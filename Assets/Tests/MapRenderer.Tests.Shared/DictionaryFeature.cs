@@ -8,14 +8,10 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// A simple in-memory <see cref="IFeature"/> built from a dictionary — lets the expression engine and
-    /// filter layer be exercised against synthetic features instead of decoded MVT ones.
-    ///
-    /// <para>Also implements <see cref="ITileCommandStreamFeature"/> (an optional <see cref="Geometry"/>
-    /// command stream), so the same double serves the mesh builders and can be handed to
-    /// <c>MvtGeometryMaterializer</c> through <c>InMemoryTileLayer</c>. Leave <see cref="Geometry"/> null for
-    /// pure expression/filter tests: a null stream materializes as zero commands, so such a feature
-    /// contributes no ring, exactly as a real geometry-less feature does.</para>
+    /// An in-memory <see cref="IFeature"/> built from a dictionary, for expression and filter tests. Its
+    /// optional <see cref="Geometry"/> command stream (<see cref="ITileCommandStreamFeature"/>) also feeds
+    /// the mesh builders through <c>InMemoryTileLayer</c>. A null stream materializes as zero commands, so
+    /// the feature contributes no ring, as a real geometry-less feature does.
     /// </summary>
     public sealed class DictionaryFeature : IFeature, ITileCommandStreamFeature
     {

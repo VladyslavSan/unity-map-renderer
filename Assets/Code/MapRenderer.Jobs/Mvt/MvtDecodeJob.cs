@@ -6,26 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
-    /// Burst job: decodes an MVT polygon-feature geometry command stream (uint[] → NativeArray&lt;uint&gt;)
-    /// into ring vertices stored in a flat <see cref="RingVertices"/> buffer with per-ring offsets.
-    ///
-    /// <b>This job IS the production MVT geometry decoder</b> — the only one; its managed twin lives in the
-    /// test assembly as an independent oracle. It implements the MVT spec's encoding over native
-    /// containers:
-    ///   command = id &amp; 0x7; count = id &gt;&gt; 3
-    ///   MoveTo=1, LineTo=2, ClosePath=7
-    ///   Parameters are zigzag-encoded deltas applied to a running cursor.
-    ///
-    /// Does NOT reference MapRenderer.Core — Core's System.Math stays off the Burst path.
-    ///
-    /// Input layout: one contiguous NativeArray&lt;uint&gt; holding the raw geometry commands for
-    /// ALL polygon features of a layer, with per-feature start offsets in <see cref="FeatureOffsets"/>.
-    /// Output: flat vertex array (<see cref="OutVertices"/>) + per-ring start-index array
-    /// (<see cref="OutRingOffsets"/>), both pre-sized by the caller.
-    ///
-    /// Note: this is an IJob (not IJobParallelFor) because MVT decoding is sequential per tile
-    /// and pre-sizing the output requires a pass anyway. The parallelism is tile-level
-    /// (multiple <see cref="MvtDecodeJob"/>s scheduled in parallel, one per tile).
+    /// Burst job: the production MVT polygon geometry decoder. It decodes the layer's command stream
+    /// (<see cref="Commands"/>, per-feature <see cref="FeatureOffsets"/>) into the caller-pre-sized flat
+    /// <see cref="OutVertices"/> and per-ring <see cref="OutRingOffsets"/>. Its managed twin in the test
+    /// assembly is an independent oracle. It does not use Core, so Core's System.Math stays off Burst.
+    /// It is an <c>IJob</c> because decoding is sequential per tile; parallelism is one job per tile.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct MvtDecodeJob : IJob

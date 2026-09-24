@@ -6,28 +6,17 @@ namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>
     /// The tile-decode seam — <c>(TileId, bytes) → IDecodedTile</c>, selected by
-    /// <see cref="TileEncoding"/> rather than hardcoded to MVT. <c>TileDecodeDispatch</c> (Unity) is handed
-    /// an <see cref="ITileDecoder"/> resolved from the fetch's <see cref="TileResponse.Encoding"/> instead
-    /// of calling <see cref="MvtDecoder.Decode"/> directly.
-    ///
-    /// <para><b>The <see cref="TileId"/> is a parameter, and that is the load-bearing part.</b> The decoded
-    /// tile owns its geometry, so the buffers' tile address is stamped HERE, once, from the id the fetch
-    /// already had. An address supplied later, by whichever consumer wanted geometry, is what lets a buffer
-    /// be paired with the wrong tile. The returned tile owns <c>Allocator.Persistent</c> memory and is
-    /// <c>IDisposable</c>; its owner is the <c>SharedDisposable{IDecodedTile}</c> minted around it, which
-    /// frees it at the last reference — never a consumer.</para>
+    /// <see cref="TileEncoding"/> (the fetch's <see cref="TileResponse.Encoding"/>), not hardcoded to MVT.
+    /// Non-obvious why: the <see cref="TileId"/> is a parameter so the buffers' tile address is stamped here,
+    /// once; an address a consumer supplies later can pair a buffer with the wrong tile. The returned tile's
+    /// owner is the <c>SharedDisposable{IDecodedTile}</c> minted around it, never a consumer.
     /// </summary>
     public interface ITileDecoder
     {
         /// <summary>Produces the tile at <paramref name="id"/>, taking ownership of nothing and handing
-        /// ownership of the result to its caller.
-        ///
-        /// <para><b><paramref name="bytes"/> may be null</b> for a decoder that carries its own payload — a
-        /// source with no wire format at all (GeoJSON slices a retained, already-projected dataset). Such a
-        /// decoder is a closure over that payload and ignores the parameter entirely. What it does NOT ignore
-        /// is <paramref name="id"/>: the tile address is the one input every decoder needs, because it is
-        /// what the produced buffers stamp themselves with, and it is why this seam — not an eagerly built
-        /// tile — is the right place for a byte-less source to plug in.</para></summary>
+        /// ownership of the result to its caller. <b><paramref name="bytes"/> may be null</b> for a decoder
+        /// that carries its own payload (GeoJSON slices a retained dataset); every decoder still needs
+        /// <paramref name="id"/>, because the produced buffers stamp themselves with it.</summary>
         IDecodedTile Decode(TileId id, byte[] bytes);
     }
 

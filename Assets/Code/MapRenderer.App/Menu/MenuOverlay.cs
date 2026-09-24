@@ -7,16 +7,10 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App.Menu
 {
     /// <summary>
-    /// Toggleable, page-based debug GUI for the MapDemo app. A single draggable IMGUI window whose
-    /// content is the top of a page stack: the root is a menu of buttons, each opening a sub-page
-    /// (<see cref="IMenuPage"/>) with its own layout and a Back button to return. Open/close with
-    /// <see cref="ToggleKey"/> (default backquote <c>`</c>) or a small hotspot in the top-right screen corner.
-    ///
-    /// <para><b>Input-backend independent:</b> the toggle key is read from IMGUI <c>Event.current</c>, so it works
-    /// whether the project runs the legacy Input Manager or the new Input System — no dependency on either.</para>
-    ///
-    /// <para>Attach to any GameObject in the scene and wire <see cref="Map"/> in the Inspector. Debug/demo tooling
-    /// only — not part of the render path; while hidden it costs a frame nothing but the corner-hotspot button.</para>
+    /// Toggleable, page-based debug GUI for the MapDemo app; not part of the render path. A draggable IMGUI
+    /// window shows the top of a page stack: a root menu of buttons, each opening a sub-page (<see cref="IMenuPage"/>)
+    /// with a Back button. Open/close with <see cref="ToggleKey"/> (default backquote <c>`</c>) or a hotspot in the
+    /// top-right screen corner. The key comes from IMGUI <c>Event.current</c>, so either Unity input backend works.
     /// </summary>
     public sealed class MenuOverlay : MonoBehaviour
     {
@@ -36,9 +30,8 @@ namespace MapRenderer.App.Menu
         [Tooltip("Menu window rectangle in logical pixels (draggable at runtime).")]
         public Rect WindowRect = new Rect(20f, 20f, 360f, 470f);
 
-        // Runtime UI scale (IMGUI has no DPI awareness, so on a Retina/4K screen the menu is otherwise tiny).
-        // Auto-detected from display density on the first frame, then tweakable live via the Settings page — a
-        // RUNTIME setting, not an authoring/Inspector knob. 0 = not yet initialized.
+        // Runtime UI scale, because IMGUI has no DPI awareness. Auto-detected on the first frame, then set live by
+        // the Settings page; 0 = not yet initialized.
         private float _uiScale;
 
         /// <summary>The live UI scale, read/written by the Settings page (<see cref="SettingsPage"/>). Clamped to
@@ -75,9 +68,8 @@ namespace MapRenderer.App.Menu
 
         private void OnGUI()
         {
-            // Scale all IMGUI by the display factor so the menu is legible on high-DPI screens. Everything below
-            // (window + pages + hotspot) is then in LOGICAL px = device px / scale; IMGUI transforms mouse input
-            // by the inverse, so clicks still land. Matrix is restored in every path (including hidden).
+            // Everything below is in logical px = device px / scale; IMGUI maps mouse input by the inverse, so
+            // clicks still land. The matrix is restored on every path, including hidden.
             if (_uiScale <= 0f) _uiScale = AutoDetectUiScale(); // lazy auto-detect on the first frame
             float scale = _uiScale;
             Matrix4x4 prevMatrix = GUI.matrix;

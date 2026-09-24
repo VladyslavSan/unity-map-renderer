@@ -50,12 +50,12 @@ namespace MapRenderer.Unity.Rendering.Map
         public double3 CameraRelativePosition { get; private set; }
 
         /// <summary>
-        /// World metres per DEVICE pixel at the look-at — pushed to the shader global
-        /// <c>_MapFrameMetersPerDevicePixel</c> by <see cref="SyncToCamera"/>. The reference depth and the absent
-        /// DPR are in docs/line-rendering-design.md § "Where the constant comes from — the camera, measured".
-        /// Non-local invariants: the half-FOV halves in DEGREES before the <see cref="Angle"/> conversion, as
-        /// <see cref="CameraPoseMath.AltitudeForZoom"/> does, so the two are bit-identical; the 1 device px
-        /// height floor keeps a zero-height viewport from pushing <c>+Inf</c> into the process-wide shader global.
+        /// World metres per DEVICE pixel at the look-at, pushed to <c>_MapFrameMetersPerDevicePixel</c> by
+        /// <see cref="SyncToCamera"/>.
+        /// See docs/line-rendering-design.md § "Where the constant comes from — the camera, measured".
+        /// Non-local invariant: the FOV halves in DEGREES before the <see cref="Angle"/> conversion, as
+        /// <see cref="CameraPoseMath.AltitudeForZoom"/> does, so the two are bit-identical; the 1 px height floor
+        /// keeps a zero-height viewport from pushing <c>+Inf</c> into the process-wide shader global.
         /// </summary>
         public double MetresPerDevicePixel =>
             2.0 * math.length(CameraRelativePosition)
@@ -85,12 +85,10 @@ namespace MapRenderer.Unity.Rendering.Map
         public double2 ViewportPx => new double2(Camera.pixelWidth, Camera.pixelHeight);
 
         /// <summary>Logical (DPR-normalized) viewport size — <see cref="ViewportPx"/> ÷ <see cref="DevicePixelRatio"/>,
-        /// the screen-space unit the symbol placement + coverage-cull passes measure in. One definition shared by
-        /// its consumers (<c>SymbolSubsystem.CurrentBatch</c>, <c>SymbolPlacementSystem.Tick</c>, the altitude
-        /// framing below, and <c>MapView.BuildTileSelectionConfig</c>'s framing viewport).
-        /// <para>The division and its unusable-ratio fallback live in <see cref="DeviceScaling"/>, shared with the
-        /// paint conversion — so an unconfigured ratio cannot frame the camera and scale the paint differently
-        /// — see <see cref="DeviceScaling"/>.</para></summary>
+        /// the screen-space unit the symbol placement, coverage-cull and altitude-framing code measure in.
+        /// <para>Non-local invariant: the division and its unusable-ratio fallback live in <see cref="DeviceScaling"/>,
+        /// shared with the paint conversion, so an unconfigured ratio cannot frame and paint differently.
+        /// </para></summary>
         public double2 ViewportLogicalPx => DeviceScaling.DeviceToLogicalPx(ViewportPx, DevicePixelRatio);
 
         /// <summary>
@@ -175,7 +173,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // The frame's ruler, pushed as the LAST act of the commit, after CameraRelativePosition, which
             // MetresPerDevicePixel reads. Pushed here, not in RenderLayerSet.ApplyZoom, because it is a
             // CAMERA quantity established at this one site — a render path that builds a MapCamera cannot
-            // forget it. Limitation no test can observe: this is PROCESS-global shader state, so with N
+            // forget it. Limitation: this is PROCESS-global shader state that no test observes, so with N
             // live MapViews the last SyncToCamera of the frame wins, including one not doing the rendering.
             Shader.SetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
                                   (float)MetresPerDevicePixel);

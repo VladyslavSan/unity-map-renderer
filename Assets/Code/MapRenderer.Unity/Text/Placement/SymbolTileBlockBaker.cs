@@ -1,6 +1,5 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header): this file is in MapRenderer.Unity.Text.Placement
-// and uses Unity.Mathematics types — TOP-LEVEL `using Unity.Mathematics;` + unqualified types, never an inline
-// `Unity.Mathematics.X`. Unity-side (needs Unity.Collections' NativeArray — Core stays engine-free).
+// Namespace-collision guard (see GlyphAtlasTexture.cs's header): TOP-LEVEL `using Unity.Mathematics;` and
+// unqualified types, never an inline `Unity.Mathematics.X`.
 
 using Unity.Collections;
 using Unity.Mathematics;
@@ -10,49 +9,23 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Bakes one tile's build-time
-    /// <see cref="SymbolTileBuffer"/> into a fresh native <see cref="SymbolTileBlock"/>. The per-symbol
-    /// field math lives in the <see cref="BuildPointInput"/>/<see cref="BuildCurvedInput"/> helpers, shared by
-    /// this bake and by the baker's golden test — the test states its expected per-symbol values by calling the
-    /// SAME helpers rather than re-deriving them, a drift-guard so the test's expectation cannot diverge from
-    /// what the bake produces.
-    ///
-    /// <para>Runs on the MAIN thread, once per tile commit (<c>SymbolSubsystem.RunTailAsync</c>) — glyph
-    /// quads / curved glyphs are only materialized there (the per-layer shape tail), so there is nothing left
-    /// to bake off it. No <c>IProjection</c> parameter (bake-safety): every symbol in one build's buffer
-    /// belongs to the SAME physical tile (one <c>(source, tile)</c> build), so the caller's single
-    /// <paramref name="tileOriginRender"/> already IS the launch-time <c>TileRenderOrigin.Project</c> result
-    /// folded into every symbol's <c>AnchorRender</c> — a single origin value suffices because one build is
-    /// exactly one tile (no multi-tile set to keep a per-tile origin cache for).</para>
+    /// Bakes one tile's build-time <see cref="SymbolTileBuffer"/> into a fresh native <see cref="SymbolTileBlock"/>.
+    /// It runs on the main thread once per tile commit (<c>SymbolSubsystem.RunTailAsync</c>), where the glyph quads
+    /// exist. Non-obvious why: it takes no <c>IProjection</c>, because one build is one physical tile, so one
+    /// <c>tileOriginRender</c> serves every symbol.
     /// </summary>
     internal static class SymbolTileBlockBaker
     {
-        /// <summary>Bake <paramref name="buffer"/> (one tile's build output — <see cref="SymbolTileBuffer.Symbols"/>
-        /// is a dense list, one symbol per successfully-shaped symbol) into a fresh
-        /// <see cref="SymbolTileBlock"/>. <paramref name="slotCount"/> clamps each symbol's material slot
-        /// (via <c>ClampSlot</c>, to the material-array bounds).
-        ///
-        /// <para>(G) Exception-safety: every array is allocated INTO the returned block; on any exception
-        /// mid-bake (allocation or fill), the partially-built block is disposed (frees whatever
-        /// <see cref="NativeArray{T}.IsCreated"/>) before the exception is rethrown — never a partial-allocation
-        /// leak.</para></summary>
-        /// <summary>Drift-guard: the per-symbol POINT field math used by <see cref="Bake"/> (the
-        /// production build-time bake) and by the baker's golden test (which states its expected per-symbol
-        /// values by calling this SAME helper rather than re-deriving them) — ONE implementation, so the test's
-        /// expectation cannot diverge from what the bake produces. Resolves everything stable about
-        /// <paramref name="symbol"/> EXCEPT its glyph quads/world anchor (copied by the caller into its own
-        /// pool). <paramref name="tileOriginRender"/> is the symbol's tile's render-space origin — a single value
-        /// for the single-tile bake.</summary>
+        /// <summary>The per-symbol point field math of <see cref="Bake"/>. The golden test calls this same helper
+        /// for its expected values, so the two cannot drift. It resolves everything stable about
+        /// <paramref name="symbol"/> except its glyph quads and world anchor, which the caller copies.</summary>
         internal static PointStageInput BuildPointInput(in ShapedSymbol symbol, int slotCount, in double3 tileOriginRender,
             SymbolPairRole pairRole)
         {
             float4 color  = SymbolPlacementSystem.LinearColor(symbol.Paint);
             float4 halo   = SymbolPlacementSystem.LinearHaloColor(symbol.Paint);
-            // Icon FadeId identity rides symbol.IconImageId (interned, 0 for text — a text symbol's FadeId
-            // is unchanged, PointFadeId's guard-skip fold). UNCONDITIONAL on pairRole — a pair's
-            // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
-            // (StageJob skips staging a Rider symbol entirely) but is left correctly resolved so
-            // the gather Compact pass's per-symbol fade-alive probe stays well-defined.
+            // Icon FadeId identity rides symbol.IconImageId (0 for text). It ignores pairRole: a rider's FadeId
+            // stays resolved so the gather Compact pass's fade-alive probe stays well-defined.
             long   fadeId = SymbolPlacementSystem.PointFadeId(symbol.AnchorRender, symbol.MaterialIndex, symbol.TextId, symbol.IconImageId);
 
             // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
@@ -88,13 +61,9 @@ namespace MapRenderer.Unity.Text.Placement
             };
         }
 
-        /// <summary>Drift-guard: the per-symbol CURVED field math used by <see cref="Bake"/> (the
-        /// production build-time bake) and by the baker's golden test (which states its expected per-symbol
-        /// values by calling this SAME helper rather than re-deriving them) — ONE implementation, so the test's
-        /// expectation cannot diverge from what the bake produces. Resolves everything stable about
-        /// <paramref name="symbol"/> EXCEPT its glyphs/anchors/anchor-fade-ids/world path (copied by the caller
-        /// into its own pool). <paramref name="tileOriginRender"/> is the symbol's tile's render-space origin —
-        /// a single value for the single-tile bake.</summary>
+        /// <summary>The per-symbol curved field math of <see cref="Bake"/>. The golden test calls this same helper
+        /// for its expected values, so the two cannot drift. It resolves everything stable about
+        /// <paramref name="symbol"/> except its glyphs, anchors, anchor fade ids and world path.</summary>
         internal static CurvedStageInput BuildCurvedInput(in ShapedSymbol symbol, int slotCount, in double3 tileOriginRender)
             => new CurvedStageInput
             {
@@ -112,11 +81,14 @@ namespace MapRenderer.Unity.Text.Placement
                 // map-aligned line icon is a one-glyph curved symbol sampling the SPRITE sheet.
                 AtlasKind = symbol.Kind == SymbolKind.Icon ? SymbolKind.Icon : SymbolKind.Text,
                 IconRotateRadians = symbol.IconRotateRadians,
-                // The resolved pitch alignment — StageCurved's world-arc predicate. MetresPerLogicalPixel
-                // is absent: it is this frame's camera ruler, patched per frame by
-                // StageJob, not a stable baked field.
+                // StageCurved's world-arc predicate. MetresPerLogicalPixel is absent: StageJob patches it
+                // per frame from the camera.
                 PitchAlignment = symbol.PitchAlignment,
             };
+
+        /// <summary>Bakes <paramref name="buffer"/> into a fresh <see cref="SymbolTileBlock"/>.
+        /// <paramref name="slotCount"/> clamps each symbol's material slot. On any exception mid-bake, it disposes
+        /// the partial block before it rethrows, so no allocation leaks.</summary>
         internal static SymbolTileBlock Bake(SymbolTileBuffer buffer, int slotCount, in double3 tileOriginRender)
         {
             var block = new SymbolTileBlock();
@@ -165,9 +137,8 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // First pass: exact per-array sizes, so every NativeArray below is allocated ONCE at its final size
-        // (Burst-safe fixed arrays — no growth). Mirrors Shape's contribution to each buffer pool 1:1
-        // (each symbol's *Count field IS that contribution — no re-derivation needed here).
+        // First pass: exact per-array sizes, so every NativeArray is allocated once at its final size. Each
+        // symbol's *Count field is its contribution to that pool.
         private static void CountSizes(SymbolTileBuffer buffer, int rawCount, out int pointCount, out int curvedCount,
             out int quadCount, out int glyphCount, out int anchorCount, out int anchorFadeCount, out int worldPointCount)
         {
@@ -194,9 +165,8 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Second pass: fill every array, running each pool's write cursor forward — the per-symbol field math via
-        // BuildPointInput/BuildCurvedInput (the same helpers the golden test states its expectations through)
-        // plus the Max*/symbol bookkeeping, writing into pre-sized NativeArrays instead of growable arrays.
+        // Second pass: fill every pre-sized array, running each pool's write cursor forward, plus the Max*
+        // bookkeeping.
         private static void Fill(SymbolTileBlock block, SymbolTileBuffer buffer, int rawCount, int slotCount,
             in double3 tileOriginRender)
         {
@@ -218,9 +188,8 @@ namespace MapRenderer.Unity.Text.Placement
                     int quadStart = quadIdx;
                     for (int q = 0; q < symbol.QuadCount; q++) block.Quads[quadIdx++] = buffer.Quads[symbol.QuadStart + q];
 
-                    // SymbolPairing resolves the PROPOSAL (a rider can go missing to per-symbol
-                    // shaping isolation) against the TILE list — this loop's own `buffer.Symbols` — so a
-                    // half-built pair dissolves back into two None-role symbols.
+                    // SymbolPairing resolves the proposal against the tile list, so a pair whose rider failed
+                    // to shape dissolves back into None-role symbols.
                     SymbolPairRole pairRole = SymbolPairRole.None;
                     if (SymbolPairing.TryGetRider(buffer.Symbols, i, out _)) pairRole = SymbolPairRole.Owner;
                     else if (SymbolPairing.IsRider(buffer.Symbols, i)) pairRole = SymbolPairRole.Rider;
@@ -244,13 +213,8 @@ namespace MapRenderer.Unity.Text.Placement
                     block.WorldCount[i] = 1;
                     block.RepAnchor[i] = symbol.AnchorRender;
 
-                    // Mirrors SymbolBatch.AddPoint: one AABB box + its quads, one candidate.
-                    // UNCHANGED even for a paired half. A pair still spans TWO symbols here (icon +
-                    // text), each contributing 1 to MaxBoxes/MaxCandidates — but at stage time it
-                    // collapses to ONE real SymbolCandidate with BoxCount/EmitCount up to 2. So MaxBoxes covers
-                    // a pair's two boxes EXACTLY, and MaxCandidates (the emit pool's size, SymbolPlacementSystem
-                    // PreSizeStageOutputs) covers its two emits EXACTLY too, with one candidate slot of slack.
-                    // This is the proof PreSizeStageOutputs needs no change for pairing.
+                    // Mirrors SymbolBatch.AddPoint: one box, its quads, one candidate, also for a pair half. The
+                    // two halves reserve the two boxes and two emits that the pair stages as one candidate.
                     block.MaxBoxes += 1; block.MaxQuads += symbol.QuadCount; block.MaxCandidates += 1;
                 }
                 else
@@ -299,22 +263,16 @@ namespace MapRenderer.Unity.Text.Placement
                 }
             }
 
-            // No count fields to publish: CountSizes sized every array to exactly what this loop just wrote,
-            // so each array's Length already IS its count (see SymbolTileBlock's header). If the two
-            // passes ever disagreed, the write above would have thrown IndexOutOfRange at the divergence
-            // rather than silently leaving a count short of Length — which is the point of not carrying one.
+            // No count fields to publish: each array's Length is its count. A disagreement between the two
+            // passes throws IndexOutOfRange at the divergence.
         }
 
-        // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
-        // BuildPointInput's anchorLocal narrowing above). Up is a DIRECTION (pre-RTC render-space), so unlike
-        // AnchorRender it needs no tile-origin subtraction — narrow only. Internal (not private): the baker's
-        // golden test reuses it verbatim to state its expected world-ups rather than duplicating the cast, so
-        // the two narrowings cannot drift apart.
+        // Up is a direction, so unlike AnchorRender it needs no tile-origin subtraction. Internal so the golden
+        // test states its expected world-ups through the same cast.
         internal static float3 NarrowUp(in double3 up) => new float3((float)up.x, (float)up.y, (float)up.z);
 
-        // Every symbol in one build's list shares the same physical tile (one (source, tile) build) — the
-        // first symbol's TileKey identifies the whole block; an empty build (every symbol failed and was
-        // skipped) has no tile identity to report, so it stays 0 (nothing downstream keys off it).
+        // One build is one physical tile, so the first symbol's TileKey identifies the block. An empty build
+        // has no tile identity and reports 0.
         private static long ResolveTileKey(SymbolTileBuffer buffer, int rawCount)
             => rawCount > 0 ? buffer.Symbols[0].TileKey : 0;
     }

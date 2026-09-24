@@ -11,22 +11,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static partial class StyledLineTileBuilder
     {
         /// <summary>
-        /// The write graph's stream-write node (job-scheduling-design.md): one instance per
-        /// layer, writing <see cref="LineGraphOutput"/>'s columns into the mesh buffers as a Burst job.
-        /// Nested here (not a top-level type) so it can read this class's private vertex-stream layout
-        /// (<see cref="LinePositionNormal"/>, <see cref="LineWidthColor"/>) directly — <see cref="ScheduleStreamWrite"/>
-        /// is its only caller.
-        ///
-        /// <para><b>Holds the whole <see cref="Md"/>, not four separate stream <c>NativeArray</c> fields</b> —
-        /// see <c>docs/lessons-learned.md</c> for the <c>MeshData</c>-aliasing fault this shape avoids (mirrors
-        /// <c>StyledFillTileBuilder.FillStreamWriteJob</c>'s own doc).</para>
-        ///
-        /// <para><b>Indices are copied VERBATIM</b> — the winding swap already happened in
-        /// <see cref="RibbonAggregateJob"/>, offset per ring, before this job ever runs.
-        /// This is the one deliberate difference from fill's write job, which does the swap here.</para>
-        ///
-        /// <para><b>The <c>.AsArray()</c> rule</b>: resolved inside <see cref="Execute"/>, never at schedule
-        /// time.</para>
+        /// The stream-write node for one line layer: writes <see cref="LineGraphOutput"/>'s columns into the
+        /// mesh buffers. Nested so it reads the private vertex-stream layout. It holds the whole
+        /// <see cref="Md"/>, not per-stream arrays, to avoid the <c>MeshData</c>-aliasing fault in
+        /// <c>docs/lessons-learned.md</c>. Non-local invariant: it copies indices VERBATIM, because
+        /// <see cref="RibbonAggregateJob"/> already swapped the winding; fill's write job swaps it itself.
         /// </summary>
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         private struct LineStreamWriteJob : IJob

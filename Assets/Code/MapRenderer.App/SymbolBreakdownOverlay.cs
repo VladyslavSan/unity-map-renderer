@@ -4,15 +4,10 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// Dev diagnostic (opt-in, not part of the render path): an on-screen button that, on click, arms a
-    /// one-shot symbol-breakdown capture on the live <see cref="MapView"/>'s <c>SymbolPlacementSystem</c>. The
-    /// next placement Tick logs a per-style-layer + per-vertical-screen-band tally of that frame's input
-    /// records to the Console — answering "what are all these symbols, and where on screen are they?" for a
-    /// heavy per-frame symbol load (the tilted-view horizon pile-up reads as a top-band-heavy histogram).
-    ///
-    /// <para>Attach to any GameObject in the scene and wire <see cref="Map"/> in the Inspector. Costs a frame
-    /// nothing but the button draw; the capture itself runs once per click. Delete this file (and
-    /// <c>SymbolPlacementSystem.Diagnostics.cs</c>) to strip the feature entirely.</para>
+    /// Dev diagnostic (opt-in, not part of the render path): an on-screen button that arms a one-shot
+    /// symbol-breakdown capture on the live <see cref="MapView"/>'s <c>SymbolPlacementSystem</c>. The next
+    /// placement Tick logs a per-style-layer and per-vertical-screen-band tally of that frame's input records to
+    /// the Console. Delete this file and <c>SymbolPlacementSystem.Diagnostics.cs</c> to strip the feature.
     /// </summary>
     public sealed class SymbolBreakdownOverlay : MonoBehaviour
     {

@@ -9,22 +9,11 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Our clean-room base material inspector. Subclasses the RAW <see cref="ShaderGUI"/> and
-    /// reproduces the familiar URP-Lit inspector — <b>Surface Options</b> / <b>Surface Inputs</b> /
-    /// <b>Advanced</b> — as collapsible <see cref="MaterialHeaderScope"/> foldouts, so a map material reads
-    /// almost identically to a stock Lit material. Successors extend it: <see cref="LitShaderGUI"/> adds the
-    /// Detail-inputs foldout; the feature shaders (<c>FillShaderGUI</c>/<c>LineShaderGUI</c>) add their
-    /// geometry-specific foldout.
-    ///
-    /// <para>(Named <c>BaseShaderGUI</c> in our own namespace — distinct from URP's
-    /// <c>UnityEditor.BaseShaderGUI</c>, which this file does not reference.) The shader-feature <b>keyword sync</b>
-    /// lives here in the editor (full editing capability, incl. the editor-only
-    /// <c>MaterialEditor.FixupEmissiveFlag</c>) — mirroring URP's <c>BaseShaderGUI.SetMaterialKeywords</c>;
-    /// <see cref="ValidateMaterial"/> owns the surface-level set and <see cref="LitShaderGUI"/> adds the Lit
-    /// shading-model set. The runtime tweakers (<c>BaseMaterialTweaker</c>/<c>Fill</c>/<c>Line</c>) keep only
-    /// the generic render-state contract (depth/blend), not keywords. Uses Unity's public
-    /// <see cref="MaterialHeaderScopeList"/> UI utility (Core.Editor); does NOT derive from or copy URP's
-    /// <c>BaseShaderGUI</c>/<c>LitShader</c>/<c>LitGUI</c> source.</para>
+    /// Base material inspector over the raw <see cref="ShaderGUI"/> (not URP's <c>UnityEditor.BaseShaderGUI</c>).
+    /// It draws the URP-Lit layout (<b>Surface Options</b> / <b>Surface Inputs</b> / <b>Advanced</b>) as
+    /// <see cref="MaterialHeaderScope"/> foldouts; <see cref="LitShaderGUI"/> and the feature shaders add theirs.
+    /// Keyword sync lives here, editor-side, because it needs the editor-only
+    /// <c>MaterialEditor.FixupEmissiveFlag</c>; the runtime tweakers keep only the depth/blend render state.
     /// </summary>
     public abstract class BaseShaderGUI : ShaderGUI
     {
@@ -96,16 +85,13 @@ namespace MapRenderer.Unity.Editor
         /// </summary>
         public override void ValidateMaterial(Material material)
         {
-            // Double-sided GI from cull state (URP BaseShaderGUI L929). URP compares the RenderFace enum
-            // (Front=2), which equals CullMode.Back (2) — i.e. double-sided GI is on unless we cull back faces
-            // (the single-sided front-rendering default). Compare against CullMode.Back, NOT CullMode.Front:
-            // the latter left DoubleSidedGI on for our stock Cull-Back materials.
+            // Double-sided GI is on unless the material culls back faces. Compare against CullMode.Back: a
+            // CullMode.Front test would leave DoubleSidedGI on for the stock Cull-Back materials.
             if (material.HasProperty(ShaderProperties.PropertyId.CullMode))
                 material.doubleSidedGI = (CullMode)material.GetFloat(ShaderProperties.PropertyId.CullMode) != CullMode.Back;
 
-            // Emission (URP BaseShaderGUI L943-953): the editor-only FixupEmissiveFlag reconciles the GI flag
-            // with the emission colour first, then the keyword follows the flag (a black colour ⇒ EmissiveIsBlack
-            // ⇒ excluded from AnyEmissive ⇒ keyword off). This is exactly why keyword sync lives editor-side now.
+            // The editor-only FixupEmissiveFlag reconciles the GI flag with the emission colour, then the keyword
+            // follows the flag (a black colour ⇒ EmissiveIsBlack ⇒ not AnyEmissive ⇒ keyword off).
             if (material.HasProperty(ShaderProperties.PropertyId.EmissionColor))
                 MaterialEditor.FixupEmissiveFlag(material);
             bool emission = (material.globalIlluminationFlags & MaterialGlobalIlluminationFlags.AnyEmissive) != 0;
@@ -127,9 +113,8 @@ namespace MapRenderer.Unity.Editor
                 material.HasProperty(ShaderProperties.PropertyId.AlphaClip) &&
                 material.GetFloat(ShaderProperties.PropertyId.AlphaClip) >= 0.5f);
 
-            // This inspector exposes raw blend factors rather than a blend preset, so the premultiply/
-            // modulate blend-preset keywords are not auto-derived — keep them off (URP sets these in its
-            // transparent branch, L1114/L1115).
+            // This inspector exposes raw blend factors, not a blend preset, so the premultiply/modulate
+            // blend-preset keywords have nothing to derive from and stay off.
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaPremultiplyOn, false);
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaModulateOn,    false);
         }
@@ -151,9 +136,8 @@ namespace MapRenderer.Unity.Editor
             // Raw low-level render state — what URP's Surface Type/Blend presets hide.
             EnumPopup<DepthWrite>(ShaderProperties.PropertyNames.ZWrite, "Depth Write");
             EnumPopup<CompareFunction>(ShaderProperties.PropertyNames.ZTest, "Depth Test");
-            // Label matches the ShaderLab `Cull` directive: the enum names the face that is CULLED
-            // (Off/Front/Back), NOT the face rendered. "Render Face" would invert it (Cull Front → the
-            // BACK face renders), so this popup is labelled by what it literally sets.
+            // Labelled "Cull", as the enum names the CULLED face; "Render Face" would read inverted
+            // (Cull Front renders the BACK face).
             EnumPopup<CullMode>(ShaderProperties.PropertyNames.CullMode, "Cull");
             EnumPopup<BlendMode>(ShaderProperties.PropertyNames.SrcBlend,      "Src Blend");
             EnumPopup<BlendMode>(ShaderProperties.PropertyNames.DstBlend,      "Dst Blend");
@@ -177,8 +161,7 @@ namespace MapRenderer.Unity.Editor
         // ─────────────────────────────────────────────────────────────────────────────────────────
         // Section 2 — Surface Inputs
         // ─────────────────────────────────────────────────────────────────────────────────────────
-        // Layout + logic mirror URP's Lit Surface Inputs (BaseShaderGUI.DrawBaseProperties + LitGUI.Inputs +
-        // DrawEmissionProperties + DrawTileOffset), collapsed into one section. Strings are our own.
+        // Layout and logic mirror URP's Lit Surface Inputs, collapsed into one section.
         protected virtual void DrawSurfaceInputs(Material material)
         {
             // ── Base Map + colour (URP BaseShaderGUI.DrawBaseProperties) ──

@@ -56,13 +56,10 @@ namespace MapRenderer.Unity.Common
             Transform.localRotation = Quaternion.identity;
         }
 
-        /// <summary>Destroys the node's <see cref="GameObject"/> (and with it both components). Runs at most
-        /// once — <see cref="VerifiedDisposable"/> owns the guard — and the Editor-only finalizer reports a
-        /// node dropped without it. That report is the point: a node is owned either by a pool or by the
-        /// caller's live tree, and one that reaches neither is a leak nobody would otherwise notice.
-        ///
-        /// <para>Safe when the GameObject is ALREADY destroyed (a caller that tears down its scene tree
-        /// wholesale kills the object, then disposes the wrapper) — <c>DestroySafely</c> is null-tolerant.</para></summary>
+        /// <summary>Destroys the node's <see cref="GameObject"/> and both components. Runs at most once
+        /// (<see cref="VerifiedDisposable"/> owns the guard). The Editor-only finalizer reports a node dropped
+        /// without it: a node that neither a pool nor a live tree owns is a leak. Safe when a scene
+        /// teardown already destroyed the GameObject, because <c>DestroySafely</c> is null-tolerant.</summary>
         protected override void DoDispose() => GameObject.DestroySafely();
     }
 }

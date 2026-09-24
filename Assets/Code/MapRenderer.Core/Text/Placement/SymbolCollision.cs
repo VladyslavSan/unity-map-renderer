@@ -26,22 +26,13 @@ namespace MapRenderer.Core.Text.Placement
         {
             if (a.SortKey < b.SortKey) return -1;
             if (a.SortKey > b.SortKey) return 1;
-            // Hysteresis: at EQUAL sort key, an incumbent (placed last frame) sorts first, so the greedy pass keeps
-            // it over a newcomer that would otherwise win only on the arbitrary feature/tile tiebreak below (the
-            // tile-churn / reprojection flip that reads as flicker). Strictly BELOW SortKey: a lower-SortKey
-            // newcomer still sorts first and wins, so incumbency never blocks a higher-priority symbol. Since
-            // incumbency only ever RAISES priority, last frame's survivor set is a one-step fixed point (no
-            // oscillation).
+            // Hysteresis below SortKey: at equal sort key an incumbent sorts first, so the arbitrary tiebreak
+            // below cannot flicker; incumbency only raises priority, so the survivor set is a fixed point.
             if (a.WasPlacedLastFrame != b.WasPlacedLastFrame) return a.WasPlacedLastFrame ? -1 : 1;
             if (a.FeatureIndex != b.FeatureIndex) return a.FeatureIndex < b.FeatureIndex ? -1 : 1;
             if (a.TileKey != b.TileKey) return a.TileKey < b.TileKey ? -1 : 1;
-            // STRICT total order: a curved feature's repeated anchors all share (SortKey, FeatureIndex, TileKey), so
-            // WITHOUT this final key they compare EQUAL. The heapsort's tie-resolution is then unstable, and the
-            // incumbency feedback (WasPlacedLastFrame reflects last frame's survivors) can drive a limit CYCLE: the
-            // placed-anchor subset oscillates frame-to-frame even on a STILL camera, flipping which neighbours are
-            // blocked, so their collision losers never finish fading. FadeId is the anchor's stable per-frame
-            // identity (LineFadeId(tile,feature,anchorIndex) / the point fade id), unique per candidate, so it
-            // makes the order TOTAL and keeps the one-step fixed point. Distinct-FeatureIndex symbols never reach here.
+            // FadeId, unique per candidate, makes the order total: a curved feature's anchors share every key
+            // above, and with the unstable heapsort that drives a limit cycle through incumbency on a still camera.
             if (a.FadeId != b.FadeId) return a.FadeId < b.FadeId ? -1 : 1;
             return 0;
         }

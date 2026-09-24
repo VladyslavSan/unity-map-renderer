@@ -20,13 +20,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private ITileMeshRenderLayer _layer;
         private int                  _materialIndex;
 
-        /// <summary>The graph build produced by <see cref="ProcessOnWorker"/> — held until
-        /// <see cref="TryTakeGraphRequest"/> hands it to the runner, exactly once. If a prior build was never
-        /// taken (the runner never called <see cref="TryTakeGraphRequest"/> before this processor was
-        /// returned to the pool), <see cref="Reset"/> disposes it first — a never-fired backstop that turns a
-        /// forgotten take into a bounded, observable non-leak rather than a silent one. The unconditional
-        /// null-out below is what makes this safe within a pooled processor's NEXT lease, not just this
-        /// one — see its own comment.</summary>
+        /// <summary>The graph build <see cref="ProcessOnWorker"/> produced, held until
+        /// <see cref="TryTakeGraphRequest"/> hands it to the runner once. <see cref="Reset"/> disposes a build
+        /// that was never taken, a backstop that turns a forgotten take into a bounded non-leak.</summary>
         private ILayerMeshBuild _build;
 
         // Pool-only: real construction happens via Reset, called from AllocateForKick after
@@ -40,9 +36,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         {
             _layer         = layer;
             _materialIndex = materialIndex;
-            // Mandatory, not tidiness: Dispose() returns a build to ITS OWN pool, so without the
-            // unconditional null-out below, a later Reset on this (re-rented) processor would Dispose a
-            // build some OTHER tenant has since rented — freeing that tenant's columns out from under it.
+            // The null-out is mandatory: Dispose() returns the build to its own pool, so a later Reset would
+            // otherwise free a build that another tenant has since rented.
             if (_build != null) _build.Dispose();
             _build = null;
         }
@@ -60,19 +55,15 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
         {
-            // The source layer is resolved FIRST: it is both the selection input and the owner of the buffer
-            // the ordinals index, so resolving it once is what makes "the geometry I borrow is the geometry
-            // my ordinals index" true automatically, rather than by matching two lookups.
+            // Resolve the source layer once: it is both the selection input and the owner of the buffer the
+            // ordinals index, so the borrowed geometry always matches the ordinals.
             ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(_layer.StyleLayer, tile);
             if (tileLayer != null)
             {
-                // A pooled worker pass (RunWorkerPass) hands a non-null Buffers, so selection is appended
-                // into its grow-only SelectedTileFeature[] instead of a fresh `new List<>()` per (tile ×
-                // style-layer) — the largest managed allocator on the mesh-build path. `null` (tests,
-                // non-pooled callers) takes the allocating path, mirroring StyledFillTileBuilder.OrderBySortKey.
-                // Read Features ONCE per layer (the accessor may be a lease/decorator, and re-reading it is
-                // exactly the "re-derive the buffer" shape RunWorkerPass_ObtainsGeometryWithoutReReadingThe-
-                // FeatureList forbids): the same list sizes the scratch buffer and drives the selection loop.
+                // Non-obvious why: a pooled pass (RunWorkerPass) hands non-null Buffers, so selection fills a
+                // grow-only array, not a new List per (tile × style-layer); null (tests) takes the allocating
+                // path. Read Features once: the accessor may be a lease, and a re-read is what
+                // RunWorkerPass_ObtainsGeometryWithoutReReadingTheFeatureList forbids.
                 var features = tileLayer.Features; // IReadOnlyList<IFeature> — read the accessor ONCE
                 IReadOnlyList<SelectedTileFeature> selected;
                 if (context.Buffers != null)
@@ -88,9 +79,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     selected = list;
                 }
 
-                // The "no selected features ⇒ do nothing" gate. It avoids no materialization (the decode
-                // already did that, once, for every layer); it keeps a filter that matches nothing from
-                // calling BuildGraphRequest at all.
+                // A filter that matches nothing never calls BuildGraphRequest. The decode has already
+                // materialized the geometry, so this gate saves no materialization.
                 if (selected.Count > 0)
                 {
                     // BORROWED from the decoded tile — never disposed here, and its Tile/Extent came from the
@@ -101,10 +91,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     // zero-vertex result the pipeline reaches by scheduling over an uncreated buffer.
                     if (geometry.IsCreated)
                     {
-                        // The graph is the only mesher — build the request, and the graph's write step
-                        // allocates and writes later. The layer itself picks its kind's Rent and its own
-                        // emptiness gate; this adapter only stores
-                        // the result — null when there is nothing to build.
+                        // The graph's write step allocates and writes later. The layer picks its Rent and
+                        // emptiness gate; this adapter stores the result (null: nothing to build).
                         _build = _layer.BuildGraphRequest(
                             selected, geometry, in context, _materialIndex, _layer.StyleLayer?.Id ?? "TileMesh");
                     }
@@ -128,12 +116,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             return true;
         }
 
-        /// <summary>Infallible: only returns THIS processor to its pool — safe because <c>Release</c> is
-        /// <see cref="ITileMeshLayerProcessor"/>'s sole "done with this processor" signal, called exactly
-        /// once per processor (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>'s settle loop), with
-        /// nothing touching the processor afterward. Never disposes/consumes <see cref="_build"/> — the
-        /// caller owns whatever <see cref="TryTakeGraphRequest"/> already handed it; a build never taken
-        /// is <see cref="Reset"/>'s backstop to free, not this method's.</summary>
+        /// <summary>Infallible: only returns this processor to its pool. The settle loop of
+        /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> calls it once per processor, and nothing touches
+        /// the processor afterward. It never disposes <see cref="_build"/>: the caller owns a taken build, and
+        /// <see cref="Reset"/> frees one never taken.</summary>
         public void Release() => TileMeshLayerProcessorPool.Return(this);
     }
 }

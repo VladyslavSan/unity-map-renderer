@@ -1,52 +1,20 @@
 // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
 // SymbolPlacementSystem.Tick. NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// THE OFF-LOOK-AT, MULTI-DEPTH MEASUREMENT FIXTURE.
+// THE OFF-LOOK-AT, MULTI-DEPTH MEASUREMENT FIXTURE: SIX real symbols at TWO view depths — a curved symbol at
+// the look-at (depth d) and its twin at ~2d, from the SAME cell, TextSizePx and baked advances; the same pair
+// along the RECEDING direction; and a point symbol at each anchor. It reads each glyph's WORLD anchor off the
+// built mesh, its screen position through the LIVE camera, and its view depth.
 //
-// WHAT THIS IS. One rendered scene carrying SIX real symbols at TWO view depths: a curved symbol anchored at
-// the look-at (view depth d) and its twin anchored away from it at ~2d, built from the SAME glyph cell, the
-// SAME TextSizePx and the SAME baked em advances; the same pair again along the RECEDING direction; and a
-// point symbol at each of the two anchors. It measures, per symbol, the per-glyph WORLD anchors the CPU
-// staging produced (read back from the built mesh), their screen positions through the LIVE camera, and
-// their view depths.
-//
-// WHY IT EXISTS. A fixture that anchors its symbol at the LOOK-AT cannot tell a screen-constant ruler from a
-// world-welded (top-down-px) ruler, because at the look-at the two coincide EXACTLY. This is the fixture
-// that tells them apart.
-//
-// THE RECEDING ARM IS THE MEASUREMENT ARM. The four curved symbols carry `PitchAlignment =
-// AlignmentMode.Map`, so `SymbolStagingMath.StageCurved` lays them out in WORLD ARC LENGTH. Under the world
-// walk the LineCenter (0, 0.5) anchor resolves to the road's WORLD midpoint, so a receding symbol lands at
-// its intended anchor and its per-gap numbers are asserted; the receding roads are built symmetric in world
-// metres for exactly that reason (see `Build`). The assertions live in `MapPitchedWorldArcLayoutTests`.
-//
-// THE CROSS-AZIMUTH ARM CANNOT CARRY THE FIXTURE ALONE. It is iso-depth INHERENTLY, and for an
-// iso-depth symbol a true per-glyph world walk and a screen walk scaled by ONE per-symbol constant produce
-// IDENTICAL output. Every cross-azimuth tooth can be green while a screen-walk model sits in the tree. The
-// depth-SPANNING arm is the falsifiability.
-//
-// WHAT THE CROSS-AZIMUTH ARM IS FOR. A line at CONSTANT view depth (perpendicular to the view axis) has two
-// properties nothing else has:
-//   1. NO WITHIN-LABEL FORESHORTENING. Every glyph sits at one `w`, so the far/near comparison is a pure
-//      1/w law with no second-order span correction.
-//   2. THE ANCHOR IS WALK-INVARIANT. A perspective projection restricted to a constant-`w` line is AFFINE,
-//      so the (seg, t) = (0, 0.5) anchor resolves to the same point whether the arc walk runs on the SCREEN
-//      polyline or on the WORLD polyline. That is also why this arm alone cannot tell a world walk from a
-//      screen walk.
-//
-// WHY THE HEADLINE READING CANNOT BE DEFEATED BY A UNIFORM MISCALIBRATION. The headline number is
-// screenSpacing_far / screenSpacing_near — a RATIO of two measurements taken in one frame from one symbol
-// pair. Any uniform scale error (OneEm, TextSizePx, mpp, DPR, the atlas scale, a wrong P11) multiplies both
-// readings and CANCELS. What survives is the depth dependence, which is the question.
-//
-// NO METRE LITERALS: every world size here is `k · scene.MetresPerDevicePixel` — a bare metre literal is
-// sub-pixel at this pose (zoom 8 / lat 30 puts one device px at hundreds of metres) and would render as
-// nothing. Same rule TiltFixtureSelfTests enforces.
-//
-// THE ORACLE IS NOT THE CODE UNDER TEST. ModelPredictedScreenSpacingPx below calls NONE of SymbolStagingMath,
-// PolylineArcMath, CurvedTextLayout, TextQuadLayout.Layout, BillboardMath, WorldSymbolRenderer or any shader.
-// Its terms are fixture constants, TextQuadLayout.OneEm (a unit DEFINITION that cancels in every ratio),
-// MapCamera.MetresPerDevicePixel, and the live camera's own projection matrix / viewport / view depth.
+// Non-obvious why: at the look-at a screen-constant ruler and a world-welded ruler coincide, so only an
+// off-look-at anchor tells them apart. The curved symbols are map-pitched, so the LineCenter anchor resolves
+// to the road's WORLD midpoint; the receding roads are symmetric in metres so it lands where the fixture aims.
+//   • The RECEDING arm is the measurement arm (asserted in MapPitchedWorldArcLayoutTests).
+//   • The CROSS-AZIMUTH arm sits at one depth `w`: a pure 1/w law, and the anchor is walk-invariant because
+//     the projection is affine there. So it alone cannot tell a world walk from a scaled screen walk.
+//   • The headline is a RATIO of far/near spacing in one frame, so any uniform scale error cancels.
+// NO METRE LITERALS: every world size is `k · scene.MetresPerDevicePixel`; a bare metre is sub-pixel here.
+// ModelPredictedScreenSpacingPx, the oracle, calls none of the staging, layout or rendering code.
 
 #if UNITY_EDITOR
 using System;
@@ -114,16 +82,10 @@ namespace MapRenderer.Tests
         public double SpillMargin { get; set; } = 1.5;
 
         /// <summary>The device-pixel ratio the whole scene is built at. Passed straight through to
-        /// <c>TiltedGroundSceneConfig</c> and so to <c>MapCamera</c>.
-        ///
-        /// <para><b>The scene's world geometry is DPR-INVARIANT and that is the point.</b> The altitude
-        /// framing uses <c>ViewportLogicalPx</c>, so at DPR 2 the orbit radius halves and
-        /// <c>MetresPerDevicePixel</c> halves with it — leaving
-        /// <see cref="OffLookAtSymbolScene.MetresPerLogicalPixel"/>, and therefore
-        /// <see cref="OffLookAtSymbolScene.AdvanceWorldMetres"/>, the SAME number of metres at DPR 1 and
-        /// DPR 2. A fixed world length then projects to twice as many DEVICE px at DPR 2. So the DPR tooth is
-        /// NOT "twice the DPR-1 value" — it is the same metre expectation re-measured, which is exactly what
-        /// a production ruler that dropped the ratio (and so used per-DEVICE-px metres) would fail.</para></summary>
+        /// <c>TiltedGroundSceneConfig</c> and so to <c>MapCamera</c>. Non-obvious why: the world geometry is
+        /// DPR-INVARIANT. At DPR 2 <c>MetresPerDevicePixel</c> halves, so
+        /// <see cref="OffLookAtSymbolScene.AdvanceWorldMetres"/> stays the same metres. A ruler that dropped
+        /// the ratio would use per-DEVICE-px metres and fail that same expectation.</summary>
         public double DevicePixelRatio { get; set; } = 1.0;
     }
 
@@ -162,12 +124,9 @@ namespace MapRenderer.Tests
         public readonly double[] ScreenSpacingPx;
 
         /// <summary>The FIXTURE'S OWN intended anchor for this symbol (not a measured value) — the point the
-        /// oracle is evaluated at, and what the placement teeth compare the staged geometry against.
-        ///
-        /// <para><b>A placement expectation on ALL FOUR curved arms.</b> A <c>LineCenter</c> walk on the
-        /// SCREEN arc anchors at the screen midpoint, which on a receding road is not the projection of the
-        /// world midpoint. Under the WORLD arc walk the anchor resolves by world arc length, and the receding
-        /// roads are built symmetric in metres, so a receding symbol lands here too.</para></summary>
+        /// oracle is evaluated at, and what the placement teeth compare the staged geometry against. It holds on
+        /// all four curved arms: the WORLD arc walk anchors by world arc length, and the receding roads are
+        /// symmetric in metres.</summary>
         public readonly double3 AnchorWorldUnity;
 
         public readonly double2 AnchorScreenPx;
@@ -216,26 +175,12 @@ namespace MapRenderer.Tests
         public readonly double MetresPerDevicePixel;
 
         /// <summary>
-        /// The ruler the settled model is expressed in: metres per LOGICAL screen pixel. `text-size` and
-        /// the baked em advances are logical px, <c>MapCamera.MetresPerDevicePixel</c> is per DEVICE px by its
-        /// own doc, so the ratio is a real factor and not bookkeeping.
-        ///
-        /// <para><b>ORACLE HYGIENE — this must stay a product of two things the FIXTURE owns.</b>
-        /// <c>Config.DevicePixelRatio</c> is a fixture constant and <c>MetresPerDevicePixel</c> is
-        /// <c>MapCamera</c>'s own published ruler, pinned elsewhere to BE the lateral look-at ruler. It must NOT
-        /// be read from any production field or helper that already carries the combined value: if the two
-        /// sides sourced the ratio from the same place they would drop it together and the DPR tooth would be
-        /// vacuous.</para>
-        ///
-        /// <para><b>Where the OTHER leg of the DPR chain is pinned.</b> The two sides here do share
-        /// <c>MetresPerDevicePixel</c> itself, so no tooth over this fixture can catch an error INSIDE that
-        /// value at DPR 2. It is pinned outside this fixture, by
-        /// <see cref="DevicePixelRatioSnapshotTests"/>:
-        /// <c>FrameConstant_IsTheScenesOwnMetresPerDevicePixel_AtBothRatios</c> (the pushed frame constant
-        /// equals the scene's own ruler at both ratios and the pair halves exactly) and
-        /// <c>LineWidth_AndGroundSpan_ScaleTogetherAcrossDpr</c> (a fixed ground feature's device span
-        /// doubles at DPR 2). Together those fix the ruler; this one fixes the ratio applied to
-        /// it.</para></summary>
+        /// The ruler the settled model is expressed in: metres per LOGICAL screen pixel. `text-size` and the
+        /// baked advances are logical px, and <c>MapCamera.MetresPerDevicePixel</c> is per DEVICE px.
+        /// Non-obvious why: it must stay a product of the fixture's DPR constant and the camera's ruler, never a
+        /// production value that already combines them, or both sides drop the ratio together. Limitation: an
+        /// error inside <c>MetresPerDevicePixel</c> is invisible here; <see cref="DevicePixelRatioSnapshotTests"/>
+        /// pins it.</summary>
         public double MetresPerLogicalPixel => MetresPerDevicePixel * Config.DevicePixelRatio;
 
         /// <summary>THE MODEL, in one line: one glyph advance is a fixed WORLD length,
@@ -263,12 +208,9 @@ namespace MapRenderer.Tests
         public readonly double GlyphCellScreenWidthPx;
 
         /// <summary>The 'F' cell's own width in BAKED px, recovered from
-        /// <see cref="GlyphCellScreenWidthPx"/> by dividing out the one scale that produced it. Together with
-        /// <see cref="OffLookAtSymbolSceneConfig.AdvanceBakedPx"/> it gives the advance-to-cell constant,
-        /// <c>AdvanceBakedPx / GlyphCellWidthBakedPx</c> — a quotient of two BAKED layout constants in which
-        /// <c>arcScale</c>, <c>TextSizePx</c>, <c>MetresPerLogicalPixel</c>, DPR and <c>OneEm</c> all cancel.
-        /// Exposed so a tooth DERIVES that constant instead of writing the number, which would silently stop
-        /// tracking the fixture if the cell or the advance were ever re-tuned.</summary>
+        /// <see cref="GlyphCellScreenWidthPx"/> by dividing out the one scale that produced it. A tooth divides
+        /// <see cref="OffLookAtSymbolSceneConfig.AdvanceBakedPx"/> by it to DERIVE the advance-to-cell constant,
+        /// in which every scale cancels, so the constant tracks a re-tuned cell or advance.</summary>
         public double GlyphCellWidthBakedPx
             => GlyphCellScreenWidthPx / (Config.TextSizePx / TextQuadLayout.OneEm);
 
@@ -290,10 +232,8 @@ namespace MapRenderer.Tests
 
         /// <summary>The COLUMN analogue of <see cref="InkBandHalfRows"/>, for a RECEDING symbol. A
         /// receding symbol runs screen-VERTICALLY, so its ink is segmented along ROWS inside a column band.
-        /// <para>The band must span the cell's CROSS-ROAD arm, which for a receding symbol lies along ĉ — the
-        /// cross-azimuth direction, perpendicular to the view axis and therefore NOT foreshortened. That arm
-        /// is the ~34-px cell height at the near symbol and shrinks with depth at the far one, so the same 45
-        /// half-width that serves the cross arm is comfortably generous here too.</para></summary>
+        /// The band spans the cell's cross-road arm, which is not foreshortened (~34 px near, smaller far), so
+        /// the cross arm's 45 half-width is generous here too.</summary>
         public const int InkBandHalfCols = 45;
 
         private readonly Dictionary<OffLookAtSymbolId, SymbolMeasurement> _measurements = new();
@@ -304,9 +244,8 @@ namespace MapRenderer.Tests
         private readonly Dictionary<OffLookAtSymbolId, SymbolTileBuffer> _symbolsById = new();
         private readonly SymbolPlacementSystem _system;
         private readonly TestSymbolPlan _plan;
-        // The frame RenderIsolated re-Ticks against — the same one the construction passes used, so an
-        // isolated render is the same camera and the same floating origin, not a rebuilt approximation.
-        // Assigned by Build alongside the measurement dictionaries (a struct, so this is a copy).
+        // The construction passes' frame (a struct copy), so RenderIsolated re-Ticks with the same camera and
+        // floating origin.
         private SceneFrame _frame;
         private readonly GlyphAtlasTexture _atlasF;
         private readonly GlyphAtlasTexture _atlasA;
@@ -353,14 +292,9 @@ namespace MapRenderer.Tests
         public int VertexCount(OffLookAtSymbolId id) => _vertexCounts[id];
 
         /// <summary>This symbol's raw stream-0 <see cref="WorldBillboardVertex"/>s, in TL/TR/BR/BL order
-        /// per glyph, exactly as <c>WorldSymbolRenderer.Emit</c> wrote them, captured in the GEOMETRY pass.
-        ///
-        /// <para><see cref="Measure"/> reads only <c>AnchorLocal</c> — the per-glyph POSITION. A tooth about
-        /// the corner OFFSETS, which carry world metres rather than logical px, needs the vertices
-        /// themselves. Captured at
-        /// construction rather than re-read on demand because the ink pass re-Ticks the system and overwrites
-        /// the cross-azimuth slot meshes — a lazy read would silently return a different frame's
-        /// geometry.</para></summary>
+        /// per glyph, as <c>WorldSymbolRenderer.Emit</c> wrote them, for teeth about the corner OFFSETS.
+        /// Non-obvious why: the ink pass re-Ticks and overwrites the slot meshes, so they are captured in the
+        /// GEOMETRY pass; a lazy read would return another frame's geometry.</summary>
         public WorldBillboardVertex[] Vertices(OffLookAtSymbolId id) => _vertices[id];
 
         /// <summary>The inclusive ink COLUMN band around <paramref name="id"/>'s projected anchor — the
@@ -376,40 +310,19 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Re-Ticks the scene with ONLY <paramref name="id"/> and renders it, returning a fresh
         /// row-flipped frame (row 0 = the TOP scanline, same convention as <see cref="InkPixels"/>).
-        ///
-        /// <para><b>Why the receding arm needs this at all.</b> <see cref="InkPixels"/> is rendered from the
-        /// two CROSS-AZIMUTH symbols only — <see cref="Create"/>'s two-pass note explains that a receding
-        /// symbol inherently crosses the frame vertically, so with everything drawn at once no band can
-        /// say WHICH symbol put ink in it. The two receding symbols additionally run along the same ground
-        /// direction ĝ from the same origin, so at heading 0 they project into nearly the SAME columns and a
-        /// column band cannot separate them either. Rendering one symbol at a time removes the attribution
-        /// question entirely rather than managing it.</para>
-        ///
-        /// <para><b>Lazy on purpose.</b> Every other tooth on this fixture pays nothing: the extra Tick and
-        /// render happen only when a tooth asks. That matters because <see cref="Create"/> is on the hot path
-        /// of every fixture in this family.</para>
-        ///
-        /// <para><b>Safe after construction.</b> Every geometric reading — <see cref="Measure"/>,
-        /// <see cref="Vertices"/>, <see cref="VertexCount"/> — was captured into a dictionary during the
-        /// geometry pass, and <see cref="InkPixels"/> is already a cloned pixel array, so re-Ticking here
-        /// cannot change any of them. It DOES overwrite the live slot meshes, which is why nothing
-        /// reads those lazily.</para>
+        /// Non-obvious why: the two receding symbols project into nearly the same columns, so no band can
+        /// attribute their ink; one symbol per render removes the question. It runs only when a tooth asks,
+        /// and every other reading was captured in the geometry pass, so the re-Tick changes none of them.
         /// </summary>
         public Color32[] RenderIsolated(OffLookAtSymbolId id)
             => RenderIsolated(id, out _, out _, out _);
 
         /// <summary>
-        /// The same isolated pass, additionally handing back the COLLISION BOXES and the RAW VERTICES
-        /// the very same Tick staged, plus the slot transform they are expressed against. One Tick, one
-        /// render, three readings from ONE frame, so a tooth comparing a box to the quad it is supposed to
-        /// bound is comparing two things the same staging pass produced.
-        ///
-        /// <para><b>The <c>boxes[g]</c> ↔ <c>vertices[4g … 4g+3]</c> pairing holds inherently with a
-        /// SINGLE symbol in the frame</b> — <c>StageCurvedAnchor</c> appends box <c>g</c> and quad <c>g</c> in
-        /// the same loop iteration, <c>WorldSymbolRenderer.Emit</c> walks the quads in order, and
-        /// <c>CollisionJob</c> does not reorder the box pool (it sorts the CANDIDATES; the
-        /// grid stores absolute box indices). Callers must still ASSERT it
-        /// (<c>boxes.Length == vertices.Length / 4</c>), never assume it.</para>
+        /// The same isolated pass, also returning the COLLISION BOXES, the RAW VERTICES and the slot transform
+        /// from the same Tick, so a box and its quad come from one staging pass. Non-local invariant: with one
+        /// symbol, <c>boxes[g]</c> pairs with <c>vertices[4g … 4g+3]</c>, because staging appends both in one
+        /// iteration and <c>CollisionJob</c> sorts candidates, not boxes. Callers must still ASSERT
+        /// <c>boxes.Length == vertices.Length / 4</c>.
         /// </summary>
         public Color32[] RenderIsolated(OffLookAtSymbolId id, out SymbolBox[] boxes,
             out WorldBillboardVertex[] vertices, out Transform slot)
@@ -446,27 +359,17 @@ namespace MapRenderer.Tests
         /// <paramref name="id"/>: a glyph advance is fixed ONCE in world metres at the top-down ruler,
         /// <c>Δ_world = (Δ_baked / OneEm) · TextSizePx · mpp</c>, and a world-fixed displacement perpendicular
         /// to the view axis at view depth <c>w</c> projects to <c>Δ_world · |P11| · H / (2w)</c>.
-        ///
-        /// <para><b>CONSTRAINT — this method must not touch any MEASURED value except the anchor's own
-        /// <c>w</c>.</b> Everything else is a fixture constant (<c>AdvanceBakedPx</c>, <c>TextSizePx</c>), a
-        /// unit definition (<c>OneEm</c>, which cancels identically in every ratio the teeth read), the frame
-        /// ruler (<c>MapCamera.MetresPerDevicePixel</c>, pinned elsewhere to BE the lateral look-at ruler), or
-        /// the live camera's raw projection (<c>m11</c>, <c>pixelHeight</c>). Feeding a measured spacing back
-        /// in makes the oracle self-referential.</para>
-        ///
-        /// <para>Valid as stated for a CROSS-AZIMUTH symbol (one <c>w</c> for the whole symbol). For a receding
-        /// symbol it is a single-depth linearisation and is reported, never asserted.</para>
+        /// Non-obvious why: it may read no MEASURED value except the anchor's <c>w</c>, or it becomes
+        /// self-referential. For a receding symbol it is a single-depth linearisation, reported, never
+        /// asserted.
         /// </summary>
         public double ModelPredictedScreenSpacingPx(OffLookAtSymbolId id)
             => OracleAtDepth(_measurements[id].AnchorViewDepthMetres);
 
         /// <summary>The same oracle at an arbitrary view depth — the form the report's per-gap column uses.
-        /// <paramref name="viewDepthMetres"/> is the ONLY input this may take from a measurement.
-        ///
-        /// <para>The world length is <see cref="AdvanceWorldMetres"/>, which carries the factor
-        /// <c>Config.DevicePixelRatio</c> — an exact <c>×1.0</c> at the default DPR 1; at DPR 2 it is what
-        /// keeps the expectation in the same metres (see
-        /// <see cref="OffLookAtSymbolSceneConfig.DevicePixelRatio"/>).</para></summary>
+        /// <paramref name="viewDepthMetres"/> is the ONLY input this may take from a measurement. The world
+        /// length <see cref="AdvanceWorldMetres"/> carries <c>Config.DevicePixelRatio</c>, which keeps the
+        /// expectation in the same metres at DPR 2.</summary>
         public double OracleAtDepth(double viewDepthMetres)
             => GroundRuler.ClosedFormPerpendicularSpanPx(
                 AdvanceWorldMetres, viewDepthMetres, AbsP11, ViewportHeightPx);
@@ -487,16 +390,9 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Builds the scene, solves the two anchors, stages all six symbols through the REAL
         /// <c>SymbolPlacementSystem.Tick</c>, measures every slot mesh, and renders the ink frame.
-        ///
-        /// <para><b>TWO TICK PASSES, ONE SCENE AND ONE CAMERA.</b> Pass 1 ticks all six symbols and takes every
-        /// geometric measurement off the built meshes. Pass 2 re-ticks with ONLY the two cross-azimuth symbols
-        /// and renders — because the receding and point symbols' ink sweeps across both cross-azimuth row
-        /// bands (a receding symbol inherently crosses the frame vertically), which would make the ink
-        /// arm unable to say WHICH symbol put ink in a band. The two passes share the camera, so their
-        /// projections are identical; that the cross-azimuth geometry is unchanged between them is ASSERTED
-        /// (bit-identical anchors), not assumed. The headline measurement is the mesh readback, not the ink —
-        /// the ink arm is coarse corroboration only, because an ink-width reading conflates CPU spacing with
-        /// the shader's screen-px glyph size.</para>
+        /// Non-obvious why: pass 1 measures all six meshes; pass 2 renders only the cross-azimuth
+        /// pair, because receding ink crosses their row bands. Unchanged cross geometry between the passes is
+        /// ASSERTED. The ink is coarse corroboration only; it conflates spacing with glyph size.
         /// </summary>
         public static OffLookAtSymbolScene Create(OffLookAtSymbolSceneConfig config)
         {
@@ -510,10 +406,8 @@ namespace MapRenderer.Tests
                 LitAmbient       = false,       // the symbol arm needs no lit recipe.
             };
 
-            // Every precondition below is an Assert, so ANY of them can throw before the returned object
-            // exists to own the cleanup. Nothing else owns these until Create returns, so this method is its
-            // own Dispose for that window — the same discipline TiltedGroundScene.Create documents for the
-            // process-global ambient state it mutates.
+            // Any precondition Assert below can throw before the returned object exists, so this method is its
+            // own Dispose until it returns (as in TiltedGroundScene.Create).
             TiltedGroundScene    scene    = null;
             GlyphAtlasTexture    atlasF   = null;
             GlyphAtlasTexture    atlasA   = null;
@@ -576,12 +470,8 @@ namespace MapRenderer.Tests
             double viewportHeightPx = cam.pixelHeight;
 
             // ── the glyph run: N copies of ONE 'F' cell, at fixture-owned em advances ──────────────────
-            //
-            // The point arm borrows WorldPointEmitRenderTests' 'A' LAYOUT while the Tick binds the 'F'
-            // ATLAS — Tick takes one GlyphAtlasTexture and uses it for exactly one thing, the material's
-            // texture (`atlas?.Texture`), never for geometry. The point arm's measurand is its staged
-            // ANCHOR, and the point symbols are excluded from the ink pass, so the mismatched atlas
-            // cannot reach any reading this fixture takes.
+            // Non-obvious why: the point arm's 'A' layout meets the 'F' atlas, which Tick uses only as a
+            // texture; point ink is never read, so the mismatch reaches no reading.
             SymbolQuad cell;
             (atlasF, cell) = WorldCurvedAbRenderSnapshotTests.BuildGlyphF();
             List<SymbolQuad> pointQuadsA;
@@ -620,40 +510,29 @@ namespace MapRenderer.Tests
             };
 
             var buffer = new SymbolTileBuffer();
-            // A fresh single-record buffer per id, so RenderIsolated can re-Tick exactly ONE of them without
-            // depending on the combined buffer's construction order. Each is copied (pooled spans and all)
-            // into `buffer` via TestSymbolTileBuffer.CopySymbolInto.
+            // A single-record buffer per id, so RenderIsolated can re-Tick ONE of them without depending on the
+            // combined buffer's order. Each is copied into `buffer`.
             var symbolsById = new Dictionary<OffLookAtSymbolId, SymbolTileBuffer>();
             var curvedIds = new[]
             {
                 OffLookAtSymbolId.CrossNear, OffLookAtSymbolId.CrossFar,
                 OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar,
             };
-            // The symbol's span as the staging gate measures it — WORLD metres. `symbolSpanScreenPx` is
-            // LOGICAL px (TextSizePx and the baked advances both are), so this conversion is the same one
-            // production makes, from the fixture's own two constants (see MetresPerLogicalPixel's hygiene note).
+            // The symbol's span in WORLD metres, as the staging gate measures it: LOGICAL px times the fixture's
+            // own metres per logical px (see MetresPerLogicalPixel).
             double metresPerLogicalPx = mpp * config.DevicePixelRatio;
             double symbolSpanArcM      = symbolSpanScreenPx * metresPerLogicalPx;
 
-            // The CROSS roads are sized by a SCREEN solve, which is what puts their extents where the ink
-            // bands expect them. `· DevicePixelRatio` converts the logical-px design target into the
-            // DEVICE px the solver measures in, so the road keeps the same METRE length at any DPR — an
-            // exact ×1.0 at DPR 1.
+            // The CROSS roads are sized by a SCREEN solve in DEVICE px, so their extents meet the ink bands and
+            // keep the same METRE length at any DPR.
             double targetHalfRoadPx = config.SpillMargin * symbolSpanScreenPx * config.DevicePixelRatio;
-            // The RECEDING roads are built symmetric in WORLD metres instead, because the LineCenter
-            // (0, 0.5) anchor resolves to the road's WORLD midpoint. A screen-solved receding road is wildly
-            // asymmetric in metres (up-screen metres-per-px explodes toward the vanishing line — the solver's
-            // reachability cap exists for exactly that), so its world midpoint would sit far up-screen of the
-            // intended anchor, at much greater depth, and the measured depth-span ratio would shrink at that
-            // deeper base. Symmetric in metres puts the anchor where the fixture aimed it.
+            // Non-obvious why: LineCenter anchors at the WORLD midpoint, so the RECEDING roads are symmetric in
+            // WORLD metres. A screen-solved receding road is so asymmetric in metres that the anchor would sit far
+            // up-screen, deeper than aimed, and shrink the measured depth ratio.
             double recedingHalfLenM = config.SpillMargin * symbolSpanArcM;
-            // Every road stays within this ground radius of the look-at. Twice the far anchor's own offset
-            // leaves the two CROSS-AZIMUTH roads untouched (their farthest vertex sits at ~0.7× this radius —
-            // and the linear-agreement assert below would fail loudly if the cap ever bound on that arm),
-            // while bounding the receding roads, which are otherwise unbounded in ground distance for a
-            // bounded screen extent. The orbit-radius floor keeps the cap usable when the far anchor is
-            // close to (or on) the look-at, so a small TargetDepthRatio degrades into a small measurement
-            // rather than into an unbuildable fixture.
+            // Non-obvious why: every road stays inside this ground radius. It bounds the receding roads and leaves
+            // the cross roads (~0.7× the radius) untouched; the linear-agreement assert fails if it binds there.
+            // The orbit-radius floor lets a small TargetDepthRatio still build.
             double roadGroundCapM = math.max(2.0 * math.length(farAnchor), 4.0 * wNear);
 
             foreach (OffLookAtSymbolId id in curvedIds)
@@ -676,18 +555,15 @@ namespace MapRenderer.Tests
                 }
                 else
                 {
-                    // Symmetric in WORLD metres (see recedingHalfLenM). The screen extents are measured and
-                    // reported but do not size the road, so a capped or degenerate projection stays legible
-                    // in the table.
+                    // Symmetric in WORLD metres (see recedingHalfLenM). The screen extents are only reported, so a
+                    // capped or degenerate projection stays legible in the table.
                     tPlus = tMinus = recedingHalfLenM;
                     double2 anchorPx = GroundRuler.ProjectPx(cam, anchor);
                     reachedPlusPx  = math.length(GroundRuler.ProjectPx(cam, anchor + dir * tPlus) - anchorPx);
                     reachedMinusPx = math.length(GroundRuler.ProjectPx(cam, anchor - dir * tMinus) - anchorPx);
 
-                    // The two guards SolveGroundOffsetForScreenPx enforces implicitly, made explicit here:
-                    // the road must stay inside the ground cap (or the production gather's B-3 distance cull
-                    // eats the symbol) and its up-screen end must not run past the camera into non-positive
-                    // view depth.
+                    // SolveGroundOffsetForScreenPx's two guards, explicit: inside the ground cap (or the distance
+                    // cull drops the symbol), and the up-screen end at positive view depth.
                     double farthestGroundM = math.max(
                         math.length(anchor + dir * tPlus), math.length(anchor - dir * tMinus));
                     Assert.That(farthestGroundM, Is.LessThan(roadGroundCapM),
@@ -703,10 +579,8 @@ namespace MapRenderer.Tests
 
                 if (cross)
                 {
-                    // The cross-azimuth projection is exactly linear (constant depth), so the screen solve
-                    // MUST agree with the plan's closed form `SpillMargin · labelSpanPx · metresPerScreenPx`,
-                    // with metresPerScreenPx MEASURED. Asserting it here validates the solver against the
-                    // simple construction on the arm where the simple construction is exact.
+                    // At constant depth the projection is linear, so the solve MUST equal the closed form
+                    // `SpillMargin · labelSpanPx · metresPerScreenPx` (measured). This validates the solver.
                     double probeSpanM  = 30.0 * mpp;
                     double probeSpanPx = GroundRuler.GroundSegmentSpanPx(
                         cam, anchor, new double2(dir.x, dir.z), probeSpanM);
@@ -720,10 +594,8 @@ namespace MapRenderer.Tests
                         $"{linearHalfLenM:F1} m).");
                 }
 
-                // All four curved symbols are map-pitched, so StageCurved centres them at the WORLD arc
-                // midpoint and its `symbolSpanArc > total` / `centerArc ± halfSpan` gates are in METRES.
-                // This mirrors that gate exactly. A road too short must fail HERE, with its numbers, rather
-                // than as a silently missing symbol.
+                // This mirrors StageCurved's span gates, which are in METRES for map-pitched symbols. A road
+                // too short fails HERE with its numbers, not as a silently missing symbol.
                 Assert.That(tMinus + tPlus, Is.GreaterThan(1.05 * symbolSpanArcM),
                     $"P-M precondition ({id}): the road's total world arc " +
                     $"({tMinus:F0} + {tPlus:F0} m) must exceed the label's world span " +
@@ -738,17 +610,13 @@ namespace MapRenderer.Tests
                 var curvedBuffer = new SymbolTileBuffer();
                 TestSymbolTileBuffer.AddCurved(curvedBuffer, glyphs, new[] { new LineAnchor(0, 0.5f) },
                     new[] { origin + pathA, origin + pathB },
-                    // The per-vertex surface normal is what SymbolWorldGroundFrame builds the glyph's ground
-                    // plane from, so a zero here silently routes every glyph through the camera-facing
-                    // fallback. This scene is Web-Mercator, so up IS (0,1,0).
+                    // SymbolWorldGroundFrame builds the glyph plane from this normal; a zero would fall back to
+                    // camera-facing. The scene is Web-Mercator, so up IS (0,1,0).
                     new[] { worldUp, worldUp },
                     placement: SymbolPlacement.LineCenter,
                     up: worldUp,
-                    // The RESOLVED pitch alignment, and the switch this whole fixture measures. Without it
-                    // these symbols take the screen walk and the fixture measures nothing.
-                    // (A shipped line-symbol layer reaches the same value through
-                    // AlignmentResolution.ResolvePitch in SymbolFeatureExtractor; this fixture hand-builds
-                    // its buffer records, so it states the resolved value directly.)
+                    // The RESOLVED pitch alignment (production resolves it in AlignmentResolution.ResolvePitch).
+                    // Without it the symbols take the screen walk and the fixture measures nothing.
                     pitchAlignment: AlignmentMode.Map,
                     paint: SymbolPaint.Default,
                     text: id.ToString(),
@@ -782,10 +650,8 @@ namespace MapRenderer.Tests
             // ── stage + measure ────────────────────────────────────────────────────────────────────────
             system = new SymbolPlacementSystem(scene.MapCam,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // Disable the pre-projection far-distance cull for this fixture. Its measurand is the WORLD-cell
-            // invariant at DEPTH (the "deep" pose's far anchors sit at ~8× the near depth, beyond the camera far
-            // distance); the cull is not this fixture's subject, and leaving it on would drop the far half of the
-            // scene before it can be measured. The cull's own behaviour is pinned by the symbol-placement teeth.
+            // No far-distance cull: the "deep" pose's far anchors sit at ~8× the near depth, and the cull would
+            // drop them. The symbol-placement teeth pin the cull itself.
             system.SymbolMaxDistanceFraction = double.PositiveInfinity;
             plan = new TestSymbolPlan(scene.MapCam.Projection);
             snapshot = new SnapshotRenderer(config.SizePx, config.SizePx);
@@ -828,10 +694,8 @@ namespace MapRenderer.Tests
                     slotVerticesById[id] = slotVertices;
                 }
 
-                // The receding roads are sized in world metres, so no screen-solved extent guarantees they
-                // land in frame — and the receding teeth read them. A receding symbol that wandered
-                // off-screen would still produce numbers, about geometry the renderer never draws. Same
-                // 32 px margin the in-frame precondition uses.
+                // World-sized receding roads need not land in frame, and an off-screen symbol still yields
+                // numbers about undrawn geometry. Same 32 px margin as the in-frame precondition.
                 const double recedingMarginPx = 32.0;
                 foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
                 {
@@ -854,9 +718,8 @@ namespace MapRenderer.Tests
                         "STOP RULE 2 applies here too: lower the ZOOM and report, never the depth ratio.");
                 }
 
-                // PASS 2 — ink. Only the cross-azimuth pair, so a band's ink can only have come from the
-                // symbol whose anchor defines it (see this method's two-pass note). Symbols 0/1 are
-                // CrossNear/CrossFar — the first two symbols appended above.
+                // PASS 2 — ink, from the cross-azimuth pair only: symbols 0/1, CrossNear/CrossFar, the first two
+                // appended above.
                 var crossOnly = new SymbolTileBuffer();
                 TestSymbolTileBuffer.CopySymbolInto(crossOnly, buffer, 0);
                 TestSymbolTileBuffer.CopySymbolInto(crossOnly, buffer, 1);
@@ -972,19 +835,10 @@ namespace MapRenderer.Tests
         /// The signed ground offset (metres) along unit <paramref name="dir"/> from
         /// <paramref name="anchor"/> whose PROJECTION sits <paramref name="targetPx"/> from the anchor's —
         /// bisection on the LIVE camera, since the screen offset is monotone in the offset along a ground ray.
-        ///
-        /// <para>On a CONSTANT-DEPTH (cross-azimuth) direction this is exactly
-        /// <c>targetPx · metresPerScreenPx</c> — the plan's closed construction — and <see cref="Create"/>
-        /// asserts the agreement. It is written as a solve because the RECEDING direction is strongly
-        /// non-linear: extrapolating the local metres-per-px linearly there overshoots the vanishing line and
-        /// would place a road whose SCREEN midpoint (which is where <c>LineCenter</c> anchors) sits hundreds
-        /// of pixels from the intended anchor, off-frame. Solving in screen px instead puts the anchor at the
-        /// screen arc midpoint exactly.</para>
-        ///
-        /// <para>REACHABILITY CAP: the target is unreachable up-screen from an already-far anchor (the
-        /// vanishing line is a finite screen row). When it is, the solve returns the offset achieving 90 % of
-        /// the reachable maximum and reports it through <paramref name="reachedPx"/>, so a capped road is
-        /// visible in the report rather than silently different from the design.</para>
+        /// At constant depth it equals <c>targetPx · metresPerScreenPx</c>, which <see cref="Create"/> asserts;
+        /// a receding direction is too non-linear to extrapolate. Limitation: past the vanishing line the target
+        /// is unreachable, so the solve returns 90 % of the reachable maximum and reports it in
+        /// <paramref name="reachedPx"/>.
         /// </summary>
         private static double SolveGroundOffsetForScreenPx(UnityEngine.Camera cam, double3 anchor, double3 dir,
             double targetPx, double depthSlopeAlongDir, double anchorDepthM, double mpp,
@@ -993,10 +847,8 @@ namespace MapRenderer.Tests
             double tCap = 1.0e4 * mpp;
             if (depthSlopeAlongDir < 0.0)
                 tCap = math.min(tCap, 0.9 * anchorDepthM / -depthSlopeAlongDir);
-            // …and never past the ground-distance cap (|anchor + t·dir| ≤ cap, dir unit ⇒ the positive root of
-            // a plain quadratic). This is what keeps the roads inside the production gather's B-3 distance
-            // cull; without it the RECEDING FAR road walked thousands of km chasing an up-screen extent that
-            // the vanishing line makes arbitrarily expensive, and the whole symbol was culled before staging.
+            // …and never past the ground-distance cap (the positive root of |anchor + t·dir| = cap), or a far
+            // receding road runs thousands of km and the distance cull drops the symbol before staging.
             double along = math.dot(anchor, dir);
             double disc  = along * along - math.lengthsq(anchor) + maxGroundFromLookAtM * maxGroundFromLookAtM;
             Assert.That(disc, Is.GreaterThan(0.0),
@@ -1079,15 +931,8 @@ namespace MapRenderer.Tests
                 sb.AppendLine(string.Format(c,
                     "   oracle at the label's own anchor depth ({0:F1} m) = {1:F3} px",
                     m.AnchorViewDepthMetres, anchorOracle));
-                // The oracle COLUMN is evaluated at each gap's OWN view depth — a strict generalisation of the
-                // closed form. On a cross-azimuth symbol that equals the anchor-depth oracle to within the
-                // 0.5 % oracle-acceptance bound; on a receding symbol it is the only form that means
-                // anything, since the symbol sits neither at one depth nor at its nominal anchor.
-                // `worldResid%` is the world-spacing reading: the measured WORLD gap against
-                // AdvanceWorldMetres. It
-                // is the column that tells a per-GLYPH world walk from a screen walk scaled by one per-symbol
-                // constant — on an iso-depth symbol the two are identical, so the receding rows are the ones
-                // that mean something.
+                // The oracle column uses each gap's OWN view depth, the only form a receding symbol supports.
+                // `worldResid%` (measured WORLD gap vs AdvanceWorldMetres) separates the walks on receding rows.
                 sb.AppendLine(
                     "   gap   worldM        worldResid%   screenPx    viewDepthM   oraclePx@gap    residual%");
                 for (int g = 0; g < m.ScreenSpacingPx.Length; g++)

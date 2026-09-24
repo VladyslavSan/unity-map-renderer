@@ -1,10 +1,5 @@
-// MapView/MapViewTests.cs — MapHost wiring and MapView telemetry/mesh-build teeth (EditMode).
-//
-// MapViewLightingTests.cs holds the two files that would collide on bare CameraProperties (see its
-// header). MapViewLiveLoopTests.cs stays its own file: it imports System, and every file here calls bare
-// Object.DestroyImmediate (UnityEngine.Object) — a using collision the merge rule resolves by not
-// merging, never by qualifying. SceneIntegrityTests.cs stays its own file too — its [TearDown] calls
-// EditorSceneManager.NewScene, process-state per test-conventions.md.
+// MapHost wiring and MapView telemetry/mesh-build tests (EditMode). Sibling MapView files stay separate for
+// using collisions (System.Object, CameraProperties) or process state (SceneIntegrityTests' NewScene).
 //
 // Contents:
 //   MapRootWiringTests          — MapHost.Wire() wiring graph: MapController.Map/.Camera and the MapView built over the camera.
@@ -82,7 +77,7 @@ namespace MapRenderer.Tests.MapViews
                 // Act.
                 MapHost.Wire(rootGo, cam, initialView);
 
-                // Assert — tooth 1:
+                // Assert:
                 var ctrl    = rootGo.GetComponent<MapController>();
                 var mapView = rootGo.GetComponent<MapView>();
 
@@ -310,12 +305,8 @@ namespace MapRenderer.Tests.MapViews
         }
 
         // ── ConsumeBacklog: the "measure first" signal ────────────────────────────────────────────
-        // EditMode-only: this test blocks CONSUME (MaxConsumesPerTick=0) so completed mesh builds pile up
-        // as an unconsumed backlog. It needs the ThreadPool builds to COMPLETE (wall-clock) WITHOUT being
-        // consumed — DrainMeshBuilds would consume them to Built (backlog→0, defeating the scenario), and a
-        // PlayMode yield-pump stalls the pipeline under consume=0 backpressure. AwaitInFlightMeshBuilds gives
-        // each iteration the ThreadPool wall-clock a completed build needs WITHOUT consuming — the only
-        // mechanism that fits.
+        // Non-obvious why: this is EditMode because with MaxConsumesPerTick=0 builds must COMPLETE unconsumed.
+        // DrainMeshBuilds consumes them and a PlayMode pump stalls; AwaitInFlightMeshBuilds only waits.
         [Test]
         public void ConsumeBacklog_TracksTheThrottledBuildBacklog_ThenDrainsToZero()
         {
@@ -331,10 +322,8 @@ namespace MapRenderer.Tests.MapViews
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 
-                // Mesh builds complete one at a time on the ThreadPool, so ConsumeBacklog trickles up across
-                // several Ticks. Wait for it to STABILIZE at PendingTileCount (⇒ no record still in-flight);
-                // AwaitInFlightMeshBuilds gives each iteration the wall-clock a completed build needs (see
-                // note above) WITHOUT consuming, so the backlog it measures stays intact.
+                // Builds complete one at a time, so wait for ConsumeBacklog to STABILIZE at PendingTileCount
+                // (no record still in flight).
                 TileTelemetrySnapshot snap = default;
                 for (int f = 0; f < 3000; f++)
                 {
@@ -374,14 +363,7 @@ namespace MapRenderer.Tests.MapViews
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Async non-blocking mesh build acceptance tests.
-    ///
-    /// Architecture note on tooth 1 / .Schedule().Complete() greppability:
-    ///   The stage names 5 sites. Only ONE is on the live Update path: the old
-    ///   StyledFillTileBuilder.cs:125 site (now replaced by managed projection in BuildMeshData).
-    ///   The other sites are off-path test-only utilities:
-    ///     - FillMeshPipeline.cs:208,245,443 — test-only jobified path; no MapView caller.
-    ///   A naive grep of the full tree finds these; they are intentionally not in the live Update path.
+    /// Async non-blocking mesh build tests.
     /// </summary>
     [TestFixture]
     public class MapViewAsyncMeshBuildTests : BaseTestFixture
@@ -418,7 +400,7 @@ namespace MapRenderer.Tests.MapViews
 
         /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
         /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
-        /// them. The async-settle behavioural teeth (Tooth1/3/4 + tilt) live in the PlayMode half
+        /// them. The async-settle behavioural teeth (deferral, parity, release + tilt) live in the PlayMode half
         /// (MapRenderer.Tests.PlayMode.MapViews.MapViewAsyncMeshBuildTests); this half's off-main / profiler /
         /// drain-determinism teeth need EditMode, so they warm up with this deterministic drain.</summary>
         private static void PumpUntilSettled(MapView view, int maxTicks = 2500)
@@ -432,32 +414,19 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
-        // ── Tooth 2: RETIRED — see this file's header comment for the before/after. ───────────
+        // ── Gap: no test times the worst single-frame stall; the marker count below stands in ─
 
-        // ── Tooth 2b: profiler-marker harness — main-thread PmBuildMesh count == 0 ────────────
+        // ── Profiler-marker harness — main-thread PmBuildMesh count == 0 ──────────────────────
 
         /// <summary>
-        /// Pins the numeric criterion for Tooth 2 ("max single-frame stall drops sharply") with the
-        /// profiler-marker harness (ProfilerRecorder).
-        ///
-        /// A synchronous build fires PmBuildMesh on the MAIN THREAD: ≥1 main-thread sample per tile.
-        /// The async path runs BuildMeshData (which fires PmBuildMesh) inside Task.Run on a ThreadPool
-        /// thread, so a full async tile load must leave ZERO main-thread PmBuildMesh samples.
-        ///
-        /// Two recorders (both CollectOnlyOnCurrentThread = main thread only):
-        ///   A) MapRenderer.Meshing.StyledFillTileBuilder.BuildLayerInput → must be ZERO (prologue off main
-        ///      thread; production fires this marker, not
-        ///      WriteMeshData, which stays reachable only through a direct call, e.g. from tests)
-        ///   B) MapRenderer.Mesh.Upload      → must be > ZERO (consume/upload still runs on main thread)
-        ///
-        /// Recorder B is the positive control: it confirms that PumpUntilSettled actually built the
-        /// tile on this thread, so the ==0 for A is meaningful (not "nothing happened").
-        ///
-        /// [UnityTest] coroutine: yields frames so the profiler commits accumulated samples, mirroring
-        /// the technique used in ProfilerMarkerTests.ProfilerRecorder_BuildMarker_HasSamplesAfterTileLoad.
+        /// A full async tile load leaves ZERO main-thread samples of the build marker
+        /// (<c>StyledFillTileBuilder.BuildLayerInput</c>), because the prologue runs on a ThreadPool thread.
+        /// The positive control: <c>MapRenderer.Mesh.Upload</c> fires &gt; 0 times on the main thread, so the
+        /// zero is not "nothing happened". A <c>[UnityTest]</c>, because the profiler commits samples only as
+        /// frames pass.
         /// </summary>
         [UnityTest]
-        public IEnumerator Tooth2b_MainThreadBuildMarker_ZeroHits_AfterAsyncLoad()
+        public IEnumerator MainThreadBuildMarker_ZeroHits_AfterAsyncLoad()
         {
             const string buildMarkerName  = StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput;
             const string uploadMarkerName = "MapRenderer.Mesh.Upload";
@@ -472,9 +441,8 @@ namespace MapRenderer.Tests.MapViews
             view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
-            // Start recorders BEFORE the tile load. CollectOnlyOnCurrentThread restricts capture to the
-            // main (test) thread — so Task.Run background samples for PmBuildMesh are NOT counted.
-            // SumAllSamplesInFrame accumulates sample hits per frame (not just durations).
+            // Start recorders BEFORE the tile load. CollectOnlyOnCurrentThread drops background samples;
+            // SumAllSamplesInFrame sums hits per frame.
             using var tessRecorder = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, buildMarkerName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame |
@@ -499,12 +467,8 @@ namespace MapRenderer.Tests.MapViews
                 yield return null;
                 yield return null;
 
-                // Sum marker invocations across all recorded frames.
-                // ProfilerRecorderSample.Count = number of Begin/End marker firings in that frame
-                // (correct hit-count metric — recorder.Count alone counts frame-buffer entries, not firings).
-                // Clamp to the ring's CAPACITY, not Count: ProfilerRecorder is a fixed-size ring, and the
-                // pump above runs far more frames than that, so once it wraps `Count` stops being a valid
-                // index bound and GetSample() throws IndexOutOfRange (intermittently, on slow machines).
+                // Sum sample.Count (marker firings per frame), clamped to the ring CAPACITY: once the fixed-size
+                // ring wraps, recorder.Count is no valid index bound and GetSample() throws.
                 long tessMainHits = 0L;
                 for (int i = 0; i < math.min(tessRecorder.Count, RecorderCapacity); i++)
                     tessMainHits += tessRecorder.GetSample(i).Count;
@@ -514,19 +478,17 @@ namespace MapRenderer.Tests.MapViews
                     uploadMainHits += uploadRecorder.GetSample(i).Count;
 
                 // ── Positive control: PmMeshUpload fired on the main thread (consume did run here) ──
-                // If this is 0, the tile never built — the build==0 assertion would be vacuously
-                // true and meaningless. Upload runs in ConsumeMeshBuild on the main thread.
+                // At 0 the tile never built, and the build==0 assertion below would be vacuous.
                 Assert.Greater(uploadMainHits, 0L,
-                    $"Tooth 2b positive control: PmMeshUpload ('{uploadMarkerName}') must have fired " +
+                    $"Positive control: PmMeshUpload ('{uploadMarkerName}') must have fired " +
                     $">0 times on the main thread (got {uploadMainHits}). "                            +
                     "If 0, no tile was built — the ==0 build assertion would be vacuous. "             +
                     "Check AllTilesSettled() and that the fixture path is correct.");
 
                 // ── Concrete bound: PmBuildMesh == 0 on the main thread ─────────────────────────
-                // A synchronous build: ≥1 main-thread PmBuildMesh hit per tile.
-                // The bound here: 0 main-thread PmBuildMesh hits (BuildMeshData runs in Task.Run).
+                // A synchronous build would fire at least one main-thread hit per tile.
                 Assert.AreEqual(0L, tessMainHits,
-                    $"Tooth 2b: PmBuildMesh ('{buildMarkerName}') fired {tessMainHits} time(s) "        +
+                    $"PmBuildMesh ('{buildMarkerName}') fired {tessMainHits} time(s) "                  +
                     $"on the main thread — expected 0. "                                                +
                     "Baseline: ≥1 main-thread hit per tile (sync BuildMesh path). "                 +
                     "Async path: BuildMeshData runs in Task.Run (off main thread), so "             +
@@ -540,14 +502,14 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
-        // ── Tooth 5: drain determinism — DrainMeshBuilds() settles all tiles ──────────────────
+        // ── Drain determinism — DrainMeshBuilds() settles all tiles ───────────────────────────
 
         /// <summary>
         /// DrainMeshBuilds() must block until all outstanding mesh build tasks complete and
         /// AllTilesSettled() returns true immediately after.
         /// </summary>
         [Test]
-        public void Tooth5_DrainMeshBuilds_SettlesAllTiles()
+        public void DrainMeshBuilds_SettlesAllTiles()
         {
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = Track(new GameObject("MapView_T5"));
@@ -570,9 +532,9 @@ namespace MapRenderer.Tests.MapViews
                 view.DrainMeshBuilds();
 
                 Assert.IsTrue(view.AllTilesSettled(),
-                    "Tooth 5: AllTilesSettled() must be true immediately after DrainMeshBuilds().");
+                    "AllTilesSettled() must be true immediately after DrainMeshBuilds().");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
-                    "Tooth 5: The z0/0/0 tile must be built after explicit drain.");
+                    "The z0/0/0 tile must be built after explicit drain.");
             }
             finally
             {
@@ -583,15 +545,9 @@ namespace MapRenderer.Tests.MapViews
         // ── BuildMeshData / UploadMesh split sanity ────────────────────────────────────────────
 
         /// <summary>
-        /// Sanity test: BuildMeshData → UploadMesh round-trip produces the same vertex count and positions
-        /// as the synchronous BuildMesh convenience.
-        ///
-        /// <c>WriteMeshData</c> SCHEDULES the graph rather
-        /// than running it, and job scheduling is main-thread-only (see <c>WriteMeshData</c>'s own doc) — so
-        /// this write happens on the main thread too, matching what production actually does (the graph
-        /// arm's write step is scheduled from the pump, never from a worker). Both paths still go through
-        /// the same <c>FillStreamWriteJob</c>, so positions must be bit-for-bit identical (no ULP drift from
-        /// the split).
+        /// A BuildMeshData → UploadMesh round trip gives the same vertex count and bit-identical positions as the
+        /// synchronous BuildMesh, because both use <c>FillStreamWriteJob</c>. The write runs on the main thread,
+        /// as in production, because <c>WriteMeshData</c> schedules jobs and scheduling is main-thread-only.
         /// </summary>
         [Test]
         public void BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh()

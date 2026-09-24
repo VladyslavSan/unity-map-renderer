@@ -1,7 +1,6 @@
-// The synchronous convenience surface, held in the test assembly. Production writes a mesh through
-// Styled*TileBuilder.ScheduleWrite, reached asynchronously through TileBuildGraph, and calls none of the
-// four methods below. Each body MIRRORS its production counterpart statement for statement and must stay
-// that way — do not "clean up" a body here without re-deriving it from production first.
+// Synchronous test-only mesh writes; production reaches Styled*TileBuilder.ScheduleWrite asynchronously.
+// Non-local invariant: each body mirrors its production counterpart statement for statement, so re-derive
+// it from production before any "clean up".
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -61,9 +60,8 @@ namespace MapRenderer.Tests
 
             using var ringVisitOrder = input.RingVisitOrder;
             using var colors         = featureColors;
-            // OR, not overwrite: FillGeometry rebuilds the LayerInput from loose arguments, so the value
-            // BuildLayerInput derived from fill-antialias would be silently discarded here — and this helper
-            // would band a layer that production leaves hard.
+            // OR, not overwrite: FillGeometry rebuilds the LayerInput, so an overwrite would drop the
+            // fill-antialias value and band a layer that production leaves hard.
             FillGeometry(md, geometry, ringVisitOrder, colors,
                 tileOriginRender, projection, clip, out vertexCount, out bounds,
                 suppressBoundaryBand || input.SuppressBoundaryBand);
@@ -97,9 +95,8 @@ namespace MapRenderer.Tests
                 SuppressBoundaryBand = suppressBoundaryBand,
             };
 
-            // The graph is the only mesher — schedule it and complete synchronously right here. Every
-            // caller of THIS method is off the production path; production, background quad included,
-            // reaches the graph asynchronously through ScheduleWrite, driven by TileBuildGraph.
+            // The graph is the only mesher; complete it synchronously here. Production, background quad
+            // included, reaches it asynchronously through ScheduleWrite.
             FillGraphOutput output = FillMeshGraph.Schedule(input);
             output.Handle.Complete();
             try
@@ -160,9 +157,8 @@ namespace MapRenderer.Tests
 
             IProjection proj = projection ?? StyledFillExtrusionTileBuilder.DefaultProjection;
 
-            // The graph schedules BOTH the roof measure AND the wall chain — complete it synchronously
-            // here, then hand the combined output to ScheduleStreamWrite. Every caller of THIS method is off
-            // the production path, which reaches the graph asynchronously through ScheduleWrite.
+            // The graph schedules BOTH the roof measure AND the wall chain; complete it synchronously here,
+            // then hand the combined output to ScheduleStreamWrite.
             FillExtrusionGraphOutput ext = FillExtrusionMeshGraph.Schedule(input, colors, bake);
             ext.Handle.Complete();
             try
@@ -217,9 +213,8 @@ namespace MapRenderer.Tests
             using var featColors   = featureColors;
             using var featWidths   = featureWidths;
 
-            // The graph is the only mesher — schedule it and complete synchronously right here. `using var`
-            // disposes in REVERSE declaration order (boundsArr, then output), so a mid-method throw cannot
-            // strand either.
+            // `using var` disposes in REVERSE declaration order (boundsArr, then output), so a mid-method
+            // throw cannot strand either.
             using var output = LineMeshGraph.Schedule(input);
             output.Handle.Complete();
 
@@ -238,12 +233,9 @@ namespace MapRenderer.Tests
             bounds      = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
             vertexCount = output.Vertices.Length;
 
-            // `geometry` is NEVER disposed here (see the BORROWED note on the parameter above). The decoded
-            // LAYER lends it to every style layer naming this source-layer, and to the symbol pass of the
-            // same kick, so freeing it here frees geometry a sibling consumer is still reading. The second
-            // free corrupts the heap: the store hands back an array-backed buffer whose Dispose frees three
-            // real NativeArrays. StyledLineBuilderStructureTests pins the rule structurally, so a breach
-            // fails on the offending LINE rather than as a scatter of unrelated red fixtures.
+            // Non-local invariant: `geometry` is BORROWED and never disposed here. The decoded LAYER lends it
+            // to every style layer on this source-layer and to the same kick's symbol pass, so a free here
+            // corrupts the heap under a sibling reader. StyledLineBuilderStructureTests pins the rule.
         }
     }
 }

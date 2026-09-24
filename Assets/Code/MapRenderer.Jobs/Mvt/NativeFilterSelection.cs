@@ -12,12 +12,10 @@ namespace MapRenderer.Jobs.Mvt
     internal static class NativeFilterSelection
     {
         /// <summary>
-        /// Rebinds <paramref name="program"/> against <paramref name="layer"/>'s key/value tables and, on
-        /// success, wraps the binding in a disposable <see cref="INativeFeatureMatcher"/>. Returns
-        /// <c>null</c> — "fall back to the managed path" — when <paramref name="layer"/> carries no
-        /// resolver yet (a hand-built layer outside the decode, never true of a decoded production layer;
-        /// see <see cref="MvtLayer.DenseKeyResolver"/>) or the rebind is refused (a literal string resolves
-        /// to two or more ids in this layer — see <c>NativeFilterRebind.Rebind</c>).
+        /// Rebinds <paramref name="program"/> against <paramref name="layer"/>'s tables and wraps the
+        /// binding in a disposable <see cref="INativeFeatureMatcher"/>. Returns <c>null</c> (the managed
+        /// path) when the layer has no resolver (a hand-built layer outside the decode) or
+        /// <c>NativeFilterRebind.Rebind</c> refuses the program.
         /// </summary>
         internal static INativeFeatureMatcher TryBind(MvtLayer layer, NativeFilterProgram program)
         {

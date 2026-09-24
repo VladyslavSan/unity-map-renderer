@@ -3,21 +3,17 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// <c>line-offset</c> — engine-free CPU helpers for the perpendicular ribbon shift. The vertex shader
-    /// extrudes each vertex along its extrusion normal by ±½·widthM. The offset adds <c>offsetM</c> along the
-    /// same normal times the vertex's side (±1), so both vertices of a station move by one world vector and the
-    /// half-width is unchanged: <c>displacement = normal × side × offsetM</c>. HLSL mirror:
-    /// <c>Line_VertexExtrude.hlsl</c>; keep both in sync on any arithmetic change.
-    /// <para>Two limitations. A round-join fan has one side sign per half-fan, so <see cref="Displace"/> shifts
-    /// it non-uniformly; the shift stays bounded and NaN-free (the fan pivot has normal 0). On a sharp corner
-    /// the raw miter factor (1/cos(θ/2)) → ∞ as θ → 180°, but <c>line-miter-limit</c> (default 2) bounds the
-    /// displacement at <c>miterLimit × |offsetM|</c>. No geometric offset solver exists.</para>
+    /// <c>line-offset</c> CPU helpers for the perpendicular ribbon shift: <c>displacement = normal × side ×
+    /// offsetM</c>, so both vertices of a station move by one world vector and the half-width is unchanged.
+    /// Non-local invariant: <c>Line_VertexExtrude.hlsl</c> mirrors this arithmetic. Limitation: a round-join
+    /// fan shifts non-uniformly (bounded, NaN-free), and a sharp corner's displacement is bounded only by
+    /// <c>line-miter-limit</c> at <c>miterLimit × |offsetM|</c>; there is no geometric offset solver.
     /// </summary>
     public static class LineOffset
     {
         // ── Core displacement helper ──────────────────────────────────────────────────────────
-        // normal = the 2D extrusion normal (LineRibbonVertex.Across); |normal| already carries the miter factor,
-        // so with Across (not the re-normalised unitDir_WS) this matches the HLSL `unitDir_WS * side * miter` term.
+        // Non-local invariant: normal is LineRibbonVertex.Across, whose length carries the miter factor, so this
+        // matches the HLSL `unitDir_WS * side * miter` term.
 
         /// <summary>
         /// Returns the perpendicular world-space displacement for a vertex with the given
@@ -31,8 +27,8 @@ namespace MapRenderer.Core.Style.Line
         }
 
         // ── Zoom-coupled px→m conversion ─────────────────────────────────────────────────────
-        // Mirrors the width px→m conversion in Line_VertexExtrude.hlsl, where `pxToWorld` is a frame constant
-        // (1 for a world-unit width). Offset and width share it, so offsetM(z1)/offsetM(z2) == widthM(z1)/widthM(z2).
+        // Non-local invariant: mirrors the width px→m conversion in Line_VertexExtrude.hlsl (frame-constant
+        // `pxToWorld`), so offsetM(z1)/offsetM(z2) == widthM(z1)/widthM(z2).
 
         /// <summary>
         /// Converts an offset from its source unit to world meters, mirroring the

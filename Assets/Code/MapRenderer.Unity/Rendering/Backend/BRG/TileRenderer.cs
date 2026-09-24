@@ -14,28 +14,18 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.Rendering.Backend.BRG
 {
     /// <summary>
-    /// BRG render backend (internal, IDisposable).
-    ///
-    /// Draws tile-layer meshes via <see cref="BatchRendererGroup"/> instead of per-layer GameObjects.
-    /// One <see cref="BatchDrawCommand"/> per (tile,layer) mesh, sharing one batch and one
-    /// <see cref="GraphicsBuffer"/> for all per-instance data. Materials are registered once from the
-    /// <see cref="RenderLayerSet"/>; draw commands are emitted in ascending renderQueue order so the
-    /// painter's-algorithm layer order is honoured (NOT GameObject child order).
-    ///
-    /// Per-instance buffer layout: see <see cref="MapInstanceData"/> (the single source of truth for
-    /// the SoA layout). <see cref="InstancePropPlan.BuildFromStruct{T}"/> reflects it ONCE at
-    /// construction to build the cached packing plan; per-frame pack is reflection-free.
-    ///
-    /// Clean-room: design follows the MapLibre Style Spec and Unity BRG documentation.
+    /// BRG render backend: draws tile-layer meshes via <see cref="BatchRendererGroup"/>, one
+    /// <see cref="BatchDrawCommand"/> per (tile, layer) mesh, all sharing one batch and one
+    /// <see cref="GraphicsBuffer"/> of per-instance data laid out by <see cref="MapInstanceData"/>.
+    /// Materials are registered once from the <see cref="RenderLayerSet"/>. Draw commands go out in
+    /// ascending renderQueue order, which is the painter's layer order.
     /// </summary>
     internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
         // ── Reflected-once packing plan ───────────────────────────────────────────────────────
-        // Built once at construction from MapInstanceData. Per-frame pack indexes MaterialEntries[]
-        // by index only — no reflection, no boxing, no LINQ, no managed allocation.
+        // Per-frame pack indexes MaterialEntries[] by index only: no reflection, boxing or allocation.
 
-        // internal, not private: the test assembly's observability extensions read it (see
-        // BrgTileRendererTestExtensions) — the sanctioned footprint for test-only accessors.
+        // Internal so BrgTileRendererTestExtensions in the test assembly can read it.
         internal readonly InstancePropPlan _plan = InstancePropPlan.BuildFromStruct<MapInstanceData>();
 
         // ── Per-draw-item record ─────────────────────────────────────────────────────────────
@@ -177,20 +167,14 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             }
         }
 
-        // Read-only queries over this class's state that only tests ask for — DrawItemCount, HasBuffer,
-        // FloatsPerInstance, MetadataEntryCount, GetInstanceTranslation, GetInstancePropValue,
-        // GetPropSoaOffset, GetEmittedRenderQueues — live in the test assembly; see
-        // BrgTileRendererTestExtensions. CullingCallCount stays a field above because this class WRITES
-        // it, and ComputeEmitOrder stays because Rebuild calls it.
+        // Test-only read queries (DrawItemCount, HasBuffer, GetInstancePropValue, …) live in the test
+        // assembly's BrgTileRendererTestExtensions. CullingCallCount stays here because this class writes it.
 
         /// <summary>
-        /// Returns the XZ scene-space bounding box that covers all registered tile instances.
-        /// Each tile origin is the translation from the packed O2W buffer; <paramref name="tileSizeWorld"/>
-        /// is added to the max to account for the tile's mesh extent beyond its origin.
-        /// Used by tests to frame a camera that sees all BRG-rendered tiles (BRG has no child
-        /// GameObjects so the standard ComputeChildBounds approach does not apply).
-        ///
-        /// Returns <c>default(Bounds)</c> if no draw items are registered or the buffer is empty.
+        /// Returns the XZ scene-space bounding box that covers all registered tile instances, read from the
+        /// packed O2W translations; <paramref name="tileSizeWorld"/> adds each tile's extent beyond its origin.
+        /// BRG has no child GameObjects, so child-bounds framing does not apply. Returns an empty
+        /// <see cref="Bounds"/> when no draw items are registered or the buffer is empty.
         /// </summary>
         public Bounds ComputeSceneBounds(float tileSizeWorld)
         {
@@ -222,11 +206,9 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
-        /// <paramref name="materialIndex"/> is the layer's global SLOT (<see cref="Style.IRenderLayer.DrawIndex"/>),
-        /// indexing the full-width material list built at construction; non-tile-mesh slots are null and
-        /// never receive an AddTileLayer call. <paramref name="tileId"/> is part of the shared
-        /// <see cref="ITileRenderBackend"/> contract for the Entities backend's per-tile hierarchy; BRG
-        /// draws a flat instance buffer and does not use it.
+        /// <paramref name="materialIndex"/> is the layer's global slot (<see cref="Style.IRenderLayer.DrawIndex"/>)
+        /// into the full-width material list; null (non-tile-mesh) slots never receive this call.
+        /// BRG draws a flat instance buffer and ignores <paramref name="tileId"/>.
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {
@@ -276,17 +258,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // ── Per-frame rebuild ─────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Rebuilds the instance data buffer from all registered draw items using SoA layout.
-        /// Must be called once per frame on the BRG path.
-        ///
-        /// Recomputes per-instance objectToWorld from <paramref name="frame"/> (the camera-relative
-        /// <see cref="SceneFrame"/> — scene origin + rebase rotation) and reads material props back from each
-        /// layer material (no per-frame managed allocation in steady state — buffer is grown on demand but
-        /// never shrunk).
-        ///
-        /// SoA (Struct-of-Arrays): all instance O2W first, then all W2O, then all _BaseColor, etc.
-        /// Byte offsets in ReRegisterBatch are computed from the current instance count N.
-        /// The batch is re-registered whenever N changes (offsets change with N).
+        /// Rebuilds the SoA instance buffer (all O2W, then all W2O, then each material prop) once per frame:
+        /// objectToWorld from <paramref name="frame"/>, props read back from each layer material. The buffer
+        /// grows but never shrinks, so steady state does not allocate. SoA byte offsets depend on the
+        /// instance count, so the batch is re-registered when the count changes or the GPU buffer grows.
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {
@@ -309,19 +284,15 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             if (_cpuBuffer.Length < floatsNeeded)
                 _cpuBuffer = new float[floatsNeeded];
 
-            // Pack per-instance data in SoA layout.
-            // Each property block P occupies floats [Pfx_P*count .. Pfx_P*count + count*stride_P - 1].
-            // Instance si's value for property P is at: Pfx_P*count + si*stride_P.
+            // Pack in SoA layout: instance si's value for property P starts at float Pfx_P*count + si*stride_P.
 
             // ── O2W block (12 floats per instance) ──────────────────────────────────────────
             int o2wBase = _plan.O2WFloatOffset * count; // = 0 * count = 0
             // ── W2O block (12 floats per instance) ──────────────────────────────────────────
             int w2oBase = _plan.W2OFloatOffset * count; // = 12 * count
 
-            // Place each tile in the look-at's local ENU frame. The rebase is a proper (orthonormal)
-            // rotation, so O2W = [R | pos] and its RIGID inverse W2O = [Rᵀ | -Rᵀ·pos]. Building both directly
-            // from the float3x3 (no quaternion round-trip, no math.inverse) keeps the Mercator
-            // identity-rebase case a bit-for-bit translation-only packing (R = I ⇒ pos.y = 0).
+            // The rebase R is orthonormal, so O2W = [R | pos] and W2O = [Rᵀ | -Rᵀ·pos]. Building both from the
+            // float3x3 directly keeps Mercator (R = I) a bit-exact translation-only packing.
             float3x3 rebase  = frame.Rebase;
             float3x3 rebaseT = math.transpose(rebase);
 
@@ -448,16 +419,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         }
 
         /// <summary>
-        /// Registers (or re-registers) the BRG batch with SoA byte offsets computed for
-        /// <paramref name="instanceCount"/> instances.
-        ///
-        /// MetadataValue.Value = (uint)(array_byte_offset | 0x80000000u):
-        ///   array_byte_offset = property_SoaFloatOffset × instanceCount × 4
-        /// This is the offset of the FIRST element of the property's SoA array in the buffer.
-        /// Unity computes instance i's value at: array_byte_offset + i × sizeof(property).
-        ///
-        /// Driven by the reflected plan — no hand-maintained M(...) wall. Each material entry is
-        /// emitted in one loop; the 2 transform entries are emitted first.
+        /// Registers (or re-registers) the BRG batch with SoA byte offsets for <paramref name="instanceCount"/>
+        /// instances, transforms first, then the plan's material entries. Each metadata value is
+        /// <c>(SoaFloatOffset × instanceCount × 4) | 0x80000000</c>: the byte offset of the property's first
+        /// element. Unity reads instance i at that offset + i × sizeof(property).
         /// </summary>
         private void ReRegisterBatch(int instanceCount)
         {
@@ -505,15 +470,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // ── OnPerformCulling ──────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// BRG culling callback. Emits one <see cref="BatchDrawCommand"/> per draw item in ascending
-        /// renderQueue order (painter's algorithm), grouped into run-length
-        /// <see cref="BatchDrawRange"/>s by declared shadow-cast mode
-        /// (<see cref="ComputeDrawRanges"/>). Minimal culling for a camera view: all draws are emitted. A
-        /// LIGHT view emits only the caster slots (<see cref="ComputeEmitOrder"/>), so "only fill-extrusion
-        /// casts" holds in code we own rather than depending on the engine honouring range filter settings.
-        ///
-        /// <c>unsafe</c> is required to fill <see cref="BatchCullingOutputDrawCommands"/> via raw
-        /// pointers and <see cref="UnsafeUtility.Malloc"/>.
+        /// BRG culling callback. Emits one <see cref="BatchDrawCommand"/> per visible draw item in ascending
+        /// renderQueue order, in run-length <see cref="BatchDrawRange"/>s by shadow-cast mode. A camera view
+        /// emits every visible draw. A light view emits only caster slots (<see cref="ComputeEmitOrder"/>), so
+        /// "only fill-extrusion casts" does not depend on the engine honouring range filter settings.
         /// </summary>
         private unsafe JobHandle OnPerformCulling(
             BatchRendererGroup rendererGroup,
@@ -524,12 +484,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             // Track invocations so tests can confirm this path is driven by the render loop.
             Interlocked.Increment(ref CullingCallCount);
 
-            // Compacted emit order: the sorted-item slots whose handle is still live in _items. Handles
-            // removed by RemoveItem since the last Rebuild (tile eviction during zoom) are filtered out
-            // here, so they get NO draw command. This is load-bearing: UnsafeUtility.Malloc does NOT zero
-            // memory, so emitting one command per _sortedItems slot and skipping stale ones in place would
-            // leave uninitialized garbage BatchDrawCommands (invalid batch/mesh/material id) — the source
-            // of the "MeshID <null>" BRG error seen while zooming.
+            // Compacted emit order: handles removed since the last Rebuild get no draw command. Malloc does
+            // not zero memory, so a skipped slot would be a garbage command (the BRG "MeshID <null>" error).
             int emitted = ComputeEmitOrder(_emitList, cullingContext.viewType);
             if (emitted == 0 || !_batchRegistered) return default;
 
@@ -559,9 +515,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 UnsafeUtility.AlignOf<int>(),
                 Allocator.TempJob);
 
-            // ComputeDrawRanges wrote EVERY field of every range — Malloc does not zero (see the MeshID
-            // <null> note above), and a half-written BatchDrawRange fails as random shadow/layer-mask
-            // behaviour rather than cleanly.
+            // ComputeDrawRanges writes every field of every range: Malloc does not zero, and a half-written
+            // BatchDrawRange fails as random shadow/layer-mask behaviour.
             for (int r = 0; r < rangeCount; r++) drawCommandsPtr->drawRanges[r] = _drawRanges[r];
 
             // Fill exactly `emitted` contiguous commands — no holes. _emitList[e] is
@@ -591,21 +546,14 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         }
 
         /// <summary>
-        /// Builds the compacted draw-command emit order into <paramref name="dst"/>: for each entry in
-        /// <see cref="_sortedItems"/> (ascending renderQueue) whose handle is still live in
-        /// <see cref="_items"/>, appends that entry's index (the packed instance-buffer slot). Handles
-        /// removed by <see cref="RemoveItem"/> since the last <see cref="Rebuild"/> — e.g. tiles evicted
-        /// while zooming, before <c>_sortedItems</c> is rebuilt — are filtered out, so no draw command is
-        /// emitted for a stale slot (which would otherwise be uninitialized garbage: the BRG
-        /// "MeshID &lt;null&gt;" error). Returns the number of live items.
-        ///
-        /// Internal for white-box testing of the eviction/compaction invariant. Allocation-free in steady
-        /// state (reuses <paramref name="dst"/>).
+        /// Writes into <paramref name="dst"/> the index (packed instance-buffer slot) of each
+        /// <see cref="_sortedItems"/> entry whose handle is still live and whose slot is visible. Handles
+        /// removed by <see cref="RemoveItem"/> since the last <see cref="Rebuild"/> are skipped, so no stale
+        /// slot emits an uninitialized command (the BRG "MeshID &lt;null&gt;" error). Internal for tests.
         /// </summary>
         /// <param name="dst">Reused destination list; cleared first.</param>
-        /// <param name="viewType">The view being culled. <see cref="BatchCullingViewType.Light"/> is the
-        /// shadow pass, and drops every slot declared <see cref="ShadowCastingMode.Off"/> — see
-        /// <see cref="OnPerformCulling"/> for why the range's filter settings alone are not relied on.</param>
+        /// <param name="viewType">The view being culled. <see cref="BatchCullingViewType.Light"/> (the shadow pass)
+        /// drops every slot declared <see cref="ShadowCastingMode.Off"/>.</param>
         /// <returns>The number of items written.</returns>
         internal int ComputeEmitOrder(List<int> dst, BatchCullingViewType viewType)
         {
@@ -648,15 +596,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         }
 
         /// <summary>
-        /// Run-length groups <paramref name="emitOrder"/> (already in emission order) by declared shadow-cast
-        /// mode into <paramref name="dst"/>, one <see cref="BatchDrawRange"/> per run. A range is the ONLY
-        /// place a shadow declaration can live — <see cref="BatchDrawCommand"/> carries no such field — so
-        /// per-layer variation costs one extra range per mode change, never a reorder: the ranges partition
-        /// the command array contiguously and in order, leaving the painter's ordering untouched.
-        /// <see cref="BatchFilterSettings"/> is written in FULL (see <see cref="OnPerformCulling"/>).
-        ///
-        /// Internal for the same reason <see cref="ComputeEmitOrder"/> is — it is the testable seam into
-        /// <see cref="OnPerformCulling"/>, which needs a live GPU otherwise. Allocation-free in steady state.
+        /// Groups <paramref name="emitOrder"/> into <paramref name="dst"/>, one <see cref="BatchDrawRange"/> per
+        /// run of equal shadow-cast mode, with <see cref="BatchFilterSettings"/> written in full. The range is
+        /// the only place for the shadow flag (<see cref="BatchDrawCommand"/> has none). The ranges partition
+        /// the commands in order, so the painter's order holds. Internal: the GPU-free test seam into
+        /// <see cref="OnPerformCulling"/>.
         /// </summary>
         /// <param name="emitOrder">Compacted emit order from <see cref="ComputeEmitOrder"/>.</param>
         /// <param name="dst">Reused destination list; cleared first.</param>

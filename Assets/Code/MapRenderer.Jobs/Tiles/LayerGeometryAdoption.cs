@@ -5,18 +5,10 @@ namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>
     /// The two guards every <see cref="ITileLayer"/> implementation applies when it takes ownership of its
-    /// decoded buffer — <b>set once</b>, and <b>in lockstep with the feature list</b>.
-    ///
-    /// <para><b>Why it is shared and not copied.</b> The lockstep is a property of the TYPE rather than of
-    /// one decoder's discipline, and more than one <see cref="ITileLayer"/> implementation exists. An
-    /// invariant three ordinal-indexed consumers depend on must have ONE statement: two copies drift, and
-    /// the weaker of them is then the real contract.</para>
-    ///
-    /// <para>Both failures are loud and both happen BEFORE any state is written, so a rejected buffer is
-    /// never half-adopted: a second adopt would orphan the first buffer (a native leak nothing can reach,
-    /// since the tile's <c>Dispose</c> frees only what the layer currently holds), and a mismatched feature
-    /// column mis-buckets every ring — silently while the ordinals stay in range, and as an
-    /// index-out-of-range once they do not.</para>
+    /// decoded buffer — <b>set once</b>, and <b>in lockstep with the feature list</b>. Non-obvious why: several
+    /// layer types exist, and two copies of one invariant drift, so the guards live here once. Both throw
+    /// before any state is written: a second adopt would leak the first buffer, and a mismatched feature
+    /// column mis-buckets every ring.
     /// </summary>
     internal static class LayerGeometryAdoption
     {
@@ -25,9 +17,8 @@ namespace MapRenderer.Jobs.Tiles
         /// <param name="geometry">The buffer being adopted. A <c>default</c> one is legal for a feature-less
         /// layer: the materializers return it, and its zero count matches an empty feature list.</param>
         /// <param name="featureCount">The layer's own feature count — the other half of the lockstep.</param>
-        // `geometry` is passed BY VALUE, not `in`: TileGeometryBuffers is a non-readonly struct, and member
-        // access through `in` on one of those forces a defensive copy per read (conventions, "Pass large
-        // read-only structs by `in`" — the `in` ⟺ `readonly struct` gate).
+        // `geometry` is BY VALUE, not `in`: TileGeometryBuffers is a non-readonly struct, so `in` forces a
+        // defensive copy per read (conventions, "Pass large read-only structs by `in`").
         internal static void Validate(
             string owner, bool alreadyAdopted, TileGeometryBuffers geometry, int featureCount)
         {

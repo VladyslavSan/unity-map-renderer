@@ -1,5 +1,4 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
-// (Tools/core-tests). Do NOT add any UnityEngine reference.
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine reference.
 // Tests classification, clamping, pan pinning and the fake source for the touch gesture recognizer.
 
 using System.Collections.Generic;
@@ -157,9 +156,8 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(0, CountKind(tiltFrame, GestureKind.HeadingBy),
                 "Frame 2: no HeadingBy");
 
-            // Frames 3–5: inject strong pinch + twist while finger count stays 2.
-            // Distance grows by 80px (well above pinchThreshold=8), angle rotates.
-            // A stateless dominant-component classifier would flip to ZoomRotate here — the latch forbids it.
+            // Frames 3–5: strong pinch + twist with two fingers. A stateless dominant-component classifier
+            // would flip to ZoomRotate here; the latch forbids it.
             for (int i = 0; i < 3; i++)
             {
                 double spread = 80.0 + i * 20;
@@ -393,9 +391,7 @@ namespace MapRenderer.Tests.Cameras
                 Sample(1, f1.x, f1.y, TouchPhase.Began),
             });
 
-            // Rotate f1 CCW so inter-finger angle increases by ~20 degrees.
-            // Initial angle: atan2(0, 200)*180/PI = 0 degrees.
-            // Target angle: 20 degrees — so f1 moves to (cos20*200, sin20*200) from f0.
+            // Rotate f1 CCW about f0 from 0° to 20°: f1 moves to (cos20*200, sin20*200) from f0.
             double rad20 = 20.0 * math.PI_DBL / 180.0;
             double nx    = f0.x + 200.0 * math.cos(rad20);
             double ny    = f0.y + 200.0 * math.sin(rad20);

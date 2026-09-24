@@ -7,36 +7,15 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Core.GeoJson
 {
     /// <summary>
-    /// RFC 7946 → <see cref="GeoJsonDataset"/>. Accepts a <c>FeatureCollection</c>, a bare <c>Feature</c>, or
-    /// a bare geometry object as the root (RFC §3). Syntax errors surface as the underlying
-    /// <see cref="JsonParseException"/>, unchanged; everything that is well-formed JSON but not well-formed
-    /// GeoJSON raises <see cref="GeoJsonFormatException"/>.
-    ///
-    /// <para><b>The longitude-first swap happens HERE and nowhere else.</b> RFC 7946 §3.1.1 positions are
-    /// <c>[longitude, latitude, (altitude)]</c>; they become latitude-first <see cref="GeoCoordinate"/>
-    /// immediately, per the repo convention that the swap lives at the projection boundary. The third
-    /// element is read past and discarded — the surface-only model <c>TileToGeoJob</c> also assumes.</para>
-    ///
-    /// <para><b>Ring winding is re-encoded from ROLE.</b> RFC §3.1.6 states role POSITIONALLY (first ring
-    /// exterior, the rest holes) and prescribes the right-hand rule, but also directs parsers NOT to reject
-    /// non-conforming winding — so authored winding carries no information. Downstream
-    /// (<c>RingAssemblyJob</c>) classifies outer-vs-hole by SIGN, so role is re-encoded as winding here,
-    /// while the per-polygon grouping is still in hand.</para>
-    ///
-    /// <para><b>Which sign, and why it is the mirror of the RFC's.</b> The target is the MVT convention in
-    /// TILE space: exterior CW-on-screen = positive shoelace, holes negative — that is what makes a GeoJSON
-    /// tile indistinguishable from an MVT tile downstream. <c>(lon, lat) → (u, v)</c> is orientation
-    /// REVERSING (<c>u</c> grows with longitude, <c>v</c> SHRINKS with latitude), so a ring's shoelace sign
-    /// flips on projection. To land positive in tile space the exterior must therefore be normalised
-    /// NEGATIVE here in <c>(lon, lat)</c> — clockwise in lon/lat, i.e. the mirror image of the RFC's
-    /// right-hand rule, which is exactly the rule the RFC says not to trust anyway.</para>
-    ///
-    /// <para><b>Rejected, loudly</b> (this source serves declarative fixtures, where silently rendering less
-    /// is the worst outcome): a segment whose <c>|Δlon| &gt; 180°</c> (RFC §3.1.9 directs authors to split
-    /// antimeridian-crossing geometry — interpreting such a segment literally draws it the long way around
-    /// the world), <c>GeometryCollection</c>, a LinearRing with fewer than 4 positions or an unclosed one,
-    /// coordinates outside <c>[−90, 90]</c> / <c>[−180, 180]</c>, and an <c>id</c> that is neither string nor
-    /// number. Ignored per spec: <c>bbox</c>, foreign members, CRS (RFC §4 fixes it to WGS 84).</para>
+    /// RFC 7946 → <see cref="GeoJsonDataset"/>; the root may be a <c>FeatureCollection</c>, <c>Feature</c> or
+    /// geometry (RFC §3). Invalid JSON throws <see cref="JsonParseException"/>, invalid GeoJSON
+    /// <see cref="GeoJsonFormatException"/>. Lon-first positions (RFC §3.1.1) become latitude-first here and
+    /// nowhere else; altitude is discarded. Non-local invariant: <c>RingAssemblyJob</c> classifies rings by sign,
+    /// so positional ring role (RFC §3.1.6) is re-encoded as winding, exterior NEGATIVE in (lon, lat): the
+    /// projection to tile space reverses orientation, so the exterior lands positive, the MVT convention.
+    /// Rejected: a segment with <c>|Δlon| &gt; 180°</c> (RFC §3.1.9), <c>GeometryCollection</c>, a ring under 4
+    /// positions or unclosed, out-of-range coordinates, a non-string/number <c>id</c>. Ignored: <c>bbox</c>,
+    /// foreign members, CRS (RFC §4).
     /// </summary>
     public static class GeoJsonParser
     {
@@ -284,11 +263,9 @@ namespace MapRenderer.Core.GeoJson
         {
             IReadOnlyList<JsonValue> rings = RequireArray(value, featureIndex, "Polygon coordinates");
 
-            // RFC §3.1: an empty coordinates array is an empty geometry. No ringCounts entry is added, so a
-            // MultiPolygon containing an empty polygon ends up with FEWER PolygonRingCounts entries than the
-            // RFC array had polygons. That is safe: the counts exist only to walk Paths in
-            // polygon-sized strides (GeoJsonTileSlicer.ClipPolygons' `ring += ringCount`), and a zero-ring
-            // polygon contributes nothing to Paths either way. The two lists index Paths, not the wire array.
+            // RFC §3.1: an empty coordinates array is an empty geometry and adds no ringCounts entry.
+            // Non-local invariant: a MultiPolygon holding an empty polygon has fewer PolygonRingCounts entries
+            // than polygons, which is safe because the counts only stride through Paths (ClipPolygons).
             if (rings.Count == 0) return;
 
             var polygon = new List<List<GeoCoordinate>>(rings.Count);
@@ -334,15 +311,10 @@ namespace MapRenderer.Core.GeoJson
         }
 
         /// <summary>
-        /// Re-encodes positional ring role as winding: the exterior (ring 0, per RFC §3.1.6) is oriented to a
-        /// NEGATIVE lon/lat shoelace and every hole to a positive one, so that after the
-        /// orientation-reversing projection into tile space the exterior reads positive (CW on screen) and
-        /// holes negative — the MVT convention <c>RingAssemblyJob</c> classifies against.
-        ///
-        /// <para>Reversal keeps vertex 0 in place and reverses the rest, which is what reversing the CLOSED
-        /// RFC ring and re-stripping its duplicate produces. Reversing the whole stripped list would rotate
-        /// the ring by one as well, so two inputs describing the same ring with opposite winding would not
-        /// normalise to the same vertex sequence.</para>
+        /// Re-encodes positional ring role as winding: the exterior (ring 0, RFC §3.1.6) gets a NEGATIVE lon/lat
+        /// shoelace and every hole a positive one (see the class doc). Reversal keeps vertex 0 in place and
+        /// reverses the rest, as reversing the closed RFC ring would, so both windings of one ring normalise to
+        /// the same vertex sequence.
         /// </summary>
         private static void NormaliseRingWinding(List<List<GeoCoordinate>> polygon)
         {

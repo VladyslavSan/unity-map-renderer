@@ -1,13 +1,5 @@
-// Line pixel-precision GPU/visual acceptance tests: analytical AA and tile-seam clipping.
-//
-// Split by TWO using collisions, not the line cap: `CameraProperties` (MapRenderer.Core.Geo
-// vs UnityEngine.Rendering) and bare `Object` (System.Object vs UnityEngine.Object) —
-// both CS0104. Within that constraint each file groups its dominant line sub-area.
-// This file: the two fixtures pinning a sub-pixel geometric boundary — the AA
-// straddle on a styled edge, and the tile-seam clip. TileSeamSnapshotTests moved
-// here from tile-pipeline: all three of its tests pin geometry (cracks, bands,
-// rims) at a boundary, which is meshing per docs/commit-conventions.md, not
-// TileManager lifecycle.
+// Line pixel-precision GPU/visual acceptance tests: the AA straddle and the tile-seam clip, both sub-pixel
+// boundaries (meshing). Split from the other line files by the CS0104 `CameraProperties`/`Object` collisions.
 //
 // Contents:
 //   LineAaSnapshotTests    — Acceptance teeth for the line analytical-AA rebuild (strict one-device-pixel straddle centred on the styled edge).
@@ -45,23 +37,12 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance teeth for the line analytical-AA rebuild (strict one-device-pixel straddle centred on the
-    /// styled edge). Every measurement here is an ALPHA-WEIGHTED coverage integral recovered from the
-    /// rendered pixels — never a thresholded non-background pixel count, which is what made the earlier
-    /// AA work flake.
-    ///
-    /// <para>Camera and background mirror <see cref="LineSnapshotTests"/>: top-down ortho at (0, 200, 0),
-    /// orthographicSize 70, 512×512 ⇒ metresPerPixel = 2·70/512 = 0.2734375 exactly, so world Z maps to the
-    /// image row as <c>row = 256 + z / metresPerPixel</c> with no rounding slack. The horizontal fixtures sit
-    /// a QUARTER pixel off that mapping (<see cref="QuarterPixelOffsetM"/>) so no ribbon edge ever lands on a
-    /// pixel centre: a rasterizer tie would make the hard-edge measurement ambiguous and would let an
-    /// injected half-pixel geometry pad hide inside the tie.</para>
-    ///
-    /// <para>The project renders in LINEAR colour space, so the 8-bit snapshot bytes are sRGB-ENCODED
-    /// composites. Coverage is recovered by decoding to linear first and projecting onto the
-    /// background→plateau colour axis; skipping the decode would bend the alpha ramp and corrupt every
-    /// integral.</para>
-    ///
+    /// Acceptance teeth for line analytical AA (a one-device-pixel straddle centred on the styled edge),
+    /// each an ALPHA-WEIGHTED coverage integral, never a thresholded pixel count. Camera: top-down ortho,
+    /// orthographicSize 70, 512×512, so <c>row = 256 + z / 0.2734375</c> exactly. Non-obvious why: an edge on
+    /// a pixel centre makes a rasterizer tie that could hide an injected half-pixel pad, so the horizontal
+    /// fixtures sit a QUARTER pixel off (<see cref="QuarterPixelOffsetM"/>). The snapshot bytes are
+    /// sRGB-encoded, and skipping the linear decode bends the alpha ramp and corrupts every integral.
     /// </summary>
     [TestFixture]
     public class LineAaSnapshotTests : BaseTestFixture
@@ -109,13 +90,9 @@ namespace MapRenderer.Tests.Visual
             camera.backgroundColor    = BgColor;
             camera.enabled            = false;
 
-            // The frame constant the line shader converts a PIXEL width with. Production pushes it from
-            // MapCamera.SyncToCamera, measured off that camera; this fixture hand-builds a UnityEngine.Camera
-            // with no MapCamera, so it must push the equivalent for ITS camera — exactly MetresPerPx, already
-            // derived from OrthoSize and the snapshot height above, and what 2*d*tan(fov/2)/H degenerates to
-            // under ortho. Any NEW fixture that hand-builds a camera has to do this too, and the failure is
-            // QUIET: a 0 here renders every styled width as the same 1 px hairline (measured), not a blank
-            // frame. PixelWidthBand_StillRenders_WhenTheFrameConstantIsUnset pins that fallback.
+            // Non-local invariant: MapCamera.SyncToCamera pushes the frame constant, and this hand-built camera
+            // has none, so it pushes MetresPerPx itself. A 0 renders a plausible 1 px hairline, not a blank
+            // frame; PixelWidthBand_StillRenders_WhenTheFrameConstantIsUnset pins that fallback.
             Shader.SetGlobalFloat(
                 ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel, MetresPerPx);
             return (go, camera);
@@ -169,18 +146,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// World Z placing a horizontal centreline at a chosen distance from a pixel CENTRE.
-        ///
-        /// <para>Pixel row <c>r</c> has its centre at continuous row <c>r + 0.5</c> — this fixture's own
-        /// established convention: with the centreline at 256.25 the flank centres sit at radial distances
-        /// {0.25, 1.25, …} and {0.75, 1.75, …} (see <see cref="QuarterPixelOffsetM"/>), which only holds if
-        /// the centres are the half-integers. So the centreline goes at <c>row + 0.5 + phase</c>, and
-        /// <paramref name="phaseFromCentre"/> IS the distance to the nearest sample.</para>
-        ///
-        /// <para>Parametrising on that distance rather than on "row + p" is deliberate: it makes the fixture
-        /// independent of which of <c>p = 0</c> / <c>p = 0.5</c> is the equidistant tie, a question the plan
-        /// and its challenge answered in opposite directions. <c>phaseFromCentre = 0</c> is the centreline
-        /// landing exactly ON a sample (unambiguous); <c>0.5</c> is the tie and is never used.</para>
+        /// World Z placing a horizontal centreline at a chosen distance from a pixel CENTRE. Pixel row
+        /// <c>r</c> has its centre at <c>r + 0.5</c>, so the centreline goes at <c>row + 0.5 + phase</c> and
+        /// <paramref name="phaseFromCentre"/> IS the distance to the nearest sample. Parametrising on that
+        /// distance avoids any ambiguity about which phase is the tie: 0 lands ON a sample, 0.5 is the tie.
         /// </summary>
         private static double ZForPhase(int pixelRow, double phaseFromCentre)
             => (pixelRow + 0.5 + phaseFromCentre - SnapH * 0.5) * MetresPerPx;
@@ -315,11 +284,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T1.</b> A diagonal ribbon's outer silhouette carries genuine partial coverage on BOTH flanks,
         /// and the profile rises monotonically from background to the plateau. A hard triangle silhouette
-        /// (no MSAA) produces only coverage 0 and 1, so this is red without the straddle ramp.
-        ///
-        /// <para>The fixture is diagonal on purpose: an axis-aligned edge can land on a pixel boundary and
-        /// produce a clean binary profile even WITH a working ramp, which would make the tooth pass for the
-        /// wrong reason.</para>
+        /// (no MSAA) produces only coverage 0 and 1. The ribbon is diagonal because an axis-aligned edge on a
+        /// pixel boundary reads binary even with a working ramp.
         /// </summary>
         [Test]
         public void OuterSilhouette_IsAntialiased()
@@ -407,21 +373,16 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T2.</b> Two coplanar <c>Map/Line</c> draws in painter order — a wide dark casing under a narrow
         /// light fill — must keep the fill OPAQUE across its whole styled band, with at most one blended
-        /// pixel per flank at the boundary.
-        ///
-        /// <para>This is the tooth that rejects an INSET fade (the model that got edge AA removed): a feather
-        /// that eats inward from the fill's edge lets casing colour through well inside the fill band, which
-        /// is exactly what a cased road cannot tolerate. A strict straddle with an <c>a == 1</c> interior
-        /// passes it.</para>
+        /// pixel per flank at the boundary. It rejects an INSET fade, which lets casing colour through inside
+        /// the fill band; a straddle with an <c>a == 1</c> interior passes.
         /// </summary>
         [Test]
         public void CasedPair_InternalBoundary_StaysCrisp()
         {
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
-            // The casing has to be BRIGHT as well as differently-hued: this scene has only dim ambient
-            // light, so a dark navy renders within ~0.02 linear of the background and no fill-vs-casing
-            // measurement is separable from background noise.
+            // The casing must be BRIGHT: under this dim ambient light a dark navy is within ~0.02 linear of the
+            // background, so no fill-vs-casing reading would separate from noise.
             var (casingGo, casingMat) = BuildHorizontalLine(
                 CasingWidthPx, widthIsPixels: true, color: new Color(0.20f, 0.45f, 0.98f, 1f),
                 renderQueue: 3000);
@@ -510,12 +471,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T2b.</b> The coverage integral across a perpendicular cut equals the STYLED width in pixels.
         /// The straddle's 50 % contour must sit on the styled edge, so adding AA changes the apparent width
-        /// by nothing at all.
-        ///
-        /// <para>The <c>_WidthIsPixels = false</c> case is the one that catches the pad-unit bug: in
-        /// world-metre mode the shader's <c>pxToWorld</c> is a literal 1.0 (a unit-conversion factor, not a
-        /// metres-per-pixel scale), so a pad written as <c>0.5 · pxToWorld</c> pads by half a METRE — about
-        /// 1.8 px per side at this camera — while the pixel-width case still looks correct.</para>
+        /// by nothing. The <c>_WidthIsPixels = false</c> case catches a pad in the wrong unit: there
+        /// <c>pxToWorld</c> is a literal 1.0, so <c>0.5 · pxToWorld</c> would pad half a METRE (~1.8 px).
         /// </summary>
         [TestCase(true,  TestName = "ApparentWidth_Unchanged_MatchesStyledPixels_PixelWidth")]
         [TestCase(false, TestName = "ApparentWidth_Unchanged_MatchesStyledPixels_WorldWidth")]
@@ -570,29 +527,13 @@ namespace MapRenderer.Tests.Visual
         /// the radii where the join geometry is the only thing drawing. Nearer the corner the two ribbon
         /// quads composite over the fan at <c>a == 1</c>, so a seam there is not observable at all.
         ///
-        /// <para>What this gates: <b>the coverage ramp keys on the C0-continuous interpolated
-        /// <c>|side|</c> varying</b>, so every internal edge (quad↔fan, fan↔fan) is invisible. It does NOT
-        /// gate the "coverage derived from per-triangle edge distance" alternative — that needs
-        /// <c>SV_Barycentrics</c> (SM 6.1) and the line's ForwardLit pass is <c>#pragma target 2.0</c>, so
-        /// that wrong implementation is unreachable in this shader. The reachable way to break join
-        /// continuity is a <c>|side|</c> discontinuity or dip along an interior edge, which is what a
-        /// manufactured-flank-sign defect produces and what this measurement catches.</para>
-        ///
-        /// <para>Measured over an ANNULUS around the corner, from ⅓ to ⅔ of the half-width. The inner
-        /// radius is not enough on its own: right at the corner the two ribbon quads still overlap the join
-        /// geometry, and a quad drawn at <c>a == 1</c> composites over any seam the fan renders underneath
-        /// it. The outer radius is where the fan is the only thing drawing, and is also the binding
-        /// constraint on the corner angle — a bevel's chord stands off at only half-width·cos(θ/2), which
-        /// for a 90° corner (0.71·half-width) would fall INSIDE the probe. Hence the 60° corner, whose
-        /// bevel chord sits at 0.87·half-width, outside the annulus for all three join types. No point in
-        /// the annulus is near enough to the silhouette for the straddle ramp to legitimately darken it.</para>
-        ///
-        /// <para><b>The 60° corner is NECESSARY, not an arbitrary/incidental choice — do not move this
-        /// fixture to 90°.</b> This bites harder after the join-side-correction stage: the chamfer/arc now
-        /// really do sit on the convex side (the actual silhouette), so their standoff from the corner is
-        /// exactly the margin this test depends on. At a 90° corner the corrected chamfer chord would sit
-        /// at <c>0.7071·halfWidthPx = 8.49 px</c> against an annulus reaching <c>(2/3)·halfWidthPx = 8 px</c>
-        /// — a margin of only ~0.5 px, not a safe one to probe blind.</para>
+        /// <para>It gates that the ramp keys on the C0-continuous <c>|side|</c> varying, so interior edges are
+        /// invisible; a <c>|side|</c> dip along an interior edge fails it. Non-obvious why: the corner is 60°
+        /// because the annulus spans ⅓ to ⅔ of the half-width, where only the fan draws, and a bevel chord stands
+        /// off at half-width·cos(θ/2). At 90° that is 0.71 (8.49 px against the annulus's 8 px); at 60° it is
+        /// 0.87, outside the annulus for all three joins. Do not move this fixture to 90°. Limitation: it does not
+        /// gate coverage from per-triangle edge distance, which needs <c>SV_Barycentrics</c> and is unreachable
+        /// at <c>#pragma target 2.0</c>.</para>
         /// </summary>
         [TestCase(JoinType.Miter)]
         [TestCase(JoinType.Bevel)]
@@ -667,23 +608,13 @@ namespace MapRenderer.Tests.Visual
 
         // ─── Joins: the three types must be DISTINGUISHABLE on screen ───────────────────────────
         //
-        // Until the join-side correction, `line-join: bevel` rendered as a miter and `line-join: round`
-        // never rendered round — the chamfer/arc were emitted on the CONCAVE side, buried inside the
-        // overlap of the two half-width bands. It survived because no rendered-output tooth could tell the
-        // three joins apart: Join_NoInteriorSeam probes the corner's INTERIOR (it stays green if the
-        // convex silhouette vanishes entirely) and LineSnapshotTests' round-join scene only asserts the PNG
-        // is non-trivial. Exactly the shape of the normalize(0) NaN that made line-cap: round render as
-        // butt — always ask what the tooth would read if the mechanism were absent.
-        //
-        // The discriminator is the reach of the join silhouette along the OUTWARD bisector. At a 90° corner
-        // the three are analytically separated and cannot be confused within AA tolerance:
+        // Non-obvious why: a chamfer or arc emitted on the CONCAVE side is buried in the band overlap, and
+        // no interior probe sees it. The discriminator is the join's reach along the OUTWARD bisector, which
+        // at a 90° corner separates the three well beyond AA tolerance:
         //     miter → halfWidth / cos45° = 1.41421·h     (the miter tip)
         //     round → halfWidth          = 1.00000·h     (the arc radius)
         //     bevel → halfWidth · cos45° = 0.70711·h     (the chamfer chord's standoff)
-        //
-        // Fixture: a V with its apex at the world origin opening toward −X, so the outward bisector points
-        // along +X — screen-RIGHT under this ortho camera regardless of the raw buffer's row order, which
-        // no other tooth in this file has had to pin down.
+        // The V opens toward −X, so the bisector is screen-RIGHT whatever the buffer's row order.
 
         private const float JoinReachWidthM     = 24f;                        // world metres, so h = 12 m
         private const float JoinReachHalfWidthM = JoinReachWidthM * 0.5f;
@@ -751,10 +682,8 @@ namespace MapRenderer.Tests.Visual
                         Frame pixels     = snap.Pixels;
                         float3 background = BackgroundLinear(pixels);
 
-                        // Plateau: the most saturated sample on a column that crosses BOTH arms, scanned
-                        // over the full height. Not a fixed (col,row) — the centre row left of the apex is
-                        // the empty wedge BETWEEN the arms, and a fixed row would also have to assume the
-                        // raw buffer's row order, which this fixture is built specifically not to depend on.
+                        // Plateau: the most saturated sample on a column crossing BOTH arms. A fixed row could land
+                        // in the empty wedge and would assume the buffer's row order.
                         float3 plateau = PlateauOnColumn(pixels, SnapW / 2 - 73, 0, SnapH - 1, background);
                         Assert.Greater(math.length(plateau - background), 0.05f,
                             $"{join}: no covered pixel found on the arm-crossing column — the fixture did " +
@@ -797,8 +726,7 @@ namespace MapRenderer.Tests.Visual
         /// 156 and 356 (plus <paramref name="columnOffsetM"/>), on the centreline row <see cref="SnapH"/>/2.
         /// </summary>
         /// <param name="columnOffsetM">World-X shift of the whole line. <see cref="QuarterPixelOffsetM"/>
-        /// takes the arc's 0° chord — the one facing −X, the only axis-aligned chord on the cap — off the
-        /// pixel boundary it otherwise lands on.</param>
+        /// takes the cap's axis-aligned 0° chord off a pixel boundary.</param>
         private static (GameObject go, Material mat) BuildRoundCappedLine(float columnOffsetM = 0f)
         {
             var pts = new List<double2>
@@ -829,18 +757,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// A round cap must reach the screen at all, and its silhouette must be an ARC.
-        ///
-        /// <para>The cap fan is built around a pivot vertex carrying <c>extrudeN == 0</c> (it has to stay on
-        /// the centreline). The extrusion helper guarded the divide by that length but then fed the zero
-        /// vector to <c>normalize()</c>, which is NaN — and a NaN position discards every triangle referencing
-        /// the vertex, which is all of them. The whole cap vanished and <c>line-cap: round</c> rendered
-        /// pixel-identical to <c>butt</c>, silently, for as long as the helper has existed.</para>
-        ///
-        /// <para>Extent alone is not enough — a SQUARE cap also reaches past the endpoint, by a constant
-        /// half-width at every offset. What distinguishes an arc is that the extent SHRINKS as the sample row
-        /// moves off the centreline, so this asserts both the on-axis extent (≈ the half-width) and a strict
-        /// decrease across four offsets. A flat cap edge fails the second.</para>
+        /// A round cap must reach the screen at all, and its silhouette must be an ARC. Non-obvious why: the
+        /// fan's pivot vertex has <c>extrudeN == 0</c>, and a <c>normalize()</c> of it would be NaN, discarding
+        /// the whole cap so it renders as <c>butt</c>. A SQUARE cap also reaches past the endpoint, so the
+        /// extent must also SHRINK as the row moves off the centreline.
         /// </summary>
         [Test]
         public void RoundCap_ExtendsPastEndpoint_AsAnArc()
@@ -864,15 +784,8 @@ namespace MapRenderer.Tests.Visual
                 const float capHalfPx = CapWidthPx * 0.5f;   // 20 px — the cap's radius
                 const float centreRow = SnapH / 2f;          // the centreline sits on the row boundary
 
-                // Rows at increasing offset from the centreline. A circle's forward reach is
-                // sqrt(r² − dy²) — 19.99, 17.02, 12.64 px here; a square cap's is r at every one of them.
-                //
-                // The three offsets are chosen, not arbitrary. Near the APEX the arc is almost flat (dy 0.5
-                // and 6.5 differ by 1.08 px, which whole-pixel coverage of a hard edge cannot resolve), and
-                // near the RIM the chorded silhouette departs from the true circle by more than any sane
-                // tolerance — the final chord runs straight from the 36° vertex (reach 11.76 px) to the butt
-                // (reach 0), so at dy 18.5 the real geometry reaches 4.6 px where the circle says 7.6. These
-                // three sit in the band where a circle is a good model of the chorded cap.
+                // A circle reaches sqrt(r² − dy²) (19.99, 17.02, 12.64 px); a square cap reaches r. Rows avoid
+                // the too-flat apex and the rim, where the chorded cap leaves the circle.
                 int[] rows = { SnapH / 2, SnapH / 2 + 10, SnapH / 2 + 15 };
 
                 foreach (int outward in new[] { -1, 1 })
@@ -900,11 +813,8 @@ namespace MapRenderer.Tests.Visual
                         $"round cap of half-width {capHalfPx:F0} px must reach ≈ {capHalfPx:F0} px. " +
                         $"0 means the cap is not rendering at all. Extents: {report}");
 
-                    // (b) It is an ARC, not a flat edge. Two ways, both of which a square cap fails: the
-                    //     reach tracks sqrt(r² − dy²) at every offset, and it shrinks monotonically.
-                    //     Tolerance absorbs the chorded silhouette (roundSegments=4 ⇒ the apex chord sits at
-                    //     r·cos18° = 19.02 px, ~1 px inside the true circle) plus whole-pixel quantisation of
-                    //     a hard edge.
+                    // (b) An ARC: the reach tracks sqrt(r² − dy²) and shrinks monotonically. The tolerance absorbs
+                    //     the chorded apex (r·cos18° = 19.02 px) and whole-pixel quantisation.
                     for (int i = 0; i < extents.Length; i++)
                         Assert.That(extents[i], Is.EqualTo(ideals[i]).Within(2.5f),
                             $"{which} cap reach at sample {i} is {extents[i]:F2} px but a circular cap of " +
@@ -926,17 +836,10 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T3c, pre-AA form.</b> With <c>line-blur</c> on, a round cap's soft edge must be present at
-        /// EVERY angular position around the cap's silhouette arc.
-        ///
-        /// <para>This probes the round-cap <c>side</c> tagging directly, through the one <c>|side|</c>-keyed
-        /// mechanism that exists before the AA ramp does. A cap fan seeded from the ribbon's
-        /// <c>rightButt</c>/<c>rightPrev</c> vertex, which the adjoining quad needs tagged −1, makes the seam
-        /// triangle's outer edge — a true silhouette — interpolate <c>side</c> +1 → −1 through 0 at its
-        /// midpoint. <c>smoothstep(0, feather·_Blur, 1 − |side|)</c> then reads that whole arc segment as deep
-        /// interior and applies NO feather: one hard-edged wedge per capped end, roughly
-        /// 180°/(roundSegments+1) wide, with the rest of the cap blurred.</para>
-        ///
-        /// <para>It stays in the suite after the AA ramp lands, as the guard on the pre-AA mechanism.</para>
+        /// EVERY angular position around the cap's silhouette arc. Non-obvious why: it probes the cap's
+        /// <c>side</c> tagging through the blur feather. A fan seeded from a vertex tagged −1 would make a
+        /// silhouette edge interpolate <c>side</c> +1 → −1 through 0, and that wedge (about
+        /// 180°/(roundSegments+1)) would get no feather.
         /// </summary>
         [Test]
         public void RoundCap_BlurFadesAllTheWayAround()
@@ -1014,30 +917,18 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T3c, AA-ON form.</b> The straddle's fade must be present at EVERY angular position around a
-        /// round cap's silhouette — at the shipped default material state, with no <c>line-blur</c>.
-        ///
-        /// <para>Not a duplicate of <see cref="RoundCap_BlurFadesAllTheWayAround"/>. That one only exercises
-        /// a configuration production never uses: <c>line-blur</c> is opt-in and <c>liberty.json</c> sets it
-        /// on zero layers, so with <c>_Blur = 0</c> its whole mechanism is a no-op branch. This one measures
-        /// the DEFAULT state, and against a much tighter expression — a one-pixel ramp rather than
-        /// <c>smoothstep</c> over three.</para>
-        ///
-        /// <para>What it pins that nothing else does: <c>aaPadWorld</c> is measured PER VERTEX, along that
-        /// vertex's own <c>unitDir_WS</c>. Around a cap arc every vertex has a different across-direction, so
-        /// a uniform fade all the way round is a real claim about the pad on curved geometry, not a
-        /// restatement of the straight-edge teeth.</para>
+        /// round cap's silhouette — at the shipped default material state, with no <c>line-blur</c>, which
+        /// <see cref="RoundCap_BlurFadesAllTheWayAround"/> needs and <c>liberty.json</c> never sets. Non-obvious
+        /// why: <c>aaPadWorld</c> is measured PER VERTEX along its own <c>unitDir_WS</c>, and every cap vertex
+        /// has a different direction, so this pins the pad on curved geometry.
         /// </summary>
         [Test]
         public void RoundCap_Silhouette_FadesAtEveryAngle()
         {
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
-            // Quarter-pixel shift, for the same reason the horizontal fixtures carry one. Without it the
-            // arc's 0° chord (facing −X, the cap's only AXIS-ALIGNED chord) sits at 156 − r·cos18° = 136.98,
-            // i.e. on a pixel boundary — and a one-pixel straddle centred on a pixel boundary puts BOTH
-            // straddling pixel centres ~0.5 px out, so they read 1.00 and 0.02 and there is no partially
-            // covered pixel to find. That is correct AA, not a missing fade; T1 avoids the same degeneracy
-            // by using a diagonal. Shifted, that chord lands at 137.23 and reads 0.77.
+            // Non-obvious why: unshifted, the 0° chord sits on a pixel boundary (136.98), where a correct straddle
+            // reads 1.00 and 0.02 with no partial pixel. The quarter-pixel shift puts it at 137.23, reading 0.77.
             var (lineGo, mat)      = BuildRoundCappedLine(QuarterPixelOffsetM);   // _Blur at its 0 default
             AssertAaKeywordClear(mat);
 
@@ -1081,14 +972,8 @@ namespace MapRenderer.Tests.Visual
                             profile.Append($"{radius:F2}:{c:F2} ");
                         }
 
-                        // The fade itself is looked for in the NEIGHBOURHOOD of the rim, not along the ray.
-                        // A ray sampled at discrete pixels can straddle a ONE-pixel ramp without landing
-                        // inside it — where it crosses the rim between pixel centres it reads 1.00 then 0.04
-                        // and the ramp is missed, which is sub-pixel ray placement, not a missing fade. (The
-                        // blur probe does not hit this: a 3 px feather always covers several pixels.) A 5×5
-                        // box around the rim always contains the ramp band if it exists anywhere nearby, and
-                        // still finds nothing inside a dead arc segment — that defect is ~12.6 px of arc,
-                        // far wider than the box.
+                        // Search a 5×5 box at the rim, not the ray: a ray can step over a one-pixel ramp. The box
+                        // still finds nothing in a dead arc segment, which spans ~12.6 px.
                         bool fadeFound = false;
                         int  rimColumn = (int)math.round(capColumn + (capHalfPx - 0.5f) * dirX);
                         int  rimRow    = (int)math.round(capRow    + (capHalfPx - 0.5f) * dirY);
@@ -1123,17 +1008,10 @@ namespace MapRenderer.Tests.Visual
         // ─── T4: the toggle actually turns the whole mechanism off ──────────────────────────────
 
         /// <summary>
-        /// <b>T4.</b> With <c>_EDGE_ANTIALIASING_OFF</c> set, the line reproduces the pre-AA build exactly:
-        /// a BINARY coverage profile, and the same apparent width.
-        ///
-        /// <para>Both clauses are load-bearing, because the toggle has two halves and gating only one of
-        /// them still looks half-right. Gate just the ramp and the geometry keeps its half-pixel pad: the
-        /// edge is hard but the line is a pixel fatter than styled — the outset artefact, which clause
-        /// (ii) catches and clause (i) does not. Gate just the pad and the ramp has nowhere to land — the
-        /// failed inset fade, which clause (i) catches.</para>
-        ///
-        /// <para>The only test in this fixture that sets the keyword. Everything else asserts the shipped
-        /// AA-on state and calls <see cref="AssertAaKeywordClear"/> first.</para>
+        /// <b>T4.</b> With <c>_EDGE_ANTIALIASING_OFF</c> set, the line has a BINARY coverage profile and the
+        /// styled apparent width. Both clauses matter: gating only the ramp leaves a pixel-fat line (clause
+        /// ii), and gating only the pad leaves an inset fade (clause i). It is the one test here that sets the
+        /// keyword; the rest call <see cref="AssertAaKeywordClear"/>.
         /// </summary>
         [TestCase(true,  TestName = "AaOff_ReproducesHardEdge_PixelWidth")]
         [TestCase(false, TestName = "AaOff_ReproducesHardEdge_WorldWidth")]
@@ -1214,17 +1092,10 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T3b.</b> Two features of the SAME layer meeting at an angle, measured at their crotch — the
         /// wedge where the two silhouettes converge over background. Where both ribbons sit at their styled
-        /// edge each contributes ~0.5 alpha and <c>1 − (1−0.5)(1−0.5) = 0.75</c> rather than 1. That is
-        /// inherent to alpha-blended same-layer overlap and is an ACCEPTED limit; the only real
-        /// fix is a whole-layer offscreen composite, a separate epic.
-        ///
-        /// <para><b>Recorded, not gated.</b> The number goes to the test log so a future regression shows up
-        /// as a changed measurement; the assertion is loose enough never to flake. Do not tighten it into a
-        /// threshold without deciding to fix the limit.</para>
-        ///
-        /// <para>Only pixels DEEP inside the union of the two styled bands are measured — a pixel on the
-        /// union's own outer silhouette legitimately reads a partial value, and counting those would report
-        /// working antialiasing as under-coverage.</para>
+        /// edge each contributes ~0.5 alpha, so it reads <c>1 − (1−0.5)(1−0.5) = 0.75</c>, not 1. Limitation:
+        /// that is inherent to alpha-blended same-layer overlap; only a whole-layer offscreen composite fixes
+        /// it. The number is recorded, not gated. Only pixels DEEP inside the union are measured, because
+        /// the union's own silhouette legitimately reads partial.
         /// </summary>
         [Test]
         public void Junction_UnderCoverage_Recorded()
@@ -1232,9 +1103,8 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
 
-            // A shallow V: two features sharing a vertex at the world origin, each 20° off +x, so their
-            // inner silhouettes converge gradually over background — the junction-crotch case. A right
-            // angle does not produce it: the two bands simply abut.
+            // A shallow V (each arm 20° off +x) so the inner silhouettes converge over background; at a right
+            // angle the two bands simply abut.
             const double armLengthM = 30.0;
             double2 armEndA = new double2(armLengthM * math.cos(math.radians(20.0)),
                                           armLengthM * math.sin(math.radians(20.0)));
@@ -1355,23 +1225,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Apparent width must not depend on which way the line runs on screen.
-        ///
-        /// <para>The ramp divides by a screen-space gradient of <c>side</c>. <c>fwidth</c> is
-        /// <c>|ddx| + |ddy|</c> — the L1/Manhattan length — which over-reads the true (L2) length by
-        /// <c>|cos θ| + |sin θ| ∈ [1, √2]</c>. Dividing by that stretches the ramp to 1.41 px on a 45°
-        /// diagonal while an axis-aligned line keeps 1.00 px, so the diagonal renders both softer and
-        /// THINNER: the perpendicular integral is <c>W + 1 − c</c>, losing 0.41 px of ink at 45°.</para>
-        ///
-        /// <para>Both lines are rendered in ONE frame with identical material state, so the comparison
-        /// cannot drift on exposure or reference. The horizontal arm doubles as the control: <c>fwidth</c>
-        /// is exact when the gradient is axis-aligned, so it must read the styled width both before and
-        /// after the fix — if it moves, the change did more than intended.</para>
-        ///
-        /// <para>A vertical cut through a 45° band spans <c>√2</c> × the perpendicular width, hence the
-        /// <c>√2</c> divisor. Measured in LINEAR space via <see cref="CoverageAt"/>: an sRGB-luminance read
-        /// over-reads partial-coverage pixels by several percent, which is the same order as the 3.4 %
-        /// effect being measured and cannot separate the two hypotheses.</para>
+        /// Apparent width must not depend on which way the line runs on screen. Non-obvious why:
+        /// <c>fwidth</c> is the L1 length <c>|ddx| + |ddy|</c>, which over-reads by <c>|cos θ| + |sin θ|</c>, so
+        /// a ramp divided by it spans 1.41 px at 45° and the diagonal loses 0.41 px of ink. Both lines render
+        /// in ONE frame; the horizontal arm is the control. A vertical cut through a 45° band spans √2 × its
+        /// width, and the read is LINEAR, because sRGB luminance errs by as much as the 3.4 % effect.
         /// </summary>
         [Test]
         public void ApparentWidth_IsDirectionIndependent()
@@ -1422,9 +1280,8 @@ namespace MapRenderer.Tests.Visual
                 }
                 float diagonal = diagonalSum / columns;
 
-                // Padded half-width is styled/2 + 0.5, and the perpendicular integral of the trapezoid is
-                // 2H − c, so the ramp width falls straight out. This is the same measurement re-expressed
-                // in the units the defect is stated in, not independent corroboration of it.
+                // The trapezoid integrates to 2H − c with H = styled/2 + 0.5, which gives the ramp width: the same
+                // measurement in the defect's units, not independent corroboration.
                 const float paddedHalfPx = DirectionWidthPx * 0.5f + 0.5f;
                 float rampPx = 2f * paddedHalfPx - diagonal;
 
@@ -1655,9 +1512,8 @@ namespace MapRenderer.Tests.Visual
             ringMat.SetFloat("_GapWidth", 20f);
             AssertAaKeywordClear(referenceMat);
             AssertAaKeywordClear(ringMat);
-            // The reference strip stays on the DEFAULT strategy — see BuildHairlineSweep. A 12 px line is
-            // identical under all three, and leaving the keyword off keeps the unit reference immune to the
-            // very bugs this tooth hunts.
+            // The reference strip stays on the DEFAULT strategy (see BuildHairlineSweep), immune to the bugs
+            // this tooth hunts.
             ringMat.EnableKeyword(HairlineHardKeyword);
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
@@ -1678,10 +1534,8 @@ namespace MapRenderer.Tests.Visual
                 string dump = FormatProfile(profile, centreRow - 16);
                 TestContext.WriteLine($"A6a thin ring (gap 20 px, width 1 px): {dump}");
 
-                // Binary FIRST, so a half-hardened ring reports the asymmetry it actually has rather than
-                // tripping the non-vacuity guard below (an un-hardened inner edge drags the ring's lit
-                // pixels under 0.95, so both would fire — but only this one names the cause). A blank render
-                // is trivially binary, which is what the guard after it is for.
+                // Binary FIRST, so a half-hardened ring names its cause here; a blank render is trivially binary,
+                // which the guard after it catches.
                 for (int i = 0; i < profile.Length; i++)
                     Assert.That(profile[i] < 0.05f || profile[i] > 0.95f, Is.True,
                         $"Row {centreRow - 16 + i}: coverage {profile[i]:F3} is neither on nor off. A 1 px " +
@@ -1702,15 +1556,9 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>Recorded, not gated.</b> Peak brightness and ink across the width threshold, so a POP —
-        /// a line visibly jumping as it crosses the hard/ramped boundary under zoom — would show up as a
-        /// step in these numbers rather than only in the maintainer's eye.
-        ///
-        /// <para>Continuity is expected by construction: writing the profile in device pixels as
-        /// <c>c(d) = saturate((halfStyled − d)/rampPx + 0.5)</c>, its integral over d is <c>2·halfStyled</c>
-        /// for ANY rampPx, so narrowing the ramp moves no ink; and rampPx itself is a <c>smoothstep</c>,
-        /// which is C1 at both ends, so there is no kink where the transition band opens or closes. This
-        /// records the measurement anyway — a derivation is not an observation.</para>
+        /// <b>Recorded, not gated.</b> Peak brightness and ink across the width threshold, so a POP under zoom
+        /// shows as a step in these numbers. Continuity is expected: <c>c(d) = saturate((halfStyled − d)/rampPx
+        /// + 0.5)</c> integrates to <c>2·halfStyled</c> for ANY rampPx, and rampPx is a C1 <c>smoothstep</c>.
         /// </summary>
         [TestCase("_HAIRLINE_HARD",       TestName = "Hairline_Hard_ThresholdTransition_Recorded")]
         [TestCase("_HAIRLINE_SOLID_CORE", TestName = "Hairline_SolidCore_ThresholdTransition_Recorded")]
@@ -1773,12 +1621,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// The phase sweep plus an <c>a == 1</c> reference strip, in one frame, under a strategy keyword.
-        ///
-        /// <para>The reference strip is not decoration. <see cref="PlateauOnColumn"/> normalises against the
-        /// brightest sample on its own cut, which would make any hairline peak measurement a tautology — a
-        /// dim hairline would normalise to 1.0 and every peak assertion would pass. A 12 px line is untouched
-        /// by every strategy (its band is far above the threshold and above the clamp), so its interior is a
-        /// valid unit reference under all three variants.</para>
+        /// Non-obvious why: <see cref="PlateauOnColumn"/> normalises to its own cut's brightest sample, so without
+        /// the strip a dim hairline would read 1.0. A 12 px line is untouched by every strategy.
         /// </summary>
         private static List<(GameObject go, Material mat)> BuildHairlineSweep(string keyword, float widthPx)
         {
@@ -1791,10 +1635,8 @@ namespace MapRenderer.Tests.Visual
             for (int i = 0; i < HairlinePhases.Length; i++)
                 built.Add(BuildHorizontalLineAtZ(ZForPhase(HairlineRows[i], HairlinePhases[i]), widthPx,
                                                  widthIsPixels: true, color: color));
-            // The reference strip stays on the DEFAULT strategy. A 12 px line renders identically under all
-            // three (its band is above every threshold and the clamp is inactive), but leaving the keyword
-            // off makes the reference immune to the strategy bugs these teeth hunt: a defect that scales
-            // coverage at EVERY width would otherwise scale the reference too, and the ratio would hide it.
+            // The reference stays on the DEFAULT strategy, or a defect that scales coverage at EVERY width would
+            // scale the reference too and the ratio would hide it.
             foreach (var (_, mat) in built) AssertAaKeywordClear(mat);
             for (int i = 1; i < built.Count; i++) built[i].Item2.EnableKeyword(keyword);
             Assert.IsTrue(built[1].Item2.IsKeywordEnabled(keyword),
@@ -1955,14 +1797,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>A7.1 — the whole keyword matrix.</b> 3 strategies × AA on/off = 6 variants; the gate otherwise
-        /// only exercises whichever combinations the fixtures happen to set, so a variant that failed to
-        /// compile or read a symbol not in scope on its path would ship green. Each case names its own
-        /// combination, so a failure localises to one cell rather than "the strategies are broken".
-        ///
-        /// <para>The three AA-OFF rows are the load-bearing ones: both strategy blocks are guarded on
-        /// <c>!defined(_EDGE_ANTIALIASING_OFF)</c>, so with AA off all three must be INERT and identical —
-        /// a hard edge at the styled width.</para>
+        /// <b>The whole keyword matrix.</b> 3 strategies × AA on/off = 6 named variants, so a variant that
+        /// fails to compile on its path cannot ship green. The AA-OFF rows matter most: both strategy blocks
+        /// are guarded on <c>!defined(_EDGE_ANTIALIASING_OFF)</c>, so with AA off all three must render the
+        /// same hard edge at the styled width.
         /// </summary>
         [TestCase(true,  null,                        1.0f, true,  TestName = "Matrix_AaOff_Default")]
         [TestCase(true,  "_HAIRLINE_HARD",            1.0f, true,  TestName = "Matrix_AaOff_Hard")]
@@ -2038,9 +1876,8 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
             var color = new Color(0.95f, 0.60f, 0.15f, 1f);
-            // A 1.5 px line has no a == 1 plateau of its own, so it needs a wide reference in-frame:
-            // normalising against the thin line's own samples inflates every reading, and inflates each
-            // strategy differently because their peaks differ.
+            // A 1.5 px line has no a == 1 plateau, so a wide in-frame reference normalises it; its own samples
+            // would inflate each strategy differently.
             var (refGo, refMat) = BuildHorizontalLineAtZ(ZForPhase(ReferenceRow, 0.0), ReferenceWidthPx,
                                                           widthIsPixels: true, color: color);
             var (hGo, hMat) = BuildLine(
@@ -2219,27 +2056,13 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T7.</b> With <c>_MapFrameMetersPerDevicePixel</c> UNSET (0), a pixel-width band must still
-        /// render, with a plateau clearly distinct from the background.
+        /// render, with a plateau clearly distinct from the background, at its styled width.
         ///
-        /// <para><b>Why the guard exists, and what it is not.</b> A shader global is PROCESS state; there is
-        /// no "unset" for one, so a render path that forgets the push reads 0. Multiplying the styled width by
-        /// 0 gives zero world width, and — MEASURED by removing the guard, not assumed — every road of every
-        /// styled width then collapses to the same <b>1 device-px hairline</b>: the AA pad is still extruded,
-        /// so the frame is not empty, it is plausible and wrong — the worst kind of diagnostic, and the kind
-        /// that sends an investigation into the projection subsystem. The dash divisor's separate fail-safe
-        /// (0 ⇒ <c>dashU = 0</c> ⇒ a uniform half-coverage line) stays as it is: visible, never
-        /// corrupt.</para>
-        ///
-        /// <para>The fallback is <c>MapPixelsToWorld</c> at the vertex — chosen ONLY because it renders a
-        /// plausibly-sized line, not because it is the width model. It is unreachable in production and in
-        /// any fixture that builds a <c>MapCamera</c>. Under THIS
-        /// camera it happens to be exact (an orthographic projection has no depth term, so the per-vertex
-        /// probe returns <see cref="MetresPerPx"/> at every vertex), which is why the width clause below can
-        /// be tight — that is a property of the fixture, not an endorsement.</para>
-        ///
-        /// <para>RED-verified by removing the guard: the band renders <b>1.000 px</b> against 16, so the WIDTH
-        /// clause is the one that fires and the plateau clause still passes. Both clauses are load-bearing —
-        /// do not drop the width one as belt-and-braces.</para>
+        /// <para>Non-obvious why: an unpushed shader global reads 0, and a zero width collapses every road to
+        /// a plausible 1 device-px hairline (the AA pad still extrudes). The fallback, <c>MapPixelsToWorld</c>
+        /// at the vertex, only keeps the size plausible; production and <c>MapCamera</c> fixtures never reach
+        /// it. Under this ortho camera it returns <see cref="MetresPerPx"/> exactly, so the width clause can be
+        /// tight, and that clause is the one a missing guard fails (1.000 px against 16).</para>
         /// </summary>
         [Test]
         public void PixelWidthBand_StillRenders_WhenTheFrameConstantIsUnset()
@@ -2315,12 +2138,9 @@ namespace MapRenderer.Tests.Visual
             camera.backgroundColor    = BgColor;
             camera.enabled            = false;
 
-            // This camera's OWN frame constant, and not BuildCamera's: the global is PROCESS state, so
-            // without this push a tilted perspective render runs against whatever the last orthographic
-            // fixture left behind (0.2734375 m/px, ~1.55x wrong here). Derived from the camera exactly as
-            // MapCamera.MetresPerDevicePixel is — 2·d·tan(fov/2)/H at the look-at, where the look-at is where
-            // the view axis meets the ground plane. Never a hand-written literal: a literal would stop
-            // tracking the pose above the moment anyone nudges it.
+            // Non-local invariant: the global is PROCESS state, so this camera pushes its OWN constant,
+            // 2·d·tan(fov/2)/H at the look-at, derived like MapCamera.MetresPerDevicePixel and never a literal.
+            // Otherwise it would render against the last ortho fixture's 0.2734375 m/px (~1.55× wrong).
             float distanceToLookAt = -camera.transform.position.y / camera.transform.forward.y;
             Shader.SetGlobalFloat(
                 ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
@@ -2329,31 +2149,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <c>hairlineScale</c> is a per-vertex scalar carried on a varying, so what perspective-correct
-        /// interpolation does to it mid-segment is a live question.
-        ///
-        /// <para><b>The scalar is NOT constant along a pixel-width line.</b> It would be under
-        /// <c>aaPadWorld = 0.5·pxToWorld</c> ⇒ <c>minWidthWorld = 2·pxToWorld</c> and
-        /// <c>widthWorld = W·ws·pxToWorld</c>, where <c>pxToWorld</c> cancels out of
-        /// <c>saturate(widthWorld / max(widthWorld, minWidthWorld))</c>. Under the world-width model those are
-        /// not the same quantity: <c>widthWorld</c> takes the frame constant while the pad — a genuine
-        /// screen quantity — keeps its per-vertex measurement. Nothing cancels, and nothing should: a
-        /// pixel-width hairline holds a fixed WORLD width, so it shrinks below the 2 device-px floor as it
-        /// recedes, the clamp engages progressively, and the compensation dims it to keep the coverage
-        /// integral honest. The old paragraph's "world-unit widths are the case that DOES vary" now describes
-        /// PIXEL widths.</para>
-        ///
-        /// <para><b>What is asserted instead</b> — the interpolation question, which is what the arm was
-        /// really for. Over a 1 px <c>_HAIRLINE_SOLID_CORE</c> line receding from a tilted perspective camera,
-        /// against a 4 px <c>a == 1</c> companion at the same depths (which cancels the lit shading exactly):
-        /// (a) it never VANISHES at any measured depth; (b) its ratio to the companion is monotonically
-        /// NON-INCREASING with depth — degradation, not drift or oscillation; (c) no row-to-row STEP exceeds a
-        /// bound, which is what "is interpolating a varying sound?" actually asks — a varying interpolated
-        /// wrongly, or a clamp engaging discontinuously, shows up as a jump; and (d) the compensation is
-        /// applied at all — a ratio near 1.0 means it is not.</para>
-        ///
-        /// <para>Measured after the fix: 0.851 / 0.724 / 0.571 / 0.434 / 0.284 over rows 180…300, steps of
-        /// 0.127…0.153.</para>
+        /// <c>hairlineScale</c> is a per-vertex scalar on a varying, and it is NOT constant along a pixel-width
+        /// line: <c>widthWorld</c> takes the frame constant while the AA pad stays per-vertex, so a receding
+        /// hairline falls below the 2 device-px floor and the compensation dims it. Over a 1 px
+        /// <c>_HAIRLINE_SOLID_CORE</c> line against a 4 px <c>a == 1</c> companion at the same depths, it must
+        /// (a) never vanish, (b) never rise with depth, (c) never jump between rows, and (d) stay under 1.0.
         /// </summary>
         [Test]
         public void HairlineScale_DegradesSmoothlyWithDepth_UnderTilt()
@@ -2361,21 +2161,14 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera) = BuildTiltedCamera();
             Track(cameraGo);
             var color = new Color(0.95f, 0.60f, 0.15f, 1f);
-            // Reference: a wide line close to the camera, giving an a == 1 plateau in the same frame.
-            // Placed inside the frustum: at y=18 tilted 12° with a 55° fov the ground is visible from about
-            // z = -33 outward, so anything nearer than that renders nothing at all.
+            // Reference: a wide near line, an a == 1 plateau in the same frame. The ground is visible only
+            // from z ≈ -33 outward at this pose, so it sits beyond that.
             var (refGo, refMat) = BuildLine(
                 new List<double2> { new double2(-30.0, -20.0), new double2(30.0, -20.0) },
                 12f, widthIsPixels: true, color: color);
-            // Two lines recede side by side. The 4 px companion carries no keyword and is a == 1, so its
-            // measured peak at each depth IS the local lit-shading level — this shader is real PBR with a
-            // live viewDirectionWS, so colour varies with depth, and that would otherwise be
-            // indistinguishable from the scalar drifting. Dividing by it cancels the shading exactly.
-            // SUBDIVIDED along z. `pxToWorld` is evaluated per VERTEX, so a pixel-width line only holds its
-            // styled device width exactly at its vertices; across one long segment spanning a huge depth
-            // range the extrusion interpolates linearly in world space while the required world offset grows
-            // with depth, and the rendered width drifts in between. That is a property of the extrusion
-            // model, not of any strategy — subdividing removes it and lets this tooth measure the scalar.
+            // Non-obvious why: the 4 px a == 1 companion's peak IS the local PBR shading level, so dividing by
+            // it cancels shading. The lines are SUBDIVIDED along z, because a long segment interpolates its
+            // extrusion linearly while the needed world offset grows with depth, which drifts the width.
             var farPts  = new List<double2>();
             var nearPts = new List<double2>();
             for (int i = 0; i <= 40; i++)
@@ -2396,9 +2189,8 @@ namespace MapRenderer.Tests.Visual
 
                 Frame pixels     = snap.Pixels;
                 float3 background = BackgroundLinear(pixels);
-                // Plateau from a NAMED interior box of the near reference bar, not a whole-column max: the
-                // max could land on any row, at any depth, and then everything is normalised against an
-                // arbitrary reference. Locate the bar in the lower frame, well below the measured rows.
+                // Plateau from the near reference bar, located in the lower frame, not a whole-column max,
+                // which could land at any depth.
                 int plateauRow = 0; float bestSoFar = -1f;
                 for (int row = 20; row < 170; row++)
                 {
@@ -2416,9 +2208,8 @@ namespace MapRenderer.Tests.Visual
                 var report = new System.Text.StringBuilder();
                 for (int row = 150; row <= 330; row += 30)
                 {
-                    // RAW, unsaturated: the ratio of two lit surfaces at the same depth cancels both the
-                    // shading level and the plateau's absolute calibration — but only while neither term
-                    // has clamped.
+                    // RAW, unsaturated: the same-depth ratio cancels shading and calibration only while
+                    // neither term has clamped.
                     float hair = 0f, wide = 0f;
                     for (int column = SnapW / 2; column < SnapW; column++)
                         hair = math.max(hair, RawProjection(pixels, column, row, background, plateau));
@@ -2445,15 +2236,9 @@ namespace MapRenderer.Tests.Visual
                     $"plateau from row {plateauRow}): {report}({rowsMeasured} depths; ratio {hi:F3} → " +
                     $"{lo:F3}; largest rise with depth {maxRise:F4}, largest step {maxStep:F4})");
 
-                // (a) IT MUST NOT VANISH — and every sampled depth must carry BOTH lines. The loop skips a
-                // row when either reads too faint, so this doubles as the vacuity guard: a hairline that
-                // stopped rendering at depth would silently shrink the sample rather than fail.
-                // KNIFE-EDGE, deliberately, and worth knowing before touching it: the sweep offers SEVEN
-                // candidate rows (150…330 step 30) and exactly FIVE survive the faint-row filter above —
-                // rows 150 and 330 are past the useful range at both ends, and row 300 already reads 0.739
-                // raw. So this bound has zero margin. Widening the sweep does not help (the filter, not the
-                // range, is what drops them); the honest reading of a drop to 4 is "a hairline stopped
-                // rendering at depth", which is a real regression and exactly what this clause is for.
+                // (a) IT MUST NOT VANISH: the loop skips faint rows, so the count is the vacuity guard.
+                // Limitation: five of the seven candidate rows survive, so the bound has zero margin; a drop to
+                // four means a hairline stopped rendering at depth.
                 Assert.That(rowsMeasured, Is.GreaterThanOrEqualTo(5),
                     $"Only {rowsMeasured} of the sampled depths carried both lines. Either the fixture no " +
                     "longer spans a useful depth range, or a hairline stopped rendering at depth — the " +
@@ -2463,25 +2248,22 @@ namespace MapRenderer.Tests.Visual
                     "vanishing. SolidCore exists so a receding hairline keeps a solid 2 device-px core and " +
                     $"pays for it in alpha; measured 0.284 at the deepest sampled row. {report}");
 
-                // (b) DEGRADATION, not drift. A fixed world width shrinks monotonically in device px with
-                // depth, so the clamp engages monotonically and the compensation follows it. A RISE would
-                // mean the scalar is tracking something other than the rendered width.
+                // (b) DEGRADATION, not drift: a fixed world width only narrows with depth, so a RISE means the
+                // scalar tracks something other than the rendered width.
                 Assert.That(maxRise, Is.LessThan(0.02f),
                     $"The hairline's coverage ratio RISES by {maxRise:F4} with depth. Under a constant world " +
                     "width the rendered band can only get narrower, so hairlineScale can only fall. A rise " +
                     $"means the scalar is not tracking the rendered width. {report}");
 
-                // (c) THE INTERPOLATION QUESTION. hairlineScale is a plain varying; if interpolating a ratio
-                // were unsound mid-segment, or the clamp engaged discontinuously, it would show as a JUMP
-                // between adjacent sampled depths rather than as a smooth ramp. Measured steps: 0.127…0.153.
+                // (c) THE INTERPOLATION QUESTION: an unsound varying or a discontinuous clamp shows as a JUMP
+                // between adjacent depths (measured steps: 0.127…0.153).
                 Assert.That(maxStep, Is.LessThan(0.30f),
                     $"hairlineScale steps by {maxStep:F4} between adjacent sampled depths, against a smooth " +
                     "0.127…0.153 measured. A jump is what an unsound interpolation of this varying, or a " +
                     $"discontinuous clamp, would look like. {report}");
 
-                // (d) THE COMPENSATION IS APPLIED AT ALL. Near 1.0 means the band is being clamped wider
-                // without paying for it in alpha — tooth T8's failure, a 1 px road rendered twice as
-                // prominent as the style asked for.
+                // (d) THE COMPENSATION IS APPLIED: near 1.0, the band is clamped wider without paying in alpha,
+                // so a 1 px road renders twice as prominent as styled.
                 Assert.That(hi, Is.LessThan(0.95f),
                     $"The clamped hairline reaches {hi:F3} of an a == 1 line at the same depth; near 1.0 " +
                     $"means the energy compensation is not being applied. {report}");
@@ -2495,13 +2277,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // T3 + T5 — the two pixel questions the tile-buffer clip stage exists to settle, measured on real pixels:
-    //   T3  does clipping remove the double-painted alpha BAND along a seam? (and does NOT-clipping still show it)
-    //   T5  does clipping at the tile boundary open a hairline CRACK in its place?
-    //
-    // Both render two adjacent tiles built through the REAL worker fan-out — TileLayerProcessorRunner.RunWorkerPass
-    // → TileMeshLayerProcessor → StyledFillTileBuilder — placed at their real TileRenderOrigin.Project origins, so
-    // the clip knob is exercised the whole way down the wiring, not injected at the builder.
+    // The tile-buffer clip on real pixels: T3, clipping removes the double-painted alpha BAND along a seam; T5,
+    // clipping opens no CRACK. Both build two adjacent tiles through the REAL worker fan-out, at real origins.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // TileSeamSnapshotTests — T3 + T5 — the two pixel questions the tile-buffer clip stage exists to settle
@@ -2515,9 +2292,8 @@ namespace MapRenderer.Tests.Visual
 
         private const double TileExtent = 4096.0;
 
-        // The two neighbours: z1/x0/y0 and z1/x1/y0 abut along Mercator x = 0. z1 is the WORST case for the
-        // RTC-baked float magnitudes T5 is about (a tile spans the half-world, ~2.0e7 m) — a crack that does
-        // not open here does not open at z14 either.
+        // z1/x0/y0 and z1/x1/y0 abut along Mercator x = 0. z1 is the WORST case for RTC float magnitudes
+        // (a tile spans ~2.0e7 m), so a crack absent here is absent at z14.
         private static readonly TileId WestTile = new TileId { Z = 1, X = 0, Y = 0 };
         private static readonly TileId EastTile = new TileId { Z = 1, X = 1, Y = 0 };
 
@@ -2526,18 +2302,15 @@ namespace MapRenderer.Tests.Visual
         private const float SeamWorldZ = 1.0e7f;
         private const float CamY       = 1.0e6f;
 
-        // The synthetic buffered feature: a closed ring (-64,-64) → (4160,-64) → (4160,4160) → (-64,4160) —
-        // the exact 64-unit-buffered rectangle every real fixture produces. MoveTo×1 + LineTo×3 + ClosePath,
-        // zigzag-encoded per the MVT spec, the same shape as BackgroundQuad's full-extent ring
-        // (whose 8192/8191 are zigzag(±4096); these are zigzag(-64)=127 and zigzag(±4224)=8448/8447).
+        // The 64-unit-buffered ring (-64,-64) → (4160,-64) → (4160,4160) → (-64,4160), zigzag-encoded per the
+        // MVT spec: zigzag(-64) = 127 and zigzag(±4224) = 8448/8447.
         private static readonly uint[] BufferedRingGeometry =
             { 9, 127, 127, 26, 8448, 0, 0, 8448, 8447, 0, 15 };
 
         // ── T3: the band ──────────────────────────────────────────────────────────────────────────
 
-        // The seam strip and two interior reference strips, in pixels, at the T3 framing below. The strip is
-        // narrower than the projected 128-px band so it never samples the band's edge; the references sit far
-        // outside it. Rows are a central slab — every row is interior to BOTH tiles.
+        // Seam and reference strips at the T3 framing: the seam strip sits inside the 128 px band, and the rows
+        // are interior to BOTH tiles.
         private const int BandStripX0 = 236, BandStripX1 = 276;
         private const int LeftRefX0   =  40, LeftRefX1   = 120;
         private const int RightRefX0  = 392, RightRefX1  = 472;
@@ -2576,18 +2349,16 @@ namespace MapRenderer.Tests.Visual
                     "in batch EditMode; re-run as PlayMode: ./Tools/run-tests.sh PlayMode");
             }
 
-            // Arm 1 — the RED arm, asserted in the SAME test so the tooth cannot go vacuous: unclipped, the
-            // two neighbours double-paint the buffer strip. In linear light the ratio is exactly 2 − α = 1.5:
-            // one paint gives α·C, two give α·C + (1−α)·α·C.
+            // Arm 1, the RED arm in the SAME test: unclipped neighbours double-paint the strip, so the linear
+            // ratio is 2 − α = 1.5.
             Assert.Greater(bufferedBand / bufferedInterior, 1.4,
                 $"unclipped (b=64) the seam strip must read ~1.5× the interior in linear light (double-painted " +
                 $"α=0.5 composites to 0.75, not 0.5). Measured seam={bufferedBand:F4}, " +
                 $"interior={bufferedInterior:F4}. If this is ~1.0 the band is not being reproduced and arm 2 " +
                 "proves nothing.");
 
-            // Arm 2 — clipped at the tile boundary, the two tiles no longer overlap and the strip matches the
-            // interior it sits between. Stated as a RATIO so it is scale-free: an absolute tolerance would
-            // silently loosen as the fill colour darkened.
+            // Arm 2: clipped, the tiles do not overlap and the strip matches the interior. A RATIO stays
+            // scale-free as the fill colour darkens.
             Assert.LessOrEqual(math.abs(clippedBand / clippedInterior - 1.0), 0.02,
                 $"clipped (b=0) the seam strip must read the same as the interior. Measured " +
                 $"seam={clippedBand:F4}, interior={clippedInterior:F4} " +
@@ -2600,23 +2371,11 @@ namespace MapRenderer.Tests.Visual
         // pixels a one-device-pixel band from each neighbour would reach into.
         private const int SeamRimX0 = 255, SeamRimX1 = 257;
 
-        // Clipped at the tile boundary, the two neighbours ABUT: one paints full coverage where the other
-        // stops. An outward band drawn along that cut is therefore ink over a fill that is already there —
-        // f(1-f) relative, worst on the translucent layers, which is why this measures at alpha 0.3 rather
-        // than at T3's 0.5.
-        //
-        // RED, measured against real production code rather than an injected defect: on the tree carrying
-        // the band but not clip-edge suppression, this fixture read rim=0.0892 interior=0.0662, ratio
-        // 1.3467 — with the per-column profile flat at 0.0662 everywhere except columns 255 and 256, which
-        // read 0.0896 and 0.0888. Two pixels, one from each neighbour's band, each about half covered:
-        // 0.5 x f(1-f) / f = 0.35 at f = 0.3, which is what those columns measure. That is 17x this
-        // assertion's tolerance, so the tooth discriminates by a wide margin rather than by calibration.
-        //
-        // WHAT THIS FIXTURE CANNOT ALSO WITNESS, stated so nobody reads it as the whole claim: both tiles are
-        // full-extent quads, so EVERY edge of both rings lies on a window line and the entire band is
-        // suppressed here. Deleting the band node outright would pass this test. That a real feature edge
-        // KEEPS its band is FillBandJobTests' job at the fix site, and
-        // FillBoundaryBandRenderTests.ASquareFillHasGradedBoundaryPixels_AndAnUngradedInterior's on a frame.
+        // Non-obvious why: clipped neighbours ABUT, so an outward band along the cut is ink over existing fill,
+        // f(1-f) relative and worst on translucent layers, hence alpha 0.3. An unsuppressed band reads two
+        // half-covered columns at ~1.35×, 17× the tolerance.
+        // Limitation: both tiles are full-extent, so the whole band is suppressed here and deleting the band
+        // node would pass. FillBandJobTests and FillBoundaryBandRenderTests pin that a real edge keeps its band.
         [Test]
         public void TwoNeighbours_TranslucentFill_ClippedAtTheTileBoundary_LeaveNoBandRimOnTheSeam()
         {
@@ -2878,12 +2637,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>Builds one tile's fill mesh through the production worker fan-out, so the clip travels the
-        /// real <see cref="TileLayerProcessContext"/> → <see cref="TileMeshLayerProcessor"/> →
-        /// <see cref="ITileMeshRenderLayer.BuildGraphRequest"/> path rather than being handed to the builder —
-        /// then, since the graph is the only mesher, this
-        /// harness drives it synchronously the way <c>TileManager.KickMeshBuild</c>'s pump does
-        /// (<c>ScheduleMeasureFromDecode</c> → <c>CompleteMeasureAndScheduleWrite</c> →
-        /// <c>CompleteWriteAndTakePayloads</c>), since there is no pump here to do it a tick later.</summary>
+        /// real <see cref="TileLayerProcessContext"/> → <see cref="ITileMeshRenderLayer.BuildGraphRequest"/>
+        /// path. With no pump here, it drives the graph synchronously as <c>TileManager.KickMeshBuild</c>'s pump
+        /// does (<c>ScheduleMeasureFromDecode</c> → <c>CompleteMeasureAndScheduleWrite</c> →
+        /// <c>CompleteWriteAndTakePayloads</c>).</summary>
         private static Mesh BuildTileMesh(TileId id, double3 origin, TileBufferClip clip, IProjection projection)
         {
             var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: BufferedRingGeometry);

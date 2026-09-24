@@ -1,14 +1,8 @@
 // Layer-occlusion and layer-compositing GPU/visual acceptance tests.
 //
-// Both members pin one layer occluding/being occluded by another in the composited draw
-// stack (background vs. surrounding layers; a symbol layer vs. a fill layer by draw index).
-// SymbolLayerOrderSnapshotTests lands here (render-layers), not in Text/Placement — all
-// four of its tests pin draw order / render-layer occlusion, not text placement geometry
-// (docs/commit-conventions.md: render-layers is IRenderLayer/draw-order/material indexing;
-// the Symbol/Text/Icon naming rule governs what a TYPE is named, not which topic a TEST is in).
-// Also split from RenderLayerTests.cs by the same CameraProperties collision as
-// BackendCameraTests.cs above: both members here use the bare Core.Geo.CameraProperties
-// constructor.
+// Non-obvious why: SymbolLayerOrderSnapshotTests is here, not in Text/Placement, because its tests pin draw
+// order and render-layer occlusion, the render-layers topic. Split from RenderLayerTests.cs by the CS0104
+// `CameraProperties` collision: both classes here use the bare Core.Geo constructor.
 //
 // Contents:
 //   BackgroundSnapshotTests        — a style's background layer renders at its declared draw slot (the style's colour, not the camera clear) and composites mid-stack (occludes a layer declared below it, is occluded by one declared above it).
@@ -45,17 +39,9 @@ namespace MapRenderer.Tests.Visual
     /// <summary>
     /// A style's <c>background</c> layer renders at its declared draw slot (the style's colour, not the
     /// camera clear) and composites mid-stack: it occludes a layer declared below it and is occluded by one
-    /// declared above it. Background's geometry is per-covered-tile meshes owned by the
-    /// backend (visible only through <see cref="MapRenderer.Unity.Rendering.Tile.TileManager"/>'s
-    /// cover→build→consume loop), not a self-owned world-cap
-    /// <see cref="MeshRenderer"/> — so this harness drives a real <see cref="MapView"/> over a small
-    /// deterministic cover (<see cref="MapRenderer.Tests.MapViewTestExtensions.LoadTestStyle"/>) and frames
-    /// the render camera on ONE specific loaded tile's own container position (read from the GameObject
-    /// backend's live Transform hierarchy — a frustum-selected cover is not guaranteed to be a solid square
-    /// block, so framing on the whole cover's bounding-box centre can land in an uncovered gap), instead of a bare
-    /// <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerSet"/> render. The assertions are relational
-    /// (green/red-dominant centre sample; mid-stack occlude-below / occluded-by-above), so they pin
-    /// "Mercator background visually preserved", never byte-identical pixels.
+    /// declared above it. Background geometry is per-tile meshes from the
+    /// <see cref="MapRenderer.Unity.Rendering.Tile.TileManager"/> loop, so the harness drives a real
+    /// <see cref="MapView"/> and frames ONE loaded tile. The assertions are relational, never byte-identical.
     /// </summary>
     [TestFixture]
     public class BackgroundSnapshotTests : VisualTestFixture
@@ -74,17 +60,13 @@ namespace MapRenderer.Tests.Visual
         // Central sample sub-rect (pixels), well inside the framed footprint, away from its edges.
         private const int SX0 = 216, SY0 = 216, SX1 = 296, SY1 = 296;
 
-        // The mid-stack tooth's small hand-built fill quad's footprint (a FRACTION of the framed footprint,
-        // see FillFraction below) and its centred/corner sample rects — the fill quad sits centred, so a
-        // corner sample lands outside it while staying inside the camera frustum (and inside the covered
-        // background's real per-tile extent — see FrameFraction/FillFraction below).
+        // Sample rects for the mid-stack tooth: the centre rect sits inside the centred fill quad, and the corner
+        // rect sits outside it but inside the frustum and the covered background tile.
         private const int FillCenterX0 = 236, FillCenterY0 = 236, FillCenterX1 = 276, FillCenterY1 = 276;
         private const int CornerX0 = 20, CornerY0 = 20, CornerX1 = 60, CornerY1 = 60;
 
-        // Deterministic single-source cover: an INTERIOR look-at (never a Mercator tile-grid corner — lon=0/
-        // lat=0 sits exactly on a 4-tile seam at every integer zoom ≥1, which would put the sample regions on
-        // a sub-pixel gap between adjacent per-tile background quads) at a fixed zoom, mirroring
-        // PreparedCacheTests' TrackedTile pattern.
+        // An INTERIOR look-at at a fixed zoom: lon=0/lat=0 sits on a 4-tile seam at every zoom ≥1, which would
+        // put the samples on a sub-pixel gap between per-tile background quads.
         private const int Zoom = 4;
         private static readonly CameraProperties LookAt =
             new CameraProperties(new GeoCoordinate3D { Longitude = 10, Latitude = 10, Altitude = 0 }, Zoom, 0, 0);
@@ -92,9 +74,8 @@ namespace MapRenderer.Tests.Visual
         // The camera frustum stays well inside the covered background's real per-tile footprint (never
         // samples past its true edge into the camera clear) — see the design note on RenderCameraOrthoSize.
         private const float FrameFraction = 0.2f;
-        // The hand-built fill quad's half-extent, as a fraction of the frustum half-size — small enough that
-        // the corner sample above sits clearly outside it, large enough that the centre sample sits
-        // clearly inside it.
+        // The fill quad's half-extent as a fraction of the frustum half-size: the corner sample sits clearly
+        // outside it, and the centre sample clearly inside.
         private const float FillFraction = 0.15f;
 
         private static (GameObject go, MapView view) NewView()
@@ -106,11 +87,8 @@ namespace MapRenderer.Tests.Visual
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
-            // GameObject backend: a frustum-selected cover is not guaranteed to be a solid square block (it
-            // can be sparse/diamond-shaped near the horizon), so framing on the WHOLE cover's bounding-box
-            // CENTER (the naive ComputeSceneBounds idiom) can land in an uncovered gap. Framing on ONE
-            // specific loaded tile's own container position (below) is robust regardless of cover shape —
-            // and requires reading the live Transform hierarchy (GameObjectTileRendererTests' pattern).
+            // GameObject backend, so the test can frame ONE tile's container from the live Transform hierarchy.
+            // A cover need not be a solid block, so its bounding-box centre can land in an uncovered gap.
             view.Config.Backend = RenderBackend.GameObject;
             return (go, view);
         }
@@ -162,9 +140,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.Greater(greenMean[1], greenMean[0], "A green background-color must sample green-dominant, not the slate clear.");
                 Assert.Greater(greenMean[1], greenMean[2], "A green background-color must sample green-dominant, not the slate clear.");
 
-                // Falsifier: a DIFFERENT style background must sample DIFFERENTLY. Under the camera-clear
-                // hack both renders would sample the same slate clear colour regardless of the style — this
-                // is guaranteed to fail against that implementation.
+                // Falsifier: a DIFFERENT style background must sample DIFFERENTLY. A camera-clear implementation
+                // would sample the same slate colour for every style.
                 double[] redMean = RenderBackgroundOnlyStyle(camera, "#ff0000", "red-background.png");
 
                 Debug.Log($"[BackgroundSnapshot] red style: meanRGB=({redMean[0]:F3},{redMean[1]:F3},{redMean[2]:F3})");
@@ -195,9 +172,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.Greater(aCenter[1], aCenter[0], "Background declared ABOVE the fill must occlude it at centre (green-dominant).");
                 Assert.Greater(aCenter[1], aCenter[2], "Background declared ABOVE the fill must occlude it at centre (green-dominant).");
 
-                // Style B: background declared BELOW fill (background first, drawIndex 0; fill second,
-                // drawIndex 1 — higher queue, drawn on top). The fill must win at centre; the background
-                // must still show at the corner, outside the fill quad's small footprint.
+                // Style B: background BELOW fill (drawIndex 0 vs 1). The fill must win at centre, and the
+                // background must still show at the corner.
                 const string styleB = @"{
     ""version"": 8,
     ""layers"": [
@@ -249,12 +225,10 @@ namespace MapRenderer.Tests.Visual
             finally { view.Teardown(); }
         }
 
-        /// <summary>Drives the given two-layer (fill + background) style through a real <see cref="MapView"/>
-        /// cover (background is per-tile, produced by the real pipeline; the fill layer declares no
-        /// <c>source</c>, so it never fetches and is hand-quaded here, using
-        /// the SET's own fill material), renders, and returns the centre-region mean
-        /// colour (<paramref name="corner"/> gets the corner-region mean). Null (and <paramref name="corner"/>
-        /// null) on the GPU-context guard.</summary>
+        /// <summary>Drives a two-layer (fill + background) style through a real <see cref="MapView"/> cover,
+        /// renders, and returns the centre-region mean colour (<paramref name="corner"/> gets the corner mean).
+        /// The fill layer has no <c>source</c>, so it is hand-quaded with the set's fill material. Null (and
+        /// <paramref name="corner"/> null) on the GPU-context guard.</summary>
         private static double[] RenderMidStackStyle(
             Camera camera, string styleJson, int fillIndex, string pngName, out double[] corner)
         {
@@ -363,39 +337,16 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj.
     //
-    // The render-layer model's acceptance teeth, as real snapshot tests: the persistent per-slot
-    // MeshRenderer is the proven-headless path. A Graphics.RenderMesh submit renders 0 px headless (see
-    // SymbolAtlasOrientationSnapshotTests' header); a scene MeshRenderer Unity redraws on its own renders
-    // normally under a manually-invoked Camera.Render().
+    // The render-layer model's acceptance teeth. Non-obvious why: a persistent per-slot MeshRenderer renders
+    // under a manual Camera.Render(), but a Graphics.RenderMesh submit renders 0 px headless.
     //
-    // Setup fuses two proven harnesses: the real-glyph symbol pipeline from SymbolAtlasOrientationSnapshotTests
-    // (fixture atlas, CodepointTextShaper, real SymbolPlacementSystem) and the queue/composite scene from
-    // LayerOrderSnapshotTests (the QualitySettings/ambient/light recipe).
-    // SymbolRenderLayers are built directly via SymbolRenderLayer.Create, bypassing RenderLayerSet.Build — so
-    // each test writes the renderQueue itself (`TransparentQueue + drawIndex`, one sub-slot's worth — these
-    // tests order two TEXT materials against each other / against an occluding line, never a layer's own
-    // icon-vs-text pair, so the sub-slot band is inert here and the hand-written values stay valid),
-    // mirroring exactly what RenderLayerSet.Build does in production for a single sub-slot. EVERY Create call
-    // below additionally writes its own WorldIconMaterial queue at QueueFor(drawIndex, Base), which can sit
-    // ABOVE the text queue the test hand-writes — inert in all of them for the reason above; the first such
-    // site carries the worked example.
+    // SymbolRenderLayer.Create bypasses RenderLayerSet.Build, so each test writes `TransparentQueue + drawIndex`
+    // itself. These tests order TEXT against text or a line, never an icon-vs-text pair, so the sub-slot band and
+    // the WorldIconMaterial queue that Create writes are inert here.
     //
-    // Tooth 1's occluder is a wide LINE ribbon, not a fill quad, so it exercises the REAL production line
-    // vertex layout (StyledLineTileBuilder.LinePositionNormal/LineWidthColor) rather than the generic Lit
-    // vertex streams a hand-built Vector3[]/Vector2[] quad carries. (A hand-built quad DOES render headless
-    // once wound Unity-front — see LayerOrderSnapshotTests.BuildFillQuad and its winding note — and that
-    // file's variance tooth now carries a non-vacuous top-fill guard; the line here is a vertex-layout choice,
-    // not a workaround for an invisible quad.)
-    // SyntheticLineMesh builds the real production vertex layout, proven to render headless (it backs
-    // LayerOrderSnapshotTests.BuildWideLine). renderQueue-vs-symbol compositing doesn't care which layer KIND
-    // produced the geometry, so a line still proves tooth 1's claim (higher-queue geometry composites over a
-    // symbol layer's symbols) — see BuildOccludingLineRibbon.
-    //
-    // Sample-point discovery: rather than predicting exactly which pixels a real glyph's ink lands on (an 'A'
-    // has a hollow counter — its centroid is not reliably inked), every ink-sensitive test first renders the
-    // LABEL ALONE and finds the pixel whose colour is closest to the expected ink colour (necessarily deep
-    // inside the glyph body, not an AA edge) — then samples a small box around THAT pixel in the composite
-    // render. This is robust to exact glyph shape/position and needs no a-priori pixel math.
+    // Tooth 1's occluder is a wide LINE ribbon, so it uses the real production line vertex layout; queue
+    // compositing does not depend on the layer kind. Ink-sensitive tests first render the symbol ALONE and
+    // sample around the pixel closest to the ink colour, because a glyph's centroid (an 'A') can be hollow.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolLayerOrderSnapshotTests — Unity EditMode only
@@ -448,9 +399,8 @@ namespace MapRenderer.Tests.Visual
                 textSizePx: 200f,
                 sortKey: 0f,
                 featureIndex: 0,
-                // A realistic containing tile (BuildOverheadScene's look-at) keeps the
-                // world-anchored bake float32-safe — TileKey=0 is ~2e7m away (see
-                // SymbolAtlasOrientationSnapshotTests' identical note).
+                // A realistic containing tile keeps the world-anchored bake float32-safe; TileKey=0 is ~2e7 m
+                // away.
                 tileKey: TestTileKeys.PackedContaining(
                     new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
                 materialIndex: materialIndex,
@@ -505,12 +455,8 @@ namespace MapRenderer.Tests.Visual
             return lightGo;
         }
 
-        // A HUGE line ribbon through the world origin at Y=0 (the ground plane a MapCamera at tilt 0 looks
-        // straight down at, world origin == the look-at under camera-relative rendering), standing in for a
-        // fill occluder — see the header comment for why a fill quad doesn't work here. Built via
-        // SyntheticLineMesh (the real production line vertex layout, proven to render headless by
-        // LayerOrderSnapshotTests.BuildWideLine), sized to cover the whole frustum regardless of camera
-        // altitude/FOV so no camera-specific geometry math is needed.
+        // A HUGE line ribbon through the world origin (the look-at) at Y=0, in the real production line vertex
+        // layout, sized to cover the whole frustum at any camera altitude or FOV.
         private static (Mesh mesh, Material mat) BuildOccludingLineRibbon(Color color, int renderQueue)
         {
             var mesh = SyntheticLineMesh.BuildFromPoints(
@@ -534,10 +480,8 @@ namespace MapRenderer.Tests.Visual
             return go;
         }
 
-        // Finds the pixel whose colour is closest to `target` — necessarily deep inside a solid-ink glyph
-        // region (not an AA edge), so a small box around it is a robust, position-independent sample point.
-        // Returns false (and asserts a minimum closeness) so a solo-render precondition failure surfaces
-        // clearly rather than silently sampling a background pixel later.
+        // Finds the pixel closest to `target`, which lies deep inside solid ink. It asserts a minimum closeness,
+        // so a failed solo render never samples a background pixel later.
         private static bool TryFindClosestPixel(Frame frame, Color32 target, out int x, out int y)
         {
             int best = int.MaxValue; x = -1; y = -1;
@@ -578,10 +522,8 @@ namespace MapRenderer.Tests.Visual
                       ""paint"": { ""text-color"": ""#ffffff"" } }
                 ]
             }";
-            // text-color: white — a CONSTANT text-color now binds _TextColor (style-transitions epic), so
-            // leaving it at the spec default (black) would multiply the hand-injected vertex ink below to
-            // black. White is the uniform's identity, so this test's direct SymbolPaint injection (bypassing
-            // SymbolFeatureExtractor.EvaluatePaint) reaches the pixel untouched, as it always has.
+            // text-color white: a constant text-color binds _TextColor, and the black default would multiply the
+            // hand-injected vertex ink to black. White is the identity, so the injected paint is untouched.
             StyleDocument style = StyleParser.Parse(StyleJson);
             var symbolLayer = (Symbol.StyleLayer)style.Layers[0];
             var settings = MapMaterialSetTestUtil.Load();
@@ -589,11 +531,8 @@ namespace MapRenderer.Tests.Visual
             var greenSymbolColor = new Color32(26, 217, 26, 255); // (0.1, 0.85, 0.1) in 0-255
             var redOccluderColor = new Color(0.85f, 0.1f, 0.1f, 1f);
 
-            // Create(drawIndex: 1) also writes WorldIconMaterial.renderQueue itself, at
-            // QueueFor(1, Base) = 3002 — ABOVE the TransparentQueue + 1 = 3001 this test hand-writes to
-            // Material (the text) next. That is inert here: this test never stages or renders an icon quad,
-            // only the text glyph, so the icon material's queue is set but never composited against
-            // anything.
+            // Create(drawIndex: 1) writes the icon queue QueueFor(1, Base) = 3002, above the text's 3001 set
+            // next. That is inert: this test renders no icon quad.
             var renderLayer = SymbolRenderLayer.Create(symbolLayer, settings, 8.0, drawIndex: 1);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned (asserted by MapMaterialSetTestUtil.Load).");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
@@ -685,12 +624,9 @@ namespace MapRenderer.Tests.Visual
             var layers = new List<SymbolRenderLayer> { layerA, layerB };
 
             using var snap = new SnapshotRenderer(Size, Size);
-            // Solo render of symbol A alone (layerA only) to find the ink sample point — labelA/labelB share
-            // the identical glyph/anchor/size, so the same footprint applies to both. ONE TestSymbolPlan
-            // instance serves every tick in this test: SymbolPlacementSystem skips the native-mirror refresh
-            // unless the source's IDENTITY or version changed, and TestSymbolPlan reuses one SymbolGatherPlan
-            // whose WinnerSetVersion it advances per Build — two independently-constructed plans would each
-            // start at version 1 and could collide on that skip guard.
+            // Non-local invariant: ONE TestSymbolPlan serves every tick. SymbolPlacementSystem skips the mirror
+            // refresh unless the source identity or version changes, and two fresh plans both start at version 1.
+            // A solo render of symbol A finds the ink sample point; B shares its glyph, anchor and size.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
@@ -724,11 +660,8 @@ namespace MapRenderer.Tests.Visual
                 // Swap declared order (mutate renderQueue in place — same materials, same presenters).
                 layerA.Material.renderQueue = LayerDrawOrder.TransparentQueue + 2;
                 layerB.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
-                // Points draw through the WORLD path, whose queue lives on a SEPARATE material
-                // (WorldTextMaterial) synced from Material.renderQueue at Tick/present time, so a live queue
-                // mutation needs a re-Tick to take effect. A re-Tick here
-                // matches real usage (production always Ticks before every Render); rebuilding through the
-                // SAME TestSymbolPlan keeps the mirror-refresh guard satisfied (see its note above).
+                // The WORLD path's queue lives on WorldTextMaterial, synced from Material.renderQueue at Tick, so
+                // a queue change needs a re-Tick (production Ticks before every Render).
                 system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 snap.Render(cam);
@@ -785,10 +718,8 @@ namespace MapRenderer.Tests.Visual
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // SHOW half: one Tick with a symbol, render TWICE with no Tick between — no manual
-                // MeshFilter/MeshRenderer attach anywhere in this test: the presenter IS a persistent scene
-                // renderer, created and bound entirely inside Tick.
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
+                // SHOW half: Tick, then render TWICE with no Tick between; the persistent presenter is bound in
+                // Tick. The Tick is duplicated because the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the label must place (precondition).");
@@ -823,10 +754,8 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Collision parity: the no-layers and the real-SymbolRenderLayer paths must produce IDENTICAL
-        //    candidate/survivor/quad counts — render layers touch only the DRAW, never anything upstream of
-        //    the emit loop. Two fresh SymbolPlacementSystem instances (not one instance ticked twice), so
-        //    sticky-placement incumbency from the first call cannot bias the second. ──
+        // ── Collision parity: with and without SymbolRenderLayers, the counts must be IDENTICAL. Two fresh
+        //    systems, so sticky-placement incumbency from one call cannot bias the other. ──
 
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
         {
@@ -854,12 +783,9 @@ namespace MapRenderer.Tests.Visual
                 sortKey: sortKey,
                 featureIndex: featureIndex,
                 tileKey: 0L,
-                // PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey —
-                // so two symbols sharing an anchor with a default Text/MaterialIndex collide on FadeId. FadeId is
-                // the display key (SymbolCandidate.FadeId's uniqueness contract), so a collision makes the loser
-                // show alongside the winner. A distinct Text per symbol keeps the anchors identical (the real
-                // collision this test needs) while giving each a unique identity, and does not perturb the staged
-                // geometry (its quads are supplied explicitly here).
+                // Non-local invariant: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage), and a
+                // FadeId collision makes the loser show beside the winner. A distinct Text keeps the anchors equal
+                // but the identities unique; the quads are supplied explicitly, so geometry is unchanged.
                 text: "L" + featureIndex);
         }
 
@@ -894,8 +820,7 @@ namespace MapRenderer.Tests.Visual
             AddOverlappingSymbol(buffer, 0, frame.SceneOriginRender, sortKey: 20f);
             AddOverlappingSymbol(buffer, 1, frame.SceneOriginRender, sortKey: 10f); // lower key wins the collision
 
-            // The invariant: supplying per-layer render layers — each with its own material and persistent
-            // presenter — partitions only the DRAW, and must not perturb anything upstream of the emit loop.
+            // Per-layer render layers partition only the DRAW; nothing upstream of the emit loop may change.
             // Same plan, same symbols, layers vs no layers.
             var noLayersSystem = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layeredSystem  = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
@@ -907,10 +832,8 @@ namespace MapRenderer.Tests.Visual
                     "precondition: both labels reach the placement path — they share an anchor, so a dedup " +
                     "merge here would silently turn the comparison into 1-vs-2 and read as a real divergence.");
 
-                // Duplicate both systems' ticks — the collision verdict is harvested one Tick late.
-                // Without this, a fresh system's single Tick harvests nothing (LastSurvivorCount == 0 on both
-                // sides), and the equality assertions below would pass VACUOUSLY (0 == 0) without ever exercising
-                // a real collision — hence the Assert.Greater lines strengthening them against that.
+                // Duplicate both ticks: the verdict is harvested one Tick late, so one Tick gives 0 == 0 on both
+                // sides. The Assert.Greater lines below guard against that vacuous pass.
                 noLayersSystem.Tick(in frame, built, atlasTexture);
                 noLayersSystem.Tick(in frame, built, atlasTexture);
 

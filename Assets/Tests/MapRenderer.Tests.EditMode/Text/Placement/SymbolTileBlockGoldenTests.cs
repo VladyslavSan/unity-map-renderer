@@ -1,6 +1,5 @@
-// Unity EditMode only — SymbolTileBlock/Baker need Unity.Collections' NativeArray, and the produced-
-// fixture test drives a real Camera/Material/Shader through StyledSymbolTileBuilder.BuildAsync. NOT
-// registered in core-tests.csproj (see BlockColumnHash's header for why this whole area stays EditMode-only).
+// Unity EditMode only: SymbolTileBlock/Baker need NativeArray, and the produced fixture drives a real Camera
+// through StyledSymbolTileBuilder.BuildAsync. NOT in core-tests.csproj (BlockColumnHash's header says why).
 
 using System;
 using System.Collections.Generic;
@@ -25,26 +24,18 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// The block-byte-identity golden (docs/symbol-label-perf-design.md) — pins
-    /// <see cref="SymbolTileBlockBaker.Bake"/>'s output shape so a later refactor of the bake path
-    /// cannot silently change what gets baked, only how it gets there.
-    ///
-    /// <para><b>Two fixtures, two golden strategies.</b> <see cref="Bake_HandBuiltHazardFixture_MatchesExplicitGolden"/>
-    /// hand-builds a <see cref="SymbolTileBuffer"/> (via <see cref="TestSymbolTileBuffer"/>) that
-    /// exercises every hazard (see its own doc) and asserts EXPLICIT, hand-derivable expected values per
-    /// column — a real oracle, not a value
-    /// pasted from a first run (<c>handed-down-formula-is-never-re-derived</c>). But because its input never
-    /// passes through <c>StyledSymbolTileBuilder.Shape</c>, it CANNOT catch a regression in that
-    /// tail's own emit sites (the four record-append calls and the quad-layout
-    /// migration) — only <see cref="Bake_ProducedFixture_MatchesCommittedGoldenHash"/> (built the same way
-    /// <c>SymbolProcessorParityTests.BuildOracle</c> is) exercises that path, so BOTH fixtures are required,
-    /// not a convenience duplication of one.</para>
+    /// <see cref="SymbolTileBlockBaker.Bake"/>'s output shape so a refactor of the bake path can change
+    /// how it bakes, never what it bakes.
     /// </summary>
+    /// <remarks>Non-obvious why: BOTH fixtures are required.
+    /// <see cref="Bake_HandBuiltHazardFixture_MatchesExplicitGolden"/> asserts hand-derived values per column,
+    /// but its input never passes through <c>StyledSymbolTileBuilder.Shape</c>. Only
+    /// <see cref="Bake_ProducedFixture_MatchesCommittedGoldenHash"/> exercises Shape's own emit sites.</remarks>
     [TestFixture]
     public class SymbolTileBlockGoldenTests
     {
-        // ── field-count guard: BlockColumnHash's per-struct hashers are hand-written, one line per field —
-        // a field silently added to one of these structs without a matching hash/compare line would hash
-        // FEWER fields than the type has and never notice. Pin the count so that drift fails the gate instead.
+        // ── field-count guard: BlockColumnHash's hashers are hand-written, one line per field, so a field added
+        // without a matching hash/compare line goes unhashed. Pinning the count makes that drift fail the gate.
         [Test]
         public void HashedStructs_FieldCounts_MatchHasherCoverage()
         {
@@ -64,7 +55,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static int PublicPropertyCount<T>() => typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance).Length;
 
         // ── the hand-built hazard fixture ──
-        // Raw list (8 dense slots), designed so EVERY hazard is present and unambiguous:
+        // Non-obvious why: each of the 8 dense slots plants one hazard the golden must cover, unambiguously:
         //   i0 PointA (layer 0)              — normal point, 1 quad
         //   i1 PointB (layer 0, LAST)        — normal point, 2 quads
         //   i2 CurvedC (layer 1, first)      — curved record
@@ -93,9 +84,8 @@ namespace MapRenderer.Tests.Text.Placement
             return quads;
         }
 
-        // AddPointSlot/AddCurvedSlot mirror the field set MakePoint/MakeCurved append straight into
-        // a SymbolTileBuffer via TestSymbolTileBuffer — see that type's default-value contract doc for why
-        // every omitted parameter below is byte-identical to the default.
+        // AddPointSlot/AddCurvedSlot append through TestSymbolTileBuffer; its default-value contract doc says
+        // why every omitted parameter below is byte-identical to the default.
         private static void AddPointSlot(SymbolTileBuffer buffer, SymbolStringTable stringTable,
             int featureIndex, int materialIndex, string text, string icon, int quadCount,
             SymbolPairRole pairRole = SymbolPairRole.None, int pairId = 0)
@@ -128,10 +118,8 @@ namespace MapRenderer.Tests.Text.Placement
                 featureIndex: featureIndex, tileKey: TileKeyValue, paint: SymbolPaint.Default, stringTable: stringTable);
         }
 
-        // `stringTable` is REQUIRED (not a fresh-per-call default) — the golden below asserts
-        // TextIds/IconImageIds' LITERAL values, which only hold for an isolated table interning in this exact
-        // call order; the shared/default table `TestSymbolTileBuffer` otherwise falls back to accumulates ids
-        // from every OTHER test in the run.
+        // `stringTable` is REQUIRED: the golden asserts LITERAL TextIds/IconImageIds, which hold only for an
+        // isolated table. TestSymbolTileBuffer's shared fallback table accumulates ids from every other test.
         private static SymbolTileBuffer BuildHazardFixture(SymbolStringTable stringTable)
         {
             var buffer = new SymbolTileBuffer();
@@ -215,8 +203,7 @@ namespace MapRenderer.Tests.Text.Placement
                 CollectionAssert.AreEqual(new[] { 0 }, ToArray(block.CurvedAnchorFadeStart), "CurvedAnchorFadeStart");
                 Assert.AreEqual(SymbolTileBlockBaker.BuildCurvedInput(buffer.Symbols[2], 4, TileOrigin), block.Curveds[0], "Curveds[0]");
 
-                // ── flat pools — expected values read straight off the SOURCE symbols, in the same raw-index
-                // order Fill walks (a point contributes its Quads, a curved its glyphs/anchors/path) — an
+                // ── flat pools — expected values read off the SOURCE symbols in Fill's raw-index order: an
                 // INDEPENDENT restatement of the input, not a re-derivation of Fill's math. ──
                 var expectedQuads = new List<SymbolQuad>();
                 expectedQuads.AddRange(QuadsOf(buffer, 0));
@@ -252,9 +239,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(SymbolStagingMath.LineFadeId(TileKeyValue, 1, 0, 0), block.AnchorFadeIds[0], "AnchorFadeIds[0] (the one real anchor)");
                 Assert.AreEqual(SymbolStagingMath.LineFadeId(TileKeyValue, 1, 0, -1), block.AnchorFadeIds[1], "AnchorFadeIds[1] (trailing centred fallback)");
 
-                // ── staging upper bounds: every point record (i0,i1,i3,i4,i5,i6,i7 — 7) contributes exactly 1
-                // box/candidate regardless of its quad count (i3's zero-quad hazard still counts), plus curved's
-                // (anchor+fallback = 2 placements) * 2 glyphs. ──
+                // ── staging upper bounds: each of the 7 point records contributes 1 box/candidate whatever its
+                // quad count (i3's zero quads still count), plus the curved's (anchor+fallback) * 2 glyphs. ──
                 Assert.AreEqual(11, block.MaxBoxes, "7 point boxes + 2 placements * 2 curved glyphs");
                 Assert.AreEqual(11, block.MaxQuads, "1+2+0+1+1+1+1 (=7) point quads + 2 placements * 2 curved glyphs");
                 Assert.AreEqual(9, block.MaxCandidates, "7 point candidates (i3's zero-quad record still counts) + 2 curved placements");
@@ -287,10 +273,8 @@ namespace MapRenderer.Tests.Text.Placement
         private static T[] ToArray<T>(NativeArray<T> array) where T : struct => array.ToArray();
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // ── the PRODUCED fixture: an independent StyledSymbolTileBuilder.BuildAsync, as
-        // SymbolProcessorParityTests.BuildOracle does — the ONLY fixture that exercises Shape's own
-        // emit sites (see the type doc). Cannot hand-derive glyph UVs / zoom-interpolated TextSizePx, so
-        // this pins a HASH, not explicit values — see CapturedGoldenHash's doc for how to fill it in.
+        // ── the PRODUCED fixture: the ONLY one that exercises Shape's own emit sites. Its glyph UVs and
+        // zoom-interpolated TextSizePx cannot be hand-derived, so it pins a HASH, not explicit values.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         private const string FontName = "LatinFont";
@@ -368,42 +352,16 @@ namespace MapRenderer.Tests.Text.Placement
             return output;
         }
 
-        /// <summary>Committed golden — EMPTY until the orchestrator's first gate run. This fixture's exact
-        /// column digests cannot be hand-derived (glyph UVs, zoom-interpolated TextSizePx, projected
-        /// doubles) — so the assertion below compares against a sentinel that CANNOT match,
-        /// and prints <c>ColumnHashes.ToString</c>'s full per-column dump in the
-        /// failure message. Paste that dump here (replacing the sentinel) to make this a real, committed,
-        /// fixed-oracle golden. Once pasted, DO NOT re-bake a snapshot to go green on a later divergence —
-        /// a moved digest means behaviour changed; find and fix the cause instead
-        /// — and suspect the FIXTURE first, since a snapshot can move because its fixture borrowed a
-        /// production API as a data factory rather than because production behaviour changed.
-        ///
-        /// <para><b>Moved once since capture</b>, when <c>PointStageInput</c> gained the three
-        /// <c>text-halo-*</c> fields: <c>Points</c> 1107115275 → -1357632509. That it was purely additive was
-        /// PROVED, not assumed — excluding just those three lines from
-        /// <c>BlockColumnHash.HashPointStageInput</c> reproduced the old digest exactly, and no other column
-        /// moved. Hold any future move to that same standard.</para>
-        ///
-        /// <para><b>Moved a second time:</b> <c>Points</c> -1357632509 → -1461293497 — every other
-        /// column is byte-identical (confirmed by diffing the failure output; the two strings first differ
-        /// inside the <c>Points</c> field). Cause: <c>PointStageInput.FadeId</c> is folded by
-        /// <c>SymbolPlacementSystem.PointFadeId</c>, which folds
-        /// <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c> — ids a
-        /// <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/> assigns deterministically in
-        /// assignment order — rather than hashing the symbol's raw <c>Text</c>/<c>IconImage</c> via
-        /// <c>string.GetHashCode()</c>, which is RANDOMIZED PER PROCESS on .NET Core (the same literal
-        /// string hashed to three different values across three separate net10.0 process runs during this
-        /// change's review). This move removes that latent randomized-hash dependency rather than
-        /// introducing one. This new value is still a genuine constant, not a flake: the table computing it is local to the
-        /// ONE <c>StyledSymbolTileBuilder</c> this test's <c>BuildProducedFixture</c> constructs (no
-        /// <c>stringTable</c> arg passed → a fresh, private table), so the ids — and the digest — are a
-        /// deterministic function of this fixture's decode plus <c>Shape</c>'s single-threaded walk, never of
-        /// what any other test interned first. The relation this digest only ever pinned BY PROXY (same
-        /// identity ⇒ same fade id, different ⇒ different) is independently covered by
-        /// <c>SymbolFadeTests.PointFadeId_FixedGrid_CollapsesNearby_SeparatesFar</c>/
-        /// <c>_IconIdentity_...</c>/<c>_AgreesWithDedupCell</c> — the last of which cross-checks the int-keyed
-        /// fold against the untouched string-keyed <see cref="MapRenderer.Core.Text.Placement.CrossTileSymbolKey"/>
-        /// as an independent reference.</para></summary>
+        /// <summary>Committed golden digest of the produced fixture. Its columns cannot be hand-derived (glyph
+        /// UVs, zoom-interpolated TextSizePx, projected doubles), so a mismatch prints the full per-column dump of
+        /// <c>ColumnHashes.ToString</c>. Never re-bake it to go green: a moved digest means behaviour changed.
+        /// Suspect the FIXTURE first, because a fixture can borrow a production API as a data factory.</summary>
+        /// <remarks>Non-local invariant: the digest is a constant because <c>SymbolPlacementSystem.PointFadeId</c>
+        /// folds interned <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c>
+        /// (not the per-process-randomized <c>string.GetHashCode()</c>), and <c>BuildProducedFixture</c>'s
+        /// builder gets a fresh, private <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/>.
+        /// Prove any move column by column: after an additive field, excluding it from the hasher must reproduce
+        /// the old digest.</remarks>
         private const string CapturedGoldenHash =
             "Kinds=-13491713 Detail=1233695479 WorldStart=1233695479 WorldCount=-1252581121 RepAnchor=515797947 " +
             "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=-1461293497 " +

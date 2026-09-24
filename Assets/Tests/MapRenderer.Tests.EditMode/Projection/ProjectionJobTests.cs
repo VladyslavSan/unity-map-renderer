@@ -13,18 +13,11 @@ using MapRenderer.Tests.TestSupport;
 namespace MapRenderer.Tests.Projection
 {
     /// <summary>
-    /// EditMode tests for TileToGeoJob + ProjectPointsJob&lt;TProj&gt; (WebMercator + Spherical).
-    ///
-    /// (1) Parity test — job matches TileId.ToMercator − origin for known tile coords,
-    ///     including a non-z0 tile to exercise the 2^z path.
-    /// (2) Acceptance — all 239 countries' vertices project within MercatorBounds (± margin).
-    /// (3) Precision intent — origin-relative double3 magnitudes are smaller than absolute Mercator.
-    ///
-    /// Note: whether these run Burst-compiled depends on the Jobs ▸ Burst ▸ Enable Compilation toggle and
-    /// compile success, not on the runner — <c>CompileSynchronously = true</c> falls back to managed IL
-    /// SILENTLY on a compile failure (<c>FillGraphBurstProbeTests</c>), so a passing numeric test alone never
-    /// proves Burst compiled it. <c>./Tools/run-tests.sh</c> (batch mode) is this project's path verified
-    /// Burst-compiled, via its log, not the test result.
+    /// EditMode tests for TileToGeoJob + ProjectPointsJob&lt;TProj&gt; (WebMercator + Spherical): parity
+    /// with TileId.ToMercator − origin, vertices inside MercatorBounds, and origin-relative precision.
+    /// Limitation: a passing numeric test does not prove Burst compiled the job, because
+    /// <c>CompileSynchronously = true</c> falls back to managed IL silently on a compile failure
+    /// (<c>FillGraphBurstProbeTests</c>); the batch-mode log of <c>./Tools/run-tests.sh</c> shows it.
     /// </summary>
     public class ProjectionJobTests
     {
@@ -230,9 +223,8 @@ namespace MapRenderer.Tests.Projection
         [Test]
         public void OriginRelative_MagnitudesAreBoundedByTileSize()
         {
-            // At z0, the whole-world tile spans ~±20M m in X, ~±20M m in Y.
-            // Origin-relative coords from the tile corner should be in [0, ~40M] for x and z.
-            // (We subtract the MIN corner, so values range from 0 to the tile width.)
+            // At z0 the tile spans ~±20M m in X and Y. Coords relative to the MIN corner lie in [0, ~40M]
+            // for x and z.
             var tile = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, bMax) = tile.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
@@ -262,9 +254,8 @@ namespace MapRenderer.Tests.Projection
         }
 
         // -----------------------------------------------------------------------------------------
-        // (4) Projection-agnostic job — same generic ProjectPointsJob<TProj>, Spherical struct → vertices on
-        //     the sphere. Proves the job is driven by the projection type (not hardcoded Mercator) AND that
-        //     Burst compiles ProjectPointsJob<SphericalProjection> (the second IProjection impl).
+        // (4) Projection-agnostic job: ProjectPointsJob<SphericalProjection> puts vertices on the sphere, so
+        //     the projection type drives the job, and Burst compiles the second IProjection impl.
         // -----------------------------------------------------------------------------------------
 
         [Test]

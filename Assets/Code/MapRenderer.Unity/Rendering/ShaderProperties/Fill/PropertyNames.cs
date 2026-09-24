@@ -16,9 +16,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
         public const string FillPattern         = "_FillPattern";
 
         // ── fill-pattern sampling ─────────────────────────────────────────────────────────────────
-        // `fill-pattern` itself owns `_FillPattern`. The pattern SHEET (`_PatternMap`) is a texture, not a
-        // CBUFFER member, so it lives in TexturePropertyId: this class stays exactly the fill-only CBUFFER
-        // set, which SharedUnionFillNames_EqualsFillCbuffer enforces.
+        // The pattern sheet `_PatternMap` is a texture, not a CBUFFER member, so it lives in TexturePropertyId.
 
         /// <summary>xy = sprite top-left in sheet pixels, zw = sprite size in sheet pixels.
         /// A ZERO-AREA rect (zw == 0) is the canonical "declared but unresolved" state.</summary>

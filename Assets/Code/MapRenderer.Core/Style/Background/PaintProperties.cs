@@ -5,13 +5,9 @@ namespace MapRenderer.Core.Style.Background
 {
     /// <summary>
     /// The parsed MapLibre <c>background</c> <b>paint</b> properties for a single background style layer.
-    /// Same shape as <see cref="Fill.PaintProperties"/> (the Fill pattern) — one <see cref="StyleProperty{T}"/>
-    /// per key, spec defaults when absent. Background has no source/filter, so there is no feature-driven
-    /// variant here: a data-driven expression is spec-invalid for background and is guarded at the bind
-    /// site (<see cref="MapRenderer.Unity.Rendering.Materials.MaterialFactory.BindBackgroundPaintToApplier"/>),
-    /// not here.
-    ///
-    /// Engine-free; clean-room (public Style Spec, no MapLibre source).
+    /// Same shape as <see cref="Fill.PaintProperties"/>: one <see cref="StyleProperty{T}"/> per key, spec
+    /// defaults when absent. A data-driven expression is spec-invalid for background and is guarded at the bind
+    /// site (<see cref="MapRenderer.Unity.Rendering.Materials.MaterialFactory.BindBackgroundPaintToApplier"/>).
     /// </summary>
     public sealed class PaintProperties
     {

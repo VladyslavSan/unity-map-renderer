@@ -21,39 +21,17 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
-    /// <b>The leak class of the eager decode, one test per abandonment funnel.</b>
+    /// <b>The leak class of the eager decode, one test per abandonment funnel.</b> The tile is decoded and
+    /// holds <c>Allocator.Persistent</c> buffers before any drop path — a never-kicked record, a discarded
+    /// fetch, a restyle, teardown — can drop it, so every one of them owns a release. One test per funnel
+    /// names WHICH funnel leaks; a combined "nothing leaks" case could not.
     ///
-    /// <para>Eager decode trades a re-decode for a leak. Under the retired scoped lease every drop path —
-    /// a never-kicked record, a discarded fetch, a restyle, teardown — dropped a handle that had never
-    /// decoded, so there was nothing to free and not one of those paths needed an edit. Now the tile is
-    /// already built and holding <c>Allocator.Persistent</c> buffers by the time any of them can drop it, so
-    /// every one of them is an OWNER with a release in it. These tests are what makes that claim
-    /// falsifiable.</para>
-    ///
-    /// <para><b>One test per funnel, not one combined test.</b> A single "nothing leaks" case could not name
-    /// WHICH funnel failed, and a leak in one of four is exactly the failure mode that survives review.</para>
-    ///
-    /// <para><b>Every case asserts <c>UnbalancedCount == 0</c> AND that a decode actually happened.</b> The
-    /// probe counts a tile as unbalanced when its dispose count is anything other than one, so it catches a
-    /// double release as well as a missed one — but over a fixture that never decoded it is trivially zero.
-    /// The anti-vacuity precondition is therefore load-bearing, and in most cases it is stronger than a bare
-    /// count: the tiles are asserted ALIVE at the point just before the funnel runs, so the only thing that
-    /// can have freed them by the end is the funnel under test.</para>
-    ///
-    /// <para><b>No production observability was added for any of this.</b> The instrument is a probe
-    /// <c>ITileDecoder</c> injected through a fake <c>ITileFeatureSource</c> at <c>SetSources</c>'
-    /// <c>CreateSource</c> seam, which already exists — see <c>LeaseProbeDecoder</c>.</para>
-    ///
-    /// <para><b>The two release sites this fixture used to hand to a structural clause are runtime-covered
-    /// now, and the clauses that remain pin something else.</b> <c>PumpBuilds</c>' parked-drain ct-drop is
-    /// driven for real in <c>SymbolParkedRedecodeTests</c> — reflecting the private cancellation source and
-    /// cancelling WITHOUT draining reproduces exactly the pool-vs-main interleaving that was called
-    /// unreachable — and <c>KickMeshBuild</c>'s main-thread prologue no longer HAS a release to pin: its
-    /// catch was deleted rather than tested, because the caller has not given up its reference at that point
-    /// and releasing there was an over-release, not a leak guard. What <c>TileProcessingStructureTests</c>
-    /// keeps is the residue no runtime test can reach: that both kick call sites feed the record's own field
-    /// and null it only afterwards, that the parked dispatch takes no cancellation token, and that
-    /// <c>RenderTeardownRecord</c> disarms before it fires.</para>
+    /// <para>Non-obvious why: every case also asserts that the tiles decoded and are ALIVE just before the
+    /// funnel runs, because <c>UnbalancedCount == 0</c> (a missed or a double release) is trivially zero over
+    /// a fixture that never decoded. The probe is a <c>LeaseProbeDecoder</c> behind a fake
+    /// <c>ITileFeatureSource</c> at the <c>SetSources</c> seam. <c>SymbolParkedRedecodeTests</c> drives the
+    /// parked-drain cancellation drop; <c>TileProcessingStructureTests</c> pins the residue no runtime test
+    /// can reach.</para>
     /// </summary>
     [TestFixture]
     public class EagerDecodeOwnershipTests : BaseTestFixture
@@ -74,17 +52,11 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         /// <summary>
-        /// A fake source that decodes through <see cref="TileDecodeDispatch"/> exactly as production does —
-        /// same pool hop, same lease, same one reference handed to the caller — with a probe decoder inside
-        /// it and two switches the drives need.
-        ///
-        /// <para><see cref="Serving"/> is what keeps each tooth's arithmetic honest: once it goes false every
-        /// later <see cref="GetTile"/> answers null, so a cover change cannot quietly decode a SECOND set of
-        /// tiles whose references are still legitimately held at assertion time and would read as unbalanced.
-        /// The tooth is then measuring exactly the tiles it set up.</para>
-        ///
-        /// <para><see cref="Gate"/>, when set, suspends the fetch before the decode — the only way to reach
-        /// the "released while its fetch was still in flight" funnel.</para>
+        /// A fake source that decodes through <see cref="TileDecodeDispatch"/> as production does — same pool
+        /// hop, same lease, one reference to the caller — with a probe decoder inside. When
+        /// <see cref="Serving"/> is false, <see cref="GetTile"/> answers null, so a cover change cannot decode
+        /// a second set of still-held tiles that would read as unbalanced. <see cref="Gate"/>, when set,
+        /// suspends the fetch before the decode, which is the only way to reach the mid-flight funnel.
         /// </summary>
         private sealed class ProbeFeatureSource : ITileFeatureSource
         {
@@ -131,15 +103,11 @@ namespace MapRenderer.Tests.Tiles
             mv.TileManager.SetSources(specs, view.Config.Backend);
         }
 
-        /// <summary>A view whose mesh-build cap is ONE, so a multi-tile cover is fetched and decoded far
-        /// faster than it is kicked and most records sit there holding a decoded tile they never dispatch —
-        /// the state the never-kicked funnels exist for, and the state that had no analogue at all under the
-        /// scoped lease.
-        ///
-        /// <para><b>Not zero.</b> <c>TileManager.PumpPending</c> reads a cap of 0 as UNLIMITED
-        /// (<c>maxMeshBuildsPerTick &gt; 0 ? … : int.MaxValue</c>), so setting it to zero kicks
-        /// <i>everything</i> and every reference is transferred and released by a lambda — the exact opposite
-        /// of the state under test, and a way for all four teeth here to pass while measuring nothing.</para></summary>
+        /// <summary>A view whose mesh-build cap is ONE, so a multi-tile cover decodes far faster than it is
+        /// kicked and most records hold a decoded tile they never dispatch — the never-kicked state.
+        /// <para>Non-obvious why: the cap is not zero, because <c>TileManager.PumpPending</c> reads 0 as
+        /// UNLIMITED (<c>maxMeshBuildsPerTick &gt; 0 ? … : int.MaxValue</c>) and would kick every tile, so
+        /// every tooth here would pass while measuring nothing.</para></summary>
         private static MapView NewViewWithSlowKicks(string name)
         {
             var go   = new GameObject(name);
@@ -154,23 +122,12 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// Drives the cover into the exact state the never-kicked funnels exist for — every tile fetched,
-        /// decoded and sitting in its record, un-kicked — and asserts that state before handing back the
-        /// number of tiles being held.
-        ///
-        /// <para><b>The gate is what makes it deterministic, and it is not optional.</b> The obvious drive —
-        /// pump ticks until the decodes land — spreads fetch completion across many ticks, and a tick that
-        /// observes a fetch also kicks one. Over the ~100 ticks a 16-tile cover can take, every tile ends up
-        /// kicked and its reference transferred to a pool lambda, so the funnel under test has nothing left
-        /// to release and the tooth passes measuring nothing. (That is not hypothetical: the first version of
-        /// this fixture did exactly that.) Gating the fetch instead separates the two: one tick to create the
-        /// records and request, the gate opened OFF-tick so every decode lands with no pump running, then
-        /// exactly ONE observe tick — which at a cap of one kick per tick can dispatch at most one of
-        /// them.</para>
-        ///
-        /// <para>The anti-vacuity is the returned count, not a bare "something decoded": a fixture that
-        /// decoded and then freed everything by some other path is exactly as blind as one that decoded
-        /// nothing.</para>
+        /// Drives the cover into the never-kicked state — every tile fetched, decoded and held by its record —
+        /// asserts that state, and returns the number of tiles held.
+        /// <para>Non-obvious why: the gate is required. Pumping ticks until the decodes land spreads fetch
+        /// completion over many ticks, each tick kicks one tile, and the funnel then has nothing left to
+        /// release. The gate lets every decode land OFF-tick, then ONE observe tick kicks at most one tile.
+        /// The returned count, not "something decoded", is the anti-vacuity.</para>
         /// </summary>
         private static int PumpUntilDecodedAndHeld(MapView view, ProbeFeatureSource fake)
         {
@@ -207,18 +164,13 @@ namespace MapRenderer.Tests.Tiles
             return held;
         }
 
-        /// <summary>Waits, bounded, for the funnel's releases to land, then asserts the balance. The wait is
-        /// for the at-most-one kicked tile's lambda, not for the funnel — a reference the funnel failed to
-        /// release is never released, however long this waits, so the bound cannot mask the defect.
-        ///
-        /// <para><paramref name="expectedDecodes"/> pins the POPULATION. Left at −1 the wait and the
-        /// assertion both compare <c>DisposedCount</c> against a <c>DecodeCount</c> that is still moving,
-        /// which is safe only where the caller has already pinned the decode count to a fixed number
-        /// (<see cref="PumpUntilDecodedAndHeld"/> does, with its <c>AreEqual(loaded, DecodeCount)</c>). Where
-        /// decodes are still landing — abandoned fetches resolving one by one — a moving equality can be
-        /// TRUE the instant the first one is released while the rest have not decoded yet, and every later
-        /// tile is then invisible to this balance AND to <c>UnbalancedCount</c>. Pass the fixed count
-        /// there.</para></summary>
+        /// <summary>Waits, bounded, for the funnel's releases to land, then asserts the balance. A reference
+        /// the funnel fails to release never arrives, so the bound cannot mask the defect.</summary>
+        /// <param name="expectedDecodes">The fixed decode population. Leave it at −1 only when the caller has
+        /// already pinned <c>DecodeCount</c> (<see cref="PumpUntilDecodedAndHeld"/> does).</param>
+        /// <remarks>Non-obvious why: while decodes still land, a moving <c>DisposedCount == DecodeCount</c> can
+        /// be true after the first release, and every later tile escapes this balance and
+        /// <c>UnbalancedCount</c>.</remarks>
         private static void AssertEveryTileFreedExactlyOnce(ProbeFeatureSource fake, string funnel,
             int expectedDecodes = -1)
         {
@@ -233,9 +185,8 @@ namespace MapRenderer.Tests.Tiles
             }
             else
             {
-                // No new assert here: 234 only ever `break`s, and the fall-through Asserts immediately below
-                // (DecodeCount == DisposedCount, then UnbalancedCount == 0) ARE its trailing teeth — the wait
-                // cannot mask a defect that would fail either of them.
+                // The Asserts below (DecodeCount == DisposedCount, then UnbalancedCount == 0) are this wait's
+                // teeth, so the wait cannot mask a defect that fails either of them.
                 fake.Probe.WaitUntil(() => fake.Probe.DisposedCount >= fake.Probe.DecodeCount, 10000);
             }
 
@@ -252,11 +203,8 @@ namespace MapRenderer.Tests.Tiles
         // ── a record evicted before its kick ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The wholly new path — a tile fetched, decoded, and then evicted by a cover change before it ever
-        /// kicked. Under the scoped lease this record held a handle that had never decoded; under the
-        /// reference count it holds a live tile, and <c>RenderTeardownRecord</c> is the only thing that
-        /// frees it.
-        ///
+        /// A tile fetched, decoded, and then evicted by a cover change before it kicks. The record holds a
+        /// live tile, and <c>RenderTeardownRecord</c> is the only thing that frees it.
         /// <para><b>RED injection:</b> delete <c>lt.Decode?.Release()</c> from
         /// <c>TileManager.RenderTeardownRecord</c>.</para>
         /// </summary>
@@ -272,8 +220,7 @@ namespace MapRenderer.Tests.Tiles
                 PumpUntilDecodedAndHeld(view, fake);
 
                 // Stop serving BEFORE the pan: the destination cover would otherwise decode a second set of
-                // tiles whose references are still legitimately held when the assertion runs, and a held tile
-                // reads as unbalanced. The tooth measures the tiles it set up, and only those.
+                // tiles that are still held when the assertion runs, and a held tile reads as unbalanced.
                 fake.Serving = false;
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
@@ -293,12 +240,9 @@ namespace MapRenderer.Tests.Tiles
         // ── a restyle ─────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The same funnel reached through <c>SetSources</c>, which tears down every record wholesale on a
-        /// restyle. Distinct from eviction because it runs through a different caller with a different
-        /// struct-copy shape (<c>foreach</c> over <c>_loaded</c> + <c>Clear</c>, not
-        /// <c>TryGetValue</c> + <c>Remove</c>), and because a restyle is the one path that discards records
-        /// the camera never left.
-        ///
+        /// The same funnel reached through <c>SetSources</c>, which tears down every record on a restyle. It
+        /// differs from eviction in its caller and struct-copy shape (<c>foreach</c> over <c>_loaded</c> +
+        /// <c>Clear</c>, not <c>TryGetValue</c> + <c>Remove</c>), and it discards records the camera never left.
         /// <para><b>RED injection:</b> the same site as <c>ARecordEvictedBeforeItsKick_ReleasesItsDecode</c>,
         /// observed through the restyle path.</para>
         /// </summary>
@@ -333,15 +277,11 @@ namespace MapRenderer.Tests.Tiles
         // ── teardown ──────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Teardown, and the reason <c>DoDispose</c> is routed through the funnel instead of leaving it with
-        /// its own hand-rolled loops: a per-record obligation added to the funnel would otherwise be missed
-        /// by exactly one of the four paths, and it would be the one no test drives twice.
-        ///
-        /// <para><b>RED injection — "SKIP A RECORD", not "remove the call".</b> Put a <c>continue</c> at the
-        /// top of <c>DoDispose</c>'s <c>_loaded</c> pass, so the funnel call stays textually present and the
-        /// structure test that scans for it stays green. Deleting the call is the easy injection and it
-        /// proves less: it would also trip the static clause, so it cannot tell whether this RUNTIME tooth
-        /// discriminates at all.</para>
+        /// Teardown routes <c>DoDispose</c> through the funnel, so a per-record obligation added to the funnel
+        /// reaches all four paths instead of missing the one no test drives twice.
+        /// <para><b>RED injection:</b> put a <c>continue</c> at the top of <c>DoDispose</c>'s <c>_loaded</c>
+        /// pass. Do not delete the funnel call: that also trips the structure test that scans for it, so it
+        /// cannot show that this runtime tooth discriminates.</para>
         /// </summary>
         [Test]
         public void Teardown_ReleasesEveryUnkickedRecordsDecode()
@@ -370,11 +310,9 @@ namespace MapRenderer.Tests.Tiles
         // ── a fetch discarded mid-flight ──────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The second funnel: a tile released while its <c>GetTile</c> was still in flight. The record goes
-        /// into the mid-flight fetch pen, the fetch then completes — and under the eager decode "completes"
-        /// means a tile was DECODED for a record that no longer exists. Observing the outcome is no longer
-        /// enough; <c>DiscardFetchOutcome</c> has to release it.
-        ///
+        /// The second funnel: a tile released while its <c>GetTile</c> is still in flight. The record goes
+        /// into the mid-flight fetch pen, and the completing fetch DECODES a tile for a record that is
+        /// gone, so <c>DiscardFetchOutcome</c> must release it, not only observe it.
         /// <para><b>RED injection:</b> make <c>DiscardFetchOutcome</c> observe without releasing (drop the
         /// <c>?.Release()</c> from its <c>GetResult()</c> call).</para>
         /// </summary>
@@ -388,9 +326,8 @@ namespace MapRenderer.Tests.Tiles
             {
                 LoadStyleWithSource(view, fake, Cam(0, 0, CoverZoom));
 
-                // Tick until the cover is fully created. The gate holds every fetch, so no decode can race
-                // these ticks — and a partially-created cover would leave later tiles requesting AFTER the
-                // pan, so the tooth would measure two or three tiles instead of the whole cover.
+                // Tick until the whole cover exists (the gate holds every fetch, so no decode races these ticks);
+                // a partial cover would request later tiles AFTER the pan and shrink the measured set.
                 int loaded = 0;
                 for (int f = 0; f < 60; f++)
                 {
@@ -414,22 +351,16 @@ namespace MapRenderer.Tests.Tiles
                     if (f > 2 && view.ReleaseQueueDepth() == 0) break;
                 }
 
-                // THE FIXED POPULATION, read once and never re-read. Every record stashed on the
-                // !FetchCompleted arm carries a gated fetch that will decode exactly one tile when the gate
-                // opens, and `Serving = false` above guarantees no other fetch can decode — so this number
-                // IS the set of tiles the funnel owes a release for, fixed before any of them lands.
+                // THE FIXED POPULATION, read once: each record on the !FetchCompleted arm holds one gated fetch
+                // that decodes one tile, and `Serving = false` stops every other decode.
                 int abandoned = view.ReleasedMidFetchCount();
                 Assert.Greater(abandoned, 0,
                     "PRECONDITION: records really were released while their fetch was in flight — this is the " +
                     "counter RenderTeardownRecord bumps on the !FetchCompleted arm, and without it the drain " +
                     "below would have nothing to discard and the tooth would pass vacuously");
 
-                // Now let the abandoned fetches finish. Each one DECODES a tile for a record that is gone.
-                // Waiting for ALL of them, not for the first: the drain loop below stops on a
-                // DisposedCount/DecodeCount equality, and with decodes still landing that equality can be
-                // true the moment the FIRST abandoned tile is released — the rest then decode after every
-                // assertion has run and leak unobserved, invisible to the balance and to UnbalancedCount
-                // alike. The bound cannot mask a defect: a tile the funnel never releases never arrives.
+                // Let every abandoned fetch DECODE its tile before draining; a drain that starts while decodes
+                // still land lets the later tiles decode after the asserts and leak unobserved.
                 fake.Gate.TrySetResult();
                 fake.Probe.WaitUntil(() => fake.Probe.DecodeCount >= abandoned, 10000);
                 Assert.AreEqual(abandoned, fake.Probe.DecodeCount,

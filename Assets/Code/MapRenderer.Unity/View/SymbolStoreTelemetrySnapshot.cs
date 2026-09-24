@@ -5,13 +5,10 @@ namespace MapRenderer.Unity.View
 {
     /// <summary>
     /// A snapshot of the symbol STORE — what the symbol subsystem is holding and feeding forward. Produced
-    /// and published by <c>SymbolSubsystem</c>, which owns every number in it (each provider publishes its
-    /// own telemetry; nobody assembles a snapshot on another type's behalf —
-    /// <c>docs/telemetry-design.md</c>). Its sibling, <see cref="SymbolPlacementTelemetrySnapshot"/>, holds
-    /// the RESULTS of the placement pass those symbols then go through — a different owner, hence a
-    /// different snapshot. Every field is an instantaneous LEVEL at the instant of capture, never a rate —
-    /// a plain <c>init</c>-only, engine-free carrier so it compiles in the fast core-tests project and the
-    /// Unity runner alike.
+    /// and published by <c>SymbolSubsystem</c>, which owns every number in it (<c>docs/telemetry-design.md</c>).
+    /// Its sibling <see cref="SymbolPlacementTelemetrySnapshot"/> holds the placement results, with a different
+    /// owner. Every field is a LEVEL at capture, never a rate; the carrier is engine-free, so it compiles in the
+    /// core-tests project too.
     /// </summary>
     public readonly struct SymbolStoreTelemetrySnapshot
     {

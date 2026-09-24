@@ -7,33 +7,14 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Turns a <see cref="ShapedRun"/> + atlas metrics + <see cref="TextLayoutOptions"/> into
-    /// symbol-local, anchor-relative <see cref="SymbolQuad"/>s in baked-pixel space (<see cref="OneEm"/>
-    /// = 24px — the fixed size MapLibre bakes glyph-PBFs at). Takes NO text-size parameter: layout is
-    /// size-independent, and placement applies the zoom-dependent <c>text-size/24</c> screen scale per
-    /// frame. Point placement only; <c>symbol-placement: line</c> lives in <see cref="CurvedTextLayout"/>.
-    ///
-    /// <para>
-    /// <b>Baseline convention:</b> y-up; line 0's origin is at y=0, line n's origin is at
-    /// <c>-n * LineHeightEm * OneEm</c>. That origin is the font's ASCENT reference, not its baseline —
-    /// the glyph-PBF <c>top</c> metric is top-referenced and negative, so the actual typographic baseline
-    /// sits <see cref="GlyphSdf.BaselineBelowReferencePx"/> below it (see <see cref="PlaceGlyph"/>). The
-    /// unanchored block spans <c>y ∈ [-blockHeight, 0]</c> as a LAYOUT BOX before
-    /// <see cref="TextLayoutOptions.Anchor"/>/<see cref="TextLayoutOptions.Offset"/> translate it:
-    /// <c>Top</c>/<c>Bottom</c> anchor that box's edges, while <c>Centre</c> positions the block's OPTICAL
-    /// centre, which is not the box midpoint (<c>docs/road-shields-design.md</c>).
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Algorithm shape (why no auxiliary line-width array):</b> anchor/justify need each line's own
-    /// trimmed width and the block's max line width, but only the max is known once ALL lines have been
-    /// scanned. Rather than buffer per-line widths, this walks the glyphs in a SINGLE forward pass,
-    /// baking the justify shift into a line's already-emitted quads the instant that line ends (its own
-    /// width is known then), and defers only the two block-wide constants (anchor + offset, which don't
-    /// vary per line) to one final O(quadCount) pass over the already-emitted <c>output</c> list. Every
-    /// step here is an in-place List index read/write or scalar arithmetic — no heap allocation on the
-    /// no-wrap steady path (see <c>TextQuadLayoutAllocTests</c>, Unity-only).
-    /// </para>
+    /// Turns a <see cref="ShapedRun"/> + atlas metrics + <see cref="TextLayoutOptions"/> into symbol-local,
+    /// anchor-relative <see cref="SymbolQuad"/>s in baked-pixel space (<see cref="OneEm"/> = 24px), with no
+    /// text-size (placement applies <c>text-size/24</c>); point placement only. Y is up; line n's origin is
+    /// <c>-n * LineHeightEm * OneEm</c>, the font's ascent reference, with the baseline
+    /// <see cref="GlyphSdf.BaselineBelowReferencePx"/> below it. <c>Top</c>/<c>Bottom</c> anchor the layout-box
+    /// edges; <c>Centre</c> anchors the optical centre (<c>docs/road-shields-design.md</c>). Non-obvious why:
+    /// one forward pass bakes each line's justify shift as the line ends and a final pass adds the block-wide
+    /// anchor + offset, so no per-line width array is needed and the no-wrap path allocates nothing.
     /// </summary>
     public static class TextQuadLayout
     {
@@ -47,24 +28,11 @@ namespace MapRenderer.Core.Text
         private const float DefaultLineHeightEm = 1.2f;
 
         /// <summary>
-        /// How far below a line's reference origin that line's OPTICAL centre sits — the baseline
-        /// (<see cref="GlyphSdf.BaselineBelowReferencePx"/>), less half a cap height
-        /// (<see cref="GlyphSdf.NominalCapHeightEm"/>) — applied by <see cref="VerticalAnchorShiftPx"/>'s
-        /// <see cref="VerticalAnchor.Centre"/> case on the point path, and by
-        /// <see cref="CurvedTextLayout"/> on the along-line path (<c>docs/road-shields-design.md</c>).
-        /// Not the midpoint of the line box: the box's top edge carries the font's ascent slack, so the box
-        /// midpoint sits noticeably above the ink's actual optical centre.
-        /// <para>
-        /// The em conversion cancels exactly: the cap height is <c>17/24</c> em and <see cref="OneEm"/> is
-        /// 24, so the half-cap term is <c>0.5 · (17/24) · 24 = 8.5</c> baked px and the whole constant is
-        /// <c>26 − 8.5 = 17.5</c> — an exact value rather than an approximation, which is why the teeth can
-        /// pin it as a clean hand-derived literal.
-        /// </para>
-        /// <para>
-        /// It has a SECOND reader outside this type: <see cref="CurvedTextLayout"/> applies the same constant
-        /// to every along-line cell, so a curved symbol and a centred point symbol of the same string have the
-        /// same optical relationship to their anchor. One derivation site, two producers.
-        /// </para>
+        /// How far below a line's reference origin its OPTICAL centre sits: the baseline
+        /// (<see cref="GlyphSdf.BaselineBelowReferencePx"/>) less half a cap height, exactly
+        /// <c>26 − 8.5 = 17.5</c> baked px. The line-box midpoint sits higher, because the box top carries the
+        /// ascent slack. Non-local invariant: <see cref="VerticalAnchorShiftPx"/>'s Centre case and
+        /// <see cref="CurvedTextLayout"/> both apply it, so curved and centred point symbols align the same way.
         /// </summary>
         internal const float OpticalCentreBelowReferencePx = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * OneEm;
 
@@ -208,9 +176,8 @@ namespace MapRenderer.Core.Text
                 : options.Offset;
             float2 offsetShift = offsetShiftEm * OneEm;
 
-            // The per-line justify correction (baked in above, per line, as soon as each line's own
-            // width was known) plus this single block-wide constant reproduces the full
-            // anchor+justify+offset shift for every quad — see the class doc's algorithm-shape note.
+            // The per-line justify corrections baked in above plus this block-wide constant give every
+            // quad its full anchor + justify + offset shift (see the class doc).
             float globalX = blockWidth * (justifyFactor - hAlign) + offsetShift.x;
             float globalY = VerticalAnchorShiftPx(vertical, lineCount, lineHeightPx) + offsetShift.y;
 
@@ -264,13 +231,8 @@ namespace MapRenderer.Core.Text
             if (!isWhitespace)
             {
                 float2 cellSize = entry.CellSize;
-                // The glyph-PBF `Top` metric is TOP-referenced (the glyph's top edge sits `-Top` below a
-                // fixed top/ascent reference, so `-Top + Height` is constant across a font's baseline-resting
-                // glyphs). So anchor the cell's TOP edge at `baselineY + Top + Buffer` and grow DOWNWARD by
-                // the cell height — every no-descender glyph's bottom then lands on the same baseline
-                // regardless of its own height (short x-height letters and tall caps/ascenders align), and
-                // descenders extend below it. (Anchoring the BOTTOM at `baselineY + Top + Buffer` and growing
-                // up — the earlier bug — made short letters droop below the baseline.)
+                // The glyph-PBF `Top` metric is top-referenced, so anchor the cell's TOP edge at
+                // `baselineY + Top + Buffer` and grow down: no-descender glyphs then share one baseline.
                 float leftX = penX + entry.Left - GlyphSdf.Buffer;
                 float cellTopY = baselineY + entry.Top + GlyphSdf.Buffer;
                 float2 atlasSize = atlas.Size;
@@ -355,13 +317,10 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// The whole vertical anchoring rule in one place. <see cref="VerticalAnchor.Top"/> and
-        /// <see cref="VerticalAnchor.Bottom"/> anchor the block's LAYOUT-BOX edges;
-        /// <see cref="VerticalAnchor.Centre"/> anchors the block's OPTICAL centre — the
-        /// midpoint between the FIRST line's optical centre and the LAST line's, which is why it scales by
-        /// <c>(lineCount - 1)</c> rather than <c>lineCount</c>: line spacing is untouched, and the whole
-        /// block simply moves by one constant (<see cref="OpticalCentreBelowReferencePx"/>) regardless of
-        /// line count.
+        /// The whole vertical anchoring rule. <see cref="VerticalAnchor.Top"/> and <see cref="VerticalAnchor.Bottom"/>
+        /// anchor the layout-box edges; <see cref="VerticalAnchor.Centre"/> anchors the midpoint of the first and
+        /// last lines' optical centres, hence <c>(lineCount - 1)</c>, so the block moves by one constant
+        /// (<see cref="OpticalCentreBelowReferencePx"/>) whatever the line count.
         /// </summary>
         private static float VerticalAnchorShiftPx(VerticalAnchor vertical, int lineCount, float lineHeightPx) => vertical switch
         {
@@ -383,12 +342,9 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Radial offset (ems), resolved from the anchor: pure axis anchors (Left/Right/
-        /// Top/Bottom) push straight along that axis; corner anchors split into a diagonal
-        /// (RadialOffset/sqrt2 on each axis, preserving total magnitude); Center has no direction (0,0).
-        /// Signs push AWAY from the anchored edge — e.g. a Left anchor (block's left edge at the
-        /// anchor, text extending +x) pushes further +x; a Top anchor (text extending -y) pushes
-        /// further -y. Self-pinned by a golden; no MapLibre source consulted.
+        /// Radial offset (ems) from the anchor: an axis anchor pushes along its axis, a corner anchor splits
+        /// it diagonally (RadialOffset/sqrt2 per axis), and Center gives (0,0). Signs push away from the
+        /// anchored edge: a Left anchor pushes +x, a Top anchor pushes -y. Pinned by a golden.
         /// </summary>
         private static float2 ComputeRadialOffset(float hAlign, VerticalAnchor vertical, float radialOffsetEm)
         {

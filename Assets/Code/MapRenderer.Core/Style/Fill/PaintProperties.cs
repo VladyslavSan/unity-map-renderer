@@ -5,16 +5,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Fill
 {
     /// <summary>
-    /// The parsed MapLibre fill <b>paint</b> properties for a single fill style layer.
-    ///
-    /// Each <c>fill-*</c> key is read from the layer's <c>paint</c> sub-tree (via
-    /// <see cref="PropertyNames"/>) and collapsed into a single <see cref="StyleProperty{T}"/>:
-    /// one parsed <see cref="Expressions.Expression"/>, one typed default, and a
-    /// <c>Value → T</c> projection; <see cref="StyleProperty{T}.Kind"/> reads the expression's kind
-    /// directly, with no separate Kind/evaluator plumbing.
-    ///
-    /// Absent properties use the spec defaults; <see cref="IsInertFallback"/> is true when all are absent.
-    /// Engine-free; clean-room (public Style Spec, no MapLibre source).
+    /// The parsed MapLibre fill <b>paint</b> properties for a single fill style layer. Each <c>fill-*</c> key
+    /// becomes one <see cref="StyleProperty{T}"/>: a parsed <see cref="Expressions.Expression"/>, a typed
+    /// default, and a <c>Value → T</c> projection. Absent properties use the spec defaults;
+    /// <see cref="IsInertFallback"/> is true when all are absent.
     /// </summary>
     public sealed class PaintProperties
     {
@@ -144,9 +138,8 @@ namespace MapRenderer.Core.Style.Fill
             {
                 try
                 {
-                    // fill-antialias is a JSON BOOLEAN. Projecting it through AsNumber() threw
-                    // ExpressionEvaluationException into the catch below, so `false` silently became the
-                    // default 1 — the property parsed as its own opposite.
+                    // fill-antialias is a JSON boolean: an AsNumber() projection would throw into the catch
+                    // below and turn `false` into the default.
                     var candidate = new StyleProperty<bool>(antialiasJson, antialiasDefault, v => v.AsBool());
                     // fill-antialias must not be data-driven (Feature/Composite → the project default)
                     antialias = candidate.DependsOnFeature
@@ -187,12 +180,8 @@ namespace MapRenderer.Core.Style.Fill
             if (patternJson != null) anyPresent = true;
             string patternName = patternJson?.AsString(null);
 
-            // x-fill-pattern-metres (ENGINE EXTENSION, not spec): the pattern's tiling period in world
-            // units — the distance one full repetition spans — which switches this layer to world-absolute
-            // sizing. Absent — the normal case, and every stock MapLibre
-            // style — leaves the spec's screen-relative behaviour. A present-but-unusable value (non-numeric,
-            // zero, negative) also falls back rather than throwing, matching this parser's forward-compatible
-            // posture everywhere else: an unreadable extension must never cost you the layer.
+            // x-fill-pattern-metres (engine extension): a present, positive period switches the layer to
+            // world-absolute sizing; absent or unusable values keep screen-relative, so it never costs the layer.
             JsonValue patternPeriodJson = paint?.Get(PropertyNames.FillPatternMetres);
             FillPatternSizing patternSizing = FillPatternSizing.ScreenRelative;
             double patternWorldPeriodMetres = 0.0;

@@ -5,16 +5,10 @@ using UnityEngine.UI;
 namespace MapRenderer.Demo
 {
     /// <summary>
-    /// Screen-space attribution credit for the OpenFreeMap "Liberty" basemap (OpenStreetMap /
-    /// OpenMapTiles data). Displaying this credit is a licence condition whenever the map is shown to
-    /// the public — builds, preview videos, screenshots. MapLibre GL draws it automatically; because
-    /// we render the basemap ourselves, this component draws it instead.
-    ///
-    /// <para>Attach it to a GameObject in the <b>public</b> demo scene only (kept off the internal
-    /// <c>MapDemo</c> scene). Building the Canvas + Text in code — rather than a hand-placed UI Text —
-    /// keeps the exact required wording versioned and review-gated in <see cref="RequiredCredit"/>, so
-    /// it can't be silently deleted or mistyped in a scene asset. See <c>THIRD-PARTY-NOTICES.txt</c>
-    /// for the underlying licences (OpenStreetMap ODbL, OpenMapTiles CC BY 4.0, OpenFreeMap MIT).</para>
+    /// Screen-space attribution credit for the OpenFreeMap "Liberty" basemap, a licence condition whenever
+    /// the map is shown to the public (licences in <c>THIRD-PARTY-NOTICES.txt</c>). Attach it in the public
+    /// demo scene only, not <c>MapDemo</c>. It builds the Canvas + Text in code, so the required wording
+    /// lives in <see cref="RequiredCredit"/> under review, not in a scene asset where an edit goes unseen.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class MapAttributionOverlay : MonoBehaviour

@@ -1,9 +1,5 @@
-// Materials/MaterialsTests.cs — material asset templates, unlit shader twins, editor shader GUI
-// hierarchy, render-state/tweaker contracts, and paint-color carrier composition.
-//
-// MapMaterialSetValidationTests.cs stays its own file: its `using System;` (for InvalidOperationException)
-// would collide with the bare `Object.DestroyImmediate` calls here (System.Object vs UnityEngine.Object,
-// CS0104) — see docs/conventions-short.md's "Plain-import collisions" note.
+// Material templates, unlit shader twins, shader GUIs, render-state/tweaker contracts and paint-colour
+// carriers. MapMaterialSetValidationTests.cs is separate: its `using System;` makes bare Object ambiguous.
 //
 // Contents:
 //   MapFillMaterialTests                — the committed MapFill.mat/MapLine.mat template
@@ -93,10 +89,8 @@ namespace MapRenderer.Tests.Materials
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
             Assume.That(mat, Is.Not.Null, "MapFill.mat not found.");
 
-            // _BaseColor is the map paint property (MapLibre-style fill-color knob).
-            // Named _BaseColor, not _Color, so URP's legacy _BaseColor alias has no bare _Color to
-            // clobber to {1,1,1} on import/Editor-open. Assert the ACTUAL styled RGBA — a white
-            // clobber {1,1,1,1} would fail on r/g/b here.
+            // _BaseColor, not _Color, so URP's legacy alias has no _Color to clobber to white on import.
+            // Asserting the styled RGBA catches a white clobber.
             Color color = mat.GetColor("_BaseColor");
             Assert.That(color.r, Is.EqualTo(0.4f).Within(BaseColorTol),
                 $"MapFill.mat _BaseColor.r must be ~0.4 (got {color.r:F4}). A white clobber → 1.0 fails this.");
@@ -153,14 +147,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void MapLineMat_ResolvesToTransparentQueue()
         {
-            // Regression guard. The line is transparent
-            // (lit rendering — Queue=Transparent>=2501 drives the
-            // painter's-algorithm coplanar fill/line ordering; ZWrite Off). With no URP
-            // BaseShaderGUI, the queue is NOT auto-resolved from _Surface/_QueueControl on import
-            // (our raw-ShaderGUI ValidateMaterial only syncs keywords — it never touches renderQueue).
-            // The transparent queue now comes from MapLine.mat's serialized custom render queue (3000)
-            // and the SubShader's Queue=Transparent tag. Material.renderQueue returns the resolved value,
-            // so this asserts the import outcome directly: a fresh batch import keeps the line transparent.
+            // The line must import transparent (queue >= 2501) for painter ordering. No URP BaseShaderGUI
+            // resolves the queue, so it comes from MapLine.mat's custom queue and the SubShader tag.
             var mat = AssetDatabase.LoadAssetAtPath<Material>(LineMatPath);
             Assume.That(mat, Is.Not.Null, "MapLine.mat not found — run MapLineMat_Exists first.");
 
@@ -178,31 +166,16 @@ namespace MapRenderer.Tests.Materials
     // MapFillUnlitMaterialTests — Map/FillUnlit twin
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // T1 (property-parity / silent-bind guard): every ShaderProperties.PropertyId that
-    //   MaterialFactory.BindFillPaintToApplier binds (MaterialFactory.cs:59-98) must (a) exist on the UNLIT
-    //   base material via Material.HasProperty AND (b) be a real UnityPerMaterial CBUFFER member of
-    //   Fill_UnlitInput.hlsl. Both halves are load-bearing and NEITHER alone suffices: HasProperty reads the
-    //   .shader Properties BLOCK, so a prop present there but absent (or #define-shadowed) in the CBUFFER
-    //   passes (a) yet the bound value never reaches the shader — the real silent-bind no-op. (This exact
-    //   defect once shipped: _Opacity kept in the Properties block but replaced by `#define _Opacity 1.0` in
-    //   the CBUFFER; HasProperty stayed true, opacity was silently pinned to 1. Check (b) is what catches it.)
-    // T2 (shared-vertex-layout structural): FillUnlit's forward Attributes semantics must be a SUBSET of what
-    //   StyledFillTileBuilder actually emits (its FillVertexDescriptors array) — the load-bearing invariant
-    //   that there is one mesh, one vertex layout, consumed by both the Lit and Unlit twins.
-    // T3 (no-lighting structural): Fill_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
-    //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
-    //   merely gating it behind an always-off keyword.
-    //
-    // Nothing SELECTS Map/FillUnlit at runtime yet (mode-selection plumbing is a later stage) — these teeth
-    // are the structural proof the twin is correct in isolation; visual confirmation is the maintainer's.
-    //
-    // Clean-room: structural/text-parse only, no MapLibre source referenced.
+    // Map/FillUnlit, structurally: every prop BindFillPaintToApplier binds is on the material AND a real
+    // CBUFFER member; its Attributes are a subset of the builder's vertex layout; its fragment has no lighting.
+    // Non-obvious why: the CBUFFER check exists because HasProperty reads the Properties block, so a
+    // #define-shadowed CBUFFER member passes it while the bound value never reaches the shader.
     [TestFixture]
     public class MapFillUnlitMaterialTests : BaseTestFixture
     {
         private const string ShaderName = "Map/FillUnlit";
 
-        // ── T1 — property parity / silent-bind guard ────────────────────────────────────────────
+        // ── Property parity / silent-bind guard ────────────────────────────────────────────
         [Test]
         public void FillUnlit_BoundPaintProperties_ExistOnUnlitMaterial()
         {
@@ -211,12 +184,8 @@ namespace MapRenderer.Tests.Materials
                 $"Shader '{ShaderName}' not found — FillUnlit.shader missing or failed to compile.");
 
             var mat = Track(new Material(shader));
-            // The exact set MaterialFactory.BindFillPaintToApplier binds (re-derived by reading that
-            // method, MaterialFactory.cs:59-104 — not copied from the stage brief). Each carries its
-            // PropertyId (for HasProperty), its C# identifier (for messages), and its shader-name
-            // string constant (for the CBUFFER-membership check). Opacity and BaseColor are the shared
-            // registry; the rest are Fill-only. None of the eight is a texture, so all belong in
-            // UnityPerMaterial.
+            // The set MaterialFactory.BindFillPaintToApplier binds, as (PropertyId, C# name, shader name).
+            // None is a texture, so all belong in UnityPerMaterial.
             var boundProps = new (int id, string name, string shaderName)[]
             {
                 (ShaderProperties.PropertyId.BaseColor,                nameof(ShaderProperties.PropertyId.BaseColor),                ShaderProperties.PropertyNames.BaseColor),
@@ -240,10 +209,7 @@ namespace MapRenderer.Tests.Materials
                 "Map/FillUnlit's Properties block is missing properties MaterialFactory.BindFillPaintToApplier " +
                 $"binds — a bind onto these would be a SILENT no-op: {string.Join(", ", missingProperty)}");
 
-            // (b) CBUFFER membership: HasProperty passes on a Properties-block entry EVEN WHEN the
-            // UnityPerMaterial member is absent or #define-shadowed — the shader then reads a literal,
-            // not the bound value, a silent no-op (a) cannot see. Assert each bound prop is a real
-            // CBUFFER member so the value the bind writes actually reaches the shader.
+            // (b) Each bound prop is a real CBUFFER member, which HasProperty cannot see (see the class comment).
             HashSet<string> cbufferMembers = ShaderPropertyParser.ParseCbufferMembers(
                 ShaderPropertyParser.MapShaderPath("Fill_UnlitInput.hlsl"));
 
@@ -258,13 +224,11 @@ namespace MapRenderer.Tests.Materials
                 $"#define-shadowed member): {string.Join(", ", notInCbuffer)}. HasProperty cannot see this.");
         }
 
-        // ── T2 — shared-vertex-layout structural ────────────────────────────────────────────────
+        // ── Shared-vertex-layout structural ────────────────────────────────────────────────
         [Test]
         public void FillUnlitForwardPass_AttributesSemantics_AreSubsetOfBuilderEmittedStreams()
         {
-            // The mesh-emitted semantic set — StyledFillTileBuilder's FillVertexDescriptors
-            // (StyledFillTileBuilder.cs): Position, Normal, Tangent, Color, TexCoord0, TexCoord3.
-            // Background reuses this same builder (BackgroundQuad), so the same set covers both.
+            // StyledFillTileBuilder's FillVertexDescriptors; the background quad uses the same builder.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
                 "POSITION", "NORMAL", "TANGENT", "COLOR", "TEXCOORD0", "TEXCOORD3",
@@ -287,16 +251,13 @@ namespace MapRenderer.Tests.Materials
                 "a vertex-layout fork is impossible by construction (unlit rendering mode).");
         }
 
-        // ── T3 — no-lighting structural ─────────────────────────────────────────────────────────
+        // ── No-lighting structural ─────────────────────────────────────────────────────────
         [Test]
         public void FillUnlitForwardPass_ReferencesNoLightingCalls()
         {
             string path = ShaderPropertyParser.MapShaderPath("Fill_UnlitForwardPass.hlsl");
             Assume.That(File.Exists(path), Is.True, $"{path} not found.");
-            // Scan CODE only — the mirror's provenance header names these tokens to document their ABSENCE
-            // ("no UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit composes the colour instead"),
-            // which is exactly the self-documenting prose a naive Contains() would false-positive on. Strip
-            // comments first so only a real lighting CALL trips the tooth.
+            // Scan CODE only: the file's header comment names these tokens to document their absence.
             string text = ShaderPropertyParser.StripHlslComments(File.ReadAllText(path));
 
             var forbidden = new[] { "SAMPLE_GI", "UniversalFragmentPBR", "OUTPUT_SH4" };
@@ -315,43 +276,16 @@ namespace MapRenderer.Tests.Materials
     // MapFillExtrusionUnlitMaterialTests — FillExtrusionUnlit twin
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // T1 (property-parity / silent-bind guard): every ShaderProperties.PropertyId that
-    //   MaterialFactory.BindFillExtrusionPaintToApplier binds (MaterialFactory.cs:148-179) must (a) exist on
-    //   the UNLIT base material via Material.HasProperty AND (b) be a real UnityPerMaterial CBUFFER member of
-    //   FillExtrusion_UnlitInput.hlsl. Both halves are load-bearing and NEITHER alone suffices — see
-    //   MapFillUnlitMaterialTests' T1 for the exact defect this catches (a Properties-block entry surviving
-    //   while the CBUFFER member is dropped or #define-shadowed; HasProperty alone cannot see it).
-    // T2 (shared-vertex-layout structural): FillExtrusionUnlit's forward Attributes semantics must be a SUBSET
-    //   of what StyledFillExtrusionTileBuilder actually emits (its VertexDescriptors array,
-    //   StyledFillExtrusionTileBuilder.cs:114-121) — the load-bearing invariant that there is one mesh, one
-    //   vertex layout, consumed by both the Lit and Unlit twins.
-    // T3 (no-lighting structural): FillExtrusion_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
-    //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
-    //   merely gating it behind an always-off keyword.
-    // T4 (depth-regime): the elevated-3D contract — ZWrite ON after FillExtrusionTweaker.ApplyElevatedContract —
-    //   must survive on the UNLIT base material exactly as it does on the Lit one (MaterialTweakerTests'
-    //   FillExtrusionTweaker_ApplyElevatedContract_SetsDepthWriteOpaqueAndWhiteIdentity is the Lit-shader
-    //   sibling of this tooth). Buildings must keep occupying the depth buffer under unlit — Unlit ≠ 2D.
-    //   SCOPE NOTE: this only proves the shared tweaker still reaches an unlit-shader material — it CANNOT
-    //   discriminate a shader that stops binding _ZWrite to the ShaderLab ZWrite command (Unity's Material
-    //   system exposes _ZWrite/_Cull/_SrcBlend/etc. as material properties regardless of Properties-block
-    //   declaration, so HasProperty(_ZWrite) cannot be made false by editing this shader — confirmed
-    //   empirically, see the dev report). T4b below is the tooth that actually catches THAT regression.
-    // T4b (render-state binding, structural): FillExtrusionUnlit.shader's forward-pass render state must bind
-    //   ZWrite to the [_ZWrite] material property, not a hardcoded literal — the thing T4 cannot see. A
-    //   hardcoded `ZWrite Off` would leave every Material-API check in T4 green while the GPU never receives
-    //   the elevated contract's ZWrite-On assertion at all.
-    //
-    // Nothing SELECTS Map/FillExtrusionUnlit at runtime yet (mode-selection plumbing is a later stage) — these
-    // teeth are the structural proof the twin is correct in isolation; visual confirmation is the maintainer's.
-    //
-    // Clean-room: structural/text-parse only, no MapLibre source referenced.
+    // Map/FillExtrusionUnlit, structurally: the same bind/CBUFFER, vertex-layout and no-lighting checks as
+    // MapFillUnlitMaterialTests, plus ZWrite ON after ApplyElevatedContract, since buildings must still fill
+    // the depth buffer unlit. Limitation: Unity exposes _ZWrite on any material, so only the forward pass's
+    // [_ZWrite] binding test catches a hard-coded `ZWrite Off`.
     [TestFixture]
     public class MapFillExtrusionUnlitMaterialTests : BaseTestFixture
     {
         private const string ShaderName = "Map/FillExtrusionUnlit";
 
-        // ── T1 — property parity / silent-bind guard ────────────────────────────────────────────
+        // ── Property parity / silent-bind guard ────────────────────────────────────────────
         [Test]
         public void FillExtrusionUnlit_BoundPaintProperties_ExistOnUnlitMaterial()
         {
@@ -384,10 +318,7 @@ namespace MapRenderer.Tests.Materials
                 "MaterialFactory.BindFillExtrusionPaintToApplier binds — a bind onto these would be a " +
                 $"SILENT no-op: {string.Join(", ", missingProperty)}");
 
-            // (b) CBUFFER membership: HasProperty passes on a Properties-block entry EVEN WHEN the
-            // UnityPerMaterial member is absent or #define-shadowed — the shader then reads a literal,
-            // not the bound value, a silent no-op (a) cannot see. Assert each bound prop is a real
-            // CBUFFER member so the value the bind writes actually reaches the shader.
+            // (b) Each bound prop is a real CBUFFER member, which HasProperty cannot see.
             HashSet<string> cbufferMembers = ShaderPropertyParser.ParseCbufferMembers(
                 ShaderPropertyParser.MapShaderPath("FillExtrusion_UnlitInput.hlsl"));
 
@@ -403,14 +334,12 @@ namespace MapRenderer.Tests.Materials
                 "HasProperty cannot see this.");
         }
 
-        // ── T2 — shared-vertex-layout structural ────────────────────────────────────────────────
+        // ── Shared-vertex-layout structural ────────────────────────────────────────────────
         [Test]
         public void FillExtrusionUnlitForwardPass_AttributesSemantics_AreSubsetOfBuilderEmittedStreams()
         {
-            // The mesh-emitted semantic set — StyledFillExtrusionTileBuilder's VertexDescriptors
-            // (StyledFillExtrusionTileBuilder.cs:114-121): Position, Normal, Tangent, Color, TexCoord3,
-            // TexCoord4. UNLIKE Fill's builder, TEXCOORD0-2 are NOT supplied (that file's own
-            // comment) — the unlit forward pass must not require them either.
+            // StyledFillExtrusionTileBuilder's VertexDescriptors. Unlike fill, TEXCOORD0-2 are absent, so the
+            // unlit pass must not require them.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
                 "POSITION", "NORMAL", "TANGENT", "COLOR", "TEXCOORD3", "TEXCOORD4",
@@ -433,15 +362,13 @@ namespace MapRenderer.Tests.Materials
                 "twin does — a vertex-layout fork is impossible by construction (unlit rendering mode).");
         }
 
-        // ── T3 — no-lighting structural ─────────────────────────────────────────────────────────
+        // ── No-lighting structural ─────────────────────────────────────────────────────────
         [Test]
         public void FillExtrusionUnlitForwardPass_ReferencesNoLightingCalls()
         {
             string path = ShaderPropertyParser.MapShaderPath("FillExtrusion_UnlitForwardPass.hlsl");
             Assume.That(File.Exists(path), Is.True, $"{path} not found.");
-            // Scan CODE only — the mirror's provenance header names these tokens to document their ABSENCE,
-            // which is exactly the self-documenting prose a naive Contains() would false-positive on. Strip
-            // comments first so only a real lighting CALL trips the tooth.
+            // Scan CODE only: the file's header comment names these tokens to document their absence.
             string text = ShaderPropertyParser.StripHlslComments(File.ReadAllText(path));
 
             var forbidden = new[] { "SAMPLE_GI", "UniversalFragmentPBR", "OUTPUT_SH4" };
@@ -457,13 +384,9 @@ namespace MapRenderer.Tests.Materials
                 "by " + nameof(FillExtrusionUnlitForwardPass_ShadesFacesAgainstMainLight) + ".");
         }
 
-        // ── T5 — the unlit fill-extrusion pass shades faces against the scene's main light ──────────
-        // Without this the wall + roof faces render the identical flat colour (a solid block). The pass must
-        // carry the world face normal AND modulate albedo by a half-Lambert off the main light's DIRECTION.
-        // Structural (headless can't render fragments); RED-verify by deleting the `albedo *=` line or the
-        // normalWS carry. Scans CODE only (StripHlslComments) so the shading's own doc comments can't satisfy
-        // it. Counterpart to the bootstrap half (DirectionalLightBootstrapTests, which guarantees the light
-        // exists); this pins that the shader actually consumes it.
+        // ── The unlit fill-extrusion pass shades faces against the scene's main light ──────────────
+        // Limitation: headless runs render no fragments, so this checks CODE for the normalWS carry and the
+        // half-Lambert `albedo *=`; without them walls and roofs render one flat colour.
         [Test]
         public void FillExtrusionUnlitForwardPass_ShadesFacesAgainstMainLight()
         {
@@ -481,14 +404,8 @@ namespace MapRenderer.Tests.Materials
                 "orientations differ — otherwise unlit 3D buildings read as flat solid blocks.");
         }
 
-        // ── T4 — depth-regime: the elevated-3D contract must survive on the UNLIT base too ──────
-        // NOTE: RED-verified against the shared FillExtrusionTweaker.ApplyElevatedContract (temporarily
-        // disabling its SetDepthWrite call), NOT against this shader — see the file header's scope note.
-        // Editing FillExtrusionUnlit.shader's Properties block (or even removing every [_ZWrite] reference
-        // from its ShaderLab commands) left this test green: Unity's Material system exposes the
-        // render-state property names (_ZWrite/_Cull/_SrcBlend/…) regardless of the shader's own
-        // declarations, so HasProperty(_ZWrite) cannot be made false from this file. T4b is the tooth that
-        // actually discriminates a broken _ZWrite binding.
+        // ── T4 — depth regime: the elevated-3D contract must survive on the UNLIT base too ─────
+        // Limitation: this catches a broken ApplyElevatedContract, not a broken shader [_ZWrite] binding.
         [Test]
         public void FillExtrusionUnlit_KeepsZWriteOn_AfterElevatedContract()
         {
@@ -497,9 +414,8 @@ namespace MapRenderer.Tests.Materials
                 $"Shader '{ShaderName}' not found — FillExtrusionUnlit.shader missing or failed to compile.");
 
             var mat = Track(new Material(shader));
-            // Simulate a base left in the flat/transparent state (as the Lit-shader sibling tooth does,
-            // MaterialTweakerTests.FillExtrusionTweaker_ApplyElevatedContract_SetsDepthWriteOpaqueAndWhiteIdentity)
-            // — the elevated contract must OVERRIDE it, on the unlit material exactly as it does on Lit's.
+            // Start from the flat/transparent state; the elevated contract must OVERRIDE it, as on the Lit
+            // material (MaterialTweakerTests).
             mat.SetFloat(ShaderProperties.PropertyNames.ZWrite, 0f);
 
             FillExtrusionTweaker.ApplyElevatedContract(mat);
@@ -509,7 +425,7 @@ namespace MapRenderer.Tests.Materials
                 "occupy the depth buffer to self-occlude even under unlit rendering (Unlit ≠ 2D).");
         }
 
-        // ── T4b — render-state binding, structural: catches what T4 (Material-API only) cannot see ──
+        // ── Render-state binding, structural: catches what T4 (Material-API only) cannot see ──
         [Test]
         public void FillExtrusionUnlit_ForwardRenderState_BindsZWriteToMaterialProperty()
         {
@@ -531,40 +447,14 @@ namespace MapRenderer.Tests.Materials
     // MapLineUnlitMaterialTests — Map/LineUnlit twin
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // T1 (property-parity / silent-bind guard): every ShaderProperties.PropertyId that
-    //   MaterialFactory.BindLinePaintToApplier binds or directly sets (MaterialFactory.cs:259-320) must (a)
-    //   exist on the UNLIT base material via Material.HasProperty AND (b) be a real UnityPerMaterial CBUFFER
-    //   member of Line_UnlitInput.hlsl. Both halves are load-bearing and NEITHER alone suffices — see
-    //   MapFillUnlitMaterialTests' T1 for the exact defect this catches (a Properties-block entry surviving
-    //   while the CBUFFER member is dropped or #define-shadowed; HasProperty alone cannot see it).
-    // T2 (shared-vertex-layout structural): LineUnlit's forward pass consumes LineAttributes — the SAME struct
-    //   every line pass (Lit and Unlit) shares, defined once in Line_VertexExtrude.hlsl (reused VERBATIM) — so
-    //   this asserts THAT struct's semantics are a SUBSET of what StyledLineTileBuilder actually emits
-    //   (LineVertexDescriptors, StyledLineTileBuilder.cs) — the load-bearing invariant that there is one mesh,
-    //   one vertex layout, consumed by both twins. UNLIKE Fill/FillExtrusion, the line builder
-    //   never emits TANGENT.
-    // T3 (no-lighting structural): Line_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
-    //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
-    //   merely gating it behind an always-off keyword.
-    // T4 (AA-preserved): line antialiasing is NOT lighting — it is the LineCoverage(...)
-    //   straddle/gap/blur/dash formula owned by the shared Line_VertexExtrude.hlsl — so unlike T3, the unlit
-    //   forward pass MUST reference it. Asserts (a) Line_UnlitForwardPass.hlsl's code calls LineCoverage( and
-    //   (b) LineUnlit.shader declares the same AA/hairline keyword pragmas the Lit twin's ForwardLit pass does
-    //   (_EDGE_ANTIALIASING_OFF, _HAIRLINE_SOLID_CORE, _HAIRLINE_HARD). RED-verify (a) by stubbing the call site
-    //   to a literal (e.g. `float coverage = 1.0;`) — the failure mode a shallow "flat unlit line" impl would
-    //   actually ship, since a flat fragment technically compiles and renders something plausible without ever
-    //   touching LineCoverage. RED-verify (b) by deleting one of the three keyword pragmas.
-    //
-    // Nothing SELECTS Map/LineUnlit at runtime yet (mode-selection plumbing is a later stage) — these teeth are
-    // the structural proof the twin is correct in isolation; visual AA/dash fidelity is the maintainer's.
-    //
-    // Clean-room: structural/text-parse only, no MapLibre source referenced.
+    // Map/LineUnlit: the same bind/CBUFFER, vertex-layout (no TANGENT) and no-lighting checks as fill, and AA
+    // survives: the pass calls LineCoverage( and declares the Lit twin's AA pragmas.
     [TestFixture]
     public class MapLineUnlitMaterialTests : BaseTestFixture
     {
         private const string ShaderName = "Map/LineUnlit";
 
-        // ── T1 — property parity / silent-bind guard ────────────────────────────────────────────
+        // ── Property parity / silent-bind guard ────────────────────────────────────────────
         [Test]
         public void LineUnlit_BoundPaintProperties_ExistOnUnlitMaterial()
         {
@@ -573,10 +463,8 @@ namespace MapRenderer.Tests.Materials
                 $"Shader '{ShaderName}' not found — LineUnlit.shader missing or failed to compile.");
 
             var mat = Track(new Material(shader));
-            // The exact set MaterialFactory.BindLinePaintToApplier binds or directly Sets (re-derived by
-            // reading that method, MaterialFactory.cs:259-320 — not copied from the stage brief): the
-            // shared BaseColor/Opacity, then the device-px family, then the two mode/dash flags it sets
-            // directly (WidthIsPixels via mat.SetFloat; DashArray/DashCount via ApplyLineDashArray).
+            // What BindLinePaintToApplier binds or sets: BaseColor/Opacity, the device-px family, WidthIsPixels,
+            // and DashArray/DashCount.
             var boundProps = new (int id, string name, string shaderName)[]
             {
                 (ShaderProperties.PropertyId.BaseColor,                nameof(ShaderProperties.PropertyId.BaseColor),                ShaderProperties.PropertyNames.BaseColor),
@@ -604,10 +492,7 @@ namespace MapRenderer.Tests.Materials
                 "Map/LineUnlit's Properties block is missing properties MaterialFactory.BindLinePaintToApplier " +
                 $"binds — a bind onto these would be a SILENT no-op: {string.Join(", ", missingProperty)}");
 
-            // (b) CBUFFER membership: HasProperty passes on a Properties-block entry EVEN WHEN the
-            // UnityPerMaterial member is absent or #define-shadowed — the shader then reads a literal,
-            // not the bound value, a silent no-op (a) cannot see. Assert each bound prop is a real
-            // CBUFFER member so the value the bind writes actually reaches the shader.
+            // (b) Each bound prop is a real CBUFFER member, which HasProperty cannot see.
             HashSet<string> cbufferMembers = ShaderPropertyParser.ParseCbufferMembers(
                 ShaderPropertyParser.MapShaderPath("Line_UnlitInput.hlsl"));
 
@@ -622,14 +507,12 @@ namespace MapRenderer.Tests.Materials
                 $"#define-shadowed member): {string.Join(", ", notInCbuffer)}. HasProperty cannot see this.");
         }
 
-        // ── T2 — shared-vertex-layout structural ────────────────────────────────────────────────
+        // ── Shared-vertex-layout structural ────────────────────────────────────────────────
         [Test]
         public void LineUnlit_AttributesSemantics_AreSubsetOfBuilderEmittedStreams()
         {
-            // The mesh-emitted semantic set — StyledLineTileBuilder's LineVertexDescriptors
-            // (StyledLineTileBuilder.cs): Position, Normal, Color, TexCoord0, TexCoord1, TexCoord2. UNLIKE
-            // Fill/FillExtrusion's builders, TANGENT is never emitted — the line derives its own tangent
-            // frame in Line_VertexExtrude.hlsl instead (see that file's Line_VertexExtrude doc).
+            // StyledLineTileBuilder's LineVertexDescriptors. No TANGENT: Line_VertexExtrude.hlsl derives its
+            // own tangent frame.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
                 "POSITION", "NORMAL", "COLOR", "TEXCOORD0", "TEXCOORD1", "TEXCOORD2",
@@ -654,15 +537,13 @@ namespace MapRenderer.Tests.Materials
                 "impossible by construction (unlit rendering mode).");
         }
 
-        // ── T3 — no-lighting structural ─────────────────────────────────────────────────────────
+        // ── No-lighting structural ─────────────────────────────────────────────────────────
         [Test]
         public void LineUnlitForwardPass_ReferencesNoLightingCalls()
         {
             string path = ShaderPropertyParser.MapShaderPath("Line_UnlitForwardPass.hlsl");
             Assume.That(File.Exists(path), Is.True, $"{path} not found.");
-            // Scan CODE only — the mirror's provenance header names these tokens to document their ABSENCE,
-            // which is exactly the self-documenting prose a naive Contains() would false-positive on. Strip
-            // comments first so only a real lighting CALL trips the tooth.
+            // Scan CODE only: the file's header comment names these tokens to document their absence.
             string text = ShaderPropertyParser.StripHlslComments(File.ReadAllText(path));
 
             var forbidden = new[] { "SAMPLE_GI", "UniversalFragmentPBR", "OUTPUT_SH4" };
@@ -680,10 +561,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void LineUnlit_PreservesLineAntialiasing()
         {
-            // (a) The forward pass's CODE must call LineCoverage( — line antialiasing (straddle AA, gap-hole
-            // cut, opt-in blur, dash coverage) lives entirely in that function (Line_VertexExtrude.hlsl,
-            // reused verbatim); a flat/stubbed fragment would compile and render *something* without ever
-            // reaching it, which is exactly the defect this tooth exists to catch.
+            // (a) The pass's CODE calls LineCoverage(, which owns all line AA and dash coverage; a flat
+            // fragment would still compile and render something.
             string forwardPassPath = ShaderPropertyParser.MapShaderPath("Line_UnlitForwardPass.hlsl");
             Assume.That(File.Exists(forwardPassPath), Is.True, $"{forwardPassPath} not found.");
             string forwardPassText = ShaderPropertyParser.StripHlslComments(File.ReadAllText(forwardPassPath));
@@ -693,10 +572,8 @@ namespace MapRenderer.Tests.Materials
                 "survive the unlit fragment. A stubbed/hardcoded coverage value would compile and render " +
                 "plausibly while silently dropping antialiasing, the gap-hole cut, line-blur and dashing.");
 
-            // (b) The shader must declare the SAME AA/hairline keyword pragmas the Lit twin's ForwardLit
-            // pass does — without them the vertex-stage extrusion and fragment-stage coverage formula can
-            // never diverge from their compiled-out defaults, silently pinning every unlit line to one
-            // hairline strategy regardless of what the style/material asks for.
+            // (b) The Lit twin's AA/hairline keyword pragmas; without them every unlit line compiles to one
+            // hairline strategy whatever the material asks for.
             string shaderPath = ShaderPropertyParser.MapShaderPath("LineUnlit.shader");
             Assume.That(File.Exists(shaderPath), Is.True, $"{shaderPath} not found.");
             string shaderText = ShaderPropertyParser.StripHlslComments(File.ReadAllText(shaderPath));
@@ -718,11 +595,8 @@ namespace MapRenderer.Tests.Materials
     // MapShaderGUITests — the map material inspectors subclass the raw ShaderGUI directly
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // STRUCTURAL — the map material inspectors subclass the RAW UnityEditor.ShaderGUI.
-    //
-    // There is no UCL-derived MapLitShaderGUI: the inspectors subclass the raw ShaderGUI directly (no
-    // URP editor dependency — the test asmdef does not reference Unity.RenderPipelines.Universal.Editor).
-    // The inspector LAYOUT itself is a manual in-editor check; this only pins the type hierarchy.
+    // STRUCTURAL — the map material inspectors subclass the RAW UnityEditor.ShaderGUI, with no URP editor
+    // dependency. It pins the type hierarchy only; the inspector layout is a manual check.
     [TestFixture]
     public class MapShaderGUITests
     {
@@ -815,9 +689,8 @@ namespace MapRenderer.Tests.Materials
     // MaterialRenderStateTests — the typed render-state layer round-trips onto ShaderLab props
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // The typed render-state layer maps Unity rendering enums → the underlying ShaderLab
-    // int properties (_ZWrite/_ZTest/_Cull/_SrcBlend/_DstBlend/_BlendOp). Pure property round-trip on a
-    // Map/Fill material; no GUI, no scene.
+    // The typed render-state layer round-trips Unity rendering enums onto the ShaderLab int properties
+    // (_ZWrite/_ZTest/_Cull/_SrcBlend/_DstBlend/_BlendOp) of a Map/Fill material.
     [TestFixture]
     public class MaterialRenderStateTests
     {
@@ -880,14 +753,8 @@ namespace MapRenderer.Tests.Materials
     // MaterialTweakerTests — runtime painter/elevated contracts + editor keyword sync
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // The split of material setup into runtime vs editor:
-    //   1. RUNTIME tweakers (Fill/Line) own only the render-state contract: ApplyPainterContract sets depth +
-    //      per-type blend + white colour identity from scratch.
-    //   2. EDITOR keyword sync lives in the shader GUIs' ValidateMaterial (BaseShaderGUI + LitShaderGUI), the
-    //      clean-room counterpart of URP's SetMaterialKeywords. It derives shader-feature keywords from the
-    //      MATERIAL's property values (never a MaterialProperty) and runs the editor-only FixupEmissiveFlag.
-    //   3. On the committed .mat baseline (no maps, black emission, opaque) the derived keyword set is EMPTY —
-    //      proving the keyword sync is behaviour-neutral (parity).
+    // Runtime tweakers own the render-state contract (depth, blend, white identity). The shader GUIs'
+    // ValidateMaterial derives the editor keywords from material values and leaves the committed .mat unchanged.
     [TestFixture]
     public class MaterialTweakerTests : BaseTestFixture
     {
@@ -941,11 +808,7 @@ namespace MapRenderer.Tests.Materials
         }
 
         // ── 1b. Elevated-3D contract: fill-extrusion is opaque + depth-writing, NOT the flat painter state ──
-        // These two are the guard: fill-extrusion is the first geometry that must occupy the depth buffer
-        // (so buildings — and a single building's own near/far walls, one mesh, unsortable — occlude via
-        // depth, not draw order). Routing it through the FILL painter contract (ZWrite Off + transparent)
-        // silently defeats that. RED-verify: revert ApplyElevatedContract to FillTweaker.ApplyPainterContract
-        // (or point CreateFillExtrusionMaterial back at it) and both fail.
+        // A building's own walls are one unsortable mesh, so they must occlude by depth, not draw order.
         [Test]
         public void FillExtrusionTweaker_ApplyElevatedContract_SetsDepthWriteOpaqueAndWhiteIdentity()
         {
@@ -989,11 +852,7 @@ namespace MapRenderer.Tests.Materials
         }
 
         // ── 2. Editor keyword sync (the shader GUIs' ValidateMaterial) reads the material ──
-        // Emission is driven by the material's GI emissive flags (URP's mechanism), not the colour directly.
-        // ValidateMaterial first runs the editor-only MaterialEditor.FixupEmissiveFlag, which reconciles the
-        // flag with the emission colour, then derives the keyword from (flags & AnyEmissive). So the OFF state
-        // must come from the flag itself (EmissiveIsBlack, no Baked/Realtime bit); the ON state needs a
-        // Baked/Realtime intent with a non-black colour (else Fixup would re-flag it black).
+        // Emission follows the GI flags: OFF is EmissiveIsBlack, ON needs Baked/Realtime and a non-black colour.
         [Test]
         public void FillShaderGUI_ValidateMaterial_EmissionTogglesFromGI()
         {
@@ -1022,11 +881,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void FillExtrusionShaderGUI_ValidateMaterial_EmissionTogglesFromGI()
         {
-            // Fill-extrusion needs a material editor. Map/FillExtrusion mirrors full URP Lit with
-            // shader_feature keywords (_EMISSION, _NORMALMAP, …), so without a ShaderGUI running the editor
-            // keyword sync those keywords are never derived from the material's properties and features like
-            // emission silently do nothing. FillExtrusionShaderGUI declares no keyword of its own, so this
-            // exercises that it correctly INHERITS LitShaderGUI's sync.
+            // Map/FillExtrusion's shader_feature keywords need a ShaderGUI to sync them; FillExtrusionShaderGUI
+            // must INHERIT LitShaderGUI's sync.
             var m = Track(NewFillExtrusion());
             m.SetColor(ShaderProperties.PropertyNames.EmissionColor, Color.black);
             m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.EmissiveIsBlack;
@@ -1043,21 +899,16 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void LineShaderGUI_ValidateMaterial_SyncsEdgeAntialiasingKeyword()
         {
-            // _EdgeAntialiasing is declared [ToggleUI], which is UI-only and attaches NO keyword.
-            // LineShaderGUI.ValidateMaterial is the ONLY thing that turns the float into
-            // _EDGE_ANTIALIASING_OFF — delete that override and the shipped AA toggle is completely inert
-            // while every other test in the repo stays green. This is its only guard.
+            // [ToggleUI] attaches no keyword; only LineShaderGUI.ValidateMaterial sets _EDGE_ANTIALIASING_OFF,
+            // and this is the only test of it.
             var m = Track(NewLine());
             m.SetFloat(ShaderProperties.Line.PropertyNames.EdgeAntialiasing, 0f);
             new LineShaderGUI().ValidateMaterial(m);
             Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.EdgeAntialiasingOff),
                 "_EdgeAntialiasing = 0 → _EDGE_ANTIALIASING_OFF must be set.");
 
-            // The POLARITY tooth. _OFF polarity is a build-correctness requirement, not a style choice:
-            // a shader_feature_local variant is stripped from a player build unless some material in the
-            // build declares the keyword, so the SHIPPING (AA-on) state must carry no keyword. An
-            // inverted sync would satisfy the clause above, look right in the Editor, and silently drop
-            // antialiasing from the player build.
+            // Non-obvious why: the keyword is _OFF because an undeclared shader_feature_local variant is stripped
+            // from the player, so the shipping AA-on state must carry NO keyword; an inverted sync drops AA there.
             m.SetFloat(ShaderProperties.Line.PropertyNames.EdgeAntialiasing, 1f);
             new LineShaderGUI().ValidateMaterial(m);
             Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.EdgeAntialiasingOff),
@@ -1067,9 +918,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void LineShaderGUI_ValidateMaterial_OnCommittedBase_LeavesAntialiasingOn()
         {
-            // The committed MapLine.mat carries `_EdgeAntialiasing: 1` and no m_ShaderKeywords entry, and
-            // every per-layer material is a new Material(base) copy that inherits the keyword set. So the
-            // shipped state — and therefore every line the map draws — must survive the sync with AA ON.
+            // Every per-layer material copies MapLine.mat's keyword set, so the shipped base must keep AA ON
+            // through the sync.
             var m = Track(new Material(MapMaterialSetTestUtil.Load().LineMaterial));
             new LineShaderGUI().ValidateMaterial(m);
             Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.EdgeAntialiasingOff),
@@ -1081,19 +931,16 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void LineShaderGUI_ValidateMaterial_SyncsHairlineStrategyKeyword()
         {
-            // _HairlineStrategy is declared [Enum(...)], a UI-only drawer that attaches NO keyword — exactly
-            // like [ToggleUI] on _EdgeAntialiasing. LineShaderGUI.ValidateMaterial is the only thing that
-            // turns the selector into _HAIRLINE_HARD; without it the whole selector is inert and every other
-            // test in the repo stays green.
+            // [Enum(...)] attaches no keyword; only LineShaderGUI.ValidateMaterial turns the selector into
+            // _HAIRLINE_HARD.
             var m = Track(NewLine());
             m.SetFloat(ShaderProperties.Line.PropertyNames.HairlineStrategy, 1f);
             new LineShaderGUI().ValidateMaterial(m);
             Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),
                 "_HairlineStrategy = 1 (Hard) → _HAIRLINE_HARD must be set.");
 
-            // Back to Default. This direction is the strip-safety one: `_` is the shipping member of the
-            // keyword set, so the variant every player build compiles is the one carrying NO keyword.
-            // A sync that latched would ship a variant that can be stripped.
+            // Back to Default must clear the keyword: the shipping variant carries none, and a latched keyword
+            // ships a strippable variant.
             Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineSolidCore),
                 "strategy 1 must not also set _HAIRLINE_SOLID_CORE — a material carrying both keywords " +
                 "compiles a variant nobody reasoned about.");
@@ -1118,9 +965,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void LineShaderGUI_ValidateMaterial_OnCommittedBase_LeavesHairlineDefault()
         {
-            // Every per-layer material is a new Material(base) copy and Unity's copy ctor carries the keyword
-            // set, so whatever the committed base declares propagates to every line the map draws. This fails
-            // the moment someone saves a strategy into MapLine.mat.
+            // Per-layer materials copy the base's keyword set, so this fails once a strategy is saved into
+            // MapLine.mat.
             var m = Track(new Material(MapMaterialSetTestUtil.Load().LineMaterial));
             new LineShaderGUI().ValidateMaterial(m);
             Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),
@@ -1135,20 +981,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void FillShaderGUI_ValidateMaterial_OnCommittedBase_LeavesKeywordStateUnchanged()
         {
-            // Parity tooth: running the editor keyword sync on a clone of the COMMITTED base fill .mat must
-            // not FLIP any feature keyword — the runtime clone relies on the import-baked state, so a
-            // derivation that disagreed with the asset would change how production renders.
-            //
-            // Asserted as before == after rather than against a hardcoded expected set: a fixed set like
-            // "empty" holds only while the base happens to be opaque with no maps, and breaks the moment
-            // the base legitimately becomes transparent (fills need _SURFACE_TYPE_TRANSPARENT or URP's
-            // OutputAlpha discards the fragment alpha) even though the underlying invariant still holds.
-            // Comparing to the asset's own state expresses the intent and survives the base's look
-            // changing again.
-            //
-            // Uses the committed .mat rather than `new Material(shader)`, whose float/texture defaults are
-            // import-state-dependent (a fresh material's `= "white"` 2D defaults read as non-null textures
-            // once loaded, and its _Surface default proved unstable across shader reimports).
+            // The sync must not FLIP any keyword of the COMMITTED fill .mat, which runtime clones rely on. It
+            // compares before == after, and a fresh `new Material(shader)` has import-dependent defaults.
             var feature = new[]
             {
                 ShaderKeywords.Emission, ShaderKeywords.NormalMap,
@@ -1184,24 +1018,9 @@ namespace MapRenderer.Tests.Materials
     // ───────────────────────────────────────────────────────────────────────────────────
 
 #if UNITY_EDITOR
-    // Unity EditMode only — real Materials via MaterialFactory / MapMaterialSet, real meshes via the production
-    // builders. NOT registered in Tools/core-tests/core-tests.csproj.
-    //
-    // A paint colour has exactly TWO carriers and the fragment MULTIPLIES them:
-    //
-    //     effective = _BaseColor (uniform, bound by MaterialFactory)  ×  COLOR stream (vertex, baked by the builder)
-    //
-    // so a layer whose colour is written into both renders it SQUARED. `line` and `fill-extrusion` did exactly
-    // that for a CONSTANT (non-data-driven) colour: the binder bound it AND the builder baked it. The invariant
-    // these teeth pin is one carrier per case — constant/zoom → the uniform, data-driven → the stream, the other
-    // side left at white — in ALPHA as well as rgb.
-    //
-    // `fill` now runs the SAME contract as `line` and `fill-extrusion` — constant/zoom rides `_BaseColor`,
-    // data-driven bakes into the stream. `ConstantFillColor_EffectiveColor_MatchesAuthored` below is fill's
-    // row of the shared tooth.
-    //
-    // The fixture colour is MID-TONE. Squaring is invisible at white and near-maximal at mid-grey,
-    // which is how this survived — every colour fixture that could have caught it was near-white.
+    // Non-local invariant: the fragment MULTIPLIES _BaseColor (uniform) by the COLOR stream (vertex), so each
+    // paint colour has ONE carrier — constant/zoom on the uniform, data-driven on the stream, the other at
+    // white, alpha included — or it renders SQUARED. Fixtures are MID-TONE, where squaring shows most.
     [TestFixture]
     public class PaintColorSingleApplyTests : BaseTestFixture
     {
@@ -1265,13 +1084,10 @@ namespace MapRenderer.Tests.Materials
         // ── Reading the two carriers ─────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// What the fragment's <c>_BaseColor</c> holds. Unity's Linear colour space converts a Color-typed
-        /// material property from sRGB to linear on UPLOAD, so the CPU-side <c>GetColor</c> read-back is the
-        /// sRGB value and <c>.linear</c> is the GPU one.
-        /// <para>That conversion is a claim about the engine, not about this repo, so it is MEASURED rather
-        /// than assumed — see <c>Visual.PaintColorRenderTests.UniformBoundColor_OverWhiteVertices_RendersAuthoredColor</c>,
-        /// which reads the same quantity off a rendered pixel. If the two ever disagree, this composition is
-        /// the half that is wrong.</para>
+        /// What the fragment's <c>_BaseColor</c> holds: Linear colour space converts a Color property to linear on
+        /// upload, so <c>GetColor</c> reads sRGB and <c>.linear</c> is the GPU value.
+        /// <c>Visual.PaintColorRenderTests.UniformBoundColor_OverWhiteVertices_RendersAuthoredColor</c> measures
+        /// the same value off a pixel; if they disagree, this method is wrong.
         /// </summary>
         private static Color ShaderBaseColor(Material mat)
             => mat.GetColor(ShaderProperties.PropertyId.BaseColor).linear;
@@ -1340,7 +1156,7 @@ namespace MapRenderer.Tests.Materials
         private static Mesh BuildExtrusionMesh(FillExtrusion.PaintProperties paint)
             => TestTileMeshBuilder.BuildFillExtrusion(new[] { SquareFeature(1000) }, paint, Zoom, Extent, Tile);
 
-        // ── Tooth 1 — the effective rendered colour equals the authored colour ───────────────────
+        // ── The effective rendered colour equals the authored colour ───────────────────
 
         /// <summary>
         /// Headline. Composes the fragment's own <c>_BaseColor.rgb × vColor.rgb</c> from the two REAL sources
@@ -1366,7 +1182,8 @@ namespace MapRenderer.Tests.Materials
                 $"stream={Fmt(stream)}. Both carrying it renders the colour SQUARED");
         }
 
-        /// <summary>Tooth 1, fill-extrusion kind. Same composition, the other defective pair.</summary>
+        /// <summary><see cref="ConstantLineColor_EffectiveColor_MatchesAuthored"/> for the fill-extrusion kind:
+        /// same composition, the other defective pair.</summary>
         [Test]
         public void ConstantFillExtrusionColor_EffectiveColor_MatchesAuthored()
         {
@@ -1384,7 +1201,7 @@ namespace MapRenderer.Tests.Materials
                 $"stream={Fmt(stream)}. Both carrying it renders the colour SQUARED");
         }
 
-        // ── Tooth 3 — alpha, per kind, both directions ───────────────────────────────────────────
+        // ── Alpha, per kind, both directions ───────────────────────────────────────────
 
         /// <summary>
         /// fill-extrusion's fragment computes <c>alpha = _BaseColor.a × vColor.a × _Opacity</c>, so a constant
@@ -1413,18 +1230,10 @@ namespace MapRenderer.Tests.Materials
         }
 
         /// <summary>
-        /// The line fragment REPLACES surface alpha with <c>coverage × _Opacity × vColor.a × _BaseColor.a</c>.
-        /// Line alpha was never double-applied — <c>_BaseColor.a</c> did not participate at all — so moving a
-        /// constant colour onto the uniform DROPS the authored alpha unless the two fragment tokens gain
-        /// <c>× _BaseColor.a</c> with it.
-        ///
-        /// <para>This row pins the CARRIERS only: the binder puts the authored alpha on the uniform and the
-        /// builder leaves the vertex at 1, so the two compose to the authored value. It spells out the
-        /// intended formula and therefore CANNOT see whether the fragment actually carries the
-        /// <c>_BaseColor.a</c> term — it passes either way once the builder gate lands. The shader half is
-        /// observed by
-        /// <c>Visual.PaintColorRenderTests.ConstantLineColorAlpha_RenderedPixel_CarriesTheAuthoredAlpha</c>,
-        /// which reads the composite instead of composing it.</para>
+        /// The line fragment sets alpha to <c>coverage × _Opacity × vColor.a × _BaseColor.a</c>, so a constant
+        /// colour on the uniform keeps its authored alpha. Limitation: this pins the CARRIERS only; the shader's
+        /// <c>_BaseColor.a</c> term is observed by
+        /// <c>Visual.PaintColorRenderTests.ConstantLineColorAlpha_RenderedPixel_CarriesTheAuthoredAlpha</c>.
         /// </summary>
         [Test]
         public void ConstantLineColorAlpha_SurvivesTheUniformPath()
@@ -1448,7 +1257,7 @@ namespace MapRenderer.Tests.Materials
                 $"see PaintColorRenderTests.ConstantLineColorAlpha_RenderedPixel_CarriesTheAuthoredAlpha.");
         }
 
-        // ── Tooth 4 — the data-driven branch still bakes, and still does NOT bind ────────────────
+        // ── The data-driven branch still bakes, and still does NOT bind ────────────────
 
         /// <summary>
         /// Both halves matter: the stream still varying catches over-gating, and <c>_BaseColor</c> staying
@@ -1476,7 +1285,7 @@ namespace MapRenderer.Tests.Materials
                 "would tint every feature and re-create the double-apply on the other branch");
         }
 
-        /// <summary>Tooth 4, fill-extrusion kind.</summary>
+        /// <summary><see cref="DataDrivenLineColor_StillVariesPerFeature"/> for the fill-extrusion kind.</summary>
         [Test]
         public void DataDrivenFillExtrusionColor_StillVariesPerFeature()
         {
@@ -1497,11 +1306,11 @@ namespace MapRenderer.Tests.Materials
                 "a data-driven fill-extrusion-color must leave _BaseColor at the white identity");
         }
 
-        // ── Tooth 5 — `fill` runs the same contract as line/fill-extrusion ───────────────────────
+        // ── `fill` runs the same contract as line/fill-extrusion ───────────────────────
 
-        /// <summary>Tooth 1, fill kind. Same composition as the line/fill-extrusion rows above — fill's
-        /// constant/zoom colour rides <c>_BaseColor</c> too, so the same double-apply hazard
-        /// applies here and the same headline check pins it.</summary>
+        /// <summary>The effective-colour test for the fill kind, with the same composition as the rows above:
+        /// fill's constant/zoom colour rides <c>_BaseColor</c> too, so the same double-apply hazard applies
+        /// and the same headline check pins it.</summary>
         [Test]
         public void ConstantFillColor_EffectiveColor_MatchesAuthored()
         {
@@ -1526,7 +1335,7 @@ namespace MapRenderer.Tests.Materials
                 $"stream={Fmt(stream)}. Both carrying it renders the colour SQUARED");
         }
 
-        /// <summary>Tooth 4, fill kind. Same shape as the line/fill-extrusion rows above.</summary>
+        /// <summary>The data-driven test for the fill kind. Same shape as the line/fill-extrusion rows above.</summary>
         [Test]
         public void DataDrivenFillColor_StillVariesPerFeature()
         {

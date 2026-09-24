@@ -6,14 +6,10 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Inspector for <c>Map/FillExtrusion</c>. The final successor in the hierarchy
-    /// (<see cref="BaseShaderGUI"/> → <see cref="LitShaderGUI"/> → this): it inherits the full Lit layout
-    /// (Surface Options / Surface Inputs / Detail Inputs / Advanced) AND <see cref="LitShaderGUI"/>'s keyword
-    /// sync unchanged, because fill-extrusion declares only the standard URP-Lit shader_features (emission,
-    /// normal/parallax/detail maps, receive-shadows, …) and no layer-specific keyword — unlike
-    /// <see cref="LineShaderGUI"/>, which overrides <c>ValidateMaterial</c> for its own keywords. Adds a
-    /// foldout for the 3D-building paint properties. Its runtime render-state contract is the elevated-3D
-    /// <see cref="FillExtrusionTweaker"/> (opaque, depth-writing), not the flat fill painter contract.
+    /// Inspector for <c>Map/FillExtrusion</c>. It inherits the full Lit layout and keyword sync of
+    /// <see cref="LitShaderGUI"/> unchanged, because fill-extrusion declares only the standard URP-Lit
+    /// shader_features and no keyword of its own. It adds a foldout for the 3D-building paint properties.
+    /// Its runtime render-state contract is <see cref="FillExtrusionTweaker"/> (opaque, depth-writing).
     /// </summary>
     public sealed class FillExtrusionShaderGUI : LitShaderGUI
     {

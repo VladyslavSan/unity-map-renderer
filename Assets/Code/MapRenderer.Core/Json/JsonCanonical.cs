@@ -6,29 +6,12 @@ namespace MapRenderer.Core.Json
 {
     /// <summary>
     /// A deterministic, value-complete serialization of a <see cref="JsonValue"/>: the same DOM always writes
-    /// the same string, and two DOMs write the same string only if they carry the same values.
-    ///
-    /// <para><b>Why this exists rather than <see cref="JsonValue.ToString"/>.</b> That method is a
-    /// <i>diagnostic</i>, not a serialization — an object renders as <c>"{3 members}"</c> and an array as
-    /// <c>"[2 items]"</c>, so two entirely different inline datasets stringify identically. Anything keyed on
-    /// it (source identity, cache keys) would silently treat them as the same document.</para>
-    ///
-    /// <para><b>Why not reference identity either.</b> A restyle re-parses the document, so identity-keying
-    /// would make every value-identical source compare as changed and rebuild its whole pipeline on every
-    /// restyle. A canonical string is the only form that answers both directions: different data ⇒ different
-    /// key, same data ⇒ same key.</para>
-    ///
-    /// <para><b>The determinism rules, and what each one is for.</b> Object members are written in ORDINAL
-    /// key order, because JSON object member order is not semantic and two authorings of the same object must
-    /// not differ. Array items keep their order, because array order IS semantic (a polygon ring is not its
-    /// reversal). Strings are quoted and escaped and numbers are not, so <c>1</c> and <c>"1"</c> cannot
-    /// collide. Numbers use the invariant round-trip format, so the string survives a locale with a comma
-    /// decimal separator.</para>
-    ///
-    /// <para>It is <b>not</b> a general-purpose JSON writer: it makes no promise of being re-parseable into
-    /// an equal DOM (a duplicate key in the source dictionary cannot occur, and non-finite numbers — which
-    /// <see cref="JsonParser"/> cannot produce — are written as their invariant text rather than rejected).
-    /// Its whole contract is comparability.</para>
+    /// the same string, and two DOMs write the same string only if they carry the same values. Its only
+    /// contract is comparability; it is not a re-parseable JSON writer. Non-obvious why:
+    /// <see cref="JsonValue.ToString"/> is a diagnostic (<c>"{3 members}"</c>), and reference identity changes
+    /// on every restyle re-parse.
+    /// Object members go in ordinal key order, arrays keep their order, only strings are quoted (so <c>1</c> and
+    /// <c>"1"</c> differ), and numbers use the invariant round-trip format.
     /// </summary>
     public static class JsonCanonical
     {
@@ -46,9 +29,8 @@ namespace MapRenderer.Core.Json
         /// <summary>A short, stable 64-bit hex digest (FNV-1a) of <paramref name="prefix"/>, the canonical
         /// text of <paramref name="value"/>, and <paramref name="extra"/> — a cache key must not re-hash the
         /// whole canonical text on every lookup; computing this digest is the one-time control-plane cost.</summary>
-        /// <param name="value">Must not be null — a null <c>Root</c> would otherwise collide with any other
-        /// null-Root document sharing <paramref name="prefix"/>. A library-contract guard: production callers
-        /// fail loud earlier, so this should never actually be what fires.</param>
+        /// <param name="value">Must not be null: a null <c>Root</c> would collide with any other null-Root
+        /// document sharing <paramref name="prefix"/>. Production callers fail earlier.</param>
         /// <param name="extra">A caller-built component folded in after <paramref name="value"/> — e.g. a
         /// layer-numbering signature the JSON content alone cannot see.</param>
         public static string CacheKey(string prefix, JsonValue value, string extra)
@@ -111,9 +93,8 @@ namespace MapRenderer.Core.Json
                 case JsonKind.Object:
                     sb.Append('{');
                     var keys = new List<string>(value.Members.Keys);
-                    // ORDINAL, not culture-aware: a culture-sensitive sort can order the same two keys
-                    // differently on two machines, which is exactly the non-determinism this type exists to
-                    // remove.
+                    // Ordinal, not culture-aware: a culture-sensitive sort can order the same two keys
+                    // differently on two machines.
                     keys.Sort(System.StringComparer.Ordinal);
                     for (int i = 0; i < keys.Count; i++)
                     {

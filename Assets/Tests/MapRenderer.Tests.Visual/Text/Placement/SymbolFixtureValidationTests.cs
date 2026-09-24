@@ -1,8 +1,5 @@
-// Pitched-camera fixture-harness self-validation tests.
-//
-// Both members validate the TEST FIXTURE's own geometry (the tilted-ground ruler, the
-// off-look-at scene) against a closed-form reference, before any production code is
-// asserted against it.
+// Pitched-camera fixture-harness self-validation tests: the tilted-ground ruler and the off-look-at scene,
+// checked against a closed-form reference before any production code is asserted against them.
 //
 // Contents:
 //   TiltFixtureSelfTests         — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture), off-screen GPU render + CPU readback.
@@ -33,38 +30,16 @@ namespace MapRenderer.Tests.Visual
     // CPU readback.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // The shared tilt-measurement fixture's OWN acceptance teeth, and its two in-stage consumers:
-    //   T1 — the ruler itself (no GPU): TiltedGroundScene / GroundRuler foreshorten by cos(tilt) and agree with
-    //        the closed form at the look-at.
-    //   T2 — a rendered line band's apparent width matches the ruler under tilt (docs/line-rendering-design.md
-    //        world-width model). SAME pose as the line-probe symmetry fixture (TiltedGroundSceneConfig's defaults,
-    //        by design) — what is new here is the FIXTURE (an east–west road, world-metre width, measured by a
-    //        column coverage integral), not the camera pose.
-    //   T3 — the general-direction ray-cut primitive (PixelCoverage.CoverageProfileAlongRay /
-    //        HalfCrossingDistancePx) resolves the three join types' silhouette reach under tilt — the
-    //        measurement `docs/line-rendering-design.md`'s grazing-incidence question will need, though THIS
-    //        tooth measures at the look-at, not grazing.
-    //   T4 — a REAL production-path symbol (SymbolPlacementSystem.Tick) does not foreshorten under tilt today
-    //        (viewport-pitch-aligned), and — the point of building this at all — the fixture can tell that
-    //        apart from what a MAP-aligned symbol would read. Wired before `pitch-alignment: map` existed.
-    //
-    // ONE FILE, BOTH CONSUMERS ON PURPOSE: splitting it would hide the very thing these teeth demonstrate
-    // — TiltedGroundScene is CONTENT-AGNOSTIC and serves a line/join consumer and a symbol consumer
-    // from the SAME harness. T4's glyph/SymbolPlacementSystem arm lives here, under Visual/, rather than under
-    // Text/Placement/, for exactly that reason: it is a TILT-FIXTURE tooth first, a symbol tooth second.
-    //
-    // COMMON TO ALL FOUR: the scene renders at 55°, the value two green fixtures (LineProbeSymmetrySnapshotTests,
-    // LineDashSnapshotTests) already use. NO tooth here asserts an absolute pixel count — every assertion is
-    // ratio-to-oracle (measured / GroundRuler projection ≈ 1) or ratio-across-tilts (q(55°) / q(0°) against a
-    // derivation that is not the render) — docs/line-rendering-design.md records why "the band is exactly
-    // N device pixels" is the wrong assertion at this pose.
-    //
-    // NO METRE LITERALS: every world size here is `k · scene.MetresPerDevicePixel` — a bare metre literal is
-    // sub-pixel at this pose (zoom 8 / lat 30 puts one device px at ~300 m) and would render as nothing.
-    //
-    // THE MANDATED INJECTION: forcing TiltDegrees = 0 inside TiltedGroundScene.Create must
-    // turn every "reads 1.000 if the mechanism is absent" clause below RED. T1(a) and T1(c) are CONTROLS and are
-    // expected to stay green under that injection.
+    // The shared tilt fixture's OWN acceptance teeth, and its two consumers, at 55°:
+    //   T1 — the ruler (no GPU) foreshortens by cos(tilt) and agrees with the closed form at the look-at.
+    //   T2 — a rendered east–west road's apparent width matches the ruler under tilt.
+    //   T3 — the ray-cut primitive resolves the three join types' silhouette reach under tilt.
+    //   T4 — a viewport-pitch-aligned production symbol does not foreshorten, and the fixture can tell that
+    //        apart from what a MAP-aligned symbol reads.
+    // Non-obvious why: one harness serves line and symbol consumers, so both live in one file. Every assertion
+    // is a ratio to an oracle or across tilts, never an absolute pixel count (docs/line-rendering-design.md).
+    // NO METRE LITERALS: every world size is `k · scene.MetresPerDevicePixel`. Forcing TiltDegrees = 0 in
+    // TiltedGroundScene.Create reds every "reads 1.000 if absent" clause; T1(a) and T1(c) are controls.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // TiltFixtureSelfTests — Unity EditMode only
@@ -85,21 +60,8 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════
-        // T1 — the ruler itself. No GPU: WorldToScreenPoint uses the camera's projection matrix, no draw.
-        //
-        // FIVE independent [Test] methods, not one. NUnit's Assert.That throws on first failure, so a
-        // single method running clauses in sequence lets an early clause's exception SHADOW every later
-        // clause: under the mandated tilt=0 injection the convergence loop would throw immediately and the
-        // remaining clauses would never execute, leaving their "goes red under injection" claim inferred
-        // rather than demonstrated. Splitting makes every clause independently RED-verifiable forever
-        // — a future injection (or a future clause added at the top) cannot shadow anything, because NUnit
-        // runs each [Test] method regardless of whether a sibling method failed.
-        //
-        // T1AreaSpan(mpp) is the one non-control span length shared by (b)/(c)/the closed-form check —
-        // 30·mpp, chosen from the convergence measurement below (~0.08% predicted deviation from the closed
-        // form, a >12× margin under this file's 1% bound). See Ruler_ForeshorteningDeviationFromClosedForm_
-        // ConvergesAsSpanShrinks's XML doc for the full derivation of why 120·mpp (this design's original
-        // choice) was too coarse.
+        // T1 — the ruler itself, no GPU, in separate [Test]s so no clause shadows another. The span is 30·mpp
+        // (~0.08% off the closed form, >12× under the 1% bound; see the convergence test).
         // ═══════════════════════════════════════════════════════════════════════════════════════════
 
         private const double T1SpanMultiplier = 30.0;
@@ -131,26 +93,12 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T1 — CONVERGENCE PROOF</b> that the closed form <see cref="GroundRuler.ClosedFormAcrossAzimuthSpanPx"/>
         /// is a SMALL-SPAN limit, and that <see cref="T1SpanMultiplier"/>·mpp (the span every other T1 tooth
-        /// below uses) sits safely inside it — a permanent, asserted property of the harness, not a one-off
-        /// diagnostic.
+        /// below uses) sits safely inside it. The deviation from cosθ must shrink (about ×¼ per halving of L).
         ///
-        /// <para><b>Why this exists at all — L was shrunk from this design's original 120·mpp,
-        /// not the tolerance widened.</b> The closed form <c>L/mpp·cosθ</c> is the INFINITESIMAL-span limit
-        /// of the exact perspective divide; across a FINITE span the near and far ends sit at different
-        /// depths, and the divide contributes a second-order-in-L correction. Solving the pinhole geometry
-        /// exactly for a segment of length L centred at the look-at gives
-        /// <c>span(θ,L)/span(0,L) = cosθ / (1 − (L/2d)²sin²θ)</c> (d = orbit radius =
-        /// <c>|CameraRelativePosition|</c>) — i.e. the closed form is exact only as L→0, and the gap from
-        /// cosθ grows as L². At L=120·mpp that gap measures 1.24% — OUTSIDE this file's 1% bound, wider than
-        /// this design assumed — so L moved to <see cref="T1SpanMultiplier"/>=30·mpp (~0.08%
-        /// measured), not the tolerance.</para>
-        ///
-        /// <para>Proves: the deviation from cosθ shrinks (roughly quarters per halving of L) as L shrinks —
-        /// the falsifiable difference between diagnosing a real second-order term and tuning until green.
-        /// Does NOT by itself prove foreshortening exists (a flat 0% at every L would also "converge" in the
-        /// sense of not growing) — <see cref="Ruler_ForeshortensByCosTilt_AlongTheTiltAxis"/> is the
-        /// DISCRIMINATOR for that, and it is a SEPARATE method so this one's failure cannot hide
-        /// it.</para>
+        /// <para>Non-obvious why: a FINITE span's ends sit at different depths, so the exact ratio is
+        /// <c>cosθ / (1 − (L/2d)²sin²θ)</c> (d = orbit radius), off cosθ by O(L²): 1.24% at 120·mpp, outside the
+        /// 1% bound, so L is 30·mpp rather than a wider tolerance. Limitation: a flat 0% also converges;
+        /// <see cref="Ruler_ForeshortensByCosTilt_AlongTheTiltAxis"/> is the discriminator.</para>
         /// </summary>
         [Test]
         public void Ruler_ForeshorteningDeviationFromClosedForm_ConvergesAsSpanShrinks()
@@ -193,11 +141,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T1 — DISCRIMINATOR.</b> Proves: the projective ruler
         /// (<see cref="GroundRuler.GroundSegmentSpanPx"/>) foreshortens by cos(tilt) along the tilt axis
-        /// (world ẑ, heading 0) at <see cref="T1SpanMultiplier"/>·mpp. Does NOT prove anything about
-        /// rendering, any shader, any material — nothing here touches a render.
-        ///
-        /// <para>READS 1.000 (not cos 55° = 0.5736) if the harness is silently at tilt 0 — a factor of
-        /// 1.744.</para>
+        /// (world ẑ, heading 0) at <see cref="T1SpanMultiplier"/>·mpp. Nothing here renders. It reads 1.000,
+        /// not cos 55° = 0.5736, if the harness is silently at tilt 0.
         /// </summary>
         [Test]
         public void Ruler_ForeshortensByCosTilt_AlongTheTiltAxis()
@@ -250,16 +195,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T1 — closed-form cross-check.</b> Proves the projective ruler agrees with the closed form
-        /// at the look-at, at <see cref="T1SpanMultiplier"/>·mpp. Does NOT prove anything off the look-at —
-        /// the closed form is valid only there, which is why every OTHER T tooth uses the projective ruler
-        /// instead of this closed form.
-        ///
-        /// <para>The ONE T1 tooth without the camera-positioning blind spot the rest of T shares: this is
-        /// bare trigonometry on <c>mpp</c> and <c>Angle</c> — it never calls
-        /// <c>CameraPoseMath.ComputeRelativePose</c>, so it would PASS a bug in that pose math (a wrong
-        /// camera position that still yields a self-consistent projective ruler). Every other T tooth reads
-        /// the live camera and would catch such a bug; this one exists to catch drift in the closed form
-        /// itself, not in the camera.</para>
+        /// at the look-at, at <see cref="T1SpanMultiplier"/>·mpp; the closed form is valid only there.
+        /// Limitation: it is bare trigonometry that never calls <c>CameraPoseMath.ComputeRelativePose</c>,
+        /// so it catches drift in the closed form, not a pose bug; the other T teeth read the live camera.
         /// </summary>
         [Test]
         public void Ruler_AgreesWithTheClosedForm_AtTheLookAt()
@@ -424,18 +362,10 @@ namespace MapRenderer.Tests.Visual
                 $"T2 (a) calibration: measured {m55.MeasuredWidthPx:F3}px vs ruler {m55.RulerWidthPx:F3}px " +
                 $"at 55° (ratio {ratioCalibration:F4}).");
 
-            // (b) DISCRIMINATION. Reads 1.000 at tilt 0 — (a) alone cannot see this, because the ruler
-            // foreshortens WITH the render, so their ratio stays 1 regardless of tilt. This clause is what
-            // makes T2 a tilt tooth.
-            //
-            // KNOWN SYSTEMATIC BIAS in the comparand, not in the render: cos55° is T1's INFINITESIMAL-span
-            // limit (see T1's convergence tooth), but this band is 120·mpp wide — the exact L at which T1
-            // measured a 1.2439% departure from cos55°. So the expected value here is ~1.24% low by
-            // construction, consuming roughly 41% of this clause's 3% budget before any real measurement
-            // error. A reading up to ~2% off is this bias, not a render defect — read the message's own
-            // numbers, don't assume the tolerance is slack. (Not corrected here: the fix belongs to the
-            // comparand — cos55°/(1-(W/2d)²sin²55°) — a decision for every T-family tooth at once, not a
-            // per-tooth change.)
+            // (b) DISCRIMINATION: reads 1.000 at tilt 0, which (a) cannot see because the ruler foreshortens
+            // with the render. Limitation: cos55° is the infinitesimal-span limit, and this 120·mpp band sits
+            // ~1.24% below it (T1's convergence test), using ~41% of the 3% budget. The exact comparand,
+            // cos55°/(1-(W/2d)²sin²55°), would change every T tooth at once.
             double cos55 = Angle.FromDegrees(TiltDeg).Cos;
             double ratioTilt = m55.MeasuredWidthPx / m0.MeasuredWidthPx;
             Assert.That(ratioTilt, Is.EqualTo(cos55).Within(3).Percent,
@@ -461,15 +391,11 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        /// <summary>Builds the apex-V fixture SHAPE <c>LineAaSnapshotTests.BuildApexFixture</c> established
-        /// (that file's own test is NOT touched — only its shape is reused here as a T subject): apex at the
-        /// world origin (the look-at), arms opening toward world −Z so the OUTWARD (convex) bisector points
-        /// world +Z — the foreshortened direction under this scene's heading-0 tilt. Renders one join type on
-        /// one tilt, marches <see cref="PixelCoverage.CoverageProfileAlongRay"/> from the apex along the
-        /// bisector, and returns both the measured reach and the SAME-CAMERA ruler for
-        /// <paramref name="analyticReachMetres"/> (a one-sided <see cref="GroundRuler.ScreenSpanPx"/> — the
-        /// reach is measured one-sided FROM a fixed point, not the symmetric-about-centre quantity
-        /// <see cref="GroundRuler.GroundSegmentSpanPx"/> models).</summary>
+        /// <summary>Builds the apex-V shape of <c>LineAaSnapshotTests.BuildApexFixture</c> with the apex at the
+        /// look-at and the convex bisector along world +Z, the foreshortened direction. Renders one join at
+        /// one tilt, marches <see cref="PixelCoverage.CoverageProfileAlongRay"/> along the bisector, and
+        /// returns the reach and the same-camera ruler for <paramref name="analyticReachMetres"/>. The ruler is
+        /// the one-sided <see cref="GroundRuler.ScreenSpanPx"/>, because reach is measured FROM the apex.</summary>
         private static JoinReachMeasurement MeasureJoinReach(
             JoinType join, double tiltDeg, double armM, double widthM, double analyticReachMetres)
         {
@@ -502,10 +428,8 @@ namespace MapRenderer.Tests.Visual
                 float3 background = PixelCoverage.BackgroundLinear(snap.Pixels);
 
                 double2 originPx = GroundRuler.ProjectPx(scene.UnityCamera, double3.zero);
-                // Baseline is armM, not a 1 m step: at this pose (d ~135km) a 1 m step differences two
-                // ~1.35e5-magnitude floats whose ulp is ~0.03 m — a several-percent budget on the step
-                // itself, which can tilt the resolved bisector direction by 1-2° and drift the marched reach
-                // by a few px. armM (~100·mpp, tens of km) keeps the float precision budget negligible.
+                // Baseline armM, not 1 m: at d ~135 km a float ulp is ~0.03 m, which would tilt the bisector by
+                // 1-2°. armM (tens of km) makes the precision loss negligible.
                 double2 dirPx = GroundRuler.ScreenDirection(
                     scene.UnityCamera, double3.zero, new double3(0.0, 0.0, armM));
 
@@ -565,9 +489,8 @@ namespace MapRenderer.Tests.Visual
                 at0[join]  = MeasureJoinReach(join, 0.0,     armM, widthM, r);
             }
 
-            // (a) calibration, per join. ≠ 1 if the ray cut is not measuring the silhouette. 6% (not T2's
-            // 3%): the round join is a 4-segment chord approximation to the arc and the crossing estimator
-            // is coarser than the coverage integral.
+            // (a) calibration, per join. 6%, not T2's 3%: the round join is a 4-segment chord of the arc, and
+            // the crossing estimator is coarser than the coverage integral.
             foreach (JoinType join in joins)
             {
                 double ratio = at55[join].ReachPx / at55[join].RulerPx;
@@ -598,12 +521,9 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════
-        // T4 — a REAL production-path symbol does not foreshorten under tilt, and the fixture can see that a
-        // map-aligned one would. Wired before `pitch-alignment: map` existed.
+        // T4 — a viewport-aligned production symbol does not foreshorten under tilt, and the fixture can see
+        // that a map-aligned one would. The glyph comes from WorldPointEmitRenderTests.BuildGlyphA.
         // ═══════════════════════════════════════════════════════════════════════════════════════════
-        //
-        // The one-glyph bootstrap is WorldPointEmitRenderTests.BuildGlyphA, widened private → internal there
-        // (test-code-bloat convention: widen and reuse, never duplicate-and-drag) rather than copied here.
 
         private readonly struct SymbolArmResult
         {
@@ -624,14 +544,10 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        /// <summary>Renders the glyph 'A' through the REAL <c>SymbolPlacementSystem.Tick</c> — exactly
-        /// <c>WorldPointEmitRenderTests.cs:104–116</c>'s recipe (double Tick: the collision verdict is
-        /// harvested one Tick late) — anchored at <c>frame.SceneOriginRender</c> (the look-at itself, so it
-        /// projects to screen centre at BOTH tilts and the two ink heights are comparable).
-        ///
-        /// <para>When <paramref name="inkHeight0PxForMapExpectation"/> is supplied (the 55° call), also
-        /// computes the MAP-aligned expectation for a quad of that height: <c>GroundSegmentSpanPx</c> of a
-        /// world-plane segment <c>inkHeight(0°) · mpp</c> metres tall, on THIS scene's own camera.</para></summary>
+        /// <summary>Renders the glyph 'A' through the REAL <c>SymbolPlacementSystem.Tick</c> (twice: the
+        /// collision verdict is harvested one Tick late) at the look-at, so both tilts put it at screen centre.
+        /// With <paramref name="inkHeight0PxForMapExpectation"/> it also computes the MAP-aligned expectation:
+        /// <c>GroundSegmentSpanPx</c> of a ground segment <c>inkHeight(0°) · mpp</c> metres long.</summary>
         private static SymbolArmResult RenderSymbolArm(
             double tiltDeg, GlyphAtlasTexture atlasTexture, List<SymbolQuad> quads, TextLayoutBounds bounds,
             double? inkHeight0PxForMapExpectation)
@@ -672,11 +588,8 @@ namespace MapRenderer.Tests.Visual
 
                 double inkHeightPx = maxRow - minRow + 1;
 
-                // The oracle projects the CAMERA-RELATIVE point the render actually lands at (Unity world
-                // origin — the look-at, under camera-relative rendering), NOT `anchorRender` itself, which is
-                // the PRE-RTC absolute render-space coordinate the shader never sees directly (SceneFrame's
-                // Rebase/RTC cancels it out — see WorldPointEmitRenderTests' NEW-F1 tooth for the proof that
-                // this cancellation is exact regardless of which real tile the symbol nominally belongs to).
+                // The oracle projects the CAMERA-RELATIVE point the render lands at (Unity world origin), not the
+                // pre-RTC `anchorRender`, which the RTC cancels out (WorldPointEmitRenderTests pins that).
                 double2 anchorScreenPx = GroundRuler.ProjectPx(scene.UnityCamera, double3.zero);
                 double  mpp            = scene.MetresPerDevicePixel;
 
@@ -698,15 +611,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T4.</b> Proves: the harness renders a PRODUCTION-PATH symbol at tilt, and resolves screen extent
-        /// finely enough to separate a map-aligned expectation from a viewport-aligned measurement by ~74% —
-        /// i.e. map pitch alignment has a real acceptance criterion.
-        ///
-        /// <para>Does NOT prove anything about <c>pitch-alignment: map</c>, which is UNIMPLEMENTED — clause
-        /// (b) is a NEGATIVE control, expected to INVERT under map pitch alignment. Nothing about the spherical <c>Up</c>
-        /// path: this scene is Web-Mercator (<c>Up</c> is the constant (0,1,0), <c>Rebase</c> is
-        /// identity), so this arm cannot distinguish a correct per-anchor frame from a hard-coded one — that
-        /// is <c>SymbolUpCarrierChainTests</c>' job, over <c>SphericalProjection</c>. Nothing about icons,
-        /// collision or fade.</para>
+        /// finely enough to separate a map-aligned expectation from a viewport-aligned measurement by ~74%.
+        /// Limitation: clause (b) is a negative control that a map-aligned symbol would invert. The scene is
+        /// Web-Mercator, so it cannot test a per-anchor <c>Up</c>; <c>SymbolUpCarrierChainTests</c> does.
         /// </summary>
         [Test]
         public void ViewportPitchAlignedSymbol_DoesNotForeshorten_AndTheFixtureCanSeeThatItWould()
@@ -751,29 +658,14 @@ namespace MapRenderer.Tests.Visual
     // SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // The off-look-at fixture's OWN acceptance teeth (M1–M13). Read OffLookAtSymbolScene's header
-    // first: it states what the fixture is, why the CROSS-AZIMUTH arm is the headline one and the RECEDING arm
-    // is soundness-only, and why the headline ratio is immune to a uniform miscalibration.
+    // The off-look-at fixture's OWN acceptance teeth (M1–M13); read OffLookAtSymbolScene's header first. They
+    // are separate [Test] methods because NUnit stops at the first failure. A two-depth check asserts the WORSE
+    // reading once, with both numbers in its message.
     //
-    // THIRTEEN INDEPENDENT [Test] METHODS, not one. NUnit's Assert.That throws on the FIRST failure, so a method
-    // running clauses in sequence lets an early clause's exception SHADOW every later clause. Where a tooth checks
-    // the same property at BOTH depths, it computes both readings first and asserts the WORSE one in a single
-    // clause whose message carries both numbers, rather than asserting twice.
-    //
-    // THESE TEETH CALIBRATE THE INSTRUMENT; THEY DO NOT PIN THE DEFECT. Every one of M1–M13 is about the
-    // frame geometry, the oracle, or a claim true under BOTH the screen walk and the world walk, so a change
-    // of walk moves none of them. THE FAR ASSERTIONS THIS FILE DEFERS LIVE IN
-    // `MapPitchedWorldArcLayoutTests` (T1…T5) — "far/near screen spacing == 0.500", the per-gap world-metre
-    // reading, and the DPR tooth, with their RED verifications. M13 still PRINTS the whole table; its
-    // `far measured/oracle` row reads ≈ 1.00.
-    //
-    // ANTI-TEETH, intentionally absent (writing any of them would be a defect):
-    //   • any tooth asserting far/near spacing ≈ 1.0 — that PINS the old defect;
-    //   • any tooth whose expected value is derived from the near symbol's MEASURED spacing scaled by anything —
-    //     that re-imports the self-referential-oracle failure.
-    //
-    // THE RED-verifications named on the teeth BELOW are injections into the FIXTURE or the ORACLE, because
-    // these teeth are about the apparatus. The world-arc teeth are RED-verified against PRODUCTION.
+    // Non-obvious why: these teeth CALIBRATE THE INSTRUMENT and hold under both the screen walk and the world
+    // walk; MapPitchedWorldArcLayoutTests (Fixture-T1…T5) pins the walk. Never assert far/near spacing ≈ 1.0,
+    // and never derive an expectation from a MEASURED spacing: the first pins a screen walk, and the second
+    // makes the oracle self-referential.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // OffLookAtSymbolFixtureTests — Unity EditMode only
@@ -795,27 +687,17 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>M1.</b> Proves: the fixture's two anchors really do sit at the designed far/near VIEW-depth
-        /// ratio — the property that makes every later reading a two-depth reading rather than the
-        /// single-depth reading a look-at-anchored fixture takes. The far anchor is SOLVED (view depth
-        /// is affine along ĝ, so two samples determine it exactly), then the achieved ratio is asserted.
-        ///
-        /// <para>Does NOT prove anything about symbols, staging, spacing or rendering.</para>
-        ///
-        /// <para>RED-verify: break the affine solve (drop the <c>/ depthSlope</c>, or scale <c>s_far</c>) ⇒ the
-        /// achieved ratio no longer matches the configured one. NOT by setting
-        /// <c>TargetDepthRatio = 1.0</c>: the second clause below compares the ACHIEVED ratio against the
-        /// CONFIGURED one, so lowering the config moves expectation and measurement together and reads green —
-        /// the plan's recipe for this tooth is vacuous, which is why the 1.8 floor clause exists.</para>
+        /// <b>M1.</b> Proves: the two anchors sit at the designed far/near VIEW-depth ratio, which makes every
+        /// later reading a two-depth reading. View depth is affine along ĝ, so the far anchor is SOLVED from
+        /// two samples. Nothing here touches symbols or rendering. Non-obvious why: a lower configured ratio
+        /// moves expectation and measurement together, so only the 1.8 floor catches it.
         /// </summary>
         [Test]
         public void TwoAnchors_SitAtTheDesignedViewDepthRatio()
         {
             using var f = CreateFixture();
-            // The floor, not decoration: the whole stage exists to read the two competing rulers apart, and
-            // below ~1.8 they are too close to. It is also what makes the clause below falsifiable by a
-            // config change — stop rule 2 says to lower the ZOOM, never the ratio, so a config that shrank
-            // the ratio to keep the far anchor on-screen must fail HERE.
+            // Below ~1.8 the two competing rulers are too close to read apart. To fit the far anchor on-screen,
+            // lower the ZOOM, never the ratio (stop rule 2), so a shrunk ratio fails HERE.
             Assert.That(f.Config.TargetDepthRatio, Is.GreaterThanOrEqualTo(1.8),
                 $"M1: the designed far/near view-depth ratio must be at least 1.8 — configured " +
                 $"{f.Config.TargetDepthRatio:F3}. STOP RULE 2: if the far anchor will not fit on-screen, " +
@@ -828,16 +710,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>M2.</b> Proves: BOTH anchors project in front of the camera and land inside the frame with a
-        /// 32 px margin — i.e. the designed depth ratio is actually reachable on-screen at this pose, so the
-        /// far arm measures something the renderer would really draw.
-        ///
-        /// <para>Does NOT prove that the far LABEL fits (that is M8's spill check), nor anything about depth.</para>
-        ///
-        /// <para><b>STOP RULE 2.</b> If this fails because the far anchor leaves the frame, LOWER THE ZOOM
-        /// (more ground per pixel) and report both numbers — do NOT shrink the depth ratio below 1.8, which
-        /// is what makes every reading on this fixture a two-depth reading.</para>
-        ///
-        /// <para>RED-verify: double the solved <c>s_far</c> ⇒ the far anchor leaves the margin.</para>
+        /// 32 px margin, so the far arm measures something the renderer draws. M8 checks that the far LABEL
+        /// fits. STOP RULE 2: if the far anchor leaves the frame, LOWER THE ZOOM; never shrink the depth ratio
+        /// below 1.8.
         /// </summary>
         [Test]
         public void TwoAnchors_ProjectOnScreen_WithMargin()
@@ -860,13 +735,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>M3 — THE ORACLE'S OWN ACCEPTANCE TEST.</b> Proves: the depth-general closed form
         /// <see cref="GroundRuler.ClosedFormPerpendicularSpanPx"/> agrees with the LIVE camera's projection of
-        /// the SAME world segment at BOTH depths, within 1 %. That is the property a look-at-anchored fixture
-        /// cannot have — a comparand known to be DEPTH-CORRECT, not merely correct at the look-at.
-        ///
-        /// <para>Does NOT prove that the closed form is the right MODEL for glyph spacing — only that it
-        /// computes the projection of a given world length correctly wherever that length sits.</para>
-        ///
-        /// <para>RED-verify: evaluate the FAR probe with <c>w_near</c> ⇒ the far reading is ≈ 2× off.</para>
+        /// the SAME world segment at BOTH depths, within 1 %: a DEPTH-CORRECT comparand. It does not prove the
+        /// closed form is the right MODEL for glyph spacing.
         /// </summary>
         [Test]
         public void ClosedFormSpan_AgreesWithTheLiveProjection_AtBothDepths()
@@ -898,15 +768,8 @@ namespace MapRenderer.Tests.Visual
         /// <b>M4 — THE RULER IDENTITY (stop rule 1).</b> Proves:
         /// <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.MetresPerDevicePixel"/> IS the lateral
         /// px-per-metre ruler at the look-at — a segment of <c>30·mpp</c> metres laid along ĉ at the look-at
-        /// projects to 30 device px. The settled model's "X px TOP-DOWN" enters the oracle at exactly this one
-        /// point; nothing else in the repo pins it.
-        ///
-        /// <para>Does NOT prove anything at any OTHER depth — the identity holds only here.</para>
-        ///
-        /// <para><b>STOP RULE 1.</b> If this reads outside 1 %, DO NOT WIDEN IT. Report both numbers and
-        /// STOP: every oracle downstream would then be calibrated against the wrong ruler.</para>
-        ///
-        /// <para>RED-verify: probe with <c>60·mpp</c> ⇒ reads 60 px against a 30 px expectation.</para>
+        /// projects to 30 device px. "X px TOP-DOWN" enters the oracle only here. STOP RULE 1: if this reads
+        /// outside 1 %, DO NOT WIDEN IT; every downstream oracle would use the wrong ruler.
         /// </summary>
         [Test]
         public void MetresPerDevicePixel_IsTheLateralRulerAtTheLookAt()
@@ -938,13 +801,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>M5 — THE DISCRIMINATOR the whole stage rests on.</b> Proves: a world length perpendicular to the
         /// view axis projects to HALF as many pixels when its view depth doubles — the 1/w law, measured on
-        /// the live camera at the fixture's own two anchors.
-        ///
-        /// <para>Does NOT prove anything about symbols or layout — this is the projection alone. It is the
-        /// tooth that says the fixture's two depths are far enough apart to tell a world-welded ruler from a
-        /// screen-constant one.</para>
-        ///
-        /// <para>RED-verify: place BOTH probes at the near anchor ⇒ reads 1.00 instead of 0.50.</para>
+        /// the live camera at the fixture's own two anchors. The projection alone: it shows the two depths are
+        /// far enough apart to tell a world-welded ruler from a screen-constant one.
         /// </summary>
         [Test]
         public void PerpendicularSpan_HalvesWhenTheViewDepthDoubles()
@@ -967,38 +825,20 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>M6 — THE TOOTH THAT VALIDATES THE WHOLE READBACK PATH.</b> Proves: the world anchor the
-        /// production staging baked for the near symbol's CENTRE glyph, read back through
-        /// <c>WorldSlotTransform(...).TransformPoint(AnchorLocal)</c>, lands where the fixture intended its
-        /// anchor — within 2 device px projected. If this holds, the fixture is measuring the renderer's own
-        /// geometry, with no RTC, tile origin or floating-origin rebase re-derived on the test side.
-        ///
-        /// <para>Checked at the LOOK-AT on purpose: on a constant-depth line the projection is affine, so the
-        /// <c>(seg, t) = (0, 0.5)</c> anchor resolves to the same point whether the arc walk runs on the screen
-        /// polyline (today) or the world polyline (after a fix) — so this tooth does NOT presuppose either
-        /// layout model and survives the fix unchanged.</para>
-        ///
-        /// <para>Does NOT prove anything about glyph SPACING. Run for BOTH arms — see the far twin below.</para>
-        ///
-        /// <para>RED-verify: offset the intended anchor by <c>20·mpp</c> along ĉ ⇒ fails by ~20 px.</para>
+        /// <b>M6 — the readback path.</b> The near CENTRE glyph's baked anchor, read back through
+        /// <c>WorldSlotTransform(...).TransformPoint(AnchorLocal)</c>, projects within 2 device px of the
+        /// intended anchor, so no RTC or rebase is re-derived. On a constant-depth line the anchor is the same
+        /// under a screen or a world arc walk, so this presupposes neither.
         /// </summary>
         [Test]
         public void GlyphWorldAnchors_LandWhereTheFixtureIntended_AtTheLookAt()
             => AssertCentreGlyphLandsAtTheIntendedAnchor(OffLookAtSymbolId.CrossNear, "M6 near");
 
         /// <summary>
-        /// <b>M6b — the FAR twin.</b> `CrossFar`
-        /// has its OWN tile key and its own RTC bake, and nothing else in the suite pins it against a known
-        /// ABSOLUTE position: M10 bounds it to only ±45 rows (≈±14 % of <c>w_far</c>), and M7–M9 pin spacing
-        /// and span, not placement. A far readback that were systematically displaced would leave every
-        /// headline RATIO intact, because the ratios are differences within one symbol — so this is the one
-        /// clause standing between the far arm and a silently wrong absolute anchor.
-        ///
-        /// <para>The look-at is NOT special to M6's argument: the walk-invariance that makes this
-        /// model-independent is a property of a CONSTANT-VIEW-DEPTH (cross-azimuth) line, which
-        /// <c>CrossFar</c> is inherently. So this survives the fix unchanged, exactly as M6 does.</para>
-        ///
-        /// <para>RED-verify: same injection as M6, applied to the far arm.</para>
+        /// <b>M6b — the FAR twin.</b> `CrossFar` has its OWN tile key and RTC bake. Non-obvious why: a displaced
+        /// far readback leaves every headline RATIO intact, and M10 bounds it only to ±45 rows, so this is the
+        /// one clause that pins the far absolute anchor. CrossFar is also constant-depth, so M6's
+        /// walk-invariance holds here too.
         /// </summary>
         [Test]
         public void GlyphWorldAnchors_LandWhereTheFixtureIntended_AwayFromTheLookAt()
@@ -1023,18 +863,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>M7.</b> Proves: both cross-azimuth symbols really do lie at CONSTANT view depth — every glyph of
-        /// a symbol is within 0.5 % of that symbol's mean depth, at both depths. This is the property the
-        /// headline measurement rests on: it is what makes the far/near comparison a pure 1/w law with no
-        /// within-symbol foreshortening to correct for.
-        ///
-        /// <para>Does NOT prove that ĉ is the cross-azimuth direction in any absolute sense, and nothing about
-        /// spacing.</para>
-        ///
-        /// <para>RED-verify: point the first reading at <c>RecedingNear</c>, a symbol that genuinely spans a
-        /// depth range ⇒ the spread reads ~36 %, 70× the bound. NOT by rebuilding the cross symbols along ĝ:
-        /// that turns the whole fixture red at a construction precondition (the cross arm's
-        /// linear-agreement check, then the staging count), so the tooth's own red would not be
-        /// attributable to the tooth.</para>
+        /// a symbol is within 0.5 % of that symbol's mean depth, at both depths. That makes the far/near
+        /// comparison a pure 1/w law with no within-symbol foreshortening. It says nothing about spacing.
         /// </summary>
         [Test]
         public void CrossAzimuthSymbols_LieAtConstantViewDepth()
@@ -1051,18 +881,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>M8.</b> Proves: both cross-azimuth symbols staged EVERY glyph — <c>4 · GlyphCount</c> stream-0
-        /// vertices on each slot mesh. A curved symbol whose road is too short returns 0 from
-        /// <c>StageCurved</c>'s spill check and silently disappears; that must be a loud failure, not a
-        /// missing measurement.
-        ///
-        /// <para>(That all four corners of each glyph share ONE <c>AnchorLocal</c> — the precondition that
-        /// makes "the glyph's position" a single well-defined point — is asserted by the fixture itself at
-        /// readback, on every symbol.)</para>
-        ///
-        /// <para>Does NOT prove the glyphs are in the right PLACE — that is M6/M9's job.</para>
-        ///
-        /// <para>RED-verify: set <c>SpillMargin = 0.5</c> ⇒ the roads are shorter than the symbols and
-        /// neither stages.</para>
+        /// vertices on each slot mesh. A road too short fails <c>StageCurved</c>'s spill check and the symbol
+        /// silently disappears, so this makes it loud. Placement is M6/M9's job.
         /// </summary>
         [Test]
         public void CurvedSymbols_StageEveryGlyph_AtBothDepths()
@@ -1081,17 +901,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>M9 — EXTRACTION CALIBRATION.</b> Proves: the per-gap measurement genuinely resolves INDIVIDUAL
         /// glyph gaps — within each cross-azimuth symbol the gaps are uniform to better than 1 %, as uniform
-        /// baked advances on a constant-depth line require. A measurement that silently reported one averaged
-        /// number, or mis-paired glyphs, could not show this.
-        ///
-        /// <para>True under BOTH the screen-constant and the world-welded model (uniform advances on a
-        /// constant-depth line are uniform either way), so this tooth survives the fix unchanged — it
-        /// calibrates the instrument, it does not pin the defect.</para>
-        ///
-        /// <para>Does NOT prove the gaps are the right SIZE. That is what is at issue, and this file makes
-        /// no such claim for the far symbol.</para>
-        ///
-        /// <para>RED-verify: perturb one glyph's <c>ArcCenter</c> in the fixture ⇒ non-uniform.</para>
+        /// baked advances on a constant-depth line require; an averaged or mis-paired measurement could not
+        /// show this. It holds under both walk models, so it calibrates the instrument, not the gap SIZE.
         /// </summary>
         [Test]
         public void GlyphSpacing_IsUniformWithinEachSymbol()
@@ -1113,62 +924,16 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>M10 — RENDER CORROBORATION.</b> Proves: both cross-azimuth symbols actually RENDER, each inside
         /// the disjoint row band its own projected anchor defines — so the geometry the mesh readback measured
-        /// is the geometry that reaches the screen, at both depths.
+        /// is the geometry that reaches the screen, at both depths. It never reads spacing from ink, which
+        /// conflates spacing with glyph SIZE. It also asserts that the far band CONTAINS its cell.
         ///
-        /// <para>Does NOT measure spacing from ink: an ink-width reading conflates the CPU's
-        /// glyph spacing with the shader's screen-px glyph SIZE, which is how a screen-ruler model reads as
-        /// correct.</para>
-        ///
-        /// <para><b>THE FAR FLOOR IS DERIVED, NOT A FLAT CONSTANT, AND THAT IS A CONSEQUENCE OF THE
-        /// FIX RATHER THAN A CONCESSION TO IT.</b> <see cref="InkFloor"/> was calibrated when a glyph was a
-        /// fixed SCREEN size at every depth, so both bands carried comparable ink. A map-pitched
-        /// glyph is a fixed WORLD size — the settled model, <c>text-size</c> under <c>pitch-alignment: map</c>
-        /// is X px TOP-DOWN — so the far symbol's screen area falls as <c>1/w²</c> BY DESIGN. Keeping one flat
-        /// floor for both bands would assert that the far symbol is NOT foreshortened, i.e. it would pin the
-        /// defect the world-metre quad removes. The far band therefore gets <see cref="FarInkFloor"/>, the same floor divided by
-        /// the fixture's OWN achieved depth ratio squared.</para>
-        ///
-        /// <para><b>The four readings this was derived from, all MEASURED on this fixture at its shipped pose</b>
-        /// (tilt 55, ratio 2). The earlier pair was taken by forcing <c>WorldSymbolRenderer</c>'s
-        /// <c>mapPitchCorners</c> to <c>false</c> and restoring it:
-        /// <code>
-        ///            near band    far band    far/near
-        ///   earlier      1200 px     1262 px     1.052    &lt;- screen-constant size: the far symbol renders the
-        ///                                                   SAME size as the near one. The defect, in ink.
-        ///   world-metre 801 px       98 px     0.122    &lt;- welded to the ground, and foreshortened.
-        /// </code></para>
-        ///
-        /// <para><b>The NEAR band moves too, and that is correct rather than a regression.</b> A reader
-        /// expects it not to, because at the look-at depth the two rulers coincide exactly — but that identity
-        /// is about the RULER, not about the PLANE. A map-pitched cell's x̂ arm lies along the road
-        /// (cross-azimuth here, perpendicular to the view axis, so it projects 1:1 and does not move), while
-        /// its ŷ arm lies along <c>cross(up, x̂)</c> — the RECEDING ground direction — which at tilt 55 is
-        /// foreshortened by roughly <c>cos 55° = 0.574</c>. The glyph is lying flat on the ground instead of
-        /// facing the camera, so it loses height: 1200 → 801 px is a factor of 0.667 against 0.574 for the
-        /// height alone. That IS the headline behaviour, seen from the ink side.</para>
-        ///
-        /// <para><b>Why the far band falls FASTER than the 1/w² area law</b> (0.122 of the near band where a
-        /// pure area model predicts 0.250) — stated so a future reader does not diagnose a size defect. Two
-        /// mechanisms, both real and both expected: (1) the far anchor is viewed at a MORE GRAZING angle than
-        /// the near one, so its ŷ arm foreshortens harder still — a per-anchor effect that no single global
-        /// cosine captures; and (2) ink is COUNTED against a hard threshold
-        /// (<c>WorldSymbolInkAnalysis.InkThreshold</c>) while the text shader ramps coverage over ~1 screen px
-        /// at the glyph edge, so a stroke whose width has halved loses a larger FRACTION of itself to the
-        /// transition. Neither is a property of the glyph's world size. <c>1/ratio²</c> is therefore used only
-        /// as a CONSERVATIVE lower bound on the shrinkage; the true falloff is faster, and the achieved margin
-        /// is 98/50 = 1.96×.</para>
-        ///
-        /// <para>That conservatism is also why this tooth stays a PRESENCE check ("did the far symbol reach the
-        /// screen at all") instead of being promoted into a size assertion. The size law is asserted where it
-        /// can be read without either confound — in WORLD METRES, off the built mesh — by T3 in
-        /// <c>MapPitchedGlyphSizeTests</c>.</para>
-        ///
-        /// <para>Still does NOT measure spacing from ink (see above), and now also asserts that the far band
-        /// CONTAINS its cell rather than clipping it — a shrinking cell could in principle have drifted out of
-        /// a band sized for the old one, and an ink count that ROSE would mean the band had caught a
-        /// neighbour. Verified, not assumed.</para>
-        ///
-        /// <para>RED-verify: move the far anchor 400 px up-screen ⇒ its band is empty.</para>
+        /// <para>Non-obvious why: a map-pitched glyph is a fixed WORLD size, so the far symbol's screen area
+        /// falls as <c>1/w²</c>; one flat floor would pin a screen-constant size, hence
+        /// <see cref="FarInkFloor"/>. Measured at the shipped pose, a screen-constant size reads 1200/1262 px
+        /// (near/far) and the world-metre quad 801/98 px. The near band shrinks too, because the cell lies flat
+        /// and its ŷ arm foreshortens by ~cos 55°. The far band falls faster than <c>1/w²</c> (grazing view,
+        /// hard ink threshold), so <c>1/ratio²</c> is a conservative bound (margin 98/50) and this stays a
+        /// PRESENCE check. <c>WorldCellSize_AndWorldAdvance_ShareOneArcScale</c> asserts the size law.</para>
         /// </summary>
         [Test]
         public void RenderedInk_AppearsInBothProjectedBands()
@@ -1195,20 +960,15 @@ namespace MapRenderer.Tests.Visual
                 f.AchievedDepthRatio, (double)farInk / nearInk,
                 1.0 / (f.AchievedDepthRatio * f.AchievedDepthRatio)));
 
-            // The far cell is SMALLER than the band that was sized for the old one, so it must sit
-            // strictly inside it. Touching an edge means the band is clipping the measurement; ink at or
-            // above the near band's level would mean the band caught a neighbouring symbol instead.
+            // The far cell must sit strictly inside its band: an edge touch means clipping, and near-level
+            // ink would mean the band caught a neighbour.
             Assert.That(farMinRow > farFrom && farMaxRow < farTo, Is.True,
                 $"M10 precondition: the far band must CONTAIN its cell, not clip it — far ink rows " +
                 $"[{farMinRow}, {farMaxRow}] inside band [{farFrom}, {farTo}]. Touching a band edge means the " +
                 "reading is clipped, so neither the count nor the floor below means what it says.");
 
-            // The far symbol must be FORESHORTENED, not merely present. The bound is the depth ratio, not 1:
-            // `farInk < nearInk` alone separates the world-metre reading (0.122) from the screen-sized one (1.052) by
-            // only 5 %, which is not a margin. Dividing by the achieved ratio puts the threshold at ~400 px
-            // against a measured 98 — roughly 4× either way, and it is still a full ratio× looser than the
-            // 1/ratio² area law, so it cannot fail for the "falls faster than the area model" reason this
-            // tooth's doc explains.
+            // Non-obvious why: a screen-sized far symbol reads 1.052× near, only 5 % above 1, so the ceiling is
+            // nearInk / ratio, not nearInk: ~400 px against 98 measured, still looser than the 1/ratio² law.
             double farInkCeiling = nearInk / f.AchievedDepthRatio;
             Assert.That(farInk, Is.LessThan(farInkCeiling),
                 $"M10: the far label must be FORESHORTENED — it carries {farInk} px against a ceiling of " +
@@ -1233,17 +993,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>The far band's ink floor: <see cref="InkFloor"/> scaled by the fixture's OWN achieved
         /// far/near view-depth ratio squared, because a map-pitched glyph's screen AREA falls as
-        /// <c>1/w²</c>. Derived from the fixture's measured pose rather than written as a literal, so it
-        /// tracks a re-tuned <c>TargetDepthRatio</c> instead of silently becoming wrong — and so it cannot be
-        /// mistaken for a number chosen to make the tooth pass.
-        ///
-        /// <para><b>The integer truncation is a real vacuity hazard, so it is ASSERTED and not clamped.</b>
-        /// <c>(int)(200 / ratio²)</c> reaches <b>0</b> at <c>AchievedDepthRatio ≳ 14.1</c>, and
-        /// <c>farInk / 0.0</c> is <c>+Inf</c>, which would PASS SILENTLY — a tooth that cannot fail. That is
-        /// reachable by exactly the edit this doc invites (re-tuning <c>TargetDepthRatio</c>), so the failure
-        /// must be loud. Clamping to 1 instead would keep the tooth alive but reduce it to "any ink at all",
-        /// which is a different and much weaker claim than the one documented above; better to stop and make
-        /// the maintainer choose a floor explicitly.</para></summary>
+        /// <c>1/w²</c>. It tracks a re-tuned <c>TargetDepthRatio</c>. Non-obvious why: it asserts instead of
+        /// clamping, because the truncation reaches 0 at a ratio ≳ 14.1, where the tooth would pass silently, and a
+        /// clamp to 1 would weaken it to "any ink at all".</summary>
         private static int FarInkFloor(OffLookAtSymbolScene f)
         {
             int floor = (int)(InkFloor / (f.AchievedDepthRatio * f.AchievedDepthRatio));
@@ -1258,22 +1010,9 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>M11 — the DEPTH-SPANNING arm's precondition.</b> Proves: the fixture really does build a symbol
         /// that spans a RANGE of view depths (strictly increasing along the glyph run, by at least 15 % end
-        /// to end) — the contrast that makes the cross-azimuth arm's constant-depth claim (M7) meaningful
-        /// rather than vacuous, and the property T2/T3/T4 need in order to discriminate a per-glyph world
-        /// walk from a screen walk scaled by one per-symbol constant.
-        ///
-        /// <para><b>Stays on <c>RecedingNear</c>.</b> The receding roads are symmetric
-        /// in world metres, which puts <c>RecedingNear</c>'s span ratio comfortably above this bound;
-        /// <c>RecedingFar</c>'s sits much closer to it (its symbol is at ~2× the depth, so the same world span
-        /// is a smaller relative spread) and asserting a bound with no margin is not a tooth. That number is
-        /// REPORTED by M13's table instead. <c>RecedingFar</c> is still a full participant in T2/T3/T4,
-        /// where even a modest depth spread gives large discrimination against a 1 % bound.</para>
-        ///
-        /// <para>Asserts nothing about SPACING — this file never did and still does not; the spacing
-        /// assertions on this arm live in <c>MapPitchedWorldArcLayoutTests</c>.</para>
-        ///
-        /// <para>RED-verify: rebuild the receding symbols along ĉ ⇒ the depth span collapses to 1.00 and the
-        /// monotonicity is noise.</para>
+        /// to end), which makes M7 meaningful and lets Fixture-T2/T3/T4 discriminate the two walks. Only
+        /// <c>RecedingNear</c> is asserted: at ~2× the depth, <c>RecedingFar</c>'s spread sits too close to the
+        /// bound, so M13 reports it instead. Spacing lives in <c>MapPitchedWorldArcLayoutTests</c>.
         /// </summary>
         [Test]
         public void RecedingSymbol_SpansAMonotonicDepthRange()
@@ -1301,14 +1040,8 @@ namespace MapRenderer.Tests.Visual
         /// <b>M12 — the POINT arm.</b> Proves: the point-placement path also stages at both depths, and each
         /// point symbol's single staged quad carries a world anchor that projects within 2 px of where the
         /// fixture put it. Point and curved reach the world mesh by different routes
-        /// (<c>CandidateEmit.AnchorLocal</c> vs the per-quad one); this pins that both routes land where they
-        /// were aimed, so a later stage touching either has a two-depth reference.
-        ///
-        /// <para>Does NOT prove anything about spacing (a point symbol has one quad) or about ink — the point
-        /// symbols are excluded from the rendered frame.</para>
-        ///
-        /// <para>RED-verify: offset one intended point anchor by <c>20·mpp</c> ⇒ fails by ~20 px (near) or
-        /// ~10 px (far).</para>
+        /// (<c>CandidateEmit.AnchorLocal</c> vs the per-quad one), so both are pinned. Point symbols are not
+        /// rendered, so nothing here reads ink.
         /// </summary>
         [Test]
         public void PointSymbols_StageAtBothDepths_WhereTheOracleProjectsThem()
@@ -1336,25 +1069,10 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>M13 — THE EVIDENCE.</b> Proves: every gap at both depths is finite and positive, and the NEAR
-        /// (look-at) symbol's mean screen spacing agrees with the model oracle within 3 %.
-        ///
-        /// <para><b>The near clause is the LOOK-AT CONTROL, and it is the whole trap in one line.</b> At the
-        /// look-at, a screen-constant ruler and the world-welded ("X px TOP-DOWN") model coincide EXACTLY, so
-        /// this reads ≈ 1.00 under BOTH — which is why a fixture anchored here discriminates nothing.</para>
-        ///
-        /// <para><b>It asserts NOTHING about the far symbol — intentionally, and still.</b> The far assertion
-        /// ("far/near screen spacing == 0.500") is T1 in <c>MapPitchedWorldArcLayoutTests</c>, RED-verified
-        /// there against the pre-fix production code. What this tooth does instead is PRINT the full per-gap
-        /// table for all six symbols and the four headline ratios, so the evidence is reproducible from the
-        /// committed suite rather than from a throwaway probe. Read the printed <c>far measured/oracle</c>
-        /// row: it is the number the world-arc walk moved, from ≈ 2.00 to ≈ 1.00.</para>
-        ///
-        /// <para>The headline ratios are ratios of two readings from ONE frame and ONE symbol pair, so any
-        /// uniform scale error (OneEm, TextSizePx, mpp, DPR, atlas scale, a wrong P11) multiplies both and
-        /// CANCELS; only the depth dependence survives.</para>
-        ///
-        /// <para>RED-verify: scale <c>TextSizePx</c> on the ORACLE SIDE ONLY by 1.2 ⇒ the near residual blows
-        /// past 3 %.</para>
+        /// (look-at) symbol's mean screen spacing agrees with the model oracle within 3 %. Limitation: at the
+        /// look-at both rulers coincide, so the near clause is a control. The far assertion is
+        /// <c>CrossAzimuthPair_ScreenSpacing_HalvesWithDepth</c>; this tooth PRINTS the per-gap table and the
+        /// headline ratios, whose <c>far measured/oracle</c> row reads ≈ 1.00 (≈ 2.00 under a screen walk).
         /// </summary>
         [Test]
         public void CurvedGlyphSpacing_MatchesTheModelAtTheLookAt_AndReportsBothDepths()

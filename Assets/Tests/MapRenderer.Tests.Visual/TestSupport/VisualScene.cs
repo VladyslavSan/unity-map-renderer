@@ -1,10 +1,5 @@
-// Unity EditMode only — the declarative visual-test authoring kit.
-// NOT registered in Tools/core-tests/core-tests.csproj.
-//
-// The composer: assembles VisualSource/VisualLayer into a REAL style JSON string, drives it through the
-// production MapView.SetStyle path (no StyleDocument shortcut), and renders the MapView's OWN MapCamera —
-// the ONE camera, both the tile-selection viewport and the snapshotted camera. MapView construction and the
-// pump mirror GeoJsonSourceTests; the lit-ambient recipe mirrors TiltedGroundScene.Create.
+// Unity EditMode only (not in Tools/core-tests) — the composer of the declarative visual-test kit: a REAL
+// style JSON through MapView.SetStyle, rendered by the MapView's own MapCamera. See VisualScene's summary.
 
 #if UNITY_EDITOR
 using System;
@@ -21,19 +16,11 @@ using RenderBackend = MapRenderer.Unity.Rendering.Map.RenderBackend;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Fluent driver for a declarative visual-test scene: named inline-GeoJSON sources, fill layers bound to
-    /// them BY ID, and a camera pose — assembled into a real style JSON string, parsed by the REAL
-    /// <see cref="StyleParser"/>, and rendered through a live <see cref="MapViewComponent"/>.
-    ///
-    /// <para><b>The kit owns exactly one camera.</b> The
-    /// <see cref="MapCamera"/> built from <see cref="Camera(GeoCoordinate3D,double,double,double)"/> is BOTH
-    /// what selects the tile cover (wired via <c>MapViewComponent.SetCamera</c>) AND what
-    /// <see cref="SnapshotRenderer"/> renders — so the rendered frame is provably what the selector saw.</para>
-    ///
-    /// <para>Usage: <c>using var scene = VisualScene.New().Source(...).Layer(...).Camera(...);
-    /// VisualFrame frame = scene.Render(px);</c> — <see cref="Render"/> returns the <see cref="VisualFrame"/>
-    /// value, not the disposable; keep the <see cref="VisualScene"/> itself in a <c>using</c> so its
-    /// MapView/camera/RT/ambient are torn down.</para>
+    /// Fluent driver for a declarative visual-test scene: named inline-GeoJSON sources, layers bound to them
+    /// BY ID, and a camera pose, parsed by the REAL <see cref="StyleParser"/> and rendered through a live
+    /// <see cref="MapViewComponent"/>. One <see cref="MapCamera"/> both selects the tile cover and renders,
+    /// so the frame is what the selector saw. Keep the scene in a <c>using</c>: <see cref="Render"/> returns
+    /// a value, and only the scene tears down its MapView, camera, RT and ambient.
     /// </summary>
     internal sealed class VisualScene : IDisposable
     {
@@ -127,12 +114,10 @@ namespace MapRenderer.Tests
             return this;
         }
 
-        /// <summary>Selects which committed <c>MapMaterialSet</c> this scene renders through, and therefore
-        /// whether the frame is lit or unlit (render mode is a property of the SET — see
-        /// <c>RenderModeMaterialSelectionTests</c>; there is no separate config flag). Default
-        /// <c>RenderMode.Lit</c>, the product default. Unlit is the arm that separates "the geometry is
-        /// wrong" from "two materials shade the same colour differently": under it a colour is exactly its
-        /// own albedo, so two overlapping draws of one colour are byte-identical.</summary>
+        /// <summary>Selects which committed <c>MapMaterialSet</c> this scene renders through, and so whether
+        /// the frame is lit or unlit. Default <c>RenderMode.Lit</c>, the product default. Unlit separates
+        /// "the geometry is wrong" from "two materials shade one colour differently": under it a colour is
+        /// its own albedo, so two overlapping draws of one colour are byte-identical.</summary>
         /// <param name="mode">The render mode to load the committed material set for.</param>
         public VisualScene RenderMode(MapRenderer.Unity.Rendering.Materials.RenderMode mode)
         {
@@ -161,11 +146,9 @@ namespace MapRenderer.Tests
             => Glyphs(new Dictionary<(string, int), byte[]> { [(fontName, 0)] = range0Bytes });
 
         /// <summary>The placed-quad count <see cref="SpinUntilSymbolsReady"/> pumps <c>LateUpdate</c> toward
-        /// before <see cref="Render"/> snapshots — the number of authored symbols times the
-        /// glyph count of their text (a single-character symbol is 1 quad). Required whenever the scene
-        /// declares a <see cref="SymbolTextVisualLayer"/>; a symbol scene that never calls this has no
-        /// readiness target and <see cref="Render"/> throws rather than guessing a frame count
-        /// (always-bound-loops).</summary>
+        /// before <see cref="Render"/> snapshots: authored symbols times the glyph count of their text.
+        /// Required whenever the scene declares a <see cref="SymbolTextVisualLayer"/>; without it
+        /// <see cref="Render"/> throws rather than guess a frame count (always-bound-loops).</summary>
         public VisualScene ExpectSymbolQuads(int quads)
         {
             _expectedSymbolQuads = quads;
@@ -184,11 +167,9 @@ namespace MapRenderer.Tests
             foreach (VisualLayer l in _layers)
                 layerEntries.Add(l.ToLayerJson());
 
-            // Root "glyphs" URL template (Style Spec): SymbolSubsystem.SetStyle bails out (no _builder,
-            // no symbols — a WARNING, not a throw) whenever style.Glyphs is null/empty, BEFORE it ever
-            // consults GlyphSourceFactoryOverride — so a symbol scene needs a non-empty value here even
-            // though GlyphSourceFactoryOverride means the URL itself is never actually fetched. Emitted only
-            // when a glyph source was supplied (Glyphs(...)), so a fill-only scene's JSON is unchanged.
+            // Non-obvious why: SymbolSubsystem.SetStyle drops all symbols (a warning) when style.Glyphs is empty,
+            // before it reads GlyphSourceFactoryOverride. So a symbol scene needs this never-fetched URL;
+            // a fill-only scene's JSON stays unchanged.
             string glyphsMember = _glyphSourceFactory != null
                 ? "\"glyphs\":\"https://fixture.invalid/glyphs/{fontstack}/{range}.pbf\","
                 : "";
@@ -214,11 +195,8 @@ namespace MapRenderer.Tests
                     "VisualScene.Camera(...) must be called before Render() — the composer has no default pose.");
 
             // ── Lit-ambient recipe — REQUIRED: fill is URP Lit and renders near-black at ambient-only.
-            // Ambient/light only (matches MapViewSnapshotTests / FillPaintSnapshotTests.cs:102-105) —
-            // NOT QualitySettings.SetQualityLevel: that call is TiltedGroundScene.Create's, whose
-            // scenes render hand-built MeshRenderer geometry, never the tile backend; forcing quality level 0
-            // can swap in a different (or absent) URP Render Pipeline Asset for the batched/Entities tile
-            // path while leaving plain-MeshRenderer fixtures unaffected. ───────────────────────────────────
+            // Non-obvious why: no QualitySettings.SetQualityLevel here. Quality level 0 can swap in a different
+            // (or absent) URP pipeline asset for the Entities tile path; hand-built MeshRenderer scenes are safe.
             _savedAmbient = (RenderSettings.ambientMode, RenderSettings.ambientLight);
             _ambientSaved = true;
             RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
@@ -238,16 +216,12 @@ namespace MapRenderer.Tests
             _mapView.Config.TileSelection.MaxZoom = tileZoom;
             _mapView.Config.MaxConsumesPerTick   = 64;
             _mapView.Config.MaxMeshBuildsPerTick = 64;
-            // The tile render backend — default Entities (the PRODUCT DEFAULT), so the suite validates the
-            // shipping path; overridable via Backend(). Rendering correctly on Entities requires the warm-up
-            // pump after settle (WarmupFrames, below): the earlier blank-on-Entities symptom was NOT a product
-            // bug but EG/BRG warm-up latency. Config.Backend is an already-public field, so this is a
-            // test-assembly configuration choice, not a production change.
+            // Default Entities, the product default, so the suite validates the shipping path. Entities needs the
+            // post-settle warm-up pump (WarmupFrames), or the frame renders blank.
             _mapView.Config.Backend = _backend;
 
-            // ── This scene's OWN camera + off-screen RT + MapCamera — the one camera. Seeded with the
-            // requested pose at construction (MapCamera's ctor calls SyncToCamera itself), THEN wired, so the
-            // camera is correct before SetStyle builds render layers at the current zoom. ──────────────────
+            // ── The one camera: seeded with the pose at construction, THEN wired, so it is correct before
+            // SetStyle builds render layers at the current zoom. ──────────────────────────────────────────
             _cameraGo    = new GameObject("VisualScene_Camera");
             _unityCamera = _cameraGo.AddComponent<UnityEngine.Camera>();
             _rt          = new RenderTexture(px, px, 24, RenderTextureFormat.ARGB32);
@@ -259,9 +233,8 @@ namespace MapRenderer.Tests
             _mapCam = new MapCamera(_unityCamera, _cameraProperties);
             _mapView.SetCamera(_mapCam);
 
-            // Glyph seam: AFTER SetCamera builds View, BEFORE SetStyle below consumes it. Only wired when a
-            // glyph source was supplied, so a fill-only scene leaves this null and takes the production
-            // GlyphSourceFactory.Create path.
+            // Glyph seam: AFTER SetCamera builds View, BEFORE SetStyle consumes it. A fill-only scene leaves it
+            // null and takes the production GlyphSourceFactory.Create path.
             if (_glyphSourceFactory != null)
                 _mapView.View.SymbolSubsystem.GlyphSourceFactoryOverride = _ => _glyphSourceFactory();
 
@@ -275,16 +248,13 @@ namespace MapRenderer.Tests
             // cullable before the snapshot — rendering on the settle frame itself is blank (see WarmupFrames).
             for (int f = 0; f < WarmupFrames; f++) _mapView.LateUpdate();
 
-            // Bounded symbol-readiness settle, LAST before the snapshot: a style with a symbol layer needs
-            // its symbols STAGED, not merely tile-settled — pump until LastQuadCount/LastSurvivorCount reach
-            // the authored count, snapshotting the very next frame. An inserted frame after that is a flake
-            // source. Only a scene declaring a symbol layer spins here.
+            // Symbol readiness is LAST before the snapshot: symbols must be STAGED, not merely tile-settled, and
+            // a frame inserted after the spin is a flake source.
             if (_layers.Exists(l => l is SymbolTextVisualLayer))
                 SpinUntilSymbolsReady();
 
-            // ── Render. Re-sync FIRST — SyncToCamera's last act pushes the process-global
-            // _MapFrameMetersPerDevicePixel ruler (see TiltedGroundScene.Render), so a scene that renders
-            // always pushes its own ruler immediately before rendering. ────────────────────────────────────
+            // ── Render. Re-sync FIRST: SyncToCamera pushes the process-global _MapFrameMetersPerDevicePixel
+            // ruler, so every scene pushes its own ruler right before it renders. ────────────────────────────
             _mapCam.SyncToCamera();
             using var snapshot = new SnapshotRenderer(px, px);
             snapshot.Render(_unityCamera);
@@ -304,17 +274,11 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Pumps <c>LateUpdate</c> until every loaded tile has settled — mirrors
-        /// <c>GeoJsonSourceTests.PumpUntilSettled</c>. A multi-tile cover still settles even though the
-        /// geojson probe returns definitively-absent null handles for disjoint tiles, and
-        /// <c>AllTilesSettled</c> treats those as settled too.
-        ///
-        /// <para>The real <c>LateUpdate</c> Tick does the consume + symbol harvest every iteration, unlike
-        /// <c>TileManager.DrainMeshBuilds</c>, which is "symbol-silent" — its two call sites pass no
-        /// <c>symbolPass</c>, so the per-consumed-layer symbol harvest never fires. Between ticks,
-        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/> only supplies the ThreadPool wall-clock; it
-        /// consumes and harvests nothing, so it cannot reintroduce the symbol-silent regression. Every
-        /// <see cref="VisualScene"/> consumer shares this helper, symbol and fill-only alike, so it stays on
-        /// the real per-frame Tick path.</para></summary>
+        /// <c>GeoJsonSourceTests.PumpUntilSettled</c>. <c>AllTilesSettled</c> counts a disjoint tile's
+        /// definitively-absent null handle as settled. Non-obvious why: it pumps the real <c>LateUpdate</c>
+        /// Tick, which harvests symbols, not <c>TileManager.DrainMeshBuilds</c>, which passes no
+        /// <c>symbolPass</c>. <see cref="TileManager.AwaitInFlightMeshBuilds"/> between ticks only waits; it
+        /// consumes and harvests nothing.</summary>
         private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
@@ -326,12 +290,10 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Pumps <c>LateUpdate</c> until the MapView-owned <c>SymbolPlacementSystem</c> has both
-        /// STAGED and SURVIVED <see cref="_expectedSymbolQuads"/> quads, or fails loud at
-        /// <see cref="SymbolReadinessCeiling"/> (always-bound-loops) — never silently renders a symbol-less
-        /// frame. Checks <c>LastSurvivorCount</c> alongside <c>LastQuadCount</c>: the collision verdict is
-        /// harvested one tick late (see <c>OffLookAtSymbolScene</c>'s duplicate-Tick note), so a
-        /// spin that stopped at quad-count-reached alone could snapshot a frame whose survivor count is still
-        /// stale.</summary>
+        /// STAGED and SURVIVED <see cref="_expectedSymbolQuads"/> quads, or throws at
+        /// <see cref="SymbolReadinessCeiling"/> (always-bound-loops). It checks <c>LastSurvivorCount</c> too:
+        /// the collision verdict arrives one tick late, so a quad count alone can meet a stale survivor
+        /// count.</summary>
         private void SpinUntilSymbolsReady()
         {
             if (!_expectedSymbolQuads.HasValue)

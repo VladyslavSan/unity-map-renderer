@@ -1,11 +1,5 @@
-// Fill-paint and boundary-band pixel-color GPU/visual acceptance tests.
-//
-// The three-way split follows TWO using collisions, not the line cap: `CameraProperties`
-// (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System.Object vs
-// UnityEngine.Object) — both CS0104. Within that constraint each file below groups
-// its dominant fill sub-area.
-// This file: UnityEngine.Rendering importers that also import System (data-driven
-// per-feature color, FillPaint-driven rendering, and the boundary band's own pixels).
+// Fill-paint and boundary-band pixel-color GPU/visual tests. The file split follows two CS0104 collisions
+// (`CameraProperties`, bare `Object`); this file holds the importers of both UnityEngine.Rendering and System.
 //
 // Contents:
 //   DataDrivenFillSnapshotTests  — acceptance snapshot tests — data-driven per-feature colors baked into the fill mesh.
@@ -30,23 +24,11 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance snapshot tests — data-driven per-feature colors baked into the fill mesh.
-    ///
-    /// The DataDrivenColorBakeTests (Unity EditMode) are the load-bearing CPU teeth for distinctness.
-    /// These snapshot tests confirm the full pipeline: bake → mesh → shader → GPU output.
-    ///
-    /// Acceptance teeth:
-    ///   Test 1: Distinct-color tooth — a match expression on CONTINENT produces ≥2 color clusters
-    ///           in the non-background pixels. Uses a full-RGB histogram to count dominant clusters,
-    ///           not IsUniform alone (which can be fooled by lighting gradients). BLOCKING.
-    ///   Test 2: Constant-input control — same expression shape (Feature kind) with a non-existent
-    ///           key → all features fall through to default → render is single-cluster / uniform.
-    ///           Proves the data-driven path without breaking when vertex colors are all the same.
-    ///   Test 3: White-fallback regression — no FillColorExpression → vertex colors default to white
-    ///           → a uniform fill from _BaseColor. Mesh must still build.
-    ///
-    /// Camera: top-down ortho 512×512, Y=200, orthoSize=70.
-    /// Background: distinctive dark slate (same as LitFillSnapshotTests).
+    /// Data-driven per-feature fill colors survive bake → mesh → shader → GPU output; the CPU teeth for
+    /// distinctness are DataDrivenColorBakeTests. A match on CONTINENT renders ≥2 clusters, counted by a full-RGB
+    /// histogram because IsUniform alone is fooled by lighting gradients. A match on a missing key renders one
+    /// hue, and no FillColorExpression still builds the mesh (white vertex colors).
+    /// Camera: top-down ortho 512×512, Y=200, orthoSize=70; background dark slate.
     /// </summary>
     [TestFixture]
     public class DataDrivenFillSnapshotTests : VisualTestFixture
@@ -107,6 +89,10 @@ namespace MapRenderer.Tests.Visual
         }
 
 
+        /// <summary>Chebyshev radius, in pixels, of the antialiased silhouette rim
+        /// <see cref="CountColorClusters"/> excludes — see its body for why 2 and not 1.</summary>
+        private const int RimRadius = 2;
+
         /// <summary>
         /// Count distinct color clusters in non-background pixels using a coarse full-RGB histogram.
         /// Quantizes to N bits per channel and returns the number of buckets with >= minPixels pixels.
@@ -114,10 +100,6 @@ namespace MapRenderer.Tests.Visual
         /// hue differences (reddish vs bluish vs gray).
         /// bitsPerChannel=4 → 4096 buckets; minPixels should be tuned to image fill fraction.
         /// </summary>
-        /// <summary>Chebyshev radius, in pixels, of the antialiased silhouette rim
-        /// <see cref="CountColorClusters"/> excludes — see its body for why 2 and not 1.</summary>
-        private const int RimRadius = 2;
-
         private static int CountColorClusters(
             Frame frame, Color32 bg,
             int bitsPerChannel = 4,
@@ -146,12 +128,8 @@ namespace MapRenderer.Tests.Visual
                 int dist = Math.Abs(r - bg.r) + Math.Abs(g - bg.g) + Math.Abs(bl - bg.b);
                 if (dist <= SnapshotCoverage.Tolerance) continue;
 
-                // Skip the silhouette rim. A fill boundary is antialiased now, so pixels NEAR the background
-                // are BLENDS of a fill colour and the background — not colours the expression produced, which
-                // is the only thing this function counts. Without this a single uniform hue reads as several
-                // clusters purely because its outline is soft. The radius is 2, not 1: the band is one DEVICE
-                // pixel measured perpendicular to the edge, which spans two pixels of a diagonal silhouette,
-                // and a corpus coastline is diagonal nearly everywhere.
+                // Skip the antialiased rim: its pixels blend fill and background, so one hue would read as several
+                // clusters. Non-obvious why: the radius is 2, as a one-pixel band spans two pixels of a diagonal edge.
                 int ix = i % width, iy = i / width;
                 bool nearBackground = false;
                 for (int dy = -RimRadius; dy <= RimRadius && !nearBackground; dy++)
@@ -199,10 +177,8 @@ namespace MapRenderer.Tests.Visual
                 snap.Render(camera);
                 snap.WritePng("data-driven-distinct-colors.png");
 
-                // Count color clusters in non-background pixels.
-                // With 4 bits per channel and minPixels=50, distinct reddish/bluish/gray regions
-                // each need ≥50 pixels to register as a cluster. The world map fill covers a large
-                // fraction of the 512×512 image, so 50 pixels is a conservative floor.
+                // Each reddish/bluish/gray region needs ≥50 pixels to count as a cluster. The world fill covers
+                // a large fraction of the 512×512 frame, so 50 pixels is a low floor.
                 int clusters = CountColorClusters(
                     snap.Pixels, Bg32,
                     bitsPerChannel: 4, minPixels: 50);
@@ -275,9 +251,8 @@ namespace MapRenderer.Tests.Visual
 
                 Debug.Log($"[DataDrivenFillSnapshotTests] Constant-control render: color clusters={clusters}");
 
-                // The key assertion: constant-input control must NOT produce the same multi-cluster
-                // result as the distinct-color expression. We allow ≤2 clusters (lighting can split one
-                // uniform color into a lit/shadow pair at 3-bit resolution).
+                // Constant input must not give the distinct-color result. ≤2 clusters passes: at 3-bit resolution
+                // lighting can split one uniform color into a lit/shadow pair.
                 Assert.LessOrEqual(clusters, 2,
                     $"Constant-input control (non-existent key → default branch for all features) " +
                     $"must produce ≤2 color clusters (got {clusters} at 3-bit/channel quantization). " +
@@ -334,32 +309,11 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Snapshot tests for FillPaint-driven rendering behavior.
-    ///
-    /// These are Unity-only tests (use UnityEngine.Mesh, rendering, etc.).
-    /// The CPU-side counterparts live in FillPaintTests.cs (also Unity EditMode only, not shared with
-    /// dotnet core-tests — see that file's header).
-    ///
-    /// Acceptance teeth:
-    ///   #3: Opacity no-rebuild — changing _Opacity changes rendered alpha/brightness WITHOUT
-    ///       rebuilding the mesh. Asserts SAME mesh instance reference + vertexCount unchanged +
-    ///       RGB-toward-background (lower composite luminance at opacity=0 than at opacity=1).
-    ///
-    ///   #6: Non-white _BaseColor gamma calibration — baked vertex colors (sRGB via Core) are
-    ///       linearized before Mesh.SetColors. With _BaseColor=white, the channel multiply
-    ///       is identity and the rendered color matches the baked vertex color (in linear space).
-    ///       With _BaseColor=gray (0.5,0.5,0.5 sRGB), the composite is darkened. This test
-    ///       confirms the vertex color × _BaseColor product is lower than vertex color alone —
-    ///       verifying the GPU multiply is in the correct (linear) color space.
-    ///
-    ///   #7: MeshBuilder.SetColors linearizes — with a data-driven red vertex color, the rendered
-    ///       R channel must be &lt; raw sRGB R=1.0 (it's linearized, ~0.21 in linear), whereas if
-    ///       linearization were skipped, the vertex color would be sRGB=1.0 and still render as 1.0.
-    ///       This test is necessarily loose (GPU rendering can't give exact float values), but
-    ///       verifies the linearization is at least applied in the right direction.
-    ///
-    /// Camera: top-down ortho 512×512, Y=200, orthoSize=70.
-    /// Background: dark slate (matches DataDrivenFillSnapshotTests and LitFillSnapshotTests).
+    /// FillPaint-driven rendering, observed in rendered frames and the built mesh. Changing <c>_Opacity</c>
+    /// changes the render without a mesh rebuild. A gray <c>_BaseColor</c> renders darker than white, so the
+    /// vertex color × <c>_BaseColor</c> multiply applies. Baked sRGB vertex colors are linearized before they
+    /// reach the mesh COLOR stream.
+    /// Camera: top-down ortho 512×512, Y=200, orthoSize=70; background dark slate.
     /// </summary>
     [TestFixture]
     public class FillPaintSnapshotTests : BaseTestFixture
@@ -449,13 +403,8 @@ namespace MapRenderer.Tests.Visual
             snapTransparent.Render(camera);
             snapTransparent.WritePng("fill-paint-opacity0.png");
 
-            // STRENGTHENED: this used to assert only "not BRIGHTER at opacity 0" (lum ≤ lum + 0.05), which
-            // passed whether or not opacity did anything — a fill rendering fully solid satisfies it. That
-            // weakness was load-bearing: fill materials were opaque-surface-typed, so URP's
-            // `OutputAlpha(color.a, IsSurfaceTypeTransparent())` forced alpha to 1 and _Opacity had NO visual
-            // effect. The old comment here ("the opaque queue may not produce transparency") documented the
-            // bug rather than the intent. Now that fills declare _SURFACE_TYPE_TRANSPARENT, opacity 0 must be
-            // genuinely INVISIBLE, which is a claim only a working alpha path can satisfy.
+            // Opacity 0 must be INVISIBLE, not merely "not brighter": an opaque-surface fill passes the weaker
+            // check, as URP's OutputAlpha forces alpha to 1 without _SURFACE_TYPE_TRANSPARENT.
             var opaqueVerdict = SnapshotCoverage.Analyse(snapOpaque.Pixels, Bg32);
             var invisibleVerdict = SnapshotCoverage.Analyse(snapTransparent.Pixels, Bg32);
 
@@ -517,9 +466,8 @@ namespace MapRenderer.Tests.Visual
             {
                 using var bagGray = new ObjectDisposalBag();
 
-                // Render with _BaseColor=gray (0.5 sRGB). In linear space: Unity linearizes
-                // material.SetColor → 0.5 sRGB ≈ 0.214 linear. Multiply with vertex color
-                // (white.linear = 1.0) → 0.214. Output should be darker than white _BaseColor case.
+                // Unity linearizes SetColor: 0.5 sRGB ≈ 0.214 linear, times the white vertex color (1.0) is
+                // 0.214, so this render must be darker than the white _BaseColor one.
                 var (mapGoGray, meshGray, matGray) = BuildFillWithColor(null, m =>
                 {
                     m.SetColor("_BaseColor", new Color(0.5f, 0.5f, 0.5f, 1f));
@@ -551,20 +499,13 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── #7: StyledFillTileBuilder linearizes vertex colors ─────────────────
-        // StyledFillTileBuilder stores colors in stream-3 via SetVertexBufferData<Vector4>,
-        // so we read them back with Mesh.GetColors (reads the COLOR attribute on any stream).
+        // Colors sit on stream 3 (SetVertexBufferData<Vector4>); Mesh.GetColors reads COLOR on any stream.
 
         [Test]
         public void DataDrivenVertexColor_IsLinearized_BeforeSetColors()
         {
-            // Verify that StyledFillTileBuilder.BuildMeshData() applied Color.linear to baked
-            // vertex colors. Inspect the mesh Color stream directly.
-            //
-            // A baked sRGB (127/255≈0.498, 0, 0, 1):
-            //   sRGB R ≈ 0.498 → linear R ≈ ((0.498+0.055)/1.055)^2.4 ≈ 0.212.
-            //
-            // We build a mesh with a constant baked color of (127,0,0,1) and verify the mesh's
-            // stored Color-stream R is ≈ 0.212, not ≈ 0.498.
+            // A baked sRGB R of 127/255 ≈ 0.498 linearizes to ((0.498+0.055)/1.055)^2.4 ≈ 0.212, so the
+            // mesh COLOR stream must hold R ≈ 0.212, not ≈ 0.498.
 
             const string halfRedExpr =
                 "[\"match\",[\"get\",\"__NEVER_MATCHES__\"]," +
@@ -584,9 +525,7 @@ namespace MapRenderer.Tests.Visual
                     Assert.Fail("Mesh not built for linearization test.");
                 }
 
-                // StyledFillTileBuilder bakes the linearized fill color into the COLOR vertex
-                // stream (stream-3). Mesh.GetColors reads the COLOR attribute regardless of which
-                // stream it lives on, so it reflects the raw stored float values (NOT re-gamma'd).
+                // Mesh.GetColors returns the stored floats of the COLOR stream, not re-gamma'd.
                 var colorList = new System.Collections.Generic.List<Color>();
                 mesh.GetColors(colorList);
                 if (colorList.Count == 0)
@@ -612,16 +551,10 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — the outward boundary band, observed in rendered pixels.
-    //
-    // The band's whole justification is a placement claim, and a placement claim is only settled on a frame:
-    // the ramp must lie OUTSIDE the boundary, so the interior keeps full coverage and two abutting fills still
-    // leave zero background weight. The job-level fixture (FillBandJobTests) proves the geometry and the
-    // attribute; these prove what the geometry was for.
-    //
-    // Frame geometry, borrowed from GeoJsonFillVisualProofTests: at tilt 0 a tile projects to exactly 512
-    // device px whatever the viewport is, so rendering one tile at SnapPx = 512 makes tile-local unit-square
-    // coordinates the same thing as frame-fraction coordinates.
+    // Unity EditMode only — the outward boundary band, observed in rendered pixels. The ramp must lie OUTSIDE
+    // the boundary, so the interior keeps full coverage and abutting fills leave zero background weight.
+    // Non-obvious why: only a frame settles that placement; FillBandJobTests covers the geometry. At tilt 0 a
+    // tile projects to 512 device px, so at SnapPx = 512 tile-local unit coordinates are frame fractions.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillBoundaryBandRenderTests — Unity EditMode only
@@ -772,9 +705,7 @@ namespace MapRenderer.Tests.Visual
 
         // ── The boundary is soft, the interior is not ──────────────────────────────────────────────────
         //
-        // RED: against the tree before the band node, EVERY count below is 0 — a hard rasterizer emits no
-        // partially-covered pixel at all. RED for the placement half: displace the band inward and graded
-        // pixels appear INSIDE the boundary, which the interior assertion catches.
+        // A hard rasterizer grades no pixel; a band displaced inward grades pixels the interior check covers.
         [Test]
         public void ASquareFillHasGradedBoundaryPixels_AndAnUngradedInterior()
         {
@@ -788,9 +719,8 @@ namespace MapRenderer.Tests.Visual
                 "a fill silhouette must produce partially-covered pixels. Zero means the band never reached " +
                 "the frame — the state this whole stage exists to leave. " + Diagnose(frame, classes));
 
-            // The interior, well inside the boundary: [0.35,0.65]² of the tile. Not one graded pixel may be
-            // here. This is the lemma's own precondition — coverage stays exactly 1 everywhere the hard fill
-            // already was — and it is what an inward-displaced band breaks first.
+            // No graded pixel in the interior [0.35,0.65]²: coverage stays 1 wherever the hard fill was (the
+            // lemma's precondition), which an inward-displaced band breaks first.
             int lo35 = (int)(0.35 * SnapPx), hi65 = (int)(0.65 * SnapPx);
             for (int y = lo35; y < hi65; y++)
                 for (int x = lo35; x < hi65; x++)
@@ -812,19 +742,15 @@ namespace MapRenderer.Tests.Visual
                 }
         }
 
-        /// <summary>The band's PERPENDICULAR width, in device pixels, read off a rendered silhouette.
-        ///
-        /// <para>Total alpha-weighted coverage over the frame exceeds the hard silhouette's area by exactly
-        /// the ramp's integral: an outward ramp of perpendicular width <c>w</c> that falls linearly 1 → 0
-        /// contributes <c>perimeter × w / 2</c>. So <c>w = 2 × (Σ coverage − hard area) / perimeter</c> —
-        /// sub-pixel, no threshold, and it reads the physical quantity the mechanism specifies rather than a
-        /// pixel count that quantisation rounds.</para></summary>
+        /// <summary>The band's PERPENDICULAR width, in device pixels, read off a rendered silhouette. An outward
+        /// ramp of width <c>w</c> falling linearly 1 → 0 adds <c>perimeter × w / 2</c> to the hard area's coverage,
+        /// so <c>w = 2 × (Σ coverage − hard area) / perimeter</c>: sub-pixel, with no threshold and no pixel count
+        /// that quantisation rounds.</summary>
         /// <param name="frame">The rendered frame.</param>
         /// <param name="hardAreaPx">The silhouette's analytic area, device px².</param>
         /// <param name="perimeterPx">Its analytic perimeter, device px.</param>
-        /// <param name="plateauX">Column of a SINGLY-covered interior pixel — the coverage-1 reference. The
-        /// frame centre is wrong for an abutting pair: it lands on the seam, which is double-coated at
-        /// <c>fill-opacity &lt; 1</c>, and every single-coated pixel would then read coverage &lt; 1.</param>
+        /// <param name="plateauX">Column of a SINGLY-covered interior pixel, the coverage-1 reference. Not the frame
+        /// centre of an abutting pair: that seam is double-coated at <c>fill-opacity &lt; 1</c>.</param>
         /// <param name="plateauY">Row of that pixel.</param>
         /// <returns>The measured perpendicular ramp width, device px.</returns>
         private static double MeasuredRampWidthPx(
@@ -844,24 +770,11 @@ namespace MapRenderer.Tests.Visual
 
         // ── The ramp is ONE device pixel, on a diagonal silhouette as much as on an axis-aligned one ────
         //
-        // The shipped coverage divides by a EUCLIDEAN gradient. fwidth is Manhattan (|ddx| + |ddy|), which
-        // OVER-READS the gradient by up to sqrt(2) — and because coverage is (1 - side) DIVIDED by it, an
-        // over-read gradient makes coverage fall FASTER: on a 45° silhouette the transition narrows to
-        // 1/sqrt(2) ~ 0.707 device px, and coverage at the boundary itself drops from 1 to 0.707, an
-        // under-inked seam. (An axis-aligned edge is unaffected: there ddx or ddy is zero and the two
-        // gradients agree bit for bit — which is exactly why the diagonal arm is the one that discriminates
-        // and why an axis-aligned fixture cannot stand in for it.)
-        //
-        // RED: ① against the tree before the band node, both widths are 0; ② swap
-        // length(float2(ddx, ddy)) for fwidth in Fill_BandCoverage.hlsl and the DIAMOND arm reds while the
-        // SQUARE arm stays green. Two earlier forms of this tooth survived that injection and are recorded
-        // because each looked convincing: counting "graded" PIXELS is quantised far too coarsely to separate
-        // 1.0 px from 0.707 px, and a [0.7, 1.3] bound on this same integral passes 0.707 by two thousandths.
-        //
-        // The LOWER bound is the discriminating one and it is what the analysis fixes: Manhattan renders
-        // 1/sqrt(2) = 0.707 of the true width, so anything at or below ~0.8 must fail. The upper bound is a
-        // sanity rail, not a discriminator, and is left slack: the diagonal arm reads a little over 1 because
-        // a diamond's four rasterised corners add ink the perimeter model does not account for.
+        // Non-obvious why: coverage divides by a EUCLIDEAN gradient; fwidth (|ddx| + |ddy|) over-reads it by up
+        // to sqrt(2) on a 45° edge, narrowing the ramp to ~0.707 px. On an axis-aligned edge the two agree, so
+        // only the diamond arm discriminates, and only the lower bound does: the upper bound is a slack rail, as
+        // a diamond's rasterised corners add ink the perimeter model omits. A graded-pixel count cannot separate
+        // 1.0 px from 0.707 px, and a 0.7 lower bound passes 0.707.
         [Test]
         public void TheRampIsOneDevicePixelWide_OnADiagonalSilhouetteAsWellAsAnAxisAlignedOne(
             [Values(false, true)] bool diagonal)
@@ -903,22 +816,11 @@ namespace MapRenderer.Tests.Visual
 
         // ── The lemma, on the composited frame ────────────────────────────────────────────────────────
         //
-        // Two ABUTTING translucent polygons in ONE layer. Background weight along their shared edge must stay
-        // 0 — it is 0 today only because hard rasterization gives one of them full coverage, and it stays 0
-        // only while the ramp lies strictly outside each boundary. A ramp placed inside leaves
-        // (1-a_A)(1-a_B) > 0 and a background trench opens along every shared edge and tile seam.
-        //
-        // RED, and the honest limits of it. Give the INTERIOR a varying `side` (so its coverage stops
-        // reading exactly 1) and this reds — that is the property the lemma actually rests on. The obvious
-        // injection, "displace the band inward", does NOT red it and is recorded here so nobody re-derives
-        // it: moving the band's outer ring inward leaves earcut's interior triangles covering the boundary
-        // at coverage 1 underneath, so the band merely double-coats and no background is exposed. The inset
-        // variant this tooth is meant to have killed shrinks the INTERIOR RING, which is a design change to
-        // a different node, not a one-line defect in this one.
-        //
-        // The first assertion is a PRECONDITION, not decoration: without it this tooth passes on a tree with
-        // no band at all — a hard silhouette also leaves no background at a shared edge — which is how it sat
-        // green through four gate runs while the band was rendering nothing.
+        // Two ABUTTING translucent polygons in ONE layer leave zero background weight along their shared edge only
+        // while each ramp lies strictly outside its boundary; a ramp inside leaves (1-a_A)(1-a_B) > 0, a trench.
+        // Limitation: a band moved inward does not red this, as earcut's interior still covers the boundary at
+        // coverage 1; an interior whose coverage drops below 1 does. The ramp-width precondition stops a hard,
+        // band-less silhouette from passing, since it also shows no background at a shared edge.
         [Test]
         public void AbuttingPolygonsInOneLayerLeaveNoBackgroundAlongTheirSharedEdge()
         {
@@ -968,19 +870,10 @@ namespace MapRenderer.Tests.Visual
 
             // ── The residual rim, bounded against a PREDICTED value ───────────────────────────────────
             //
-            // A tile seam is suppressed exactly (both endpoints on one window line). Two polygons abutting
-            // INSIDE one tile share no such predicate: each one's band ramps across the other's interior and
-            // the pair composites twice. That is over-ink, never a trench — the assertions above are what say
-            // so — and it was accepted rather than closed with an intra-layer edge hash, which would still
-            // miss a shared boundary expressed with different vertex counts on the two sides. These two
-            // assertions are what observe that acceptance, so "we accepted a rim there" is not a claim
-            // nothing checks.
-            //
-            // The bound is derived, not measured-then-recorded (a bound no bad port fails). A singly-covered
-            // pixel is S = f·C + (1−f)·B, so compositing the same source over it again gives
-            // D = f·C + (1−f)·S = S + (1−f)(S−B) — ink exactly (2−f)× the reference. The probe fixture
-            // measured this ratio at 1.5026 against a predicted 1.5000 at fill-opacity 0.5, which is what
-            // says the compositing is linear in the space sampled here rather than assuming it.
+            // See docs/fill-boundary-antialiasing-design.md § "The residual rim, accepted (maintainer call)".
+            // Non-obvious why: S = f·C + (1−f)·B composited again gives D = S + (1−f)(S−B), ink (2−f)× the
+            // reference, so the bound is derived, not measured. A probe measured 1.5026 against a predicted 1.5000
+            // at fill-opacity 0.5, so linear compositing in the sampled space is checked, not assumed.
             Assert.Greater(peak, reference + 0.05,
                 $"the rim this bound exists to bound is not there: peak seam ink {peak:F3} against a " +
                 $"singly-covered {reference:F3}. Either the band stopped reaching across the shared edge — " +

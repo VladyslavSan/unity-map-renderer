@@ -11,55 +11,23 @@ using MapRenderer.Jobs.Projection;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// Schedules one fill-extrusion layer's roof + wall graph (job-scheduling-design.md): the roof measure
-    /// via <see cref="FillMeshGraph.Schedule"/>, composed UNCHANGED, plus
-    /// the wall chain — <see cref="RingSelectJob"/> or <see cref="RingClipJob"/> (raw, pre-earcut ring
-    /// vertices off the borrowed geometry, on the same <c>input.Clip</c> branch the roof takes) →
-    /// <see cref="ProjectionColumnSizingJob"/> → <see cref="TileToGeoJob"/> →
-    /// <see cref="ProjectionDispatch"/> → <see cref="StyledFillExtrusionTileBuilder.WallQuadJob"/>, one quad
-    /// per boundary edge (both exterior AND hole rings). Both arms are scheduled on the SAME
-    /// <paramref name="deps"/> a caller passes to <see cref="Schedule"/> — not the roof's own handle: roof
-    /// and walls both read <c>input.Geometry</c>'s columns <c>[ReadOnly]</c> only, so they are independent
-    /// and may run concurrently.
-    ///
-    /// <para><b>Walls honour the tile-buffer clip.</b> The wall chain reads the same <c>input.Clip</c>
-    /// window the roof does, and a wall is emitted for EVERY edge of the clipped ring — the cut edges
-    /// introduced by the window included, because what is extruded is the clipped polygon. The reasoning,
-    /// and the one condition that reopens the alternative (translucent fill-extrusion), are in
-    /// job-scheduling-design.md.</para>
-    ///
-    /// <para><b>Byte-identical is NOT inherited at the managed-vs-Burst projection boundary:</b> linear
-    /// quantities are bit-exact, quantities downstream of a transcendental diverge by a magnitude that
-    /// depends on the call site (never a flat ULP figure carried between them) — job-scheduling-design.md
-    /// carries the measurement, including this call site's own wall-tail figures. Scheduling
-    /// instead of running does not itself move a bit: every node here is either an <c>IJob</c> (identical
-    /// <c>Execute()</c> under <c>.Run()</c> or <c>.Schedule()</c>) or an element-wise-independent
-    /// <c>IJobParallelForDefer</c> batched by <see cref="VertexBatch"/> — the batch size chooses which
-    /// worker evaluates a given index, never the expression.</para>
-    ///
-    /// <para>Sits in <c>MapRenderer.Unity</c>, not beside its siblings in <c>MapRenderer.Jobs</c> — the one
-    /// mesh graph that does not, by decision:
-    /// <see cref="StyledFillExtrusionTileBuilder.WallQuadJob"/> writes
-    /// <see cref="StyledFillExtrusionTileBuilder.PositionNormal"/>/<see cref="StyledFillExtrusionTileBuilder.ExtrudeAndBake"/>
-    /// — the vertex-stream layout at the <c>Mesh.MeshData</c> boundary, which the same discriminator that
-    /// would move this graph puts in Unity.</para>
-    ///
-    /// <b>No <c>Complete()</c> anywhere in this file</b> (mirrors <see cref="FillMeshGraph"/>/<see cref="LineMeshGraph"/>).
+    /// Schedules one fill-extrusion layer's roof (<see cref="FillMeshGraph.Schedule"/>, unchanged) and wall
+    /// chain, one quad per edge of every clipped ring, cut edges included. Roof and walls read
+    /// <c>input.Geometry</c> <c>[ReadOnly]</c> only, so both schedule on the caller's deps and may run
+    /// concurrently. It lives in Unity because the wall job writes the Mesh vertex layout; it calls no
+    /// <c>Complete()</c>. See docs/job-scheduling-design.md § "Invariants that constrain what is built next".
     /// </summary>
     public static class FillExtrusionMeshGraph
     {
         /// <summary>Vertices per batch for this graph's wall-chain <see cref="TileToGeoJob"/> node
-        /// (job-scheduling-design.md) — same reasoning as <see cref="FillMeshGraph.VertexBatch"/>:
-        /// ~10-50 µs of work per 1024 vertices, comfortably above a batch hand-off's own cost. A starting
-        /// value chosen by this reasoning, not a measured optimum — see the design doc's dated measurement
-        /// before moving it.</summary>
+        /// (docs/job-scheduling-design.md), chosen by the same reasoning as
+        /// <see cref="FillMeshGraph.VertexBatch"/>. It is a starting value, not a measured optimum.</summary>
         internal const int VertexBatch = 1024;
 
         /// <summary>Schedules the roof + wall graph for one fill-extrusion layer. Returns <see cref="default"/>
-        /// (<c>IsCreated == false</c>) when there is nothing to draw — the same borrowed-input guard as
-        /// <see cref="FillMeshGraph.Schedule"/>: an uncreated geometry buffer or an empty
-        /// <see cref="FillMeshPipeline.LayerInput.RingVisitOrder"/> means nothing to build. Otherwise returns
-        /// a <see cref="FillExtrusionGraphOutput"/> whose <c>Handle</c> is UNCOMPLETED; the caller polls or
+        /// (<c>IsCreated == false</c>) for an uncreated geometry buffer or an empty
+        /// <see cref="FillMeshPipeline.LayerInput.RingVisitOrder"/>. Otherwise returns a
+        /// <see cref="FillExtrusionGraphOutput"/> whose <c>Handle</c> is UNCOMPLETED; the caller polls or
         /// completes it before reading any field.
         /// </summary>
         /// <param name="input">By value, not <c>in</c> — mutable struct, same conventions gate as the
@@ -76,11 +44,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (!input.Geometry.IsCreated || !input.RingVisitOrder.IsCreated || input.RingVisitOrder.Length == 0)
                 return default;
 
-            // Validated HERE, before any node schedules — same reason FillMeshGraph.Schedule's own guard
-            // gives (its own doc): a throw after nodes are already in flight (roof or wall) would strand jobs
-            // holding input.Geometry live [ReadOnly] with no terminal handle left to Complete() them — the
-            // bystander-fault signature, not the real defect. FillMeshGraph.Schedule below repeats this same
-            // check on its own input copy; that is harmless duplication, not a second source of truth.
+            // Validated before any node schedules: a throw after roof or wall nodes are in flight would strand
+            // jobs holding input.Geometry [ReadOnly] with no terminal handle left to Complete() them.
             if (input.Projection == null)
                 throw new NotSupportedException(
                     "FillExtrusionMeshGraph.Schedule received a null Projection — every caller resolves the " +
@@ -90,25 +55,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
             TileGeometryBuffers source = input.Geometry;
             NativeArray<int>    visit  = input.RingVisitOrder;
 
-            // ── Roof: the flat fill's own earcut+project chain, composed unchanged. ─────────────────────
-            // The roof rides the extrusion mesh's own vertex layout, which carries no band attribute, and an
-            // extruded building keeps a hard silhouette by design.
+            // ── Roof: the flat fill's earcut+project chain, unchanged. The extrusion vertex layout carries no
+            // band attribute, and an extruded building keeps a hard silhouette. ──────────────────────────
             input.SuppressBoundaryBand = true;
             FillGraphOutput roof = FillMeshGraph.Schedule(input, deps);
 
-            // ── Walls: raw (pre-earcut) ring vertices off the borrowed source — NOT earcut output
-            // (WallColumns' own doc) — via the SAME select-or-clip branch the roof takes on input.Clip.
-            // Then tile→geo→project, then WallQuadJob emits quads. ───────────────────────────────────────────
+            // ── Walls: raw (pre-earcut) ring vertices via the SAME select-or-clip branch the roof takes on
+            // input.Clip, then tile→geo→project, then WallQuadJob emits quads. ───────────────────────────────
 
-            // Main-thread pre-pass over BORROWED inputs only (visit/source.RingOffsets — never a job output,
-            // same legitimacy as FillMeshGraph.Schedule's own pre-pass). totalVerts is a CAPACITY HINT, not a
-            // length: on the clip arm the post-Execute Length of flatTile is not known here at all
-            // (Sutherland-Hodgman may add vertices to a ring and may drop a ring outright). The exact length
-            // is established at execute time by ProjectionColumnSizingJob, which resizes geo/world/up to
-            // flatTile's final Length before the deferred nodes that write them run. Adding those three
-            // columns to RingSelectJob/RingClipJob themselves was rejected — their other call sites
-            // (FillMeshGraph.cs, FillGraphBurstProbeTests.cs) would then have to carry three dead lists a job
-            // field cannot leave unassigned.
+            // Main-thread pre-pass over BORROWED inputs only, never a job output. totalVerts is a CAPACITY HINT:
+            // clipping may add or drop vertices, so ProjectionColumnSizingJob sets the real lengths at execute.
             int maxRingLen = 0;
             int totalVerts = 0;
             for (int k = 0; k < visit.Length; k++)
@@ -128,9 +84,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             if (input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax))
             {
-                // Raw NativeArrays, not NewBuffer: deliberate parity with the roof's own ping-pong buffers
-                // (FillMeshGraph.Schedule). The DebugBuffersAllocated/DebugBufferDisposeNodes pair counts the
-                // NativeLists this graph owns; these are not part of that pairing.
+                // Raw NativeArrays, not NewBuffer, as the roof's ping-pong buffers are: the
+                // DebugBuffersAllocated/DebugBufferDisposeNodes pair counts only this graph's NativeLists.
                 int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
                 var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -159,9 +114,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             var world = NewBuffer<double3>(math.max(1, totalVerts));
             var up    = NewBuffer<double3>(math.max(1, totalVerts));
 
-            // On the chain, not parallel to it, and on BOTH arms: an arm-dependent sizing path is exactly
-            // what would let one arm drift. On the select arm flatTile.Length == totalVerts by RingSelectJob's
-            // verbatim-copy contract, so this node, not the main thread, computes that number.
+            // On the chain and on BOTH arms, so the two arms cannot drift: even where the select arm's length
+            // equals totalVerts, this node, not the main thread, computes it.
             JobHandle sized = new ProjectionColumnSizingJob
             {
                 SourceTileCoords = flatTile, OutGeo = geo, OutWorld = world, OutUp = up,
@@ -200,9 +154,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JobHandle worldDisposed       = ScheduleDispose(world, walled);
             JobHandle upDisposed          = ScheduleDispose(up, walled);
 
-            // clipDisposeHandle folds in the clip arm's ping-pong buffers (default, and harmless, on the
-            // select arm) — without it their dispose nodes are unreachable from the returned handle and the
-            // Persistent arrays leak once per extrusion layer per tile.
+            // clipDisposeHandle (default on the select arm) makes the clip buffers' dispose nodes reachable
+            // from the returned handle; without it they leak once per extrusion layer per tile.
             JobHandle scratchDisposed = JobHandle.CombineDependencies(
                 JobHandle.CombineDependencies(flatTileDisposed, flatOffsetsDisposed, flatFeatIdxDisposed),
                 JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed),

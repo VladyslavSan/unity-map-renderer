@@ -1,16 +1,8 @@
-// Unity EditMode only — SymbolTileStore / SymbolGatherPlan / SymbolTileBlock touch
-// Unity.Collections. NOT registered in core-tests.csproj.
+// Lets a render/snapshot fixture drive the PRODUCTION Tick(in SceneFrame, SymbolGatherPlan, ...) overload from
+// its SymbolTileBuffer: the store-and-bake half of SymbolSubsystem's per-frame work.
 //
-// Lets a render/snapshot fixture drive the PRODUCTION Tick(in SceneFrame, SymbolGatherPlan, ...) overload
-// from the same SymbolTileBuffer build buffer it already builds (via TestSymbolTileBuffer), so the fixture
-// exercises the path that ships.
-//
-// This is the store-and-bake half of what SymbolSubsystem does per frame (bake a block per tile, collect
-// winners, fill the plan). It owns no camera, RenderTexture, atlas or material: each fixture captured its
-// baseline against its own, and supplying them here would move every baseline.
-//
-// Equivalence is not assumed — SymbolGatherParityTests pins that the native gather over a plan fills the
-// mirror field-for-field identically to an independent block-reading oracle over the same winners.
+// Non-obvious why: it owns no camera, RenderTexture, atlas or material, because each fixture captured its
+// baseline against its own. SymbolGatherParityTests pins the gather against an independent oracle.
 
 using System;
 using System.Collections.Generic;
@@ -47,13 +39,10 @@ namespace MapRenderer.Tests
         /// <see cref="ShapedSymbol.MaterialIndex"/>. Fixtures with no layer list pass 1 (slot 0).</param>
         /// <param name="coverageFadingTiles">Tile keys the coverage cull classified <c>Fade</c> — still
         /// resident and still drawn, easing out rather than popping.</param>
-        /// <param name="droppedTiles">Tile keys classified <c>Drop</c> — the record stays resident in the
-        /// plan and is MASKED downstream, so <see cref="CollectedCount"/> counts it but nothing stages
-        /// it.</param>
-        /// <param name="departingTiles">Tile keys whose records are marked DEPARTING (the tile has left
-        /// cover and is fading out rather than popping). Production fills this from the store's per-record
-        /// <c>IsDeparting</c> flag; it reaches the same <see cref="SymbolGatherPlan.Departing"/> field
-        /// downstream reads.</param>
+        /// <param name="droppedTiles">Tile keys classified <c>Drop</c>: the record stays in the plan, MASKED, so
+        /// <see cref="CollectedCount"/> counts it but nothing stages it.</param>
+        /// <param name="departingTiles">Tile keys whose records are DEPARTING (left cover, fading out). It
+        /// feeds the <see cref="SymbolGatherPlan.Departing"/> field that production's IsDeparting fills.</param>
         public SymbolGatherPlan Build(SymbolTileBuffer buffer, int slotCount = 1,
             HashSet<long> coverageFadingTiles = null, HashSet<long> droppedTiles = null,
             HashSet<long> departingTiles = null)
@@ -84,9 +73,8 @@ namespace MapRenderer.Tests
                 var key = new SymbolTileStore.Key("s", tile);
                 int gen = _store.BeginBuild(key);
 
-                // Splitting the flat build buffer into one per-tile group means COPYING each grouped
-                // record's pooled quad/glyph/anchor/path spans into a per-tile sub-buffer (they address the
-                // SOURCE buffer's pools by (start,count)) and re-offsetting the spans to match.
+                // Each record's pooled spans address the SOURCE buffer by (start,count), so the per-tile
+                // sub-buffer COPIES them and re-offsets the spans.
                 var sub = new SymbolTileBuffer();
                 foreach (int index in byTile[tileKey]) TestSymbolTileBuffer.CopySymbolInto(sub, buffer, index);
 
@@ -99,12 +87,10 @@ namespace MapRenderer.Tests
             var blockId = new List<int>();
             var localIndex = new List<int>();
             var isDeparting = new List<byte>();
-            // The param only GATES dedup on/off — the plan-aware overload dropped its no-dedup branch, so the
-            // reconciler always dedups on the FIXED CrossTileSymbolKey.CanonicalGridMeters (4 m) grid whatever is
-            // passed. Passing the canonical value says so honestly; passing 0 would read as "dedup off" and be
-            // wrong. Consequence for a caller: two point symbols within 4 m that share (layer, text, icon) MERGE.
-            // CollectedCount is the guard — a fixture asserting it against its input count sees the merge as a
-            // failed precondition rather than as silently missing ink.
+            // Non-obvious why: the reconciler always dedups on the FIXED CanonicalGridMeters grid, whatever is
+            // passed, so 0 would misread as "dedup off". Two point symbols within 4 m that share (layer, text,
+            // icon) MERGE; a fixture that asserts CollectedCount against its input sees that as a failed
+            // precondition.
             _store.CollectInto(blockId, localIndex, isDeparting, CrossTileSymbolKey.CanonicalGridMeters, out _);
 
             var decisions = new List<byte>(blockId.Count);

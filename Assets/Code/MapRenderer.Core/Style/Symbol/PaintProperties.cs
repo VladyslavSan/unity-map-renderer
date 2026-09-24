@@ -6,19 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
-    /// The parsed MapLibre symbol <b>paint</b> properties for a single symbol style layer — the
-    /// <c>text-*</c> colour/halo knobs plus <c>icon-opacity</c>. Each key is read from the layer's
-    /// <c>paint</c> sub-tree (via <see cref="PropertyNames"/>) and collapsed into a
-    /// <see cref="StyleProperty{T}"/> (one parsed expression + typed default), exactly as <c>Line</c>/
-    /// <c>Fill</c> do. Engine-free; clean-room (public Style Spec §symbol paint).
-    /// <c>icon-color</c> and the <c>icon-halo-*</c> trio are not parsed yet.
-    ///
-    /// <para>How each is consumed: all five evaluate
-    /// per feature into the billboard vertex streams — <see cref="Color"/>/<see cref="Opacity"/> on the
-    /// label's glyphs and the halo trio on a second copy of them — so constant, zoom and data-driven all
-    /// work. A CONSTANT <see cref="Color"/> or <see cref="HaloColor"/> is the one exception: its RGB binds
-    /// to the per-layer <c>_TextColor</c>/<c>_HaloColor</c> uniform so a restyle can ease it, and the stream
-    /// carries white for it. <see cref="IconOpacity"/> is parsed here but not yet consumed.</para>
+    /// The parsed MapLibre symbol <b>paint</b> properties: the <c>text-*</c> colour/halo knobs plus
+    /// <c>icon-opacity</c>, each a <see cref="StyleProperty{T}"/> as in <c>Line</c>/<c>Fill</c>; <c>icon-color</c>
+    /// and <c>icon-halo-*</c> are not parsed. The text properties evaluate per feature into the billboard vertex
+    /// streams, except a constant <see cref="Color"/> or <see cref="HaloColor"/>: its RGB binds to the per-layer
+    /// <c>_TextColor</c>/<c>_HaloColor</c> uniform so a restyle can ease it, and the stream carries white.
     /// </summary>
     public sealed class PaintProperties
     {

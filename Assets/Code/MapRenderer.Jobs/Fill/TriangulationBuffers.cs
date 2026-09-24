@@ -8,21 +8,10 @@ namespace MapRenderer.Jobs.Fill
     /// The buffers the fill graph's triangulation works over, from sizing through aggregation — 4
     /// prefix-sum offset tables, 9 flat working/output columns, 5 per-polygon scalar columns — as one job
     /// field shared by <see cref="SizingJob"/>, <see cref="FillGatherJob{TComparer}"/>,
-    /// <see cref="EarcutBatchJob"/> and <see cref="AggregateJob"/>.
-    ///
-    /// <para><b>Unity's job reflection walks a nested struct field for container safety</b> the same way it
-    /// walks a job's own fields. Two jobs holding the same nested containers, scheduled with no dependency
-    /// between them, throw <c>InvalidOperationException</c> at the second <c>Schedule</c> call.</para>
-    ///
-    /// <para><b>Every field is plain, not <c>[ReadOnly]</c>.</b> A single struct field cannot carry a
-    /// per-column access mode, so every job that takes this struct reads as "writes all 18" to the safety
-    /// system. That costs nothing: the nodes that touch this scratch are already a linear chain.</para>
-    ///
-    /// <para><b>Every field must be a CREATED container, even one a job's <c>Execute</c> never reads.</b>
-    /// The safety system validates the whole struct at schedule time, so an uncreated
-    /// <see cref="NativeList{T}"/> left at <c>default</c> throws at <c>Schedule</c>/<c>Run</c> even for a
-    /// column that job never uses. Always build a value through <see cref="Allocate"/>, or by copying every
-    /// field from one.</para>
+    /// <see cref="EarcutBatchJob"/> and <see cref="AggregateJob"/>. Non-local invariant: the safety
+    /// system treats every job holding it as writing all 18 columns, so those jobs must form a dependency
+    /// chain; and it validates every column at schedule time, so build a value only through
+    /// <see cref="Allocate"/> (or a full copy of one), never with a <c>default</c> column.
     /// </summary>
     internal struct TriangulationBuffers
     {
@@ -74,13 +63,9 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Schedules a <c>Dispose(handle)</c> node for every column through
         /// <see cref="DisposeField{T}"/>, so a dropped column drops its recording too and the
-        /// allocated/disposed counts stop matching. Every element takes <paramref name="deps"/>, never the
-        /// combined result: the 18 dispose jobs fan OUT in parallel and the single
-        /// <see cref="JobHandle.CombineDependencies(NativeArray{JobHandle})"/> only fans them back in.
-        ///
-        /// <para><c>Allocator.Temp</c> is right for the handle array: this method runs on the main thread,
-        /// because the job system only schedules from there, and the array is allocated, combined and freed
-        /// inside this one call (gc-and-allocation-design.md).</para>
+        /// allocated/disposed counts stop matching. Each dispose takes <paramref name="deps"/>, so the 18
+        /// run in parallel and one <c>CombineDependencies</c> joins them. The handle array is <c>Temp</c>
+        /// because it lives inside this main-thread call.
         /// </summary>
         internal JobHandle DisposeAfter(JobHandle deps)
         {

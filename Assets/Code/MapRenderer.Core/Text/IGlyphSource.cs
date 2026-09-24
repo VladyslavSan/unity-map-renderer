@@ -21,9 +21,8 @@ namespace MapRenderer.Core.Text
         /// error (network failure, I/O error, unexpected HTTP status).
         /// </summary>
         /// <param name="fontStack">
-        /// The request-key string identifying the font(s) to fetch — either the full joined
-        /// <see cref="FontStack.RequestToken"/> or a single font name, depending on the glyph host's
-        /// convention. <c>GlyphManager</c> passes a single font name.
+        /// The font(s) to fetch: the joined <see cref="FontStack.RequestToken"/> or, as
+        /// <c>GlyphManager</c> passes, a single font name.
         /// </param>
         /// <param name="rangeStart">The 256-aligned range base (see <see cref="FontStackResolver.ComputeRangeStart"/>).</param>
         UniTask<GlyphRangeResponse> FetchAsync(string fontStack, int rangeStart, CancellationToken ct = default);

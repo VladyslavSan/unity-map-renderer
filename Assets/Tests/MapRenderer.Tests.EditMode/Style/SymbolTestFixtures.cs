@@ -16,9 +16,8 @@ namespace MapRenderer.Tests
     /// Shared, engine-free fixture plumbing for the symbol-extraction test files: the walk-up loaders (which
     /// have to work under Unity batch mode AND <c>dotnet test</c>, whose working directories differ), the
     /// parsed-once Liberty style, and the <see cref="PointStageInput"/> adapter that turns a real extractor
-    /// <see cref="SymbolStyle.SymbolFeature"/> into a staging input. Lifted out of
-    /// <c>SymbolShieldExtractionTests</c> when P-A's predicate teeth needed the same loaders — one copy, so a
-    /// fixture path or a staging field cannot drift between the two files.
+    /// <see cref="SymbolStyle.SymbolFeature"/> into a staging input. One copy, so fixture paths and staging
+    /// fields do not drift between files.
     /// </summary>
     internal static class SymbolTestFixtures
     {

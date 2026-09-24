@@ -1,10 +1,5 @@
-// Unity EditMode only — tests the MapCamera integration with MapView.
-// Cannot live in Tools/core-tests (needs UnityEngine.Camera, UnityEngine.Quaternion, MapView, etc.).
-//
-// Covered:
-//   • MapView.Camera.CurrentProperties reflects the camera state (single camera-state type, no bridge).
-//   • Instant Apply allocates zero GC (struct patch over the readonly-struct state).
-//   • Pose / clip-plane / perspective correctness of the Unity camera transform.
+// Unity EditMode only — tests the MapCamera integration with MapView: CurrentProperties, a zero-GC
+// instant Apply, and the pose, clip planes and perspective of the Unity camera transform.
 
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -204,16 +199,11 @@ namespace MapRenderer.Tests.Cameras
         // ── Floating-origin single owner ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <see cref="MapCamera.CameraRelativePosition"/> is the single owner of the camera's
-        /// pose relative to the floating origin — stored straight off <see cref="CameraPoseMath.ComputeRelativePose"/>'s
-        /// <c>pos</c>, never read back off <c>Camera.transform.position</c>. A non-trivial pose (heading AND
-        /// tilt both non-zero, so no axis degenerates to zero and a swapped/rounded value would show) proves:
-        /// (1) <c>MapCamera.CameraRelativePosition</c> == the independently recomputed <c>ComputeRelativePose</c>
-        /// <c>pos</c>, exactly (both are the same double3, no narrowing); (2) it matches
-        /// <c>Camera.transform.position</c> within the float32-cast tolerance the transform assignment incurs;
-        /// (3) <c>MapView.BuildSceneFrame</c> folds the SAME stored value into <c>SceneFrame.CameraRelativePosition</c>
-        /// — no second pose computation, no round-trip. A shallow impl that re-derived or read the transform
-        /// back would still pass every other test in this file but fail here.
+        /// <see cref="MapCamera.CameraRelativePosition"/> is the single owner of the camera's pose relative to
+        /// the floating origin: it equals <see cref="CameraPoseMath.ComputeRelativePose"/>'s <c>pos</c> exactly,
+        /// matches <c>Camera.transform.position</c> within float32 tolerance, and <c>MapView.BuildSceneFrame</c>
+        /// folds the SAME value into <c>SceneFrame.CameraRelativePosition</c>. Heading and tilt are both
+        /// non-zero, so a swapped or rounded axis shows.
         /// </summary>
         [Test]
         public void SyncToCamera_CameraRelativePosition_IsSingleOwner_NoRoundTrip()

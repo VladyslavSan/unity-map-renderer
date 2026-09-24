@@ -6,15 +6,10 @@ using MapRenderer.Tests.TestSupport;
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// EditMode tests for PolygonAssembler.
-    /// Verifies outer/hole classification by signed-area sign and multipolygon handling.
-    ///
-    /// Winding note: geometry is canonical CCW in tile space (Y-up, positive shoelace) — see
-    /// docs/coordinates-and-projections.md. Classification is by shoelace SIGN, not by frame:
-    ///   Positive shoelace area (area2 > 0) = EXTERIOR ring.
-    ///   Negative shoelace area (area2 &lt; 0) = HOLE ring (opposite winding).
-    /// (The same vertex order reads CW on a Y-down screen; that is a frame, not the convention.)
-    /// The assembler classifies based on the sign of the first ring (feature-relative).
+    /// PolygonAssembler's outer/hole classification and multipolygon handling. Geometry is canonical
+    /// CCW in tile space (Y-up; docs/coordinates-and-projections.md): in these fixtures area2 &gt; 0
+    /// is an EXTERIOR ring and area2 &lt; 0 a HOLE. The assembler classifies relative to the sign of
+    /// the feature's first ring.
     /// </summary>
     public class PolygonAssemblerTests
     {
@@ -86,11 +81,8 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void CwOuter_DisjointCcwRing_DropsTheRing()
         {
-            // A hole-wound ring (opposite sign) placed entirely OUTSIDE the outer.
-            // An MVT hole must lie inside its exterior, so this spatially-disjoint opposite-wound
-            // ring is a clip/winding artefact and must be DROPPED — not mis-nested. Mis-nesting it
-            // makes Earcut bridge across the gap to a far-away ring and emit overlapping triangles
-            // (area inflated up to ~34x on real tile data; see HoledPolygon_WorstCase test).
+            // A hole-wound ring entirely OUTSIDE the outer is a clip artefact and must be DROPPED:
+            // nesting it makes Earcut bridge to a far ring and emit overlapping triangles.
             var outer    = ExteriorSquare(0, 0, 100);
             var disjoint = HoleSquare(500, 500, 50); // far outside the outer
             Assert.Less(Area2(disjoint), 0, "Disjoint ring should have hole sign (negative shoelace).");

@@ -1,6 +1,5 @@
-// Rendering/RenderingTests.cs — the three tile-render backends, the render-layer model, and the
-// style-load compatibility summary. Unity EditMode only (constructs real backends/materials); not in
-// Tools/core-tests.
+// Rendering/RenderingTests.cs — tile-render backends, the render-layer model and the compatibility summary.
+// Unity EditMode only (constructs real backends/materials); not in Tools/core-tests.
 //
 // Contents:
 //   BackendDrawGateTests                 — a gated-out layer SLOT submits no draw item in any backend.
@@ -54,15 +53,8 @@ namespace MapRenderer.Tests.Rendering
     // BackendDrawGateTests — a gated-out layer slot submits no draw item, in every backend
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // The per-slot DRAW gate (ITileRenderBackend.SetLayerVisible). A layer that paints nothing the framebuffer
-    // can show must submit no draw item at all, so it costs no vertex stage and no draw call — not merely no
-    // fragment.
-    //
-    // Each backend is asserted on its OWN mechanism (BRG drops the slot from the emit order, GameObjects
-    // disables the renderer, Entities adds DisableRendering), because a shared read would go green on a gate
-    // that reached the list and nothing else. Three fill layers, and slot 1 is the gated one — a middle slot,
-    // so a gate that dropped the first or last item by an off-by-one reads differently from a gate that
-    // selected slot 1.
+    // The per-slot DRAW gate (ITileRenderBackend.SetLayerVisible): a gated layer submits no draw item. Each
+    // backend is read on its OWN mechanism, and the gated slot is the middle one, so an off-by-one reads red.
     [TestFixture]
     public class BackendDrawGateTests : BaseTestFixture
     {
@@ -300,12 +292,8 @@ namespace MapRenderer.Tests.Rendering
     // BackendNullSlotTests — every backend tolerates a null material-list entry
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // E1 tooth: once symbol/background layers take a draw slot with a NULL Material, the
-    // full-width per-layer material list every backend indexes by materialIndex carries null entries at those
-    // slots. A missed guard is a hard NRE on the first symbol/background-bearing style. This test constructs
-    // each backend with a [null, realMaterial] list and proves AddTileLayer at the REAL slot (index 1) still
-    // works and Rebuild/Dispose stay clean — the null slot itself is never AddTileLayer'd (the tile produce
-    // path filters to ITileMeshRenderLayer slots), so this is a construction-time guard test.
+    // A backend's per-layer material list can hold a NULL entry (an unassigned base material). Each backend,
+    // built with [null, realMaterial], must AddTileLayer at slot 1 and Rebuild/Dispose without an NRE.
     [TestFixture]
     public class BackendNullSlotTests : BaseTestFixture
     {
@@ -392,16 +380,8 @@ namespace MapRenderer.Tests.Rendering
     // BackendShadowModeTests — the per-layer CastShadows declaration reaches the GPU
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // Two INDEPENDENT teeth for "buildings cast shadows, ground receives them", not collapsed into
-    // one parity test:
-    //
-    //   TRANSPORT  — each backend is handed a shadow list ([On, Off, On] over three FILL layers) that no backend
-    //                could reconstruct from the layer kinds, and must report exactly it back. Three backends
-    //                agreeing while all reading one list would be near-vacuous: a wrong list reds nothing. A list
-    //                that contradicts the kinds kills "ignores the list", "re-derives from the material" and
-    //                "hard-codes a constant" in one assertion.
-    //   DERIVATION — TileManager.LayerShadowModes yields On at exactly the fill-extrusion slot. Pure; touches no
-    //                backend, so a backend defect cannot red it and a wrong declaration cannot hide behind one.
+    // Two INDEPENDENT teeth. TRANSPORT: each backend reports back [On, Off, On] over three FILL layers, a list
+    // no backend could derive from the kinds. DERIVATION: TileManager.LayerShadowModes is On only at fill-extrusion.
     [TestFixture]
     public class BackendShadowModeTests : BaseTestFixture
     {
@@ -628,12 +608,8 @@ namespace MapRenderer.Tests.Rendering
     // BrgTileRendererEvictionTests — an evicted item leaves no phantom draw command
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // Regression for a latent BRG bug present since the BRG backend was introduced: a BatchDrawCommand
-    // submitted with a null Mesh ("MeshID <null>") while zooming. Root cause: OnPerformCulling sized its
-    // (Malloc'd, non-zeroed) draw-command output to _sortedItems.Count and skipped handles removed since the
-    // last Rebuild *in place* — leaving uninitialized garbage commands. During zoom, tiles evict (RemoveItem)
-    // between Rebuilds, so stale _sortedItems slots produced garbage draws. The fix compacts: ComputeEmitOrder
-    // filters out removed handles, and OnPerformCulling emits/allocates EXACTLY the surviving count.
+    // An item removed between Rebuilds must not leave an uninitialised BRG draw command ("MeshID <null>"):
+    // ComputeEmitOrder filters removed handles, and OnPerformCulling allocates only the surviving count.
     [TestFixture]
     public class BrgTileRendererEvictionTests : BaseTestFixture
     {
@@ -668,9 +644,7 @@ namespace MapRenderer.Tests.Rendering
                 "All three live items must be emitted after Rebuild.");
 
             // ── The zoom eviction race ──────────────────────────────────────────────────────
-            // Evict the middle tile but do NOT Rebuild: _sortedItems still holds h1's slot. The old
-            // code emitted a command for that stale slot (uninitialized Malloc memory → BRG
-            // "MeshID <null>"). The compaction fix must drop it.
+            // Evict the middle tile without a Rebuild: the emit must drop h1's stale slot.
             brg.RemoveItem(h1);
 
             Assert.AreEqual(2, brg.ComputeEmitOrder(scratch, BatchCullingViewType.Camera),
@@ -701,16 +675,8 @@ namespace MapRenderer.Tests.Rendering
     // FillExtrusionRenderLayerTests — factory dispatch + fetch source for fill-extrusion
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // A style with a fill-extrusion layer: (a) TryGetFetchSource returns true with its source, and
-    // (b) RenderLayerFactory.Create returns a non-null IRenderLayer taking a slot. RED-verify: a
-    // factory without a fill-extrusion arm returns false/null for both.
-    //
-    // The render layer clones its OWN Map/FillExtrusion base material
-    // (MapMaterialSet.FillExtrusionMaterial), not the flat FILL base fill reuses. This suite builds its own
-    // synthetic settings via Shader.Find (mirroring MaterialTweakerTests' NewFill()/NewLine() precedent) so it
-    // stays independent of the committed asset. The committed production (Lit) MapMaterialSet DOES carry a
-    // FillExtrusionMaterial (the depth-writing render-state wiring it exercises is guarded by
-    // MaterialTweakerTests.CreateFillExtrusionMaterial_AppliesElevatedContract_NotFlatPainter).
+    // A fill-extrusion layer has a fetch source and a render layer that clones its OWN
+    // MapMaterialSet.FillExtrusionMaterial. Settings come from Shader.Find, independent of the committed asset.
     [TestFixture]
     public class FillExtrusionRenderLayerTests
     {
@@ -776,12 +742,8 @@ namespace MapRenderer.Tests.Rendering
     // RenderLayerCompatibilitySummaryTests — an unpainted/unsupported layer is named, not silent
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // Without the compatibility summary, a style layer of an unsupported kind would vanish with no
-    // explanation (RenderLayerFactory.Create returns a bare null; RenderLayerSet.Build's
-    // "if (layer == null) continue;" drops it on the floor). These teeth pin the style-load compatibility
-    // summary that replaces that silence: every skipped layer's id, raw type and WHY, collected once per
-    // Build — never per tile, never per frame — with the supported layers around it still taking their
-    // slots undisturbed.
+    // Every skipped layer's id, raw type and reason is collected once per Build, not per tile or frame,
+    // and the supported layers around it keep their slots.
     [TestFixture]
     public class RenderLayerCompatibilitySummaryTests : BaseTestFixture
     {
@@ -814,12 +776,9 @@ namespace MapRenderer.Tests.Rendering
             return set;
         }
 
-        /// <summary>The summary is REPLACED, not appended to, on a restyle — <see cref="RenderLayerSet.SkippedLayers"/>'s
-        /// own doc promises an old style's skips "stop applying the moment a new style replaces it"; nothing
-        /// else in this repo ever calls <see cref="RenderLayerSet.Build"/> twice on the same instance, so
-        /// this is the only coverage of that promise. RED recipe: delete the <c>_skippedLayers.Clear()</c>
-        /// line in <see cref="RenderLayerSet"/>'s private <c>ClearLayers</c> — the count becomes 2 and
-        /// <c>[0]</c> is the stale <c>circle-b</c> from the first style.</summary>
+        /// <summary>The summary is REPLACED, not appended to, on a restyle, as
+        /// <see cref="RenderLayerSet.SkippedLayers"/> promises. Nothing else in the repo calls
+        /// <see cref="RenderLayerSet.Build"/> twice on one instance.</summary>
         [Test]
         public void SkippedLayers_ReplacedNotAppended_OnRestyle()
         {
@@ -941,9 +900,8 @@ namespace MapRenderer.Tests.Rendering
     ]
 }";
 
-        // Extrusion skipped (via the material below); the OTHER layer (a real line) is present — the lone
-        // survivor is the line layer, also at dense index 0. Equal SURVIVOR COUNT to the style above (1),
-        // but a different (index, id) pair.
+        // Extrusion skipped (via the material below): the lone survivor is the line at dense index 0 —
+        // the same count as the style above, but a different (index, id) pair.
         private const string ExtrusionSkippedOtherPresentStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -968,21 +926,16 @@ namespace MapRenderer.Tests.Rendering
         }
 
         /// <summary>Pins that <see cref="MapView.LayerNumbering"/> folds the actual (dense index, id) PAIRS,
-        /// not merely the survivor COUNT. The two styles here produce the SAME count (1) by different skip
-        /// patterns — extrusion present with the other layer skipped, versus extrusion skipped with the
-        /// other layer present — so a fold that degraded to <c>layers.Count</c> would see them as identical
-        /// and let the second style serve the first's stale bake. RED recipe: replace
-        /// <see cref="MapView.LayerNumbering"/>'s body with <c>layers.Count.ToString()</c> — both sides then
-        /// return <c>"1"</c> and this assertion fails.</summary>
+        /// not merely the survivor COUNT. The two styles reach the SAME count (1) by different skip patterns,
+        /// so a <c>layers.Count</c> fold would let the second style serve the first's stale bake.</summary>
         [Test]
         public void LayerNumbering_EqualSurvivorCount_DifferentSkipPattern_ProducesDifferentNumbering()
         {
             using RenderLayerSet extrusionPresent = Build(ExtrusionPresentOtherSkippedStyleJson);
             Assert.AreEqual(1, extrusionPresent.Count, "drive precondition: only the extrusion layer survives.");
 
-            // Bag-tracked and disposed (LIFO) AFTER extrusionSkipped below — each layer's Material is a CLONE
-            // of extrusionLessMaterials' base materials, never the base itself, but disposing the consumer
-            // before its source is the safer order regardless.
+            // Disposed (LIFO) AFTER extrusionSkipped below: layers clone these base materials, and the
+            // consumer goes before its source.
             var extrusionLessMaterials = Track(WithoutExtrusionMaterial());
             using RenderLayerSet extrusionSkipped = new RenderLayerSet();
             extrusionSkipped.Build(StyleParser.Parse(ExtrusionSkippedOtherPresentStyleJson), 0.0, extrusionLessMaterials);
@@ -993,10 +946,8 @@ namespace MapRenderer.Tests.Rendering
                 "equal survivor counts from different skip patterns must still fold to different tokens.");
         }
 
-        // Same id SET, same count (2), different declared ORDER — the numbering fold's other blind spot: a
-        // fold that folded an unordered id set (or sorted the ids "for determinism") would pass the test
-        // above (one survivor each side) yet still miss this — dense POSITION is part of the cache key
-        // because cached geometry is baked against a dense INDEX, not just an id.
+        // Same id SET and count, different declared ORDER: cached geometry is baked against a dense INDEX,
+        // so a fold over an unordered (or sorted) id set would miss this.
         private const string FillThenLineStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1033,9 +984,8 @@ namespace MapRenderer.Tests.Rendering
 
         // ── Layers that can never draw are never constructed ──────────────────────────────────────
 
-        // No shipped style uses either of these, so the cases are CONSTRUCTED here rather than sampled:
-        // a `visibility: none` layer, and one authored at a constant fully-transparent opacity. Both sit
-        // between two layers that do render, so the surviving slots are observable across the skip.
+        // CONSTRUCTED cases: a `visibility: none` layer and a constant fully-transparent one, between two
+        // rendering layers so the surviving slots are observable across the skip.
         private const string NeverDrawnInterleavedStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1118,14 +1068,8 @@ namespace MapRenderer.Tests.Rendering
     // RenderLayerEmptyGateTests — BuildGraphRequest returns null for an empty selection
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // T6 (the per-layer build-object stage): the relocated emptiness gate — each
-    // ITileMeshRenderLayer.BuildGraphRequest now decides "nothing to build" itself (job-
-    // scheduling-design.md's HasWork, moved out of TileMeshLayerProcessor and up into the
-    // three render layers) — must match HasWork's old semantics exactly: null for an empty
-    // selection, a rented build for a real one. Calls BuildGraphRequest DIRECTLY on each of the three
-    // production layers (NIT 7) — not through the pipeline, which already gates emptiness upstream
-    // (TileMeshLayerProcessor.cs's own selected.Count > 0 / geometry.IsCreated
-    // checks) and would make every arm but this one's direct call vacuous.
+    // Each ITileMeshRenderLayer.BuildGraphRequest returns null for an empty selection and a rented build
+    // otherwise. Called DIRECTLY: the pipeline gates emptiness upstream, which would make the arms vacuous.
     [TestFixture]
     public class RenderLayerEmptyGateTests
     {
@@ -1250,22 +1194,13 @@ namespace MapRenderer.Tests.Rendering
     // RenderLayerSetTests — one ordered set over every painted kind (global numbering)
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // E1 (the render-layer model): global numbering supersedes the older
-    // "non-renderable takes no slot" contract — background/symbol now take slots too. These teeth fail if the
-    // old type-bucketing (fills then lines) or a second ordering creeps back, if a genuinely unpainted type
-    // (raster/unknown) takes a slot, or if a symbol/background slot's queue math desyncs the tile-mesh layers
-    // shifted above it.
-    //
-    // Background is material-bearing too (a real quad + fill-base clone), so a configured set has no
-    // null-material slot. Build_Materials_* and Build_QueueShift assert slot 0 like every
-    // other slot; Factory_* Dispose() the whole layer (background owns a GO + Mesh besides its material).
+    // One declared-order numbering over every painted kind; background (slot 0) carries a material too.
+    // These fail on type-bucketing, a slot for raster/unknown, or queue math that desyncs later slots.
     [TestFixture]
     public class RenderLayerSetTests
     {
-        // background + fill + symbol + line + fill: one style exercising all four painted kinds, in an
-        // order that decisively separates "declared order" from "type-bucketed order" for BOTH the
-        // tile-mesh pair (fill, then symbol in between, then line, then fill again) and the queue shift
-        // (each tile-mesh layer's queue must shift by the count of non-tile-mesh layers preceding it).
+        // background + fill + symbol + line + fill: all four painted kinds, in an order that separates
+        // declared order from type-bucketed order, for both the slots and the queue shift.
         private const string InterleavedStyleJson = @"{
     ""version"": 8,
     ""name"": ""Interleaved"",
@@ -1355,13 +1290,8 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(LayerSubSlot.Base,  set[3].MaterialSubSlot, "line — Base.");
             Assert.AreEqual(LayerSubSlot.Base,  set[4].MaterialSubSlot, "fill — Base.");
 
-            // renderQueue = LayerDrawOrder.QueueFor(DrawIndex, MaterialSubSlot) — DrawIndex
-            // == the slot's own declared-order index, uniformly for EVERY slot (RenderLayerSet.Build
-            // increments drawIndex once per slot regardless; the QUEUE WRITE is skipped only when that
-            // slot's own base material is unconfigured); MaterialSubSlot is Base for background/fill/line and
-            // Above for symbol-b's Material (its WorldTextMaterial), since a symbol layer's text must draw
-            // over its own icon. Background is material-bearing too, so slot 0 (bg) carries its own
-            // queue same as every other slot.
+            // renderQueue = QueueFor(declared-order index, MaterialSubSlot) for EVERY slot; the sub-slot is
+            // Above for symbol-b's WorldTextMaterial, so text draws over its own icon, and Base otherwise.
             Assert.AreEqual(LayerDrawOrder.QueueFor(0, set[0].MaterialSubSlot), set[0].Material.renderQueue,
                 "bg — slot 0, Base, material-bearing so it gets a queue like every other slot.");
             Assert.AreEqual(LayerDrawOrder.QueueFor(1, set[1].MaterialSubSlot), set[1].Material.renderQueue, "fill-a — slot 1, Base.");
@@ -1403,9 +1333,8 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreNotSame(set[3].Material, set[4].Material, "line-c and fill-d must be distinct instances.");
         }
 
-        // The world icon material's renderQueue is set at Build time, with no per-frame sync — this
-        // style, with two symbol layers at distinct draw indices, pins that BOTH world materials carry
-        // the correct Build-time queue with NO Tick at all.
+        // Two symbol layers at distinct draw indices: BOTH world materials carry their queue from Build
+        // time, with NO Tick.
         private const string TwoSymbolLayersStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1415,13 +1344,8 @@ namespace MapRenderer.Tests.Rendering
     ]
 }";
 
-        // A contract correction, NOT a re-bake. The version this replaces asserted BOTH materials
-        // equal LayerDrawOrder.QueueFor(i) — i.e. it PINNED the bug (icon and text sharing one queue,
-        // coplanar + ZWrite off ⇒ no tiebreak ⇒ the badge can paint over its own number). The "Build-time,
-        // no Tick" intent survives verbatim; what changes is the asserted VALUE — icon at its own layer's
-        // Base sub-slot, text at Above, and (the strict inequality below) icon < text ASSERTED EXPLICITLY,
-        // not merely implied by two equalities. A re-bake could restate equality at new numbers and still
-        // pass with the icon on top of the text; this cannot.
+        // Non-obvious why: icon and text are coplanar with ZWrite off, so one shared queue lets the badge paint
+        // over its number. Icon sits at Base, text at Above, and icon < text is asserted explicitly.
         [Test]
         public void Build_SymbolLayers_WorldTextAndIconQueues_SetAtBuildTime_NoTickNeeded()
         {
@@ -1457,9 +1381,8 @@ namespace MapRenderer.Tests.Rendering
             }
         }
 
-        // U2 — cross-layer: every sub-slot of layer 0's band must sit strictly below every sub-slot of
-        // layer 1's band. This is the tooth a "text = queue + 1" naive fix fails: under SubSlotsPerLayer = 1
-        // (keeping Above = 1), layer 0's text and layer 1's icon collide at the same value.
+        // Cross-layer: every sub-slot of layer 0's band sits strictly below layer 1's band. A "text = queue + 1"
+        // scheme fails here: layer 0's text and layer 1's icon collide.
         [Test]
         public void Build_SymbolLayers_Layer0Band_IsStrictlyBelow_Layer1Band()
         {
@@ -1487,18 +1410,15 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(HideFlags.DontSave, set.Root.gameObject.hideFlags,
                 "the root is not serialised into a scene/build, but IS visible/inspectable in the Hierarchy.");
 
-            // Background does not own a scene GameObject (its geometry is per-tile, produced
-            // by BackgroundQuad and owned by the backend) — only symbol presenters still take
-            // the shared-root parenting path (lazily, on first Present), so there is nothing eager left to
-            // assert here for background; this test now only pins the shared root's own visibility contract.
+            // Background owns no scene GameObject (the backend owns its per-tile quads), and symbol presenters
+            // parent lazily, so this pins only the shared root's own visibility contract.
         }
 
         [Test]
         public void Factory_IsTheSoleDispatchPoint_UnpaintedTypesYieldNoRenderLayer()
         {
-            // Extensibility contract: RenderLayerFactory maps a StyleLayer subtype → IRenderLayer. Genuinely
-            // unpainted/unsupported-for-now types (raster) map to null (no slot); background/symbol now DO
-            // produce a render layer — the axis-bearing placeholders.
+            // RenderLayerFactory maps a StyleLayer subtype → IRenderLayer: raster maps to null (no slot), and
+            // background/symbol produce a render layer.
             StyleDocument style = StyleParser.Parse(RasterAndFillStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 

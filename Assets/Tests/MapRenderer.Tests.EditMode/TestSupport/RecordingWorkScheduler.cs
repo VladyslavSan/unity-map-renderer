@@ -1,7 +1,5 @@
-// Shared test instrument — used by MeshBuildWorkSchedulerTests (TileManager's mesh-build kicks) and
-// SymbolSubsystemWorkSchedulerTests (SymbolSubsystem's parked-drain + reconcile dispatch). Lifted out of
-// MeshBuildWorkSchedulerTests' private nested class so the two suites share one spy instead of drifting into
-// two subtly different copies. NOT in core-tests.csproj — IWorkScheduler is engine-side.
+// One spy shared by MeshBuildWorkSchedulerTests and SymbolSubsystemWorkSchedulerTests instead of two
+// copies that drift apart. NOT in core-tests.csproj — IWorkScheduler is engine-side.
 
 using System;
 using System.Collections.Generic;
@@ -22,9 +20,8 @@ namespace MapRenderer.Tests
 
         public RecordingWorkScheduler(IWorkScheduler inner) => _inner = inner;
 
-        // Forwards, per IWorkScheduler.RunsInline's own contract — a decorator that hard-coded this would
-        // defeat a mutual-exclusion guard (TileManager.WorkScheduler/MeshBuildGateForTest,
-        // SymbolSubsystem.WorkScheduler/SymbolReconciler.GateForTest) for exactly this spy.
+        // Forwards, per IWorkScheduler.RunsInline's contract: a decorator that hard-coded it would defeat
+        // the mutual-exclusion guards (MeshBuildGateForTest, SymbolReconciler.GateForTest) behind this spy.
         public bool RunsInline => _inner.RunsInline;
 
         public WorkHandle<T> Schedule<T>(Func<CancellationToken, T> body, CancellationToken ct = default)

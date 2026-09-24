@@ -12,16 +12,12 @@ namespace MapRenderer.Core.Rendering
     public enum LayerSubSlot { Base = 0, Above = 1 }
 
     /// <summary>
-    /// Painter's-algorithm draw order for coplanar flat layers. Unity's automatic sort z-fights coplanar layers
-    /// and reorders them, so we own draw order (<c>ARCHITECTURE.md</c> § "Layer ordering &amp; draw
-    /// submission"). Each declared layer owns a band of <see cref="SubSlotsPerLayer"/> queue values
-    /// (<c>base + layerIndex * SubSlotsPerLayer + subSlot</c>), ZWrite off, all in the transparent range.
-    /// The caller assigns the returned values to <c>material.renderQueue</c>.
-    /// <para>Fills and lines share ONE transparent band; this is a non-local invariant. Unity draws the whole
-    /// opaque range (&lt;2500) before the whole transparent range (≥2501), so an opaque fill declared above a
-    /// transparent line would still draw under it. In the transparent phase the only other tiebreak is camera
-    /// distance, which reorders tiles within one layer, which cover disjoint regions, but never across
-    /// layers with distinct queues.</para>
+    /// Painter's-algorithm draw order for coplanar flat layers, because Unity's automatic sort z-fights them
+    /// (<c>ARCHITECTURE.md</c> § "Layer ordering &amp; draw submission"). Each layer owns a band of
+    /// <see cref="SubSlotsPerLayer"/> queue values (<c>base + layerIndex * SubSlotsPerLayer + subSlot</c>),
+    /// ZWrite off, for the caller's <c>material.renderQueue</c>. Non-local invariant: fills and lines share
+    /// ONE transparent band, because Unity draws all opaque queues before all transparent ones; camera
+    /// distance then reorders only tiles within a layer, never layers with distinct queues.
     /// </summary>
     public static class LayerDrawOrder
     {
@@ -102,9 +98,8 @@ namespace MapRenderer.Core.Rendering
         /// </summary>
         /// <param name="layerCount">Number of declared layers (&gt;= 0).</param>
         /// <param name="baseQueue">
-        /// Render queue of the bottom-most layer's <see cref="LayerSubSlot.Base"/> sub-slot (index 0). Must
-        /// place the whole band inside Unity's transparent range so ZWrite-off painter's ordering is
-        /// honoured: <c>baseQueue &gt;= <see cref="TransparentBandStart"/></c>.
+        /// Render queue of layer 0's <see cref="LayerSubSlot.Base"/> sub-slot; at least
+        /// <see cref="TransparentBandStart"/>, so ZWrite-off painter's ordering holds.
         /// </param>
         /// <returns>An <c>int[layerCount]</c> of render-queue values, one per declared layer index.</returns>
         /// <exception cref="ArgumentOutOfRangeException">
@@ -123,9 +118,8 @@ namespace MapRenderer.Core.Rendering
                     $"baseQueue must be in the transparent band (>= {TransparentBandStart}) so the " +
                     "painter's-algorithm ZWrite-off ordering is not pre-empted by the opaque phase.");
 
-            // Unity clamps render queues to [0, 5000]; saturating would collapse two sub-slots or layers onto one
-            // queue, so this throws instead. It checks the band's TOP (the last layer's Above slot), not its Base:
-            // at base 3000, 1000 layers top out at 4999 and 1001 layers need 5001.
+            // Unity clamps render queues to [0, 5000], which would merge two sub-slots onto one queue, so throw.
+            // Check the band's top (the last layer's Above slot): at base 3000, 1001 layers need 5001.
             if (layerCount > 0 &&
                 (long)baseQueue + (long)layerCount * SubSlotsPerLayer - 1 > QueueCeiling)
                 throw new ArgumentOutOfRangeException(nameof(layerCount), layerCount,

@@ -6,11 +6,9 @@ namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
     /// Per-layer property-resolution tables shared by every feature's <see cref="IMvtPropertyStore"/> in
-    /// that layer: the decoded Keys/Values lists, a key→index map, and the layer's flattened tag words. Built
-    /// ONCE by <see cref="MvtDecoder"/>, inside the decode, after the layer's key table is complete — never
-    /// lazily on first read. A decoded tile is published across threads via <c>SharedDisposable{IDecodedTile}</c>;
-    /// building the map on first use would be a write racing concurrent readers, the same publication
-    /// hazard <see cref="MvtLayer.Geometry"/> documents for lazy per-layer geometry materialization.
+    /// that layer: the decoded Keys/Values lists, a key→index map, and the layer's flattened tag words.
+    /// <see cref="MvtDecoder"/> builds it once, inside the decode. Non-obvious why: the tile is published
+    /// across threads via <c>SharedDisposable{IDecodedTile}</c>, so a lazy build would race concurrent readers.
     /// </summary>
     internal sealed class MvtLayerPropertyResolver : IFeatureKeyResolver, INativeFilterColumns
     {
@@ -23,17 +21,14 @@ namespace MapRenderer.Jobs.Mvt
         private readonly NativeArray<int> _tagLengths;
 
         /// <param name="keys">The layer's key table (declaration order).</param>
-        /// <param name="values">The layer's value table (declaration order) — BORROWED: owned by
-        /// <see cref="MvtLayer.Values"/>, freed by <see cref="MvtLayer.Dispose"/>. This resolver never
-        /// disposes it and must not be read once the owning layer has.</param>
+        /// <param name="values">The layer's value table (declaration order). Borrowed from
+        /// <see cref="MvtLayer.Values"/>; not read after <see cref="MvtLayer.Dispose"/>.</param>
         /// <param name="valueStrings">The layer's value-string side table — <see cref="MvtValueNative.ToValue"/>
         /// indexes into it for every <see cref="ValueType.String"/> entry.</param>
         /// <param name="keyIndex">Key string → index into <paramref name="keys"/>, built by the caller
         /// once <paramref name="keys"/> is complete.</param>
-        /// <param name="tagWords">Every feature's (keyIdx,valIdx) pairs, concatenated in feature order —
-        /// BORROWED: owned by <see cref="MvtLayer.FeatureTagWords"/>, freed by <see cref="MvtLayer.Dispose"/>.
-        /// This resolver never disposes it and must not be read once the owning layer has (see
-        /// <see cref="TagWords"/>).</param>
+        /// <param name="tagWords">Every feature's (keyIdx,valIdx) pairs, in feature order. Borrowed from
+        /// <see cref="MvtLayer.FeatureTagWords"/>; not read after <see cref="MvtLayer.Dispose"/>.</param>
         /// <param name="tagOffsets">Per-feature start index into <paramref name="tagWords"/>, by ordinal —
         /// BORROWED: owned by <see cref="MvtLayer.FeatureTagOffsets"/>, freed by <see cref="MvtLayer.Dispose"/>.</param>
         /// <param name="tagLengths">Per-feature word count into <paramref name="tagWords"/>, by ordinal —
@@ -103,13 +98,11 @@ namespace MapRenderer.Jobs.Mvt
         bool IFeatureKeyResolver.TryResolveKey(string name, out int keyIndex) => TryGetKeyIndex(name, out keyIndex);
 
         /// <summary>
-        /// Resolves a feature's (keyIdx,valIdx) tag-word slice into a FRESH dictionary — the same
-        /// skip-tolerant walk the pre-D1a <c>MvtDecoder.ResolveProperties</c> used (odd-length slices stop
-        /// at the last complete pair; an out-of-range key or value index skips that pair without throwing).
-        /// The cold path behind <see cref="DensePropertyStore.AsDictionary"/> — and, being an independent
-        /// forward walk of the same tag words <see cref="DensePropertyStore.TryGetByKeyIndex"/> scans
-        /// backward, the differential oracle <c>DensePropertyStoreTests</c> pairs against it. Always
-        /// allocates a new dictionary — never cached — so a caller may treat the result as its own.
+        /// Resolves a feature's tag-word slice into a new, uncached dictionary the caller owns. The walk is
+        /// skip-tolerant: an odd-length slice stops at the last complete pair, and an out-of-range index skips
+        /// its pair. It is the cold path behind <see cref="DensePropertyStore.AsDictionary"/> and the forward
+        /// oracle that <c>DensePropertyStoreTests</c> pairs with the backward
+        /// <see cref="DensePropertyStore.TryGetByKeyIndex"/> scan.
         /// </summary>
         /// <param name="offset">Start index of this feature's pairs into <see cref="TagWords"/>.</param>
         /// <param name="count">Word count of this feature's slice (not pair count — halved below).</param>

@@ -6,24 +6,17 @@ using UnityEngine.Rendering;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Off-screen render helper for snapshot tests.
-    ///
-    /// Renders a <see cref="Camera"/> to an off-screen <see cref="RenderTexture"/> (NOT the
-    /// screen / framebuffer), reads back the pixels via <c>Texture2D.ReadPixels</c>, and optionally
-    /// writes a PNG to <c>Logs/snapshots/</c>.
-    ///
-    /// No <c>[Test]</c> attribute — this is a test utility class, not a test itself.
-    ///
-    /// Usage pattern (caller is responsible for camera lifecycle):
-    /// <code>
+    /// Off-screen render helper for snapshot tests: renders a <see cref="Camera"/> to an off-screen
+    /// <see cref="RenderTexture"/>, reads the pixels back via <c>Texture2D.ReadPixels</c>, and optionally
+    /// writes a PNG to <c>Logs/snapshots/</c>. The caller owns the camera and must dispose the renderer to
+    /// release the <see cref="RenderTexture"/>.
+    /// </summary>
+    /// <example><code>
     ///   using var snap = new SnapshotRenderer(512, 512);
     ///   snap.Render(myCamera);
     ///   snap.WritePng("my-snapshot.png");
     ///   Frame frame = snap.Pixels;   // row-major, bottom-left origin
-    /// </code>
-    ///
-    /// The caller must dispose the renderer to release the <see cref="RenderTexture"/>.
-    /// </summary>
+    /// </code></example>
     public sealed class SnapshotRenderer : IDisposable
     {
         private readonly int            _width;
@@ -39,16 +32,10 @@ namespace MapRenderer.Tests
         public int Height => _height;
 
         /// <summary>
-        /// Decoded pixel data from the last <see cref="Render"/> call, as a <see cref="Frame"/>. Row-major,
-        /// <b>BOTTOM-left origin</b>: row 0 is the BOTTOM scanline of the image, and row index grows UPWARD
-        /// on screen. Default (null <see cref="MapRenderer.Tests.Frame.Pixels"/>) until <see cref="Render"/>
-        /// has been called.
-        ///
-        /// <para>That is Unity's native convention for <see cref="Texture2D.ReadPixels"/> +
-        /// <see cref="Texture2D.GetPixels32"/>, and this class does not flip (unlike <c>SpriteSheet</c>,
-        /// which does). Any test asserting a vertical DIRECTION must read this as bottom-up. Counts,
-        /// coverage fractions and mean luminance are orientation-independent, so they do not see the
-        /// difference.</para>
+        /// Decoded pixels from the last <see cref="Render"/> call, row-major with a <b>BOTTOM-left origin</b>
+        /// (Unity's <see cref="Texture2D.ReadPixels"/> convention; this class does not flip, unlike
+        /// <c>SpriteSheet</c>). A test that asserts a vertical DIRECTION must read it bottom-up. Default (null
+        /// <see cref="MapRenderer.Tests.Frame.Pixels"/>) until <see cref="Render"/> runs.
         /// </summary>
         public Frame Pixels { get; private set; }
 

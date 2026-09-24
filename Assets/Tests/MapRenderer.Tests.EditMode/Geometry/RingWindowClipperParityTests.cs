@@ -12,12 +12,9 @@ namespace MapRenderer.Tests.Geometry
 {
     /// <summary>
     /// <see cref="RingWindowClipper"/> (managed, <c>MapRenderer.Core</c>) and <see cref="RingClipJob"/>
-    /// (Burst) must produce BIT-IDENTICAL vertex sequences.
-    ///
-    /// <para>The GeoJSON slicer cannot use the job — it must stay engine-free so the whole stack runs in the
-    /// ~0.1 s <c>dotnet test</c> loop, which is the point of a source that exists to serve fixtures. That
-    /// leaves a second copy of an in-repo algorithm, which this repo normally treats as a smell. This test is
-    /// what converts the copy from an UNVERIFIED duplicate into a CHECKED equivalence.</para>
+    /// (Burst) must produce BIT-IDENTICAL vertex sequences. Non-obvious why: two copies exist because the
+    /// GeoJSON slicer must stay engine-free for the <c>dotnet test</c> loop and cannot use the job; this test
+    /// makes the duplicate a checked equivalence.
     /// </summary>
     [TestFixture]
     public class RingWindowClipperParityTests
@@ -79,9 +76,8 @@ namespace MapRenderer.Tests.Geometry
                 if (!SameSequence(managed, corpus[i])) actuallyClipped++;
             }
 
-            // Non-vacuity: without this the test could be comparing two verbatim bbox-fast-path copies and
-            // proving nothing whatsoever about the clipping ARITHMETIC. It has to hold PER WINDOW — a corpus
-            // that only clips against one of them leaves the other vacuous.
+            // Non-vacuity, PER WINDOW: without real clips the test compares bbox-fast-path copies and proves
+            // nothing about the clipping arithmetic.
             Assert.That(actuallyClipped, Is.GreaterThanOrEqualTo(5),
                 $"{where}: at least five corpus rings must have taken the real Sutherland–Hodgman path");
         }
@@ -170,14 +166,10 @@ namespace MapRenderer.Tests.Geometry
         }
 
         /// <summary>
-        /// The five named cases the tooth requires — wholly inside, straddling one edge, crossing a corner,
-        /// wholly outside, and vertices exactly ON the boundary — plus the sub-triangle rings both
-        /// implementations special-case, plus a seeded pseudo-random tail whose rings are sized and placed to
-        /// land in all of those regimes.
-        ///
-        /// <para>The absolute cases below are authored against <c>[0, 4096]</c>; driven against the buffered
-        /// window they land in different (still useful) regimes, so the boundary-exact cases are rebuilt from
-        /// <paramref name="min"/>/<paramref name="max"/> and stay boundary-exact either way.</para>
+        /// Five named cases — wholly inside, straddling one edge, crossing a corner, wholly outside, vertices
+        /// exactly ON the boundary — plus sub-triangle rings and a seeded pseudo-random tail over all regimes.
+        /// The absolute cases assume <c>[0, 4096]</c>; the boundary-exact cases are built from
+        /// <paramref name="min"/>/<paramref name="max"/> so they stay exact on the buffered window too.
         /// </summary>
         private static List<List<double2>> BuildCorpus(double2 min, double2 max)
         {
@@ -204,9 +196,8 @@ namespace MapRenderer.Tests.Geometry
             corpus.Add(Ring(min.x, 1000, 2000, 1000, 2000, 2000, min.x, 2000));              // edge on min.x
             corpus.Add(Ring(3000, min.y, max.x + 500, min.y, max.x + 500, 2000, 3000, 2000)); // exits max.x
 
-            // Sub-triangle rings. BOTH implementations run the bbox fast path BEFORE the < 3 drop, so one
-            // already inside is copied verbatim while one that is not is dropped — two branches the corpus
-            // never reached while every ring in it had three or more vertices.
+            // Sub-triangle rings: both run the bbox fast path BEFORE the < 3 drop, so one inside is copied
+            // verbatim and one that is not is dropped.
             corpus.Add(Ring(500, 500, 1500, 900));            // 2 vertices, wholly inside  ⇒ verbatim
             corpus.Add(Ring(500, 500, max.x + 500, 900));     // 2 vertices, straddling     ⇒ dropped
             corpus.Add(Ring(700, 700));                       // 1 vertex,  wholly inside   ⇒ verbatim

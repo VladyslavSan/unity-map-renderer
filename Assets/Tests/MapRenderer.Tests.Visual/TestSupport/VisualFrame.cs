@@ -81,20 +81,10 @@ namespace MapRenderer.Tests
 
         /// <summary>Pixel-weighted ink centroid + count inside the inclusive-exclusive window
         /// <c>[x0,x1)×[y0,y1)</c>. A pixel is "ink" when it differs from THIS frame's background beyond
-        /// <see cref="SnapshotCoverage.Tolerance"/> — the SAME background predicate
-        /// <see cref="SnapshotCoverage.Analyse"/> uses (not a forked threshold); unusable here is
-        /// <c>WorldSymbolInkAnalysis</c>'s white-background "R &lt; 200" rule, since this kit's background is
-        /// dark slate and every background pixel would read as ink under it.
-        ///
-        /// <para><b>No flip.</b> <see cref="Pixels"/> is BOTTOM-left origin (Unity's native
-        /// <c>ReadPixels</c>), and <c>IProjection.GroundToScreen</c> / <c>Camera.WorldToScreenPoint</c> are
-        /// also bottom-left, <c>+y</c> up — so <paramref name="x0"/>/<paramref name="y0"/> here compare
-        /// directly against an oracle screen pixel with no coordinate conversion at all.</para>
-        ///
-        /// <para><b>No per-layer <c>Ink(layerId)</c>.</b> A shared frame cannot attribute a pixel to a style
-        /// layer. While the kit renders exactly one inking layer, all non-background ink already IS that
-        /// layer's ink, so a <c>layerId</c> parameter would be vacuous. A real per-layer accessor waits for
-        /// a scene that renders two inking layers together.</para></summary>
+        /// <see cref="SnapshotCoverage.Tolerance"/>, the same predicate <see cref="SnapshotCoverage.Analyse"/>
+        /// uses. No flip: <see cref="Pixels"/>, <c>IProjection.GroundToScreen</c> and
+        /// <c>Camera.WorldToScreenPoint</c> are all bottom-left origin, so the window compares directly
+        /// against an oracle pixel. Limitation: a shared frame cannot attribute ink to one style layer.</summary>
         /// <param name="x0">Window left edge, px (inclusive).</param>
         /// <param name="y0">Window bottom edge, px (inclusive) — bottom-left origin, see above.</param>
         /// <param name="x1">Window right edge, px (exclusive).</param>

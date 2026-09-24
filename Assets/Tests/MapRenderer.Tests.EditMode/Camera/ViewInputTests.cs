@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(2.0, lo.Zoom.Value, 1e-9, "clamps to minZoom");
 
             // Anchored zoom invariant: off-centre cursor P stays pinned after scroll.
-            // (Full T1 coverage is in CameraInteractionTests; this is a quick sign-check here.)
+            // (CameraInteractionTests.ApplyZoom_ZoomToCursor_PinsGroundUnderCursor covers it fully.)
             var v2   = Cam(0, 45.0, 4.0);
             double2 P = new double2(1400.0, 800.0);
             GeoCoordinate3D before = Proj.ScreenToGround(P, Vp, v2);
@@ -128,9 +128,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ApplyPan_NearEastEdge_ClampsInsteadOfWrapping()
         {
-            // PAN CLAMP: Mercator is a finite sheet. A pan that drives the look-at toward/past the world
-            // edge must CLAMP EXACTLY to the boundary (viewport stays inside the world square), not WRAP the
-            // longitude around to the opposite edge (the old WrapLon behaviour).
+            // PAN CLAMP: Mercator is a finite sheet. A pan past the world edge must CLAMP EXACTLY to the
+            // boundary, not WRAP the longitude to the opposite edge.
             const double zoom = 5.0; // world square meaningfully larger than the viewport — real clamp room
             double mpp = WebMercator.GroundResolution(zoom);
             double halfSpanX = Vp.x * 0.5 * mpp;
@@ -159,9 +158,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ApplyPan_AtFillFloor_LocksBindingAxisToWorldCentre()
         {
-            // MIN-ZOOM LOCK: at the fill floor the world square exactly matches the viewport's larger
-            // (binding) side, so the clamp range on that axis collapses to a single point (world-centre) —
-            // no pan can move it off-centre.
+            // MIN-ZOOM LOCK: at the fill floor the world square matches the viewport's binding side, so the
+            // clamp range on that axis collapses to world-centre and no pan moves it.
             double floorZoom = CameraPoseMath.MinZoomToFill(Vp.x, Vp.y, 0.0); // Vp is 1920x1080 — X is binding
             var v = Cam(0.0, 0.0, floorZoom);
 
@@ -176,9 +174,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ClampLookAtToWorld_Globe_IsIdentity()
         {
-            // GLOBE IDENTITY: the cyclic globe has no edges to clamp — ClampLookAtToWorld must return the
-            // look-at UNCHANGED (well away from the antimeridian, where WrapLon-vs-atan2 bit differences
-            // are the documented, harmless exception).
+            // GLOBE IDENTITY: the globe has no edges, so ClampLookAtToWorld returns the look-at UNCHANGED.
+            // The point is far from the antimeridian, where WrapLon-vs-atan2 bit differences are harmless.
             var globe = new SphericalProjection();
             var cam = new CameraProperties(
                 new GeoCoordinate3D { Longitude = 42.0, Latitude = 17.0, Altitude = 0.0 }, 5.0, 0, 0);
@@ -190,10 +187,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── Apply dispatch — split helpers ───────────────────────────────────────────────────────
-        //
-        // All tests below drive the public seam ViewInput.Apply(intent, view) — not the private
-        // helpers — so they pin the seam contract.  A FakeGestureSource (T-SEAM proof) drives the
-        // same seam without any Unity/device dependency.
+        // Tests below drive the public seam ViewInput.Apply(intent, view), not the private helpers.
 
         // Helper: build a ViewContext with the test projection + viewport.
         private static ViewContext MakeView(CameraProperties cam)
@@ -375,10 +369,10 @@ namespace MapRenderer.Tests.Cameras
                 "PanToAnchor via Apply: latitude must clamp to the Mercator limit (B-PAN)");
         }
 
-        // ── T-SEAM — fake source drives the seam (genericity proof) ─────────────────────────────
+        // ── A fake source drives the seam (genericity proof) ─────────────────────────────
 
         /// <summary>
-        /// T-SEAM proof-of-genericity: a named fake intent source (no Unity/device dependency) drives
+        /// Proof of genericity: a named fake intent source (no Unity/device dependency) drives
         /// <see cref="ViewInput.Apply"/> and produces correct patches. The touch
         /// backend and any headless test driver are interchangeable sources over the identical seam.
         /// </summary>
@@ -458,15 +452,13 @@ namespace MapRenderer.Tests.Cameras
                 base_.Tilt.Degrees);
         }
 
-        // ── T0 — Absolute axis + rotation-sign pin ───────────────────────────────────────────────
+        // ── Absolute axis + rotation-sign pin ───────────────────────────────────────────────
 
         [Test]
         public void ScreenToGround_Heading0_AbsoluteAxisPin()
         {
-            // Non-round-trip forward check: pins absolute screen convention, axis mapping, and scale.
-            // Camera at lon=0, lat=45, zoom=4. Viewport 1920×1080; centre=(960,540).
-            // Cursor at P=(1160,740): offsetPx=(+200,+200) → east=+200, north=+200.
-            // Expected ground: WebMercator.ToLonLat(fromLonLat(0,45).x+200*mpp, fromLonLat(0,45).y+200*mpp).
+            // Forward check of screen convention, axis mapping and scale: P=(1160,740) is (+200,+200) px from
+            // centre, so ground is 200*mpp east and north of (0,45).
             var cam = Cam(0.0, 45.0, 4.0, heading: 0.0);
             double2 P   = new double2(1160.0, 740.0);
 
@@ -485,10 +477,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ScreenToGround_Heading90_RotationSignPin()
         {
-            // Pins the rotation SIGN that round-trip T1/T2 cannot catch.
-            // At heading=90°: screen-right (sx>0) must map to ground SOUTH (lat<45, lon≈0);
-            //                  screen-up (sy>0) must map to ground EAST (lon>0, lat≈45).
-            // A wrong ±Heading sign in the rotation formula makes screen-right → NORTH → FAILS.
+            // Pins the rotation SIGN a round-trip cannot catch: at heading=90° screen-right maps to ground
+            // SOUTH and screen-up to ground EAST.
             var cam = Cam(0.0, 45.0, 4.0, heading: 90.0);
 
             // Screen-right: P=(1160,540), offset=(+200,0).
@@ -506,14 +496,13 @@ namespace MapRenderer.Tests.Cameras
                 "heading=90°, screen-up → ground EAST (lon > 0)");
         }
 
-        // ── T1 — Zoom-to-cursor invariant ────────────────────────────────────────────────────────
+        // ── Zoom-to-cursor invariant ────────────────────────────────────────────────────────
 
         [Test]
         public void ApplyZoom_ZoomToCursor_PinsGroundUnderCursor()
         {
-            // THE decisive test. Camera at lon=0, lat=45, zoom=4.
-            // Cursor at off-centre P=(1400,800). After a Δzoom=+1.5, the earth point that was under P
-            // must still be under P in the new camera (within 0.5px).
+            // After a Δzoom=+1.5 about off-centre P, the earth point that was under P must still be under P
+            // (within 0.5px).
             var cam     = Cam(0.0, 45.0, 4.0);
             double2 P   = new double2(1400.0, 800.0);
 
@@ -540,14 +529,12 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(cam.LookAt.Latitude,  patch.Latitude.Value,  1e-6, "centre zoom: lat unchanged");
         }
 
-        // ── T2 — Anchored-pan invariant ──────────────────────────────────────────────────────────
+        // ── Anchored-pan invariant ──────────────────────────────────────────────────────────
 
         [Test]
         public void ApplyPan_AnchoredGrabbedGround_StaysUnderCursor()
         {
-            // Camera at lon=0, lat=45, zoom=4. Grab at P_start=(1400,800).
-            // Cursor moves to P_now=(1100,650). After the anchored pan, the grabbed point must appear
-            // at P_now within 0.5px.
+            // After an anchored pan from pStart to pNow, the grabbed point must appear at pNow within 0.5px.
             var cam = Cam(0.0, 45.0, 4.0);
             double2 pStart = new double2(1400.0, 800.0);
             double2 pNow   = new double2(1100.0, 650.0);
@@ -596,10 +583,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MercatorPin_UnderDpr2_HoldsWithLogicalSeam_DriftsWithPhysical()
         {
-            // The logical interaction seam fixes retina Mercator pan/zoom with no WebMercatorProjection edit.
-            // The render frames the LOGICAL viewport, so GroundToScreen(·, vpLogical) IS the render; the seam
-            // divides BOTH cursor and viewport by DPR before the projection call, so a grabbed point re-renders
-            // under the cursor. Skipping the ÷DPR (physical viewport) drifts it.
+            // The render frames the LOGICAL viewport, so the seam divides BOTH cursor and viewport by DPR and a
+            // grabbed point re-renders under the cursor. Skipping the ÷DPR drifts it.
             const double dpr = 2.0;
             double2 vpPhysical = new double2(1920, 1080);
             double2 vpLogical  = vpPhysical * (1.0 / dpr); // 960×540

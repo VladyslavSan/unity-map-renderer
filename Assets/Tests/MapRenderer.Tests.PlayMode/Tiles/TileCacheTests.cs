@@ -1,11 +1,5 @@
 // Tiles/TileCacheTests.cs — prepared-cache and deferred-release-budget teeth, PlayMode half.
 //
-// Split from Tiles/TileFetchTests.cs by a using collision, not by size: neither file here imports
-// System, and both call bare Object.DestroyImmediate/Object.Destroy (UnityEngine.Object) — TileFetchTests.cs's
-// two files import System and always qualify as UnityEngine.Object.Destroy, so the two groups must not merge.
-// PreparedCacheTests reads MeshDataPayload.DebugLiveAllocCount by baseline-then-delta, but settles with
-// PumpUntilSettled before every delta read and wraps its body in try/finally { view.Teardown(); }.
-//
 // Contents:
 //   PreparedCacheTests        — PreparedTileCache MapView-integration teeth: real cover-fetch-build-consume-evict cycles, PlayMode half.
 //   Stall2ReleaseBudgetTests  — the deferred-release queue budgets how many (tile, source) records free per Tick.
@@ -325,9 +319,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate();
-                // TileBuildsStartedLastTick counts tiles admitted, not budget units, so it does not catch a
-                // write kick on a DIFFERENT cover tile during this same Tick. It still asserts what this
-                // test claims: a revisit is a hit, not a re-prepare.
+                // Limitation: TileBuildsStartedLastTick counts admitted tiles, so it misses a write kick on a
+                // DIFFERENT cover tile in this Tick; it still proves the revisit is a hit, not a re-prepare.
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "Revisit must be a hit, not a re-prepare.");
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,

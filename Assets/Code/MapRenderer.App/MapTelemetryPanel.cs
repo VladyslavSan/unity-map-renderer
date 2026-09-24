@@ -6,21 +6,10 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// A dev/debug readout surface for the map's telemetry — mirrors <see cref="CameraControlPanel"/>'s
-    /// shape (serialized read-only display fields, overwritten every frame). Reports only, never a control
-    /// knob: no field here is ever read back into the map.
-    ///
-    /// <para><b>A telemetry CONSUMER, and off by default</b> (<c>docs/telemetry-design.md</c>): it PULLS each
-    /// provider's levels while enabled and does not <c>Update</c> at all while disabled, so a disabled panel
-    /// costs the frame nothing. That matters because writing these live public fields forces an Editor repaint
-    /// every frame, and that cost confounds a real measurement. Enable it when you want the readout; leave
-    /// it off while profiling.</para>
-    ///
-    /// <para><b>Play-mode only:</b> <see cref="MapView"/> is constructed only on the runtime
-    /// wiring/startup path, so in edit mode there is nothing to read yet.
-    /// <see cref="Pull"/> runs per frame and no-ops cleanly until the view exists — the same guard
-    /// <see cref="CameraControlPanel"/> uses. Nothing has to notice that <c>SetCamera</c> replaced the view,
-    /// because a pull reads whatever <c>Map.View</c> is at that moment.</para>
+    /// A dev/debug readout of the map's telemetry: serialized display fields, overwritten every frame and never
+    /// read back into the map. A telemetry consumer (<c>docs/telemetry-design.md</c>), off by default: writing
+    /// live public fields forces an Editor repaint every frame, which confounds a real measurement, so leave it
+    /// off while profiling. Play-mode only: <see cref="Pull"/> no-ops until the view exists.
     /// </summary>
     public sealed class MapTelemetryPanel : MonoBehaviour
     {
@@ -176,14 +165,10 @@ namespace MapRenderer.App
         private void Update() => Pull();
 
         /// <summary>
-        /// Copies the live <see cref="MapView"/>'s levels into this component's Inspector fields — the whole of
-        /// what the panel does. <c>internal</c> so an EditMode test can drive it deterministically; the
-        /// MonoBehaviour game loop does not run under the EditMode runner.
-        ///
-        /// <para>Nothing is subscribed or cached: the panel reads each provider's struct by reference on the frame
-        /// it needs it, so there is no attach/detach to keep symmetric and no staleness when <c>SetCamera</c>
-        /// replaces the view wholesale. A DISABLED panel does not <c>Update</c>, which is the entire reason a panel
-        /// nobody is looking at costs nothing.</para>
+        /// Copies the live <see cref="MapView"/>'s levels into this component's Inspector fields. <c>internal</c>
+        /// so an EditMode test can drive it; the game loop does not run under the EditMode runner. Nothing is
+        /// subscribed or cached: each pull reads the providers of whatever <c>Map.View</c> is on that frame, so
+        /// there is no attach/detach and no staleness when <c>SetCamera</c> replaces the view.
         /// </summary>
         internal void Pull()
         {

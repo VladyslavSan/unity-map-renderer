@@ -5,18 +5,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// The parsed MapLibre line <b>paint</b> properties for a single line style layer.
-    ///
-    /// Each <c>line-*</c> paint key is read from the layer's <c>paint</c> sub-tree (via
-    /// <see cref="PropertyNames"/>) and collapsed into a single <see cref="StyleProperty{T}"/>:
-    /// one parsed <see cref="Expressions.Expression"/>, one typed default, and a
-    /// <c>Value → T</c> projection. The old triple
-    /// (<c>XKind</c> + <c>PaintPropertyEvaluator X</c> + <c>DataDrivenPaintEvaluator DataDrivenX</c>)
-    /// is gone; <see cref="StyleProperty{T}.Kind"/> reads the expression's kind directly.
-    ///
-    /// Absent properties use the MapLibre Style Spec defaults and report
-    /// <see cref="ExpressionKind.Constant"/>; <see cref="IsInertFallback"/> is true when ALL paint
-    /// properties are absent. Engine-free; clean-room (public Style Spec, no MapLibre source).
+    /// The parsed MapLibre line <b>paint</b> properties for a single line style layer. Each <c>line-*</c> key
+    /// becomes one <see cref="StyleProperty{T}"/>: a parsed <see cref="Expressions.Expression"/>, a typed
+    /// default, and a <c>Value → T</c> projection. Absent properties use the Style Spec defaults and report
+    /// <see cref="ExpressionKind.Constant"/>; <see cref="IsInertFallback"/> is true when all are absent.
     /// </summary>
     public sealed class PaintProperties
     {
@@ -93,9 +85,8 @@ namespace MapRenderer.Core.Style.Line
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
         public bool IsInertFallback { get; init; }
 
-        // ── Convenience accessors matching the old PaintPropertyEvaluator API ──────────────────
-        // These enable consumers that branch on feature-dependence to use the same property for both
-        // the uniform path (Evaluate(zoom)) and the bake path (TryEvaluate(zoom, feature, out T)).
+        // ── Convenience accessors ──────────────────────────────────────────────────────────────
+        // One property serves the uniform path (Evaluate(zoom)) and the bake path (TryEvaluate(zoom, feature, out T)).
 
         /// <summary>Classification of the line-color expression.</summary>
         public ExpressionKind ColorKind => Color.Kind;

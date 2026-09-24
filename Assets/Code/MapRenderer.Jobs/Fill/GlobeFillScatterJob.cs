@@ -11,15 +11,9 @@ namespace MapRenderer.Jobs.Fill
     /// <see cref="FillGraphOutput"/>'s output columns (<c>World → WorldPositions</c>, <c>Up → VertexUp</c>,
     /// <c>East → VertexEast</c>, <c>Tile → TileVertices</c>, <c>Band → VertexBand</c>,
     /// <c>Feature → VertexFeatureIdx</c>) and copies <see cref="Indices"/> into
-    /// <see cref="OutTriangleIndices"/> verbatim. The subdivide job emits one struct per vertex, the shape
-    /// its recursive template builds; this job turns that into columns.
-    ///
-    /// <para>The <c>.AsArray()</c> rule, as in <c>FillMeshGraph.cs</c>: hold the lists, resolve inside
-    /// <see cref="Execute"/>, never at schedule time.</para>
-    ///
-    /// <para>Does not report a vertex/index total anywhere: the output columns are what a reader takes
-    /// <c>.Length</c> off once completed, so there is no separate scalar that could drift from them. It
-    /// holds <see cref="Counts"/> only to CLEAR the two band scalars, never to write a total.</para>
+    /// <see cref="OutTriangleIndices"/> verbatim. Non-local invariant: it resolves the lists inside
+    /// <see cref="Execute"/>, never at schedule time, and writes no totals; readers take <c>.Length</c> off
+    /// the columns, and it only clears the two band scalars in <see cref="Counts"/>.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct GlobeFillScatterJob : IJob

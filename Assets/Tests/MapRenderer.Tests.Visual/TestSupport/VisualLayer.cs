@@ -1,8 +1,5 @@
-// Unity EditMode only — the declarative visual-test authoring kit.
-// NOT registered in Tools/core-tests/core-tests.csproj.
-//
-// The LAYER half of the kit: a fill layer and a point-symbol text layer, each a VisualLayer subclass.
-// A line layer kind would be another subclass, and needs no change to VisualScene's JSON assembly.
+// Unity EditMode only — the LAYER half of the visual-test kit: one VisualLayer subclass per layer kind (fill,
+// point-symbol text), so a new kind needs no change to VisualScene's JSON assembly.
 
 #if UNITY_EDITOR
 using System.Collections.Generic;
@@ -100,9 +97,8 @@ namespace MapRenderer.Tests
         private double _textSizePx = 16.0;
         private string _textFontJson = "[\"Fixture Font\"]";
         private string _textColorJson;
-        // Style-Spec default `text-color` is `#000000`, invisible on this kit's dark background — always
-        // emitted so a caller that forgets Color() still gets a background-discriminable frame, rather than
-        // a silently vacuous positive control.
+        // The Style-Spec default `text-color` #000000 is invisible on this kit's dark background, so a caller
+        // that omits Color() gets white instead of a vacuous positive control.
         private const string DefaultTextColorJson = "\"#ffffff\"";
 
         /// <param name="id">The style-JSON layer id (forwarded to the base).</param>

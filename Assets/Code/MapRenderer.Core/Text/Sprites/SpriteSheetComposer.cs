@@ -1,6 +1,5 @@
-// Engine-free: no UnityEngine dependency. RGBA32 bytes are not a Unity type, which is the whole point —
-// the load-bearing pixel rule below is checked byte-for-byte on the fast dotnet-test loop instead of behind
-// a GPU readback.
+// Engine-free RGBA32 bytes, so the pixel rule below is checked byte-for-byte on the dotnet-test loop instead
+// of behind a GPU readback.
 
 using System;
 using Unity.Mathematics;
@@ -8,21 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
-    /// Executes a <see cref="SpritePadPlan"/> over pixels: copies each sprite's content block to its new
-    /// home and manufactures the transparent border around it.
-    ///
-    /// <para><b>The border rule.</b> Every border texel is <b>alpha 0 with the RGB of the nearest content
-    /// texel</b> (the content rect's edge pixel; a corner texel therefore takes the diagonal corner pixel).
-    /// The RGB replication is not cosmetic and not optional: bilinear filtering interpolates RGB and alpha
-    /// <i>independently</i>, so a mid-ramp texel whose RGB was zeroed contributes black to the colour while
-    /// still contributing coverage — a dark fringe all the way around every icon. Replicating makes the ramp
-    /// colour→same colour and alpha 1→0, which is exactly a premultiplied-looking edge without the
-    /// premultiply.</para>
-    ///
-    /// <para><b>Coordinate space</b> is the sprite JSON's: top-left origin, row-major, 4 bytes per texel in
-    /// R,G,B,A order. Both buffers are in it; the row flip that reconciles this with Unity's bottom-left
-    /// <c>GetPixel</c> convention lives in <c>SpriteSheet</c>'s pack/unpack helpers, OUTSIDE
-    /// this type, so the plan's rects mean exactly one thing here.</para>
+    /// Executes a <see cref="SpritePadPlan"/> over pixels: copies each sprite's content block and makes a
+    /// transparent border whose texels have alpha 0 and the RGB of the nearest content texel. Non-obvious why:
+    /// bilinear filtering interpolates RGB and alpha independently, so a zeroed RGB would leave a dark fringe
+    /// around every icon. Buffers are top-left-origin, row-major RGBA32; <c>SpriteSheet</c>'s pack/unpack
+    /// helpers do the row flip to Unity's bottom-left convention.
     /// </summary>
     public static class SpriteSheetComposer
     {
@@ -108,14 +97,9 @@ namespace MapRenderer.Core.Text.Sprites
         }
 
         /// <summary>
-        /// A blit that reaches outside either sheet is a planner bug, not malformed content — the planner
-        /// rejects out-of-bounds source rects and the packer guarantees the destination cell fits. Fail loudly
-        /// rather than corrupt a neighbouring sprite's row.
-        ///
-        /// <para>Every reach test widens to <c>long</c>, for the same reason
-        /// <c>SpriteSheetPadder.IsPackable</c> does: in 32-bit signed arithmetic a rect at
-        /// <c>x: int.MaxValue</c> wraps NEGATIVE and passes the bound, and the guard would then wave through
-        /// exactly the blit it exists to reject.</para>
+        /// A blit that reaches outside either sheet is a planner bug, so throw rather than corrupt a
+        /// neighbouring sprite's row. Every reach test widens to <c>long</c>, as
+        /// <c>SpriteSheetPadder.IsPackable</c> does, because <c>x: int.MaxValue</c> wraps negative in 32 bits.
         /// </summary>
         private static void RequireInBounds(
             in SpriteBlit blit, int padding, int srcWidth, int srcHeight, int dstWidth, int dstHeight)

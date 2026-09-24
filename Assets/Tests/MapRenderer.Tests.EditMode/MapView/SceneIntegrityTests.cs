@@ -1,11 +1,5 @@
-// Scene-integrity guard. Every committed .unity scene must open headless with ZERO missing-script
-// components. Catches the class of breakage where a MonoBehaviour is moved/renamed (namespace or class)
-// and a scene's component binding no longer resolves — e.g. a reorg that moves MapView/MapController/
-// MapRoot into MapRenderer.Unity.Rendering.Map. Components bind by the m_Script GUID (preserved across a
-// file move via its .meta), so a green run is also positive proof the GUIDs still resolve.
-//
-// Editor-only (UnityEditor scene APIs), runs under -batchmode via ./Tools/run-tests.sh. It only OPENS
-// scenes and never saves them, so it does not modify committed scene assets.
+// Every committed .unity scene must open headless with ZERO missing-script components, so a moved or
+// renamed MonoBehaviour whose m_Script GUID fails to resolve reds here. It opens scenes and never saves them.
 
 using System.Text;
 using NUnit.Framework;

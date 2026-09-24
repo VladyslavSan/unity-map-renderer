@@ -3,21 +3,12 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// Geodetic → slippy-tile coordinates: the ONE conversion site for the GeoJSON slicing stack. Nothing else
-    /// in that stack may touch lon/lat. The four paragraphs below are non-local invariants.
-    /// <para><b>Independent oracle.</b> The exact inverse of <see cref="TileId.ToLonLat"/>
-    /// (<c>u = (X + px/extent)/2^z</c>, <c>lon = u·360 − 180</c>, <c>lat = atan(sinh(π·(1 − 2v)))</c>), so a
-    /// round-trip test through <c>ToLonLat</c> is an independent check, not a restatement.</para>
-    /// <para><b>Single-source rule.</b> <c>v</c> comes from metres, not the closed form
-    /// <c>v = (1 − asinh(tan φ)/π)/2</c>: that is the Mercator forward literal, which only
-    /// <see cref="WebMercator.Forward"/> may contain. The detour through
-    /// <see cref="WebMercator.FromLonLat"/> costs one division.</para>
-    /// <para><b>Orientation.</b> <c>(0,0)</c> is the world's north-west corner and <c>(1,1)</c> the south-east:
-    /// <c>v</c> grows southward, so the map reverses orientation. A ring's shoelace sign flips on projection,
-    /// and <c>GeoJsonParser</c>'s winding normalisation accounts for it.</para>
-    /// <para><b>Latitude clamp.</b> <c>|lat| &gt; MaxLatitude</c> has no Mercator image (<c>v → ±∞</c>).
-    /// Clamping, not rejection, is the only way a pole-covering polygon renders; a test pins it. Latitudes
-    /// outside <c>[−90, 90]</c> are malformed input, rejected at parse.</para>
+    /// Geodetic → slippy-tile coordinates, the ONE lon/lat conversion site of the GeoJSON slicing stack and the
+    /// exact inverse of <see cref="TileId.ToLonLat"/>, so a round-trip test is independent. Non-local invariant:
+    /// <c>v</c> comes from metres via <see cref="WebMercator.FromLonLat"/>, because only
+    /// <see cref="WebMercator.Forward"/> may hold the Mercator formula; <c>v</c> grows southward, which
+    /// reverses ring winding (<c>GeoJsonParser</c> accounts for it). <c>|lat| &gt; MaxLatitude</c> is clamped,
+    /// not rejected, so a pole-covering polygon renders; latitudes outside [−90, 90] are rejected at parse.
     /// </summary>
     public static class WebMercatorTiling
     {

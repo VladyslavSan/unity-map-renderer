@@ -8,27 +8,15 @@ namespace MapRenderer.Unity.View
     /// Two-level Relative-To-Center (RTC) / floating-origin math (pure, engine-free): keeps world-scale
     /// Web-Mercator coordinates (±20,037,508 m) inside float32's usable precision so a panned/zoomed/tilted
     /// scene does not jitter (ARCHITECTURE "floating origin", <c>docs/coordinates-and-projections.md</c>).
-    ///
-    /// <para>Level 1: mesh vertices are tile-origin-relative — <c>ProjectPointsJob</c> emits each vertex as
-    /// <c>(merc_vertex − tileOrigin)</c> in double, cast to float32 at mesh-write, where <c>tileOrigin</c> =
-    /// <see cref="TileLocalOriginMercator"/>. The in-tile offset spans at most one tile
-    /// (≈ <c>4.0075e7 / 2^z</c> m), so its float32 ULP shrinks with zoom. Level 2: the tile GameObject's
-    /// local position is scene-origin-relative — its transform carries <c>(tileOrigin − sceneOrigin)</c>
-    /// cast to float32 (<see cref="TileLocalToScene"/>), where <c>sceneOrigin</c> is the camera's look-at,
-    /// re-snapped every frame, so the look-at always sits at the render origin.</para>
-    ///
-    /// <para>Non-local invariant, why the two levels compose: the GPU adds the two floats,
-    /// <c>rendered = (float)(merc_vertex − tileOrigin) + (float)(tileOrigin − sceneOrigin)</c>. The
-    /// <c>tileOrigin</c> term cancels analytically, so <c>rendered ≈ merc_vertex − sceneOrigin</c>.
-    /// Precision is governed by how far the farthest visible vertex lies from <c>sceneOrigin</c>: at most
-    /// <c>|camera − sceneOrigin| + coverRadius</c>. With <c>sceneOrigin ≡ look-at</c> each frame,
-    /// <c>|camera − sceneOrigin| ≈ 0</c>; <see cref="IVisibleTileSelector"/> bounds <c>coverRadius</c>; and
-    /// the zoom bounds each vertex's distance from its tile origin to one tile span. The worst-case
-    /// rendered magnitude stays well inside the float32 budget: below ≈ 8.4 km, a float32 ULP is
-    /// sub-millimetre.</para>
-    ///
-    /// <para>All inputs/outputs are Web-Mercator meters except <see cref="TileLocalToScene"/>, which
-    /// returns the small float32 render-space offset (east=+X, height=+Y, north=+Z).</para>
+    /// Level 1: <c>ProjectPointsJob</c> writes each vertex as float32 <c>(merc_vertex − tileOrigin)</c>, with
+    /// <c>tileOrigin</c> = <see cref="TileLocalOriginMercator"/>; the offset spans at most one tile, so its ULP
+    /// shrinks with zoom. Level 2: the tile transform carries float32 <c>(tileOrigin − sceneOrigin)</c>
+    /// (<see cref="TileLocalToScene"/>), and <c>sceneOrigin</c> is the camera look-at, re-snapped every frame.
+    /// Non-local invariant: the GPU sum cancels <c>tileOrigin</c>, leaving <c>merc_vertex − sceneOrigin</c>,
+    /// whose magnitude is at most <c>|camera − sceneOrigin| + coverRadius</c>: about 0 plus the cover radius
+    /// that <see cref="IVisibleTileSelector"/> bounds. Below about 8.4 km a float32 ULP is sub-millimetre.
+    /// All inputs and outputs are Web-Mercator meters except <see cref="TileLocalToScene"/>, which returns the
+    /// small float32 render-space offset (east=+X, height=+Y, north=+Z).
     /// </summary>
     public static class FloatingOrigin
     {
@@ -90,12 +78,10 @@ namespace MapRenderer.Unity.View
         }
 
         /// <summary>
-        /// Reproduces the GPU's two-float composition for a single vertex and returns the rendered
-        /// render-space position. Used to measure floating-origin precision honestly (the "no jitter"
-        /// gate): the engine bakes <c>(float)(merc − tileOrigin)</c> into the mesh and adds the tile
-        /// transform <c>(float)(tileOrigin − sceneOrigin)</c> at draw time. This method performs both float
-        /// casts and the float add exactly as the pipeline does, so a test can compare it against the exact
-        /// double truth <c>(merc − sceneOrigin)</c>.
+        /// Reproduces the GPU's two-float composition for one vertex and returns the rendered render-space
+        /// position: <c>(float)(merc − tileOrigin)</c> baked in the mesh plus the tile transform
+        /// <c>(float)(tileOrigin − sceneOrigin)</c>, with the pipeline's casts and float add. A test compares
+        /// it with the double truth <c>(merc − sceneOrigin)</c> to measure floating-origin jitter.
         /// </summary>
         public static float3 RenderVertex(double2 mercVertex, double2 tileOriginMerc, double2 sceneOriginMerc)
         {

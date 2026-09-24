@@ -20,10 +20,9 @@ namespace MapRenderer.Unity.Rendering.Backend
     internal interface ITileRenderBackend : IDisposable
     {
         /// <summary>
-        /// Registers a tile-layer mesh as a draw item. <paramref name="tileOriginRender"/> is the tile's
-        /// SW-corner projected render origin (<c>double3</c>); <see cref="Rebuild"/> places it relative to
-        /// the frame's scene origin. <paramref name="materialIndex"/> is the layer's global SLOT into the
-        /// full-width material list; non-tile-mesh slots are null and never receive this call.
+        /// Registers a tile-layer mesh as a draw item at SW-corner render origin <paramref name="tileOriginRender"/>,
+        /// which <see cref="Rebuild"/> places relative to the frame's scene origin. <paramref name="materialIndex"/>
+        /// is the layer's global slot into the full-width material list; null (non-tile-mesh) slots never get it.
         /// <paramref name="tileId"/> groups a tile's layers under one named parent for debugging
         /// (<see cref="BRG.TileRenderer"/> ignores it). Returns a handle for <see cref="RemoveItem"/>.
         /// </summary>

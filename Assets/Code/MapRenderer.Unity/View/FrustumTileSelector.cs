@@ -10,26 +10,11 @@ using MapRenderer.Unity.View.Camera;
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// The universal visible-tile selector: a frustum quadtree cover that works for ANY projection. It descends
-    /// the tile quadtree from the world tile, keeping every tile whose ground quad meets the camera's actual
-    /// pitched/rotated frustum (built from the same <see cref="CameraPoseMath"/> the renderer uses). Projection
-    /// specifics are asked OF the projection, not branched on here:
-    /// <list type="bullet">
-    ///   <item>tile positions come from <see cref="IProjection.Project"/> + <see cref="IProjection.TangentBasisAt"/>
-    ///     — planar or spherical, same code;</item>
-    ///   <item>a self-occluding surface (the globe) reports its horizon sphere via
-    ///     <see cref="IProjection.TryGetHorizonOccluder"/>, and tiles beyond that horizon are culled (back-face);
-    ///     a flat atlas reports none.</item>
-    /// </list>
-    ///
-    /// <para>Two injected policies make behaviour selectable/comparable rather than hard-coded:
-    /// <see cref="ITileLodStrategy"/> decides stop-vs-subdivide (flat single-zoom vs. screen-space LOD), and
-    /// <see cref="IFarPlanePolicy"/> sets how far selection reaches (shared with the render camera so the covered
-    /// frustum is exactly the rendered one).</para>
-    ///
-    /// <para>The planar Web-Mercator world is a FINITE atlas sheet — it does not repeat, so there is no
-    /// antimeridian wrap; the globe wraps naturally through its sphere positions. Engine-free, allocation-free in
-    /// steady state (reused traversal stack).</para>
+    /// The visible-tile selector for any projection: it descends the quadtree from the world tile and keeps every
+    /// tile whose ground quad meets the camera frustum (from <see cref="CameraPoseMath"/>). Positions come from
+    /// <see cref="IProjection.Project"/>/<see cref="IProjection.TangentBasisAt"/>, and a globe culls tiles past
+    /// <see cref="IProjection.TryGetHorizonOccluder"/>. <see cref="ITileLodStrategy"/> decides stop-vs-subdivide;
+    /// <see cref="IFarPlanePolicy"/> is shared with the render camera. The planar world does not wrap.
     /// </summary>
     public sealed class FrustumTileSelector : IVisibleTileSelector
     {
@@ -44,11 +29,9 @@ namespace MapRenderer.Unity.View
 
         /// <param name="minZoom">Lower clamp for the near-field selection zoom.</param>
         /// <param name="maxZoom">Upper clamp for the near-field selection zoom.</param>
-        /// <param name="onScreenTilePx">Target on-screen tile size (the 512 MapLibre convention). Sets BOTH the
-        ///   near-field selection zoom (offset <c>log2(TilePixelSize/onScreenTilePx)</c>) AND the LOD threshold
-        ///   (a tile is small enough to stop at when its projected size ≤ this).</param>
-        /// <param name="lod">Stop-vs-subdivide policy. Default <see cref="FlatLodStrategy"/> (previous behaviour:
-        ///   uniform single-zoom cover).</param>
+        /// <param name="onScreenTilePx">Target on-screen tile size (512 convention). Sets both the zoom offset
+        ///   <c>log2(TilePixelSize/onScreenTilePx)</c> and the LOD stop threshold (projected size ≤ this).</param>
+        /// <param name="lod">Stop-vs-subdivide policy. Default <see cref="FlatLodStrategy"/> (uniform zoom).</param>
         /// <param name="farPolicy">Far-plane policy — MUST match the render camera's. Default
         ///   <see cref="GeometryAwareFarPlane"/> (planar); the globe wants <see cref="MultiplierFarPlane"/>.</param>
         public FrustumTileSelector(int minZoom = 0, int maxZoom = 22, int onScreenTilePx = 512,
@@ -160,17 +143,10 @@ namespace MapRenderer.Unity.View
 
         /// <summary>True iff tile <paramref name="t"/> meets the frustum (and, on a globe, is not entirely
         /// behind the horizon). Outputs <paramref name="nearDist"/> — the NEAREST render-space distance from the
-        /// camera to the tile's bound (its bounding sphere while descending on a globe, else the corner AABB) —
-        /// and <paramref name="onScreenPx"/>, the tile's true projected on-screen size in pixels.
-        ///
-        /// <para>The LOD metric is the nearest point, not the centre, on purpose: a huge coarse tile that merely
-        /// grazes the frustum edge has a far centre but a NEAR edge, so a centre metric would emit it coarse even
-        /// though its visible sliver wants detail. Keyed on the nearest point it reads as near ⇒ the traversal
-        /// subdivides it and culls the off-view part, instead of loading a giant off-screen tile.</para>
-        ///
-        /// <para>A globe tile is bounded by a SPHERE while descending (conservative — a coarse curved tile that
-        /// contains the view isn't wrongly pruned) and by a tight corner AABB at the leaf (no ~0.7-tile
-        /// over-cover). A flat atlas tile is always the tight AABB (no bulge, no occlusion).</para></summary>
+        /// camera to the tile's bound. Non-obvious why: the distance uses the nearest point, because a coarse
+        /// tile grazing the frustum has a far centre but a near edge, so the traversal subdivides it instead of
+        /// loading it coarse. A globe tile uses a bounding sphere while descending (so a curved tile is not
+        /// wrongly pruned) and the tight corner AABB at the leaf; a flat tile always uses the AABB.</summary>
         /// <param name="onScreenPx">The tile's true projected on-screen size, in pixels.</param>
         private static bool TileVisible(in ViewFrustum frustum, IProjection proj, double3 origin, float3x3 basis,
                                         bool occ, double3 occCentre, double3 camVec, double dc, double r2,

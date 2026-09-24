@@ -5,20 +5,11 @@ using MapRenderer.Unity.View;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// The telemetry consumer that makes the map's levels readable OUTSIDE the Editor: it mirrors each
-    /// published snapshot into a <see cref="ProfilerCounterValue{T}"/> under a <c>MapRenderer</c> profiler
-    /// category, so every count charts over time in the Profiler window AND in a **Development standalone
-    /// build** — the only measurement the Editor cannot contaminate (<c>docs/telemetry-design.md</c>,
-    /// the reason this consumer exists at all).
-    ///
-    /// <para><b>Costs nothing when nobody is profiling.</b> Two layers: the whole file compiles out of a
-    /// release player (<c>ENABLE_PROFILER</c>), and <see cref="Mirror"/> early-outs on <c>Profiler.enabled</c>
-    /// before touching a single provider — so the tile provider's cover-stats scan is never triggered. A static
-    /// bool read per frame is the whole price of leaving this wired permanently.</para>
-    ///
-    /// <para><b>What is NOT charted:</b> <c>PreparedCacheEnabled</c>, <c>PreparedCacheMaxCount</c> and
-    /// <c>PreparedCacheByteBudget</c>. They are configured limits, not levels — a flat line per frame telling
-    /// you what you already set. The panel shows them; a chart would only add noise.</para>
+    /// Mirrors each published telemetry snapshot into a <see cref="ProfilerCounterValue{T}"/> under a
+    /// <c>MapRenderer</c> profiler category, so the map's levels chart in a Development standalone build, which
+    /// the Editor cannot contaminate. The file compiles out of a release player (<c>ENABLE_PROFILER</c>).
+    /// Configured limits (<c>PreparedCacheEnabled</c>, <c>MaxCount</c>, <c>ByteBudget</c>) are not levels, so
+    /// they are not charted. See <c>docs/telemetry-design.md</c>.
     /// </summary>
     internal sealed class ProfilerCounterTelemetry
     {
@@ -69,9 +60,8 @@ namespace MapRenderer.Unity.Rendering.Map
 
         private static readonly ProfilerCategory Category = new("MapRenderer");
 
-        // Static (not per-instance): a counter is a named profiler slot registered with the profiler at
-        // construction, so a rebuilt MapView must REUSE the slot rather than register a second counter under
-        // the same name. Written every published frame, hence plain fields (not `readonly`).
+        // Static: construction registers a named profiler slot, so a rebuilt MapView must reuse it, not register a
+        // second counter under the same name. Plain fields, not `readonly`, because every frame writes them.
         private static ProfilerCounterValue<int>    _visibleTiles      = Count(CounterNames.VisibleTiles);
         private static ProfilerCounterValue<int>    _coverColumns      = Count(CounterNames.CoverColumns);
         private static ProfilerCounterValue<int>    _coverRows         = Count(CounterNames.CoverRows);
@@ -131,12 +121,9 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Mirrors this frame's levels into the counters — call once per frame, after the providers have run.
-        /// Returns immediately unless the profiler is recording, which is what keeps "costs nothing when
-        /// nobody is looking" literally true: not profiling ⇒ the provider accessors are never touched ⇒ the tile
-        /// provider's cover-stats scan never runs.
-        ///
-        /// <para>Reading through <c>ref readonly</c> keeps the whole path copy-free — the <c>in</c> parameters
-        /// below are not decoration, they are what stops each snapshot being copied into these three methods.</para>
+        /// Returns immediately unless the profiler is recording, so an unprofiled frame never touches the
+        /// provider accessors and never runs the tile provider's cover-stats scan. The <c>in</c> parameters of
+        /// the three handlers stop each snapshot being copied.
         /// </summary>
         internal void Mirror()
         {

@@ -58,8 +58,7 @@ namespace MapRenderer.Unity.Editor
                 CoreUtils.SetKeyword(material, ShaderKeywords.SmoothnessTextureAlbedoChannelA,
                     material.GetFloat(ShaderProperties.PropertyId.SmoothnessTextureChannel) == 1f && IsOpaque(material));
 
-            // ── Detail keywords (URP LitDetailGUI.SetMaterialKeywords L64-73) ──
-            // The scaled variant (mul-x2 with a per-detail scale ≠ 1) is a distinct, less-performant keyword;
+            // Detail keywords: the scaled variant (per-detail scale ≠ 1) is a separate, slower keyword, and
             // exactly one of the two is on when a detail map is assigned.
             if (material.HasProperty(ShaderProperties.PropertyId.DetailAlbedoMap)
                 && material.HasProperty(ShaderProperties.PropertyId.DetailNormalMap)

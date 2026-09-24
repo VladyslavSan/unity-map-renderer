@@ -214,9 +214,8 @@ namespace MapRenderer.Tests.Tiles
             CollectionAssert.AreEqual(new[] { 24, 20, 26, 39 }, GlobeRow(1.0),    "globe, explicit 1.0");
             CollectionAssert.AreEqual(new[] { 12, 14, 18, 19 }, MercatorRow(1.0), "mercator, explicit 1.0");
 
-            // The FULL sweep, not just one tilt — a single-tilt check can miss a perturbed default that
-            // happens to land on the same side of that one tilt's threshold (RED-verified: a 1.0 → 1.1
-            // default shift left tilt 60 unchanged on both projections but moved mercator tilt 0/30/45).
+            // The full sweep: a perturbed default can land on the same side of one tilt's threshold
+            // (a 1.0 → 1.1 shift leaves tilt 60 unchanged but moves mercator tilt 0/30/45).
             var implicitDefault = new ProjectedAreaLodStrategy();
             CollectionAssert.AreEqual(new[] { 24, 20, 26, 39 },
                 new[] { SelectGlobe(0.0, lod: implicitDefault).Count, SelectGlobe(30.0, lod: implicitDefault).Count,
@@ -252,22 +251,19 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void MercatorAggressivenessSweep_CoverIsMonotoneNonIncreasing()
         {
-            // Non-increasing 12→14→28→29, 12→14→18→19, 6→11→18→19 down each column (0.5→1.0→2.0) and
-            // strictly smaller somewhere (tilt 0: 12→6; tilt 45: 28→18) — read directly off the three
-            // pinned rows; no further assertion needed.
+            // The three pinned rows are non-increasing down each column (0.5→1.0→2.0) and strictly smaller
+            // somewhere (tilt 0: 12→6; tilt 45: 28→18), so no further assertion is needed.
             CollectionAssert.AreEqual(new[] { 12, 14, 28, 29 }, MercatorRow(0.5), "mercator aggressiveness 0.5");
             CollectionAssert.AreEqual(new[] { 12, 14, 18, 19 }, MercatorRow(1.0), "mercator aggressiveness 1.0");
             CollectionAssert.AreEqual(new[] { 6, 11, 18, 19 },  MercatorRow(2.0), "mercator aggressiveness 2.0");
         }
 
         /// <summary>
-        /// T-AGGR-MONO, globe — CHARACTERISATION, not a monotonicity claim. On a globe, stopping early can
-        /// EMIT a coarse tile where descending would have had all four children culled (frustum + horizon
-        /// occlusion apply per tile, per level), so a coarser policy is not always a smaller cover.
-        /// Measured: RAISING aggressiveness 0.5 → 0.55 RAISES the cover at tilt 30
-        /// (28 → 33) and tilt 45 (45 → 48) — a genuine rise as the knob gets coarser, not the same data read
-        /// backwards. Pinned exactly so the next reader does not "fix" this as a bug; do NOT add a
-        /// non-increasing assertion here.
+        /// T-AGGR-MONO, globe — a characterisation, not a monotonicity claim. Non-obvious why: on a globe,
+        /// stopping early can EMIT a coarse tile where descending would cull all four children (frustum and
+        /// horizon occlusion apply per tile, per level), so a coarser policy is not always a smaller cover.
+        /// Raising aggressiveness 0.5 → 0.55 raises the cover at tilt 30 (28 → 33) and tilt 45 (45 → 48).
+        /// Do not add a non-increasing assertion here.
         /// </summary>
         [Test]
         public void GlobeAggressivenessSweep_CoverIsCharacterisedNotMonotone()
@@ -323,9 +319,8 @@ namespace MapRenderer.Tests.Tiles
                         if (i != j && IsAncestorOrSelf(area[i], area[j])) ancestorPairs++;
                 Assert.AreEqual(0, ancestorPairs, $"tilt {tilt}: an area tile is an ancestor of another area tile");
 
-                // A leaf covered by two area tiles would make one of them the other's ancestor (both lie
-                // on the same root-to-leaf path), which the ancestorPairs check above already rules out —
-                // so only "uncovered" needs its own count here.
+                // A leaf covered twice implies an ancestor pair, which the check above rules out, so only
+                // "uncovered" needs its own count here.
                 int uncoveredLeaves = 0;
                 foreach (TileId leaf in flat)
                 {
@@ -383,9 +378,8 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void Antimeridian_WrappedXValues_ColumnsCountsDistinctX_NotMaxMinusMinPlusOne()
         {
-            // THE decisive cover-stats test (globe-relevant): a single-zoom cover wrapping the antimeridian —
-            // X values {0, 1, n-2, n-1} at z=5 (n=32). A max(X)-min(X)+1 implementation returns 31 (huge);
-            // the correct answer is 4 distinct columns.
+            // A cover wrapping the antimeridian: X in {0, 1, n-2, n-1} at z=5 (n=32). A max(X)-min(X)+1
+            // implementation returns 32; the correct answer is 4 distinct columns.
             const int z = 5, n = 1 << z;
             var cover = new List<TileId>
             {
@@ -459,9 +453,8 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void WideViewport_Planar_Flat_ColumnsExceedRows_AndCoverIsAFilledRectangle()
         {
-            // A wide (3:1) viewport over a planar Web-Mercator projection, single-zoom (Flat) LOD, overhead
-            // (tilt 0): the frustum footprint is a rectangle wider than it is tall, so CoverColumns must exceed
-            // CoverRows, and (planar-Flat only — see docs) the cover is exactly cols*rows, no gaps.
+            // A 3:1 viewport, planar Web-Mercator, Flat LOD, tilt 0: the footprint is wider than tall, so
+            // columns exceed rows, and (planar + Flat only) the cover is cols*rows with no gaps.
             var view = new ViewContext
             {
                 Camera     = Cam(0, 0, 6.0),
@@ -577,10 +570,8 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void SortByPriority_TiebreaksEqualKeysByTileId_Deterministically()
         {
-            // Two tiles at the SAME zoom, mirrored across lookAt (X-20 vs X+20, same Y) are equidistant
-            // under GroundDistanceToLookAt at tilt=0 (a symmetric ground metric) — their keys tie exactly,
-            // so the sort must fall back to a deterministic TileId (Z,X,Y) tiebreak rather than leaving
-            // the outcome to happenstance input order.
+            // Two same-zoom tiles mirrored across lookAt (X-4 vs X+4) tie under GroundDistanceToLookAt at
+            // tilt 0, so the sort must fall back to a TileId (Z,X,Y) tiebreak, not input order.
             var center = new TileId { Z = 6, X = 32, Y = 32 };
             GeoCoordinate3D     lookAt = LookAtCenterOf(center);
             TilePriorityContext ctx    = ContextFor(lookAt, TilePriorityStrategy.GroundDistanceToLookAt);

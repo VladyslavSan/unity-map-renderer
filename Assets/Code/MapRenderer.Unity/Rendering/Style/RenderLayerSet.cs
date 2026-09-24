@@ -11,22 +11,11 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// The ordered set of runtime render layers built once from a <see cref="StyleDocument"/> and kept
-    /// current per frame.
-    ///
-    /// <para>ARCHITECTURE "Layer ordering": the style is an ordered list of layers composited in declared
-    /// order. This holds exactly that — ONE <see cref="List{IRenderLayer}"/> containing ALL painted layers
-    /// (fill, line, symbol, background, under one global numbering), where
-    /// <c>index == DrawIndex == SLOT == material index</c>; draw order rides <c>renderQueue</c>. Every kind
-    /// is an <see cref="IRenderLayer"/> implementation in one list, and a new layer type drops in via
-    /// <see cref="RenderLayerFactory"/> with no change here. Every painted kind is material-bearing when
-    /// its base material is configured; a null <see cref="IRenderLayer.Material"/> means only that ONE
-    /// slot's own base material is unconfigured (<see cref="Materials.MapMaterialSet"/>).</para>
-    ///
-    /// <para>Records are built ONCE (not per tile); each tile-mesh layer produces a mesh per tile and draws
-    /// it with the matching layer's material, whose <c>renderQueue</c> encodes the layer's place in the draw
-    /// order. Shared by reference with the tile pipeline; layers that own a material destroy it when
-    /// disposed (a null-material layer's own <c>Dispose</c> is a no-op).</para>
+    /// The ordered set of runtime render layers, built once per style and kept current per frame. ONE list
+    /// holds ALL painted layers, with <c>index == DrawIndex == SLOT == material index</c>; draw order rides
+    /// <c>renderQueue</c>. A new layer type drops in via <see cref="RenderLayerFactory"/>. A null
+    /// <see cref="IRenderLayer.Material"/> means only that slot's base material is unconfigured. Shared by
+    /// reference with the tile pipeline; each layer destroys its own material on dispose.
     /// </summary>
     internal sealed class RenderLayerSet : VerifiedDisposable
     {
@@ -38,13 +27,9 @@ namespace MapRenderer.Unity.Rendering.Style
         /// docs/conventions-short.md, "New data-plane code is born native", for the discriminator.</summary>
         private readonly List<SkippedLayer> _skippedLayers = new List<SkippedLayer>();
 
-        /// <summary>The shared Hierarchy parent for the layers' scene GameObjects (the symbol presenters and
-        /// the background quad). Visible + inspectable, but <see cref="HideFlags.DontSave"/> — a runtime
-        /// artifact, never serialised into a scene or build — mirroring the GameObject tile backend's
-        /// "MapTiles" root. Fill/line layers have no GameObject and ignore it. Lazily created on the first
-        /// <see cref="Build"/>; kept at world identity and never moved, so a child at local identity stays at
-        /// world identity — load-bearing, since the background quad's fill shader and the symbol shader both
-        /// assume an identity object-to-world.</summary>
+        /// <summary>The Hierarchy root that <see cref="Build"/> passes to layer creation as <c>parent</c>, created
+        /// on the first Build; <see cref="HideFlags.DontSave"/> keeps it out of scenes and builds.
+        /// <c>SymbolRenderLayer</c> takes <c>parent</c> but does not use it, so nothing is parented here.</summary>
         private GameObject _root;
 
         /// <summary>Last pair pushed through <see cref="SetSprites"/> — the per-frame no-op memo. Reset by
@@ -95,24 +80,11 @@ namespace MapRenderer.Unity.Rendering.Style
         private readonly List<LayerFade> _fades = new List<LayerFade>();
 
         /// <summary>
-        /// Builds the render layers from <paramref name="style"/>. Draw order IS the style's declared layer
-        /// order (MapLibre painter's algorithm): walk <c>style.Layers</c> ONCE and assign each a queue BAND
-        /// via <see cref="LayerDrawOrder"/> — one band per declared layer, monotonic across bands — so
-        /// an interleaved fill-over-symbol or line-over-fill composites exactly as declared (they share one
-        /// transparent band, ZWrite off, so the renderQueue offset alone decides order). A layer's own
-        /// <see cref="IRenderLayer.MaterialSubSlot"/> selects WHICH sub-slot of its band this write targets —
-        /// <see cref="LayerSubSlot.Base"/> for fill/line/background, <see cref="LayerSubSlot.Above"/> for a
-        /// symbol layer's text, so it draws over that same layer's icon (written separately by
-        /// <see cref="SymbolRenderLayer.Create"/>, since the icon has no Build-time free ride).
-        /// The list contains ALL painted layers — fill, line, symbol, background — with
-        /// <c>index == DrawIndex == SLOT == material index</c>; every slot is material-bearing when
-        /// its base material is configured. A layer that takes no slot — an unsupported kind, an
-        /// unconfigured material, or a by-design skip (a source-less symbol layer) — is recorded in
-        /// <see cref="SkippedLayers"/> with which, instead of silently dropped
-        /// (see <see cref="LayerSkipReason"/> for the reasons). Disposes any previously-built
-        /// layers AND clears the previous compatibility summary first (via <see cref="ClearLayers"/> — NOT
-        /// <see cref="Dispose"/>: a restyle calls this repeatedly over the object's life, so the teardown
-        /// must not be gated by the once-only disposed guard).
+        /// Builds the render layers from <paramref name="style"/> in declared order (painter's algorithm).
+        /// Each layer gets one <see cref="LayerDrawOrder"/> queue band; its <see cref="IRenderLayer.MaterialSubSlot"/>
+        /// picks the sub-slot, so a symbol's text draws over its own icon. A layer that takes no slot is
+        /// recorded in <see cref="SkippedLayers"/>. It first calls <see cref="ClearLayers"/>, not
+        /// <see cref="Dispose"/>, because a restyle rebuilds past the once-only disposed guard.
         /// </summary>
         public void Build(StyleDocument style, double initialZoom, Materials.MapMaterialSet settings = null)
         {
@@ -146,23 +118,11 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// Pushes per-frame uniforms to every layer (fill/line zoom paint, zoom-step dasharrays, and the
-        /// px→device conversion for the px-valued paint family), hence <paramref name="devicePixelRatio"/>
-        /// Alloc-free: a plain <c>for</c> over the list (struct enumerator-free), each layer's
-        /// <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
-        ///
-        /// <para><b>The frame's px→world RULER is NOT pushed here.</b> The line shader converts every
-        /// <c>px</c>-valued width property and its dash parameterisation with the
-        /// <c>_MapFrameMetersPerDevicePixel</c> global, and that is a CAMERA quantity —
-        /// <see cref="Map.MapCamera.SyncToCamera"/> owns the push, measuring it off the live camera
-        /// (<see cref="Map.MapCamera.MetresPerDevicePixel"/>) instead of re-deriving it from a Web-Mercator
-        /// zoom formula here.</para>
-        ///
-        /// <para><see cref="Build"/> takes no ratio: its per-layer seeds run at dpr 1, and the
-        /// caller re-applies at the live ratio immediately afterwards (<c>MapView.SetStyle</c>) so no frame
-        /// is ever drawn from a seeded value. Threading an initial ratio through
-        /// <see cref="RenderLayerFactory"/>'s four Create/TryCreate overloads would churn 8 call sites for
-        /// the same guarantee.</para>
+        /// Pushes per-frame uniforms to every layer (zoom paint, zoom-step dasharrays, px→device conversion);
+        /// alloc-free. The px→world ruler <c>_MapFrameMetersPerDevicePixel</c> is a camera quantity, so
+        /// <see cref="Map.MapCamera.SyncToCamera"/> pushes it, not this. Non-local invariant: <see cref="Build"/>
+        /// seeds at dpr 1, and <c>MapView.SetStyle</c> calls this at the live ratio right after it, so no frame
+        /// draws a seeded value.
         /// </summary>
         public void ApplyZoom(in StyleFrameInputs inputs)
         {
@@ -310,10 +270,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 _layers[i] = new TombstoneRenderLayer(i);
             }
 
-            // Re-push the sprite sheet in the SAME call, not by clearing the memo alone: re-binding just ran
-            // MaterialFactory's direct writes again, which zeroes _PatternRect — the memo below would then
-            // suppress the re-resolve and a pattern layer would render clipped until the sheet reference
-            // next changes, which may be never.
+            // Re-push the sheet now: re-binding zeroed _PatternRect, and the memo would otherwise suppress the
+            // re-resolve, leaving a pattern layer clipped until the sheet reference changes.
             SpriteAtlasView atlas = _spriteAtlas;
             Texture2D       tex   = _spriteTexture;
             _spriteAtlas   = null;
@@ -326,14 +284,9 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>
         /// Pushes the style's sprite sheet to every layer that paints from it (see
         /// <see cref="ISpriteConsumerRenderLayer"/>). Called each frame from the map's tick, because the sheet
-        /// is fetched asynchronously and can arrive — or be dropped by a restyle — at any point after
-        /// <see cref="Build"/>.
-        ///
-        /// <para>Early-outs on an unchanged pair, so the steady state is one reference compare per frame
-        /// rather than a walk plus a <c>SetTexture</c> per pattern layer. The comparison is on the CALLER's
-        /// references, which is why it lives here and not in each layer: <see cref="Build"/> replaces every
-        /// layer on a restyle, so the memo must be reset there too (a rebuilt layer starts unresolved and
-        /// would otherwise never be told about a sheet that had already arrived).</para>
+        /// can arrive, or be dropped by a restyle, at any point after <see cref="Build"/>. Early-outs on an
+        /// unchanged reference pair. The memo lives here, so <see cref="ClearLayers"/> resets it for the
+        /// rebuilt layers, which start unresolved.
         /// </summary>
         public void SetSprites(SpriteAtlasView atlas, Texture2D texture)
         {

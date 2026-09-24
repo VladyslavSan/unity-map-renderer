@@ -1,9 +1,5 @@
-// Style/StyleTests.cs — style-document parsing and paint/layout property evaluation for the fast (engine-
-// free) lane: TileJSON, StyleProperty<T>'s parse/classify/evaluate/GC-allocation contract, the eager-parse
-// property model, and per-kind paint/layout parsing (fill/fill-pattern/fill-extrusion/line/background/
-// symbol, plus the symbol text-field and icon-image token resolvers). Compiled verbatim by both the Unity
-// EditMode runner and the fast dotnet test project (Tools/core-tests/). Do NOT add any UnityEngine,
-// MeshBuilder, NativeArray, or MonoBehaviour references.
+// Style/StyleTests.cs — engine-free style parsing and evaluation, compiled by both Unity EditMode and
+// Tools/core-tests. Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 //
 // Contents:
 //   TileJsonTests               — TileJSON parses into the typed model; SourceResolver fills a SourceDefinition.
@@ -81,9 +77,8 @@ namespace MapRenderer.Tests.Style
                 $"(cwd={Directory.GetCurrentDirectory()}, base={AppContext.BaseDirectory})");
         }
 
-        // A representative TileJSON for the OpenFreeMap planet source (the document the liberty
-        // `openmaptiles` source's `url` points at). Carries the real tiles[] + a constrained zoom
-        // range (0..14, NOT the style-spec default 22) so a no-op resolve is detectable.
+        // A representative TileJSON for liberty's `openmaptiles` source url. Its zoom range (0..14, NOT the
+        // style-spec default 22) makes a no-op resolve detectable.
         private const string PlanetTileJson = @"{
           ""tilejson"": ""3.0.0"",
           ""name"": ""OpenMapTiles"",
@@ -96,10 +91,8 @@ namespace MapRenderer.Tests.Style
         }";
 
         // =========================================================================================
-        // 0. THE decisive test — parse a TileJSON, then fill the REAL liberty `openmaptiles` source
-        //    (vector, has `url`, no inline `tiles`). After Resolve: Tiles is populated and the zoom
-        //    range comes from the TileJSON (maxzoom 14, NOT the style default 22). A no-op / shallow
-        //    impl that leaves Tiles null, or ignores the TileJSON zoom range, FAILS here.
+        // 0. Resolving liberty's `openmaptiles` source (`url`, no inline `tiles`) populates Tiles and takes
+        //    the zoom range from the TileJSON (maxzoom 14, NOT the style default 22).
         // =========================================================================================
         [Test]
         public void Resolve_FillsVectorSourceFromTileJson_RealLibertyShapes()
@@ -138,9 +131,8 @@ namespace MapRenderer.Tests.Style
         }
 
         // =========================================================================================
-        // 1. Inline `tiles[]` short-circuit — the real liberty `ne2_shaded` raster source has inline
-        //    tiles and maxzoom 6. Resolve must return it UNCHANGED and NOT apply any TileJSON. A
-        //    resolver that overwrites or re-derives the inline tiles FAILS.
+        // 1. Inline `tiles[]` short-circuit: liberty's `ne2_shaded` raster source (inline tiles, maxzoom 6)
+        //    resolves UNCHANGED, with no TileJSON applied.
         // =========================================================================================
         [Test]
         public void Resolve_InlineTilesShortCircuits_RealLibertyShapes()
@@ -277,18 +269,9 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="StyleProperty{T}"/>: parse, classify, evaluate (uniform + bake), and the
-    /// GC-allocation gate, all on the single collapsed type.
-    ///
-    /// Covers:
-    ///   1. Constant vs Zoom classification.
-    ///   2. Numeric interpolation sampled at stop zooms and a mid-zoom (spec-derived math).
-    ///   3. Color interpolation with premultiplied-alpha over zoom.
-    ///   4. Feature / Composite input → Evaluate(zoom) throws.
-    ///   5. No-GC sweep gate (Core-side): evaluating a zoom sweep in a tight loop allocates 0 bytes.
-    ///   6. Bake-path (Evaluate(zoom,feature)): all ExpressionKinds accepted; no throw.
-    ///   7. Data-driven match expression → distinct colors per feature.
-    ///   8. Absent property → DefaultValue, Kind == Constant (no JSON round-trip).
+    /// <see cref="StyleProperty{T}"/>: Constant vs Zoom classification, numeric and premultiplied colour
+    /// interpolation, Evaluate(zoom) throwing on Feature/Composite, a zero-GC zoom sweep, the bake path for
+    /// every ExpressionKind, per-feature match colours, and an absent property as a Constant DefaultValue.
     /// </summary>
     [TestFixture]
     public class StylePropertyTests
@@ -742,22 +725,16 @@ namespace MapRenderer.Tests.Style
     /// <summary>
     /// The eight style property types (<c>Fill</c>/<c>Line</c>/<c>Symbol</c>/
     /// <c>Background</c>/<c>FillExtrusion</c> × <c>Paint</c>/<c>Layout</c>, where each exists) parse eagerly
-    /// via a static <c>Parse</c> factory — not lazily from a retained raw JSON field.
-    ///
-    /// Tooth 1: <see cref="StyleParser"/> threads its <c>fillAntialiasDefault</c> parameter into the parse,
-    /// rather than a hardcoded constant — pins behaviour preservation (passes against the pre-change code
-    /// too; it is tooth 2 below that observes the laziness actually being removed).
-    /// Tooth 2: reflection over the compiled types — the laziness cannot be reconstructed (see each clause).
-    /// Tooth 4: <c>Parse(null)</c> is tolerated (returns all spec defaults, does not throw) by all eight
-    /// types — the idiom ~60 test call sites and every production caller with an absent paint/layout block
-    /// depend on.
+    /// via a static <c>Parse</c> factory — not lazily from a retained raw JSON field. Reflection pins that
+    /// no lazy path exists; <see cref="StyleParser"/> threads <c>fillAntialiasDefault</c> into the parse;
+    /// and <c>Parse(null)</c> returns spec defaults for all eight, as absent paint/layout blocks need.
     /// </summary>
     [TestFixture]
     public class StyleLayerEagerParseTests
     {
         private const BindingFlags PublicInstance = BindingFlags.Public | BindingFlags.Instance;
 
-        // ── Tooth 1 — behaviour preservation through StyleParser (passes today too) ────────────────
+        // ── behaviour preservation through StyleParser ────────────────────────────────────────────
 
         /// <summary>Builds a minimal style with exactly one fill layer, whose <c>paint</c> block is empty
         /// unless <paramref name="antialias"/> is supplied.</summary>
@@ -798,16 +775,12 @@ namespace MapRenderer.Tests.Style
                 "an explicit layer value must win over the host default, whichever it is.");
         }
 
-        // ── Tooth 2 — the laziness cannot come back (reflection, never text) ───────────────────────
+        // ── the laziness cannot come back (reflection, never text) ─────────────────────────────────
 
         /// <summary>True when <paramref name="property"/>'s setter carries the <c>IsExternalInit</c>
         /// required custom modifier — the compiler's marker for an <c>init</c> accessor. Tolerates a
-        /// missing setter (<c>SetMethod == null</c>) by returning false rather than throwing.
-        ///
-        /// <para>Compared by <c>FullName</c>, never <c>== typeof(IsExternalInit)</c>: Core carries its own
-        /// <c>internal static class IsExternalInit</c> polyfill (<c>Core/IsExternalInit.cs</c>), duplicated
-        /// per assembly, and this TEST assembly has none of its own — a type-identity comparison would read
-        /// false even for a genuinely init-only property, making the tooth a permanent false RED.</para>
+        /// missing setter by returning false. Compared by <c>FullName</c>, not by type identity: each product
+        /// assembly has its own internal <c>IsExternalInit</c> polyfill and this test assembly has none.
         /// </summary>
         private static bool IsInitOnly(PropertyInfo property)
         {
@@ -876,7 +849,7 @@ namespace MapRenderer.Tests.Style
                     $"{type.FullName} must have zero public constructors — Parse is the only way in.");
         }
 
-        // ── Tooth 4 — Parse(null) is tolerated by all eight types ───────────────────────────────────
+        // ── Parse(null) is tolerated by all eight types ─────────────────────────────────────────────
 
         /// <summary><c>Parse(null)</c> returning all-spec-defaults (never throwing) is the idiom ~60 test
         /// call sites and every production caller with an absent paint/layout block rely on. One straight-line
@@ -1028,15 +1001,9 @@ namespace MapRenderer.Tests.Style
 
     /// <summary>
     /// <see cref="Fill.FillPattern"/>: resolving a <c>fill-pattern</c> sprite name against a sheet into
-    /// the rect + repeat count the fill shader samples with.
-    ///
-    /// <para>The load-bearing case is the NEGATIVE one. A <c>fill-pattern</c> layer characteristically
-    /// declares no <c>fill-color</c>, so it inherits the spec's opaque-black default; if an unresolvable
-    /// pattern fell back to that colour instead of reporting "unresolved", the layer paints solid black.
-    /// That is exactly the defect this stage fixes (Liberty's <c>road_area_pattern</c> plazas and
-    /// <c>landcover_wetland</c>) — see docs/fill-parity-design.md.</para>
-    ///
-    /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
+    /// the rect + repeat count the fill shader samples with. The NEGATIVE case matters most: a pattern layer
+    /// inherits the opaque-black <c>fill-color</c> default, so an unresolved pattern that fell back to colour
+    /// would paint solid black. See docs/fill-parity-design.md.
     /// </summary>
     [TestFixture]
     public class FillPatternTests
@@ -1147,12 +1114,8 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── Sizing: ScreenRelative (spec) vs WorldAbsolute (engine extension) ────────────────────
-        //
-        // These now measure repetitions per WORLD UNIT, not per tile. The tile frame was abandoned because a
-        // tile's own zoom is not derivable from the display zoom: OpenFreeMap's source stops at z14 while the
-        // camera zooms to 18+, so the same tiles are stretched across five display zooms, and a mixed-zoom
-        // cover (ScreenSpaceLod, the default) mixes levels within one frame. Both made the old tile-relative
-        // correction wrong by up to 16×.
+        // Non-obvious why: repeats are per WORLD UNIT, not per tile, because a tile's zoom is not the display
+        // zoom — sources overzoom past z14 and a ScreenSpaceLod cover mixes levels in one frame.
 
         [Test]
         public void ScreenRelative_PeriodIsTheSpriteAtItsAuthoredPixelSize()
@@ -1172,9 +1135,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ScreenRelative_IsContinuousInZoom_NoSteppingAndNoPerLevelSnap()
         {
-            // Period is a smooth function of zoom. Rounding repeats to whole numbers per tile would produce
-            // ~16 discrete snaps per zoom level — invisible in a screenshot, obvious while zooming — so
-            // consecutive samples must differ smoothly and never repeat a value (a stair-step, numerically).
+            // Period is a smooth function of zoom: whole-number repeats per tile would snap while zooming, so
+            // consecutive samples must never repeat a value.
             Assert.IsTrue(Fill.FillPattern.TryResolve("plaza", Sheet(), out var r));
 
             double previous = -1.0;
@@ -1214,10 +1176,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ScreenRelative_IsIndependentOfTheTilesOwnZoom_SoOverzoomIsCorrect()
         {
-            // THE overzoom tooth. Past the source's maxzoom the same tiles are drawn at every display zoom, so
-            // any term derived from the tile would be frozen while the camera keeps going. Repeats depend on
-            // the DISPLAY zoom only, so the apparent size stays correct: two display zooms one level apart
-            // must differ by exactly 2× regardless of which tiles are underneath.
+            // Overzoom: past the source's maxzoom the tiles stay the same, so repeats depend on the DISPLAY zoom
+            // only. Two display zooms one level apart differ by exactly 2×, whatever tiles are underneath.
             Assert.IsTrue(Fill.FillPattern.TryResolve("plaza", Sheet(), out var r));
 
             double atZ14 = Fill.FillPattern.RepeatsPerWorldUnit(
@@ -1374,9 +1334,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void PatternLayerWithoutFillColor_StillCarriesTheOpaqueBlackDefault()
         {
-            // Pins WHY the shader must clip rather than paint: this is Liberty's road_area_pattern verbatim,
-            // and its Color evaluates to opaque black. Nothing here is wrong — the spec default IS black —
-            // which is why "unresolved" cannot be allowed to fall through to the colour path.
+            // Liberty's road_area_pattern verbatim: its Color is the spec default, opaque black, so the
+            // shader must clip an unresolved pattern rather than fall through to the colour path.
             var paint = TestStyle.FillPaint(@"{""fill-pattern"":""pedestrian_polygon""}");
 
             Assert.AreEqual("pedestrian_polygon", paint.PatternName);
@@ -1770,18 +1729,9 @@ namespace MapRenderer.Tests.Style
 
     /// <summary>
     /// <see cref="Line.PaintProperties"/> / <see cref="Line.LayoutProperties"/>:
-    /// classification, pinned values, translate-array parse, anchor encoding, pattern-name capture,
-    /// join/cap layout parse (now typed enums), and inert-fallback.
-    ///
-    /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
-    ///
-    /// Property shapes:
-    ///   • line-color/opacity/width/blur/gap-width/offset: single <c>StyleProperty&lt;T&gt;</c>
-    ///     (ColorKind etc. are convenience aliases for .Kind).
-    ///   • Data-driven gate: <c>.DependsOnFeature</c>.
-    ///   • line-translate: ONE <c>StyleProperty&lt;double2&gt;</c>; access via <c>.Translate.Evaluate(0.0).x/y</c>.
-    ///   • line-translate-anchor: <c>StyleProperty&lt;float&gt;</c>.
-    ///   • line-join / line-cap: <c>JoinType</c> / <c>CapType</c> enums on LayoutProperties.
+    /// classification, pinned values, translate-array parse (one <c>StyleProperty&lt;double2&gt;</c>), anchor
+    /// encoding, pattern-name capture, join/cap layout parse into <c>JoinType</c>/<c>CapType</c>, and
+    /// inert fallback.
     /// </summary>
     [TestFixture]
     public class LinePaintTests
@@ -2433,13 +2383,8 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(AlignmentMode.Auto, bad.Layout.TextRotationAlignment, "an unrecognized alignment degrades to auto");
         }
 
-        // Icon/text parse independence. AlignmentMode has only two usable
-        // non-auto values for FOUR keys, so one layer can never give all four keys distinguishable values.
-        // Instead: FOUR layers, each setting exactly ONE of the four {text,icon}-{rotation,pitch}
-        // keys to 'map' and leaving the other three absent (auto). A copy-paste that reads the wrong
-        // PropertyNames constant, or assigns a pitch property from its sibling rotation key, then makes the
-        // SET key read Auto or an absent key read Map — caught unambiguously in exactly one of the four
-        // layers below.
+        // Icon/text parse independence: AlignmentMode has too few values for four keys in one layer, so each
+        // of FOUR layers sets ONE {text,icon}-{rotation,pitch} key to 'map'; a crossed key reads wrong in one.
         [Test]
         public void SymbolLayer_FourAlignmentKeys_ParseIndependently()
         {
@@ -2645,7 +2590,7 @@ namespace MapRenderer.Tests.Style
     [TestFixture]
     public class LineDashTests
     {
-        // ── Tooth 1 (DECISIVE): Dash ratio 2:1 for [2, 1] ────────────────────────────────────
+        // ── DECISIVE: Dash ratio 2:1 for [2, 1] ──────────────────────────────────────────────
 
         [Test]
         public void DashCoverage_Pattern_2_1_ProducesCorrectOnOffRatio()
@@ -2708,7 +2653,7 @@ namespace MapRenderer.Tests.Style
             Assert.That(Line.LineDash.DashCoverage(5.0, -1.0, pattern), Is.EqualTo(1.0f));
         }
 
-        // ── Tooth 1 (continued): On/Off regions are hard binary ──────────────────────────────
+        // ── Dash ratio, continued: On/Off regions are hard binary ────────────────────────────
 
         [Test]
         public void DashCoverage_Pattern_2_1_HardBinaryAtCenterOfRuns()
@@ -2726,14 +2671,13 @@ namespace MapRenderer.Tests.Style
                 "Center of second off-run (distU=5.5) must be 0.0");
         }
 
-        // ── Tooth 2: Zoom-stable ──────────────────────────────────────────────────────────────
+        // ── Zoom-stable ───────────────────────────────────────────────────────────────────────
 
         [Test]
         public void DashCoverage_ZoomStable_CycleCountTimesWidthMIsConstantAcrossZoom()
         {
-            // The 512 convention shifts every zoom number −1, so what was z14/z15 is now z13/z14 —
-            // the widthM / cycle counts are bit-identical to the pre-flip run (GroundResolution_512(13) ==
-            // GroundResolution_256(14)), keeping this discretization-sensitive check on the same footing.
+            // Under the 512 convention GroundResolution(13) equals the 256-convention z14, so this
+            // discretization-sensitive check keeps bit-identical widthM and cycle counts.
             double zoom1 = 13.0;
             double zoom2 = 14.0;
             const double widthPx = 4.0;
@@ -2779,7 +2723,7 @@ namespace MapRenderer.Tests.Style
                 $"Doubling widthM must halve cycle count: narrow={cycles_narrow}, wide={cycles_wide}");
         }
 
-        // ── Tooth 3: Width-coupled ────────────────────────────────────────────────────────────
+        // ── Width-coupled ─────────────────────────────────────────────────────────────────────
 
         [Test]
         public void DashCoverage_WidthCoupled_DoublingWidthMDoublesOnOffLengths()
@@ -2798,7 +2742,7 @@ namespace MapRenderer.Tests.Style
                 "At 2x width, dist=3.9 still in on-run (boundary)");
         }
 
-        // ── Tooth 5 (non-regression): solid control via DashCount=0 identity ─────────────────
+        // ── non-regression: solid control via DashCount=0 identity ───────────────────────────
 
         [Test]
         public void DashCoverage_OddLength_Is_SolidIdentity()
@@ -2944,7 +2888,7 @@ namespace MapRenderer.Tests.Style
             Assert.That(count, Is.EqualTo(0));
         }
 
-        // ── Tooth 4 (GREPPABLE): Shader consumes per-vertex sideAndDist.y as dashU ────────────
+        // ── GREPPABLE: Shader consumes per-vertex sideAndDist.y as dashU ──────────────────────
 
         /// <summary>Resolves a repo-relative path by walking up from the test runner's working directory —
         /// the runner's cwd differs between the Unity EditMode runner and <c>Tools/core-tests</c>, and
@@ -2976,10 +2920,8 @@ namespace MapRenderer.Tests.Style
             // Resolved by name (move-proof) — the lit forward pass now lives under Map/Line/Lit/.
             string text = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_LitForwardPass.hlsl"));
 
-            // dashU is computed in the shared Line_VertexExtrude helper; the
-            // forward pass calls it and carries the result in the line uv channel (uv.x — the native
-            // along-coordinate), and the fragment reads uv.x for dash coverage. There is no dedicated
-            // dashU varying any more (per-vertex distanceAlong sourcing is asserted on the helper below).
+            // The shared Line_VertexExtrude helper computes dashU; the forward pass carries it in uv.x and
+            // the fragment reads uv.x for dash coverage.
             Assert.That(text, Does.Contain("Line_VertexExtrude("),
                 "Line_LitForwardPass.hlsl must call the shared Line_VertexExtrude helper (which sources dashU).");
             Assert.That(text, Does.Contain("output.uv"),
@@ -2987,9 +2929,8 @@ namespace MapRenderer.Tests.Style
             Assert.That(text, Does.Contain("input.uv.x"),
                 "Fragment shader must read the dash coordinate from input.uv.x.");
 
-            // _DashCount: the dash logic lives in Line_VertexExtrude.hlsl (shared by all passes).
-            // Assert the guard is present there — still a single-site check, just in the helper.
-            // Shared helper, resolved by name (move-proof) — stays in the Map/Line/ kind root.
+            // _DashCount: the dash logic lives in Line_VertexExtrude.hlsl, shared by all passes and
+            // resolved by name, so the guard is a single-site check there.
             string extrudeText = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
             Assert.That(extrudeText, Does.Contain("sideAndDist.y"),
                 "Line_VertexExtrude.hlsl must consume per-vertex distanceAlong (input.sideAndDist.y) to form dashU.");
@@ -3027,13 +2968,8 @@ namespace MapRenderer.Tests.Style
         /// <summary>
         /// <see cref="Line.LineDash"/> is the declared single source of truth for the dash
         /// function and points at its HLSL mirror by name. Those pointers must name the file that actually
-        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c> — and not a file that does not exist, such
-        /// as <c>MapLineForwardPass.hlsl</c>.
-        ///
-        /// <para>The second half is what stops this from rotting: every <c>*.hlsl</c> token in the file is
-        /// resolved on disk. Without a resolve-on-disk clause, a name-only assertion is one rename away
-        /// from being green and wrong. Distinct from the greppable tooth above, which reads the SHADER files
-        /// rather than this one.</para>
+        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c>. Every <c>*.hlsl</c> token in the file is also
+        /// resolved on disk, so a renamed shader file turns the tooth red.
         /// </summary>
         [Test]
         public void ShaderPointers_InLineDashSource_ResolveOnDisk()

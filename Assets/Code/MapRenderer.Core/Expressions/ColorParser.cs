@@ -8,15 +8,10 @@ namespace MapRenderer.Core.Expressions
     /// <summary>
     /// Parses CSS color strings into <see cref="Color"/>, the literal form of the spec's "color" type:
     /// <c>#rgb</c>/<c>#rgba</c>/<c>#rrggbb</c>/<c>#rrggbbaa</c>, <c>rgb()/rgba()</c>, <c>hsl()/hsla()</c>,
-    /// and the CSS named colors. Clean-room: the CSS color syntax + the named-color table are public web
-    /// standards.
-    ///
-    /// <para><b>Out-of-range component values are clamped, not rejected</b> — CSS Color 4 §4.1: a component
-    /// outside its range is valid syntax and is clipped to the range at used-value time, so
-    /// <c>rgb(300,0,-20)</c> is red. This is the one place the two entry points to a color differ on purpose:
-    /// the <c>rgb</c>/<c>rgba</c> <i>expression constructors</i> (<see cref="Ops.ColorCtors"/>) take numbers
-    /// the style author computed and treat out-of-range as an evaluation <i>error</i>, because there a 300
-    /// means the expression is wrong. Here the 300 is a literal someone wrote, and CSS says what it means.</para>
+    /// and the CSS named colors. Out-of-range components are clamped, not rejected (CSS Color 4 §4.1), so
+    /// <c>rgb(300,0,-20)</c> is red. Non-obvious why: the <c>rgb</c>/<c>rgba</c> expression constructors
+    /// (<see cref="Ops.ColorCtors"/>) raise an error instead, because there a 300 is a computed value that
+    /// means the expression is wrong; here it is a literal whose meaning CSS defines.
     /// </summary>
     public static class ColorParser
     {

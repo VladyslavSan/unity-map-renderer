@@ -1,6 +1,5 @@
-// Engine-free, BLITTABLE — this struct crosses into the Jobs boundary as a NativeArray<PlacedQuad> element
-// (mirrors the Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/GlyphAtlasEntry
-// use). Keep it to blittable fields only.
+// BLITTABLE: this struct crosses into the Jobs boundary as a NativeArray<PlacedQuad> element, so keep it
+// to blittable fields only.
 
 using Unity.Mathematics;
 
@@ -9,10 +8,8 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// One symbol-local <see cref="SymbolQuad"/> paired with the per-symbol placement values it needs to
     /// become 4 <c>WorldBillboardVertex</c>s (<see cref="MapRenderer.Core.Text.Placement.BillboardMath.BuildWorldQuad"/>).
-    /// The per-frame stage/emit path expands each surviving symbol's quads into a flat
-    /// <c>NativeArray&lt;PlacedQuad&gt;</c>, one entry per glyph quad, with anchor/size/color repeated across
-    /// every quad of the same symbol, so the Burst stage/emit jobs stay a simple per-element map with no
-    /// per-symbol indirection.
+    /// It is one flat entry per glyph quad, with the symbol's values repeated, so the Burst stage/emit jobs
+    /// are a per-element map with no per-symbol indirection.
     /// </summary>
     public struct PlacedQuad
     {

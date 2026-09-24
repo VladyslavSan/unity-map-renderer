@@ -8,41 +8,14 @@ using CoreColor = MapRenderer.Core.Expressions.Color;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Per-layer zoom → material-uniform applier: "build-once, restyle via uniforms".
-    ///
-    /// Holds typed binding lists (<see cref="StyleProperty{float}"/> and
-    /// <see cref="StyleProperty{CoreColor}"/>) keyed to shader property IDs. On each call to
-    /// <see cref="ApplyZoom"/> it evaluates only the Zoom-kind bindings (Constant bindings are set
-    /// once at bind-time and never re-evaluated). Drives the per-layer Material instance directly via
-    /// <c>SetFloat</c>/<c>SetColor</c> — never <c>MaterialPropertyBlock</c>, which disables the SRP
-    /// Batcher (ARCHITECTURE).
-    ///
-    /// This is also the ONE seam where a px-valued style property meets the device-pixel ratio.
-    /// <see cref="BindDevicePixelFloat"/> / <see cref="BindDevicePixelVector"/> name the consumer's
-    /// <see cref="PixelSpace"/> at the binding site, with no default argument to forget. That does not
-    /// close the hole: a px property routed through these bindings must state its space, but nothing stops
-    /// a new px property being bound via <see cref="BindFloat"/> and keeping the wrong basis. Unitless
-    /// properties have no pixel space, so forcing a <see cref="PixelSpace"/> on every binding would be
-    /// wrong; the guard against a missed property is the px-surface table in
-    /// <c>docs/device-pixel-ratio-design.md</c> and its teeth, not the compiler. Those bindings always
-    /// queue (the ratio is a per-frame input, not a bind-time constant), so a Constant <c>line-width</c>
-    /// costs one <c>SetFloat</c> per layer per frame.
-    ///
-    /// <c>StyleProperty&lt;float&gt;</c> and <c>StyleProperty&lt;Color&gt;</c>
-    /// are distinct closed generic types and cannot share one binding list without boxing. Four typed
-    /// lists guarantee zero boxing in <see cref="ApplyZoom"/>, which is the alloc-free hot path.
-    ///
-    /// A rebind (<see cref="SetTransition"/> then a <c>Bind*</c> call
-    /// with an id already in the list) re-targets the entry instead of replacing it — both the old and
-    /// new endpoint are evaluated at the LIVE zoom every frame; time only moves the mix between them.
-    /// A first bind is never a re-target: <see cref="SetTransition"/> is never called before the initial
-    /// build.
-    ///
-    /// Property IDs are cached via <see cref="Shader.PropertyToID"/> at bind-time to eliminate
-    /// per-call string lookup allocations. The binding loops are plain <c>for</c> over typed
-    /// <see cref="List{T}"/>s, which use struct enumerators and have no closure overhead.
-    ///
-    /// Clean-room: design follows this repo's own design docs and the public MapLibre Style Spec.
+    /// Per-layer zoom → material-uniform applier: "build-once, restyle via uniforms". <see cref="ApplyZoom"/>
+    /// re-evaluates only queued bindings (a settled Constant is set once at bind time) and writes the layer's
+    /// own Material via <c>SetFloat</c>/<c>SetColor</c>, never a <c>MaterialPropertyBlock</c>, which disables
+    /// the SRP Batcher. Four typed lists keep it free of boxing. A rebind after <see cref="SetTransition"/>
+    /// re-targets the entry: both endpoints evaluate at the live zoom, and time moves only the mix.
+    /// Limitation: <see cref="BindDevicePixelFloat"/>/<see cref="BindDevicePixelVector"/> are the ONE seam
+    /// where px meets the device-pixel ratio, but nothing stops a new px property from using
+    /// <see cref="BindFloat"/>; docs/device-pixel-ratio-design.md § "The table is the guard, not the compiler".
     /// </summary>
     public sealed class ZoomStyleApplier
     {
@@ -67,8 +40,7 @@ namespace MapRenderer.Unity.Rendering.Style
         private readonly List<Binding<CoreColor>> _colorBindings = new List<Binding<CoreColor>>();
 
         // ── Device-pixel bindings — logical px in, the consumer's space out ──────────────────────
-        // Separate lists rather than a flag on the two above: these carry the SPACE as part of their
-        // identity, and they can never take the bind-time constant shortcut (see BindDevicePixelFloat).
+        // Separate lists: they never take the bind-time constant shortcut (see BindDevicePixelFloat).
 
         private readonly List<Binding<float>>   _devicePixelFloatBindings   = new List<Binding<float>>();
         private readonly List<Binding<double2>> _devicePixelVectorBindings = new List<Binding<double2>>();
@@ -82,9 +54,7 @@ namespace MapRenderer.Unity.Rendering.Style
         private bool _transitionArmed;
 
         // ── Layer fade (the minzoom/maxzoom/visibility draw gate) ────────────────────────────────────
-        // Not a style property, and not eased here: RenderLayerSet owns the target, the ease and the clock
-        // and pushes the RESOLVED amount. This side keeps only the value and the multiply it feeds.
-        // Starts at 1, so a layer with no gate behaves exactly as before.
+        // RenderLayerSet owns the ease and pushes the RESOLVED amount; 1 means no gate.
 
         private float _fade = 1f;
         private bool  _fadeMoved;   // set by SetFade, consumed by the next ApplyZoom
@@ -146,12 +116,10 @@ namespace MapRenderer.Unity.Rendering.Style
         internal const float VisibleOpacityEpsilon = 1f / 255f;
 
         /// <summary>
-        /// True when this layer paints nothing the framebuffer can show: fade times the authored
-        /// opacity falls below one 8-bit step. Negated into each <see cref="IFadeableRenderLayer"/>
-        /// implementer's own <c>PaintsSomething</c>, which <see cref="Backend.ITileRenderBackend.SetLayerVisible"/>
-        /// reads, so a layer outside its zoom range and one whose opacity has fallen below the
-        /// threshold are one case — neither submits a draw. A layer mid-fade reads false while the
-        /// product is still showable, which leaves the fade something to blend.
+        /// True when fade times the authored opacity falls below one 8-bit step. Each
+        /// <see cref="IFadeableRenderLayer"/>'s <c>PaintsSomething</c> negates it for
+        /// <see cref="Backend.ITileRenderBackend.SetLayerVisible"/>, so an out-of-range layer and a transparent
+        /// one submit no draw alike. A layer mid-fade reads false while the product is still showable.
         /// </summary>
         internal bool EffectiveOpacityIsZero => _fade * AuthoredOpacity < VisibleOpacityEpsilon;
 
@@ -229,11 +197,8 @@ namespace MapRenderer.Unity.Rendering.Style
         /// Bind a px-valued <see cref="StyleProperty{float}"/> whose shader consumer measures against the
         /// PHYSICAL framebuffer (<see cref="PixelSpace.Device"/>): the style's logical px are multiplied by
         /// the device-pixel ratio in <see cref="ApplyZoom"/>, so a <c>line-width: 2</c> road is 2 LOGICAL px
-        /// on every panel density.
-        ///
-        /// <para>Unlike <see cref="BindFloat"/> this ALWAYS queues, even for a Constant-kind property: the
-        /// value depends on the ratio, which is not known at bind time and can change live (a window dragged
-        /// between panels). The bind-time shortcut would freeze it at whatever the first frame's ratio was.</para>
+        /// on every panel density. It ALWAYS queues, even for a Constant, because the ratio can change live
+        /// (a window dragged between panels).
         /// </summary>
         public void BindDevicePixelFloat(StyleProperty<float> prop, int id)
             => BindOrRetarget(_devicePixelFloatBindings, prop, id, discrete: false, pushEveryFrame: true, pushNow: null);
@@ -293,9 +258,7 @@ namespace MapRenderer.Unity.Rendering.Style
             var b = list[i];
             if (_pendingTransition.IsInstant)
             {
-                // Degenerates to a plain bind: set Target, leave Origin null, and — if not pushed
-                // every frame — write the value immediately. Arms nothing (an instant restyle
-                // must leave TransitioningCount == 0).
+                // A plain bind that arms nothing: an instant restyle must leave TransitioningCount == 0.
                 b.Target = prop;
                 b.Origin = null;
                 b.Discrete = discrete;
@@ -310,13 +273,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 return;
             }
 
-            // A restyle rebinds EVERY paint property wholesale (no diffing), so a property whose
-            // VALUE did not change still reaches here as a "retarget". Without this check it would arm a
-            // pointless transition (Origin != null for the full duration, settling on the same value it
-            // started at) — a discriminant-only restyle must arm NOTHING, not just nothing visible.
-            // Scoped to the settled case; an interrupted transition already has a genuine reason
-            // to keep easing. Both sides must be provably Constant to compare cheaply — a Zoom/Feature/
-            // Composite property conservatively re-arms rather than risk missing a real change.
+            // A restyle rebinds every paint property, so an unchanged settled Constant must arm NOTHING.
+            // Any other kind re-arms rather than risk missing a real change.
             if (b.Origin == null && ValuesEqualIfBothConstant(b.Target, prop))
             {
                 b.Target = prop;
@@ -419,14 +377,9 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         // ── The one ease, three times over (per T) — endpoints at live zoom, time moves only the mix ──
-        //
-        // The delay-hold check runs on the WALL CLOCK directly (elapsed < 0), never through the
-        // Duration-normalized `t` — a zero-duration binding must still honor a nonzero delay, which a
-        // `Duration <= 0 => t = 1` shortcut would skip. A Discrete binding switches the instant the
-        // delay ends and settles immediately — it has nothing left to interpolate, so there is no
-        // reason to keep it "transitioning" for the rest of the duration window. A continuous binding
-        // still needs the separate `t <= 0` arm below: even at elapsed == 0 exactly, Mix(A, B, 0) is
-        // not bit-exactly A (StyleTransitionTests.Transition_Endpoints_AreExact).
+        // Non-obvious why: the delay hold tests elapsed < 0 on the wall clock, so a zero-duration binding
+        // still honors its delay. A Discrete binding settles when the delay ends. The `t <= 0` arm stays,
+        // because Mix(A, B, 0) is not bit-exactly A (StyleTransitionTests.Transition_Endpoints_AreExact).
 
         private static float EvalFloat(ref Binding<float> b, double zoom, double now)
         {

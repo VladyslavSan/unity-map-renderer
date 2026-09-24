@@ -79,20 +79,12 @@ namespace MapRenderer.Unity.View
         public bool   StopAt(in TileLodContext ctx) => false;
     }
 
-    /// <summary>Screen-space (distance-driven) LOD: stop once the tile's projected size drops to the target
-    /// on-screen tile size — i.e. when <c>GroundSize ≤ ScreenRatio·Distance</c>. Near the camera tiles reach
-    /// the target zoom (full detail); toward the horizon they stop progressively coarser. This is the
-    /// DEFAULT and the better-looking mode under tilt: tile count still grows under tilt, because the
-    /// billboard approximation ignores foreshortening, but that growth buys more detail toward the horizon
-    /// than the coarser, cheaper <see cref="ProjectedAreaLodStrategy"/> alternative.
-    ///
-    /// <para>Known drawback — LOD-churn white flash: because the emitted zoom is distance-driven, panning
-    /// toward the view vector continuously pulls far tiles nearer, so each crosses the threshold and its
-    /// coarse tile is swapped for four finer tiles. Under instant tile-atomic consume the coarse tile
-    /// leaves the cover before its finer replacements have fetched+built, so that patch flashes WHITE for a
-    /// frame or two. It is inherent to any screen-space LOD without tile RETENTION — the fix belongs in the
-    /// tile lifecycle (TileManager), not here: retain a parent tile until its finer children are ready, or
-    /// cross-fade. <see cref="FlatLodStrategy"/> (uniform zoom) doesn't churn, so it doesn't flash.</para></summary>
+    /// <summary>Screen-space LOD: stop once <c>GroundSize ≤ ScreenRatio·Distance</c>, so near tiles reach the target
+    /// zoom and tiles toward the horizon stop coarser. The default: under tilt it grows the tile count (the billboard
+    /// approximation ignores foreshortening), but buys more horizon detail than <see cref="ProjectedAreaLodStrategy"/>.
+    /// Limitation: panning pulls far tiles across the threshold, and the coarse tile leaves the cover before its
+    /// finer children are built, so that patch flashes white for a frame or two. The fix is tile retention in
+    /// <c>TileManager</c>; <see cref="FlatLodStrategy"/> does not churn.</summary>
     public sealed class ScreenSpaceLodStrategy : ITileLodStrategy
     {
         public string Name => "lod-screen";
@@ -104,13 +96,9 @@ namespace MapRenderer.Unity.View
     }
 
     /// <summary>Projected-area LOD: stop once the tile's TRUE projected on-screen size (foreshortening
-    /// included) drops to the target. Opt-in, not a fix for <see cref="ScreenSpaceLodStrategy"/> — the two
-    /// trade different things: this rule emits far fewer tiles under tilt but looks visibly worse, so it
-    /// costs visual quality to buy frame time.
-    ///
-    /// <para>The aggressiveness ctor parameter scales the whole threshold (1.0 = stop exactly at the target;
-    /// higher = coarser, fewer tiles). It moves the curve, not its shape: the two rules differ by a per-tile
-    /// geometric factor, not a constant, so no value of it reproduces <see cref="ScreenSpaceLodStrategy"/>.</para></summary>
+    /// included) drops to the target. Opt-in: it emits far fewer tiles under tilt but looks visibly worse.
+    /// The aggressiveness parameter scales the threshold (1.0 = the target; higher = coarser). The two rules
+    /// differ by a per-tile factor, so no value reproduces <see cref="ScreenSpaceLodStrategy"/>.</summary>
     public sealed class ProjectedAreaLodStrategy : ITileLodStrategy
     {
         private readonly double _aggressiveness;

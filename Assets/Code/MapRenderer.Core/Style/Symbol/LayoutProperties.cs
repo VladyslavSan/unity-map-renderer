@@ -6,30 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
-    /// The parsed MapLibre symbol <b>layout</b> properties for a single symbol style layer. Read from the
-    /// layer's <c>layout</c> sub-tree via <see cref="PropertyNames"/>. Engine-free; clean-room (public Style
-    /// Spec §symbol layout).
-    ///
-    /// <para>Zoom-capable numeric properties (<see cref="TextSize"/>, <see cref="SymbolSortKey"/>,
-    /// <see cref="TextPadding"/>, <see cref="TextMaxWidth"/>, <see cref="TextLineHeight"/>,
-    /// <see cref="TextLetterSpacing"/>, <see cref="TextRadialOffset"/>, <see cref="IconSize"/>,
-    /// <see cref="IconRotate"/>, <see cref="IconPadding"/>) are <see cref="StyleProperty{T}"/> so they can be
-    /// re-evaluated per frame;
-    /// <see cref="SymbolPlacement"/> is also a <see cref="StyleProperty{T}"/> but is BUILD-ZOOM-evaluated
-    /// (evaluated once by the extractor, never per frame — see its own doc); the small enum/flag knobs
-    /// (<see cref="TextAllowOverlap"/>,
-    /// <see cref="TextAnchor"/>, <see cref="TextJustify"/>, <see cref="TextOffset"/>, <see cref="TextFont"/>,
-    /// <see cref="IconAnchor"/>, <see cref="IconOffset"/>, <see cref="IconRotationAlignment"/>,
-    /// <see cref="IconAllowOverlap"/>, <see cref="IconIgnorePlacement"/>, <see cref="IconOptional"/>,
-    /// <see cref="TextOptional"/>) are parsed once as plain typed
-    /// values (mirroring <c>Line.LayoutProperties</c>'s Join/Cap-as-enum convention — the codebase encodes
-    /// constant layout flags directly, not as <c>StyleProperty&lt;bool&gt;</c>). <see cref="TextField"/> and
-    /// <see cref="IconImage"/> stay raw <see cref="JsonValue"/> — <c>TextField</c> is per-feature-resolved by
-    /// <see cref="TextFieldResolver"/>, and <c>IconImage</c> is likewise per-feature (a <c>{token}</c> string
-    /// or an expression array); neither is a scalar style value here — icon sprite resolution is a later
-    /// stage. <see cref="TextAnchor"/>/<see cref="TextJustify"/> are the <c>Core.Text</c> enums (string→enum
-    /// at parse); <see cref="TextLayoutOptionsBuilder"/> assembles them plus the em metrics into a
-    /// <see cref="Text.TextLayoutOptions"/> per feature.</para>
+    /// The parsed MapLibre symbol <b>layout</b> properties for a single symbol style layer. Zoom-capable numeric
+    /// properties are <see cref="StyleProperty{T}"/>, re-evaluated per frame; <see cref="SymbolPlacement"/> is
+    /// one too but is evaluated once at build zoom. Enum and flag knobs parse once into plain typed values, like
+    /// <c>Line.LayoutProperties</c>'s Join/Cap. <see cref="TextField"/> and <see cref="IconImage"/> stay raw
+    /// <see cref="JsonValue"/> because they resolve per feature (<see cref="TextFieldResolver"/>).
     /// </summary>
     public sealed class LayoutProperties
     {
@@ -58,14 +39,9 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>symbol-placement: <see cref="Text.SymbolPlacement.Point"/> (default),
         /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>.
-        /// BUILD-ZOOM-evaluated: the extractor evaluates this ONCE, at the tile's build
-        /// zoom, and the result is frozen into that tile's symbols for its lifetime — it is never
-        /// re-evaluated as the camera crosses a step boundary (an accepted, pinned known limit; see
-        /// docs/road-shields-design.md). An absent property degrades to point at CONSTRUCTION; a
-        /// present-but-non-string EXPRESSION RESULT degrades to point at EVALUATION (the extractor's
-        /// <c>TryEvaluate</c> call). A structurally MALFORMED expression (invalid JSON shape) still throws
-        /// from <see cref="ExpressionParser.Parse"/> here at construction — consistent with every
-        /// other <see cref="StyleProperty{T}"/> in this file, not a degrade-on-parse-failure contract.</summary>
+        /// Limitation: the extractor evaluates it once at the tile's build zoom, frozen for the tile's lifetime
+        /// (docs/road-shields-design.md). An absent property or a non-string expression result degrades to point;
+        /// a malformed expression throws from <see cref="ExpressionParser.Parse"/> at construction.</summary>
         public StyleProperty<SymbolPlacement> SymbolPlacement { get; init; }
 
         /// <summary>symbol-sort-key: greedy placement priority (lower placed first). Default 0. Zoom-capable.</summary>
@@ -119,25 +95,11 @@ namespace MapRenderer.Core.Style.Symbol
         /// point placement emitted today). Consumed by the placement billboard rotation (#4).</summary>
         public AlignmentMode TextRotationAlignment { get; init; }
 
-        /// <summary>text-pitch-alignment: whether the symbol lies flat on the map (<c>map</c>) or faces the
-        /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
-        /// <see cref="AlignmentResolution.ResolvePitch"/> against the RESOLVED
-        /// <see cref="TextRotationAlignment"/> — so under <see cref="SymbolPlacement.Line"/> /
-        /// <see cref="SymbolPlacement.LineCenter"/> placement it resolves to <c>map</c>, matching that
-        /// resolved rotation alignment; under <see cref="SymbolPlacement.Point"/> with an
-        /// auto-auto pair it resolves to <c>viewport</c> (today's billboard).
-        ///
-        /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only.</b>
-        /// <c>SymbolFeatureExtractor</c> resolves this once per layer and stamps it onto the emitted
-        /// symbol; under <see cref="AlignmentMode.Map"/> <c>SymbolStagingMath.StageCurved</c> lays the symbol out
-        /// in WORLD ARC LENGTH rather than screen px, so a glyph advance is a fixed world size and spacing
-        /// foreshortens with depth. This is not a dormant key: every shipped line-symbol layer resolves to
-        /// <c>map</c> here (an explicit or auto-auto <see cref="TextRotationAlignment"/> under line
-        /// placement), so it selects the world-metre layout for all of them.</para>
-        ///
-        /// <para><b>The POINT arm does NOT consume it yet</b> — do not infer otherwise from the above. A
-        /// map-pitched point symbol still billboards; the ground-flat point path is a later stage. Glyph SIZE
-        /// is likewise still screen-constant on both arms (W1 moved the layout, not the render).</para></summary>
+        /// <summary>text-pitch-alignment: flat on the map (<c>map</c>) or facing the camera (<c>viewport</c>).
+        /// Default <see cref="AlignmentMode.Auto"/>, which <see cref="AlignmentResolution.ResolvePitch"/> resolves
+        /// against the resolved <see cref="TextRotationAlignment"/>: <c>map</c> under line placement,
+        /// <c>viewport</c> for an auto-auto point symbol. Limitation: only the curved (along-line) arm consumes
+        /// it, laying out in world arc length under <c>map</c>; a map-pitched point symbol still billboards.</summary>
         public AlignmentMode TextPitchAlignment { get; init; }
 
         /// <summary>icon-image: the raw value (a <c>{token}</c> string or an expression array), or null when
@@ -164,15 +126,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// screen-aligned (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>.</summary>
         public AlignmentMode IconRotationAlignment { get; init; }
 
-        /// <summary>icon-pitch-alignment: whether the icon lies flat on the map (<c>map</c>) or faces the
-        /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
-        /// <see cref="AlignmentResolution.ResolvePitch"/> against the RESOLVED
-        /// <see cref="IconRotationAlignment"/> — mirrors <see cref="TextPitchAlignment"/>.
-        ///
-        /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only</b> — the same wiring and the same
-        /// fence as <see cref="TextPitchAlignment"/>, which states both in full. For icons that arm is the
-        /// one-glyph along-line symbol a MAP-resolved line icon emits (<c>road_one_way_arrow*</c> and
-        /// friends); a POINT icon still billboards.</para></summary>
+        /// <summary>icon-pitch-alignment: <c>map</c> or <c>viewport</c>, resolved like
+        /// <see cref="TextPitchAlignment"/> against the resolved <see cref="IconRotationAlignment"/>. Only the
+        /// curved arm consumes it: the one-glyph along-line symbol a map-resolved line icon emits
+        /// (<c>road_one_way_arrow*</c>); a point icon still billboards.</summary>
         public AlignmentMode IconPitchAlignment { get; init; }
 
         /// <summary>icon-allow-overlap: skip collision, always place. Default false.</summary>

@@ -8,30 +8,12 @@ using MapRenderer.Core.Lifetime;
 namespace MapRenderer.Core.Data
 {
     /// <summary>
-    /// Coordinates tile fetching from an <see cref="IDataSource"/> with an LRU <see cref="TileCache"/>
-    /// and in-flight deduplication.
-    /// <para>
-    /// <b>In-flight deduplication:</b> concurrent requests for the same tile share one fetch.
-    /// </para>
-    /// <para>
-    /// <b>Per-tile cancellation:</b> <see cref="Release"/> cancels the tile's fetch. If the source
-    /// ignores cancellation and completes anyway, the result is discarded, not cached.
-    /// </para>
-    /// <para>
-    /// <b>Thread-safety:</b> one lock guards the cache, the in-flight map, and the CTS map. The
-    /// scheduler never switches threads itself. Post-fetch bookkeeping runs on the thread that
-    /// finished the fetch; <see cref="Release"/> and <c>Dispose</c> run on their caller's thread.
-    /// The lock serializes all of them.
-    /// </para>
-    /// <para>
-    /// <b>Negative caching:</b> an absent response is not written to the LRU cache. It is suppressed
-    /// for a short, injectable-clock TTL, then re-fetched. Rationale: <c>docs/async-architecture.md</c>.
-    /// </para>
-    /// <para>
-    /// <b>Dispose ownership:</b> the scheduler does not own the injected <see cref="IDataSource"/> or
-    /// <see cref="TileCache"/> — the caller does. Disposing the scheduler cancels in-flight fetches but
-    /// does not wait for them to finish.
-    /// </para>
+    /// Coordinates tile fetching from an <see cref="IDataSource"/> with an LRU <see cref="TileCache"/>;
+    /// concurrent requests for the same tile share one fetch. <see cref="Release"/> cancels a tile's fetch,
+    /// and a result that completes anyway is discarded. An absent response is not cached; it is suppressed
+    /// for a TTL, then re-fetched (<c>docs/async-architecture.md</c>). Non-local invariant: one lock
+    /// serializes the fetch-completion thread with the <see cref="Release"/>/<c>Dispose</c> callers; the
+    /// scheduler never switches threads. Dispose cancels fetches without waiting; the caller owns source+cache.
     /// </summary>
     public sealed class TileScheduler : VerifiedDisposable
     {
@@ -55,8 +37,7 @@ namespace MapRenderer.Core.Data
         /// <param name="cache">LRU cache for present tiles. NOT owned/disposed by the scheduler.</param>
         /// <param name="negativeTtl">
         /// How long an absent (HasData=false) response suppresses re-fetch. Defaults to
-        /// <see cref="DefaultNegativeTtl"/>. Pass <see cref="TimeSpan.Zero"/> to disable negative caching
-        /// (every request re-fetches absent tiles).
+        /// <see cref="DefaultNegativeTtl"/>; <see cref="TimeSpan.Zero"/> disables negative caching.
         /// </param>
         /// <param name="clock">
         /// Injectable clock for the negative-cache TTL. Defaults to <c>() =&gt; DateTime.UtcNow</c>.

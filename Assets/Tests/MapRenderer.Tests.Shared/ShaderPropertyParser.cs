@@ -1,16 +1,9 @@
-// Editor-only (NOT engine-free) text-parsing helpers for shader/registry file inspection.
-// Used by InstanceStructShaderParityTests, MaterialPropertyRegistryParityTests, and
-// NoRawStringMaterialAccessGuardTests. Not registered in Tools/core-tests — see
-// EngineFreeShaderPaths for the engine-free equivalent that project uses instead.
+// Editor-only text-parsing helpers for shader/registry file inspection; EngineFreeShaderPaths is the
+// engine-free equivalent for Tools/core-tests. Paths anchor on AssetDatabase and the MapRenderer.Unity
+// asmdef, so moving that assembly as a whole keeps every derived path correct.
 //
-// Path resolution is move-proof: everything is anchored via UnityEditor.AssetDatabase (GUID-based
-// lookup + the MapRenderer.Unity.asmdef location), not relative filesystem arithmetic off a test
-// binary's location. Moving Assets/Code/MapRenderer.Unity as a whole keeps every derived path correct.
-//
-// Lives in MapRenderer.Tests.Shared (cross-platform: includePlatforms empty), so the whole file is
-// gated behind UNITY_EDITOR — Shared also compiles for the PlayMode/Player target, where UnityEditor
-// is not linked. Its only callers (EditMode, Visual) are both Editor-only, so the gate costs them
-// nothing.
+// Non-obvious why: Shared also compiles for the Player target, where UnityEditor is not linked, so the whole
+// file sits behind UNITY_EDITOR; its only callers (EditMode, Visual) are Editor-only.
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
@@ -55,12 +48,10 @@ namespace MapRenderer.Tests
         public static string CommonDir    => Path.Combine(ShadersDir, "Common");
 
         /// <summary>
-        /// Resolves a shader source file (<c>.hlsl</c>/<c>.shader</c>) to its absolute path by filename,
-        /// searching anywhere under <c>Shaders/Map/</c> — move-proof against the Lit/Unlit folder split (and
-        /// any future reorg). Shader filenames are unique across the Map tree, so exactly one match is
-        /// expected; a count ≠ 1 fails loudly (a duplicate or a missing file, not a silent wrong pick). Use
-        /// this for CONTENT reads (a test that inspects a file's text); the few tests whose subject is the
-        /// folder LAYOUT name their structure directly instead.
+        /// Resolves a shader source file (<c>.hlsl</c>/<c>.shader</c>) by filename anywhere under
+        /// <c>Shaders/Map/</c>, so a folder reorg does not break it. Filenames are unique across the Map tree,
+        /// so any count other than one fails the test. Use it for CONTENT reads; a test whose subject is the
+        /// folder LAYOUT names its structure directly.
         /// </summary>
         public static string MapShaderPath(string fileName)
         {
@@ -317,13 +308,10 @@ namespace MapRenderer.Tests
         // ── Shared utility ───────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Strips <c>//</c> line comments and <c>/* … */</c> block comments from HLSL source, so a
-        /// structural grep-tooth scans CODE only and never self-documenting prose. A shader that names a
-        /// forbidden token to explain its ABSENCE ("no <c>UniversalFragmentPBR</c>/<c>SAMPLE_GI</c> —
-        /// UniversalFragmentUnlit composes the colour instead") is good documentation and must not trip a
-        /// "references no lighting call" tooth; a naive <c>text.Contains(token)</c> would false-positive on
-        /// it. Not a full preprocessor — it does not model string literals (these HLSL files carry none),
-        /// which is why it is scoped to token-absence scans, not lexing.
+        /// Strips <c>//</c> and <c>/* … */</c> comments from HLSL source, so a token-absence tooth scans CODE
+        /// only: a shader comment that names a forbidden token to explain its absence must not trip it.
+        /// Limitation: it does not model string literals (these HLSL files carry none), so it serves
+        /// token-absence scans, not lexing.
         /// </summary>
         /// <param name="text">Raw HLSL source.</param>
         /// <returns>The source with comment spans replaced by a single space (offsets not preserved).</returns>

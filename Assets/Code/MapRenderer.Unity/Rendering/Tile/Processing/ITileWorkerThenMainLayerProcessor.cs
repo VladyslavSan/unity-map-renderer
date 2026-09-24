@@ -3,14 +3,11 @@ using System.Threading;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The <see cref="LayerPhase.WorkerThenMain"/> capability — the sibling of
-    /// <see cref="ITileMeshLayerProcessor"/>'s mesh-settlement capability — for a processor whose worker
-    /// step (<see cref="ITileLayerProcessor.ProcessOnWorker"/>) is followed by exactly one main-thread
-    /// completion step. Implemented by <see cref="TileSymbolLayerProcessor"/>. ARTIFACT-FREE — unlike
-    /// <see cref="ITileMeshLayerProcessor"/>, whose <see cref="ITileMeshLayerProcessor.TryTakeGraphRequest"/>
-    /// hands the caller a real artifact before its own settlement step runs, this contract's completion
-    /// step returns nothing at any point: the tail's output (e.g. a symbol layer's shaped symbol records)
-    /// is exposed and sunk by the implementor itself — sinks stay separate, only decode + dispatch unify.
+    /// The <see cref="LayerPhase.WorkerThenMain"/> capability: a worker step
+    /// (<see cref="ITileLayerProcessor.ProcessOnWorker"/>) followed by exactly one main-thread completion
+    /// step. Implemented by <see cref="TileSymbolLayerProcessor"/>. Unlike
+    /// <see cref="ITileMeshLayerProcessor"/>, it hands the caller no artifact: the implementor sinks its own
+    /// output (e.g. shaped symbol records), so sinks stay separate and only decode + dispatch unify.
     /// </summary>
     internal interface ITileWorkerThenMainLayerProcessor : ITileLayerProcessor
     {

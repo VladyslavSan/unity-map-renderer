@@ -19,9 +19,8 @@ namespace MapRenderer.Core.Style.Line
         public const int MaxEntries = 4;
 
         // ── Dash coverage: CPU mirror of the HLSL fragment function; keep both in sync ──────────────
-        // Returns 1 on a dash and 0 in a gap: a hard step; the GPU adds an fwidth feather at the same edges.
-        // metersPerDashUnit is the frame-constant ruler from the class doc; a per-vertex width here would make
-        // dashes crawl and depend on tessellation. pattern = on/off lengths in line-width units, "on" first.
+        // Non-local invariant: like the HLSL, returns 1 on a dash and 0 in a gap (the GPU adds an fwidth feather).
+        // pattern = on/off lengths in line-width units, "on" first.
         // Solid (1) for a null/empty or odd-length pattern, metersPerDashUnit <= 0, or all entries <= 0.
         public static float DashCoverage(double distanceAlong, double metersPerDashUnit, float[] pattern)
         {
@@ -69,9 +68,8 @@ namespace MapRenderer.Core.Style.Line
         }
 
         // ── Dasharray as an expression ─────────────────────────────────────────────────────────
-        // line-dasharray goes through the expression system: parsed once, then evaluated to a pattern at a zoom.
-        // LineRenderLayer re-evaluates it per frame only when it depends on zoom. It is data-constant in the
-        // spec: a feature-dependent value errors against the null feature, so TryEvaluatePattern renders solid.
+        // Non-local invariant: LineRenderLayer re-evaluates the parsed dasharray per frame only when it depends on
+        // zoom. A feature-dependent value errors against the null feature, so TryEvaluatePattern renders solid.
 
         /// <summary>
         /// Parses a <c>line-dasharray</c> property value into an expression. A dasharray may write its arrays bare

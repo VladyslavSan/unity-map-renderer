@@ -6,35 +6,11 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Resolves a codepoint against an ordered <see cref="FontStack"/>: per-glyph fallback across the
-    /// stack — the first font (in <see cref="FontStack.Names"/> order) whose decoded range
-    /// contains the codepoint wins; a codepoint present in no font's range yields the defined
-    /// not-found outcome (notdef/skip, never throw). Range math is
-    /// <c>rangeStart = (codepoint / 256) * 256</c>, the glyph-PBF 256-codepoint range convention.
-    ///
-    /// <para>
-    /// Testable without a live fetch: takes a <see cref="GlyphCache"/> of already-decoded ranges as
-    /// input; the actual fetch wiring (populating that cache from <see cref="IGlyphSource"/>) is the
-    /// deferred Unity <c>GlyphManager</c>.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Cache-key note:</b> <see cref="FontStack.RequestToken"/> is the joined-whole-stack glyph-PBF
-    /// fetch key (the real MapLibre wire convention — a single glyph host may merge several fonts'
-    /// glyphs server-side into one PBF keyed by the full joined stack; the committed fixtures decode
-    /// this way). This resolver instead looks up the cache **per individual font name** in
-    /// <see cref="FontStack.Names"/>, because per-glyph client-side fallback requires each font's own
-    /// decoded glyphs to try in order — a self-hosted glyph directory that only serves single-font
-    /// ranges (not arbitrary joined combinations) needs exactly this. Bridging "one fetch per joined
-    /// stack" vs. "one fetch per individual font, resolved client-side" is a decision for the deferred
-    /// fetch-wiring layer (Unity <c>GlyphManager</c>), not this resolver.
-    /// </para>
-    ///
-    /// <para>
-    /// Also implements <see cref="IGlyphMetricsProvider"/> so a resolver instance can back a
-    /// <see cref="ShapingRequest.Metrics"/> directly (fallback-aware advances for the shaper), without
-    /// coupling this class to shaping beyond that one small delegation.
-    /// </para>
+    /// Resolves a codepoint against an ordered <see cref="FontStack"/> with per-glyph fallback: the first
+    /// font in <see cref="FontStack.Names"/> order whose range (<c>(codepoint / 256) * 256</c>) holds it
+    /// wins, else notdef/skip. It reads the <see cref="GlyphCache"/> per font name, not per joined
+    /// <see cref="FontStack.RequestToken"/>, because client-side fallback tries each font in order. It
+    /// backs <see cref="ShapingRequest.Metrics"/>.
     /// </summary>
     public sealed class FontStackResolver : IGlyphMetricsProvider
     {
@@ -42,10 +18,8 @@ namespace MapRenderer.Core.Text
         private readonly GlyphCache _cache;
         private readonly GlyphAtlas _atlas;
 
-        /// <param name="atlas">The atlas whose font-id table stamps <see cref="PositionedGlyph.FontId"/>.
-        /// Null only for a metrics-only test: every id then resolves to 0, which is correct for a
-        /// single-face fixture and wrong for a mixed one — production passes the real atlas
-        /// (<c>GlyphManager.CreateResolver</c>).</param>
+        /// <param name="atlas">The atlas whose font ids stamp <see cref="PositionedGlyph.FontId"/>. Null
+        /// only in a metrics-only test, where every id is 0 (wrong for a mixed-face fixture).</param>
         public FontStackResolver(FontStack fontStack, GlyphCache cache, GlyphAtlas atlas = null)
         {
             _fontStack = fontStack ?? throw new ArgumentNullException(nameof(fontStack));

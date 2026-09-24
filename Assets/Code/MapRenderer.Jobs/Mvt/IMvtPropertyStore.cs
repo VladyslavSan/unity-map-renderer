@@ -4,9 +4,8 @@ using MapRenderer.Core.Expressions;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
-    /// A decoded feature's property bag, behind an interface whose sole implementation is
-    /// <see cref="DensePropertyStore"/> (keeps MVT's dense (keyIdx,valIdx) tag-pair representation,
-    /// resolving lazily). <see cref="DensePropertyStore.TryGet"/> (the backward tag-pair scan) and
+    /// A decoded feature's property bag; the sole implementation is <see cref="DensePropertyStore"/>.
+    /// <see cref="DensePropertyStore.TryGet"/> (the backward tag-pair scan) and
     /// <see cref="DensePropertyStore.AsDictionary"/> (the forward <c>ResolveToDictionary</c> walk) are two
     /// independent implementations of the same resolve, kept in agreement by the differential test in
     /// <c>DensePropertyStoreTests</c>.

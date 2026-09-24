@@ -1,6 +1,5 @@
-// Test-only image-analysis helpers shared by WorldSymbolAbRenderSnapshotTests and WorldSymbolMotionTests,
-// so both GPU teeth share ONE ink-analysis implementation. Internal, not public: a test helper's footprint
-// stays inside the test assembly.
+// Test-only image-analysis helpers, so WorldSymbolAbRenderSnapshotTests and WorldSymbolMotionTests share ONE
+// ink-analysis implementation.
 
 using Unity.Mathematics;
 using UnityEngine;
@@ -39,11 +38,8 @@ namespace MapRenderer.Tests
 
         /// <summary>Same scan, restricted to the INCLUSIVE row band
         /// <paramref name="rowFrom"/>..<paramref name="rowTo"/> (clamped to the buffer; an inverted band
-        /// reports no ink) — for a frame carrying more than one symbol, where a whole-frame scan reports one
-        /// merged bounding box that belongs to neither.
-        ///
-        /// <para>The whole-frame overload above forwards to this one, so there is exactly ONE scanner: a
-        /// change to the ink rule cannot apply to one caller and not the other.</para></summary>
+        /// reports no ink), for a frame with more than one symbol. The whole-frame overload forwards here, so
+        /// one ink rule serves both callers.</summary>
         public static void AnalyzeInk(
             Color32[] pixels, int width, int height, int rowFrom, int rowTo,
             out int minRow, out int maxRow, out int minCol, out int maxCol,

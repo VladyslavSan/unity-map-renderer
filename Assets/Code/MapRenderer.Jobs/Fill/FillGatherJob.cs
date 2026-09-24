@@ -11,16 +11,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// The fill graph's gather node: per polygon, sort its hole rings (only when <c>holeCount &gt; 1</c>)
-    /// and copy outer + hole vertices into the polygon's flat scratch slice.
-    ///
-    /// <para>The comparer is a generic type parameter, not a fixed field type, so a test can substitute a
-    /// perturbed comparer and RED-verify the parity tooth's ordering claim. Production always instantiates
-    /// with <c>FillMeshPipeline.HoleRingComparer</c>.</para>
-    ///
-    /// <para>The reused hole-index buffer is an <see cref="Allocator.Temp"/> <see cref="NativeArray{T}"/>
-    /// allocated <b>inside</b> <see cref="Execute"/>, sized from a first pass over
-    /// <see cref="PolyHoleCount"/> — <c>Allocator.Temp</c> may not be a job field.</para>
+    /// The fill graph's gather node: per polygon, sort its hole rings (when <c>holeCount &gt; 1</c>) and copy
+    /// outer + hole vertices into the polygon's flat slice. The comparer is a type parameter so a test can
+    /// substitute a perturbed one; production uses <c>FillMeshPipeline.HoleRingComparer</c>. The hole-index
+    /// buffer is <see cref="Allocator.Temp"/>, allocated inside <see cref="Execute"/>, because a Temp container
+    /// may not be a job field.
     /// </summary>
     /// <typeparam name="TComparer">The hole-ordering comparer — a stateless struct over ring indices.</typeparam>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]

@@ -1,9 +1,5 @@
-// No `using UnityEngine` — but this file is NOT compiled by Tools/core-tests and must not be re-added
-// to core-tests.csproj. It calls SymbolFeatureExtractor.Extract, which materializes
-// a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections transitively; core-tests has no
-// Unity.Collections and gets no shim (a hand-written one would be a second implementation of
-// Collections' ownership semantics, and disposing an AsArray() view there is a SILENT no-op — the fast loop
-// would pass the ownership bugs it exists to catch). Its tests run in the Unity EditMode runner.
+// Non-obvious why: keep this file out of Tools/core-tests — it depends on Unity.Collections, and a
+// Collections shim there would let the fast loop pass the ownership bugs it exists to catch.
 
 using System.Collections.Generic;
 using System.Threading;
@@ -18,21 +14,11 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// Turns one decoded MVT tile's symbol layers into rendered-ready
-    /// <see cref="ShapedSymbol"/>s, the symbol analogue of <c>StyledLineTileBuilder</c> (but it emits symbols,
-    /// never a <c>Mesh</c> — symbols are the placed-every-frame class). The Core half
-    /// (<see cref="SymbolFeatureExtractor"/>) already did the worker-safe work (select → resolve text →
-    /// project anchor → <see cref="SymbolFeature"/>); this adds the Unity-side shaping the symbols need to
-    /// render.
-    ///
-    /// <para><b>Deferred three-step build (the locked threading model).</b> Symbols do NOT have to complete
-    /// in one synchronous pass. <see cref="BuildAsync"/> runs <see cref="CollectRequiredRanges"/> (pure,
-    /// sync — gathers every glyph range the tile's symbols need), then <see cref="EnsureGlyphRangesAsync"/>
-    /// (the ONE suspension point — the async fetch/decode/atlas-append for that whole set), and only THEN,
-    /// once the glyphs are in the shared atlas, <see cref="Shape"/> (sync, no suspension) shapes + lays out
-    /// each symbol and emits the <see cref="ShapedSymbol"/>. So a tile whose glyphs are still fetching
-    /// produces its symbols a frame or two later rather than stalling the tile-consume critical path, and
-    /// shaping itself never interleaves with an atlas append.</para>
+    /// Turns one decoded tile's symbol layers into <see cref="ShapedSymbol"/>s (symbols, never a <c>Mesh</c>).
+    /// Non-local invariant: a build runs <see cref="CollectRequiredRanges"/>, then
+    /// <see cref="EnsureGlyphRangesAsync"/> (the one suspension point), then <see cref="Shape"/>, so a tile
+    /// whose glyphs are still fetching emits its symbols later without stalling tile consume, and shaping
+    /// never interleaves with an atlas append.
     /// </summary>
     public sealed class StyledSymbolTileBuilder
     {
@@ -54,9 +40,8 @@ namespace MapRenderer.Unity.Text
         internal string LastSkipReason { get; private set; }
 
         /// <param name="glyphManager">The shared production glyph manager (one atlas across all symbol layers).</param>
-        /// <param name="stringTable">The table <see cref="Shape"/> interns Text/IconImage into. Null
-        /// (the default) mints a private table — fine for a caller with no cross-tile identity to preserve;
-        /// production passes the owning <c>SymbolTileStore</c>'s table instead.</param>
+        /// <param name="stringTable">The table <see cref="Shape"/> interns Text/IconImage into. Null mints a
+        /// private table; production passes the owning <c>SymbolTileStore</c>'s table.</param>
         public StyledSymbolTileBuilder(GlyphManager glyphManager, SymbolStringTable stringTable = null)
         {
             _glyphManager = glyphManager ?? throw new System.ArgumentNullException(nameof(glyphManager));
@@ -80,9 +65,8 @@ namespace MapRenderer.Unity.Text
         /// <see cref="IProjection"/> — no glyph cache, no atlas, no <c>UnityEngine.Object</c> — so the caller
         /// may run it on the thread pool. Returns the shaping inputs <see cref="Shape"/> consumes on main.
         /// </summary>
-        /// <param name="spriteAtlas">Forwarded verbatim to <see cref="SymbolFeatureExtractor.Extract"/>;
-        /// <c>null</c> (the default) yields no icon symbols, so omitting this argument is behaviour-preserving.
-        /// Production callers still omit it — icon draw is not yet wired, so it stays inert.</param>
+        /// <param name="spriteAtlas">Forwarded to <see cref="SymbolFeatureExtractor.Extract"/>; <c>null</c> (the
+        /// default) yields no icon symbols.</param>
         /// <remarks>No store parameter and no private fallback store. Every layer's geometry is
         /// read off the decoded tile itself (<c>ITileLayer.Geometry</c>), so N symbol layers naming one
         /// source-layer read ONE buffer with nothing threaded through and nothing to dispose — and they share
@@ -108,21 +92,13 @@ namespace MapRenderer.Unity.Text
             return result;
         }
 
-        /// <summary>Convenience (tests + the demo path): extract then shape in one call — collects every
-        /// needed glyph range, ensures it (async), then shapes + lays out + emits every symbol of <paramref
-        /// name="symbolLayers"/> over <paramref name="tile"/> into <paramref name="buffer"/> (caller-owned —
-        /// the per-build reused buffer). Emission order matches
-        /// <see cref="SymbolFeatureExtractor"/>'s per-tile ordinal, so <see cref="ShapedSymbol.FeatureIndex"/>
-        /// stays the stable tiebreak. The subsystem's live path instead runs <see cref="ExtractLayers"/>
-        /// on a worker and the collect/ensure/<see cref="Shape"/> sequence on main.
-        ///
-        /// <para>Correct incremental layout relies on a FIXED-size shared atlas (the subsystem builds the
-        /// production atlas with a fixed dimension): the atlas <c>Size</c> never changes as glyphs append,
-        /// so a tile laid out early keeps valid UVs when a later tile adds glyphs. A growing atlas would
-        /// invalidate earlier tiles' UVs.</para></summary>
-        /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
-        /// <paramref name="symbolLayers"/>) stamped onto each symbol's <see cref="ShapedSymbol.MaterialIndex"/>
-        /// for the per-layer draw grouping. Null → all 0 (single-material / demo path).</param>
+        /// <summary>Extract then shape in one call, for tests and the demo path; the live path runs
+        /// <see cref="ExtractLayers"/> on a worker and the rest on main. Emission order matches the
+        /// extractor's per-tile ordinal, so <see cref="ShapedSymbol.FeatureIndex"/> stays a stable tiebreak.
+        /// Non-local invariant: the shared atlas has a fixed size, so UVs baked early stay valid as later
+        /// tiles append glyphs.</summary>
+        /// <param name="materialIndices">Per-layer material index (parallel to <paramref name="symbolLayers"/>)
+        /// stamped onto each <see cref="ShapedSymbol.MaterialIndex"/>. Null → all 0.</param>
         public async UniTask BuildAsync(
             IDecodedTile tile,
             TileId tileId,
@@ -146,19 +122,11 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>
-        /// WORKER-OR-MAIN, pure and synchronous: collects every distinct <c>(fontName, rangeStart)</c> pair
-        /// <paramref name="extractedLayers"/>' symbols will need once shaped, into <paramref name="into"/> in
-        /// FIRST-ENCOUNTER order (layers → symbols → UTF-16 code units → stack names). <b>That order is
-        /// load-bearing, not stylistic:</b>
-        /// <see cref="GlyphAtlas"/> is an insertion-order shelf packer, so this order determines every baked
-        /// glyph's UV — reordering it (e.g. emitting from <paramref name="seen"/> instead of <paramref
-        /// name="into"/>) diffs every golden snapshot that shapes text. <paramref name="seen"/> is a
-        /// caller-owned dedup scope, cleared once per BUILD (not per layer) so the set is build-wide.
-        ///
-        /// <para>This is the set named by each symbol's UTF-16 code units, not the set the shaper's
-        /// presentation-form mapping (Arabic joining) actually RESOLVES — the two differ (a known,
-        /// deferred gap), and this method must not "fix" that: doing so would fetch a different glyph set
-        /// and change rendering output.</para>
+        /// Pure and synchronous, worker or main: appends every distinct <c>(fontName, rangeStart)</c> the
+        /// symbols need to <paramref name="into"/> in first-encounter order. Non-local invariant: the atlas is
+        /// an insertion-order shelf packer, so a reorder moves glyph UVs and diffs every text snapshot.
+        /// Limitation: the set comes from UTF-16 code units, not the Arabic presentation forms the shaper
+        /// resolves; changing that changes the fetched set and the rendered output.
         /// </summary>
         /// <param name="extractedLayers">This build's <see cref="ExtractLayers"/> output; null is a no-op.</param>
         /// <param name="into">Appended to, in first-encounter order; not cleared by this method.</param>
@@ -184,15 +152,13 @@ namespace MapRenderer.Unity.Text
                 {
                     if (extracted[i].Kind == SymbolKind.Icon) continue;
                     string text = extracted[i].Text;
-                    // UTF-16 CODE UNIT, not a decoded codepoint — keeps the known surrogate-pair gap
-                    // (deferred). Do not "fix" this into a combined-codepoint walk;
-                    // that changes the requested set.
+                    // Limitation: UTF-16 code units, not codepoints, so surrogate pairs are not handled. A
+                    // codepoint walk changes the requested set.
                     for (int c = 0; c < text.Length; c++)
                     {
                         int rangeStart = FontStackResolver.ComputeRangeStart(text[c]);
-                        // ALL stack names, not just the winner — GlyphManager.EnsureFontStackRangeAsync fetches
-                        // every name because which font wins isn't known until FontStackResolver.Resolve runs
-                        // against the populated cache; collecting only the first name would kill fallback fonts.
+                        // All stack names: the winning font is known only after the cache is populated, so
+                        // collecting only the first name would kill fallback fonts.
                         for (int n = 0; n < fontStack.Names.Count; n++)
                         {
                             string name = fontStack.Names[n];
@@ -222,33 +188,22 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>
-        /// MAIN-THREAD, synchronous, no suspension point: shapes + lays out + emits each
-        /// <see cref="ShapedSymbol"/> into <paramref name="buffer"/>, reading the shared glyph cache/atlas that
-        /// <see cref="EnsureGlyphRangesAsync"/> already finished populating for this build — this method never
-        /// mutates the atlas. Reads the shared glyph cache/atlas, so it runs on the main thread. Emission
-        /// order matches the extractor's per-tile
-        /// ordinal (stable FeatureIndex).
-        ///
-        /// <para><b>No cancellation checks in the loop.</b> A cancel landing mid-shape lets the loop run to
-        /// completion into a buffer the caller then discards. The caller's trailing
-        /// <c>ThrowIfCancellationRequested</c> is the sole partial-commit guard.</para>
+        /// Main thread, synchronous: shapes, lays out and emits each <see cref="ShapedSymbol"/> into
+        /// <paramref name="buffer"/> in the extractor's per-tile order. It reads the glyph atlas that
+        /// <see cref="EnsureGlyphRangesAsync"/> filled and never mutates it. Non-local invariant: the loop has
+        /// no cancellation check; the caller's trailing <c>ThrowIfCancellationRequested</c> is the only guard
+        /// against committing a partial buffer.
         /// </summary>
         public void Shape(
             List<ExtractedLayer> extractedLayers, SymbolTileBuffer buffer, CancellationToken ct = default)
         {
             if (extractedLayers == null || buffer == null) return;
 
-            // PER-CALL locals (not instance fields): SymbolSubsystem shares one _builder across
-            // tails whose starts are budgeted per frame but never awaited to completion (RunTailAsync /
-            // PumpBuilds), so two Shape calls can be interleaved on the main thread. A local lives in
-            // this call's own stack frame, so concurrent calls never share it. `buffer` itself is
-            // NOT one of these — it is rented per-build by SymbolSubsystem (the pairing-adjacency rule:
-            // every layer processor of ONE build must write into the SAME buffer instance).
+            // Per-call locals, not fields: SymbolSubsystem shares one builder across tails, so two Shape
+            // calls can interleave on the main thread. `buffer` is per-build and shared by its layers.
             var glyphQuads = new List<PositionedGlyph>();
-            // Reused per-call temp buffers the no-alloc TextQuadLayout/CurvedTextLayout overloads
-            // clear-and-fill per symbol — copied into buffer's own growing pools right after, since those
-            // pools accumulate EVERY symbol of the whole build and the no-alloc overloads always Clear() their
-            // output first (a build-wide pool passed directly would erase every earlier symbol's quads/glyphs).
+            // Per-symbol temps: the layout overloads Clear() their output, so passing the build-wide pools
+            // directly would erase earlier symbols. Each result is copied into `buffer`.
             var quadCorners = new List<SymbolQuad>();
             var curvedPlacements = new List<CurvedGlyph>();
 
@@ -259,11 +214,7 @@ namespace MapRenderer.Unity.Text
                 int               materialIndex = layerEx.MaterialIndex;
                 FontStack         fontStack     = layerEx.FontStack;
 
-                // The glyphs are already in the shared atlas (EnsureGlyphRangesAsync ran before this call):
-                // shape + lay out + emit. The resolver is only needed by TEXT symbols (an icon-only
-                // layer may carry no text-font at all), so it is built lazily on first use rather than
-                // unconditionally — an icon-only layer never touches the font stack / GlyphManager resolver
-                // machinery.
+                // Built lazily on the first TEXT symbol: an icon-only layer may carry no text-font at all.
                 FontStackResolver resolver = null;
                 for (int i = 0; i < extracted.Count; i++)
                 {
@@ -272,12 +223,8 @@ namespace MapRenderer.Unity.Text
                         SymbolFeature s = extracted[i];
                         if (s.Kind == SymbolKind.Icon && s.Placement == SymbolPlacement.Point)
                         {
-                            // An icon is a single pre-laid-out quad (SymbolFeatureExtractor already resolved
-                            // sprite + icon-size/-offset/-anchor) — no shaping, just the SkirtPx-inset
-                            // min/max-corner bounds formula (inlined here, no allocation), so it rides the
-                            // SAME point-placement path downstream (SymbolPlacementKind.Point + AtlasKind, no
-                            // parallel path). The quad carries the transparent border; the bounds (i.e. the
-                            // collision box) must not — placement runs on the ink, not on the skirt.
+                            // A pre-laid-out quad, no shaping. The quad keeps the transparent border; the
+                            // bounds (the collision box) inset by it, so placement runs on the ink.
                             float2 iconSkirt = new float2(s.IconSkirtPx, s.IconSkirtPx);
                             float2 iconBoundsMin = math.min(s.IconQuad.TopLeft, s.IconQuad.BottomRight) + iconSkirt;
                             float2 iconBoundsMax = math.max(s.IconQuad.TopLeft, s.IconQuad.BottomRight) - iconSkirt;
@@ -314,17 +261,11 @@ namespace MapRenderer.Unity.Text
 
                         if (s.Kind == SymbolKind.Icon)
                         {
-                            // A map-resolved LINE icon is the same pre-laid-out quad, but shaped as a
-                            // ONE-GLYPH CURVED symbol — the icon cell is already horizontally centred on 0
-                            // (icon-anchor: center), which is exactly the CurvedGlyph.Cell contract, so the
-                            // whole curved machinery (per-anchor candidates, the arc walk, the rotated
-                            // collision box, the baked world tangent) applies with no new symbol kind.
-                            // TextSizePx = OneEm ⇒ the curved path's cell scale is 1, matching the point-icon
-                            // branch above (IconQuadLayout already baked icon-size in).
+                            // A LINE icon is a one-glyph curved symbol: its cell is centred on 0, which is the
+                            // CurvedGlyph.Cell contract. TextSizePx = OneEm keeps the cell scale at 1.
                             int iconGlyphStart = buffer.Glyphs.Count;
-                            // CellSkirt carries the icon's transparent border into the curved path, which
-                            // insets by it for the collision box and the chord probe while the DRAWN cell
-                            // keeps it. Every text glyph leaves it 0.
+                            // CellSkirt insets the collision box and chord probe; the drawn cell keeps the
+                            // border. Every text glyph leaves it 0.
                             buffer.Glyphs.Add(new CurvedGlyph { ArcCenter = 0f, Cell = s.IconQuad, CellSkirt = s.IconSkirtPx });
                             int iconAnchorStart = buffer.AppendAnchors(s.LineAnchors, out int iconAnchorCount);
                             int iconPathStart = buffer.AppendPath(s.PathRender, s.PathUpRender, out int iconPathCount);
@@ -355,10 +296,8 @@ namespace MapRenderer.Unity.Text
                         }
 
                         resolver ??= _glyphManager.CreateResolver(fontStack);
-                        // Zero-alloc overload: fills the reused glyphQuads instead of Shape(in) allocating
-                        // its own List<PositionedGlyph>. The wrapping ShapedRun is still a fresh (small)
-                        // allocation — TextQuadLayout/CurvedTextLayout.Layout both take a ShapedRun, and
-                        // there is no caller-buffer variant of that adapter.
+                        // Fills the reused glyphQuads. The wrapping ShapedRun still allocates: the layouts
+                        // take a ShapedRun and have no caller-buffer variant.
                         TextDirection direction = _shaper.Shape(new ShapingRequest
                         {
                             Text = s.Text,
@@ -368,11 +307,7 @@ namespace MapRenderer.Unity.Text
                         ShapedRun run = new ShapedRun { Glyphs = glyphQuads, Direction = direction };
                         if (s.Placement == SymbolPlacement.Point)
                         {
-                            // The per-feature options threaded from the style layer (anchor/offset/justify/
-                            // max-width/line-height/letter-spacing/radial-offset).
-                            // No-alloc overload writes into the reused quadCorners (Clear()-ed internally); copy
-                            // its contents into buffer's own build-wide Quads pool right after (quadCorners
-                            // itself never allocates once its capacity has stabilized across symbols).
+                            // Writes into the reused quadCorners, then copies into buffer's build-wide Quads.
                             TextLayoutBounds bounds = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions, quadCorners);
                             int textQuadStart = buffer.Quads.Count;
                             for (int q = 0; q < quadCorners.Count; q++) buffer.Quads.Add(quadCorners[q]);
@@ -406,9 +341,8 @@ namespace MapRenderer.Unity.Text
                         }
                         else
                         {
-                            // Curved along-line symbol — per-glyph layout placed on the projected line each
-                            // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
-                            // Same reused-then-copied pattern as the point-text branch above.
+                            // Curved along-line symbol, oriented by the line tangent each frame, so it takes
+                            // no point-layout options. Same reused-then-copied pattern as above.
                             CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedPlacements);
                             int textGlyphStart = buffer.Glyphs.Count;
                             for (int g = 0; g < curvedPlacements.Count; g++) buffer.Glyphs.Add(curvedPlacements[g]);
@@ -442,11 +376,8 @@ namespace MapRenderer.Unity.Text
                     }
                     catch (System.Exception ex) when (!(ex is System.OperationCanceledException) && !ct.IsCancellationRequested)
                     {
-                        // Per-symbol robustness: one symbol's build failure (e.g. a deferred mixed-direction bidi
-                        // NotSupportedException) must never blank the whole tile. Skip THIS symbol; the rest still
-                        // build and commit. buffer.AddSymbol is the last statement of every guarded emit branch,
-                        // so no partial RECORD was added — a throw before it can leave at most an orphaned tail
-                        // range in a pool (Quads/Glyphs/...), never a symbol referencing invalid data.
+                        // One symbol's failure skips only that symbol. AddSymbol is last in every branch, so a
+                        // throw leaves at most an orphaned pool range, never a record pointing at bad data.
                         SkippedSymbolCount++;
                         LastSkipReason = ex.GetType().Name + ": " + ex.Message;
                     }

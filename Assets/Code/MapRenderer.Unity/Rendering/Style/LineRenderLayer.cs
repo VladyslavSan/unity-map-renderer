@@ -106,9 +106,8 @@ namespace MapRenderer.Unity.Rendering.Style
             {
                 _applier.ApplyZoom(inputs);
 
-                // Re-evaluate the dasharray per frame ONLY when its expression depends on zoom (the engine's
-                // classification). A constant dash (the common case) is set once at bind time and skipped
-                // here — no per-frame eval, no allocation.
+                // Re-evaluate the dasharray per frame ONLY when it depends on zoom. A constant dash is set
+                // once at bind time, so it costs no per-frame eval or allocation.
                 if (ExpressionKinds.DependsOnZoom(_paint.DashArrayKind))
                     using (PmZoomLineDash.Auto())
                         Materials.MaterialFactory.ApplyLineDashArray(_paint, Material, inputs.Zoom);
@@ -138,10 +137,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
         }
 
-        // Builds the prologue's graph build — the graph's write step does the mesh write.
-        // `context.BufferClip` is never read here, BY DECISION (see
-        // ITileMeshRenderLayer.BuildGraphRequest): clipping the input polyline turns the join at the
-        // boundary vertex into a cap, trading the seam band for a seam notch.
+        // `context.BufferClip` is not read here (see ITileMeshRenderLayer.BuildGraphRequest): clipping the
+        // polyline turns the join at the boundary vertex into a cap, a seam notch instead of a seam band.
         public Meshing.ILayerMeshBuild BuildGraphRequest(
             IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
             in TileLayerProcessContext context, int materialIndex, string payloadName)

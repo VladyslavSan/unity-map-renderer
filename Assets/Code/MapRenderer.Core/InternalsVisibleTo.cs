@@ -1,8 +1,7 @@
 using System.Runtime.CompilerServices;
 
-// Grant the Unity EditMode test assembly access to internal members of MapRenderer.Core.
-// The Tools/core-tests project compiles Core sources directly into its own assembly, so
-// internal members are visible there without this attribute.
+// Grant the Unity test assemblies access to MapRenderer.Core internals. Tools/core-tests
+// compiles Core sources into its own assembly, so it needs no grant.
 [assembly: InternalsVisibleTo("MapRenderer.Tests.EditMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.Shared")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.PlayMode")]

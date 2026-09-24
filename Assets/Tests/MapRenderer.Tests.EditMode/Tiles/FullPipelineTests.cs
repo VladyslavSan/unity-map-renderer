@@ -88,24 +88,13 @@ namespace MapRenderer.Tests.Tiles
             return g;
         }
 
-        /// <summary>Pairing check (tooth (c)) — <see cref="FillExtrusionGraphOutput.DebugBuffersAllocated"/>
-        /// vs. <see cref="FillExtrusionGraphOutput.DebugBufferDisposeNodes"/>, the same PAIRING idiom
-        /// <c>FillGraphOutput</c>/<c>LineGraphOutput</c> already carry (a worker-side <c>Dispose(handle)</c>
-        /// node cannot decrement a managed counter on completion, so balance is observable only as this
-        /// pairing, never a live count). No non-vacuity clause here — deliberately: these are process-wide
-        /// monotonic statics, so in a batch run any earlier test that drove this graph already satisfies
-        /// "allocated more than zero". This tooth's teeth come entirely from the RED-verify (delete one
-        /// <c>ScheduleDispose</c> call in <c>FillExtrusionMeshGraph</c>, confirm this test fails), not from
-        /// the equality alone.
-        ///
-        /// <para><b>What <paramref name="clipped"/> buys, stated honestly.</b> Not a new counter: the clip
-        /// arm adds NO <c>NewBuffer</c> allocation — its ping-pong buffers are raw <c>NativeArray</c>s,
-        /// uncounted, exactly as the roof's are. What the second case buys is that the clip arm is
-        /// EXECUTED and its dispose nodes reached, under the same disposal assertion; without it this tooth
-        /// had only ever scheduled the <c>RingSelectJob</c> arm. The fixture is wholly inside
-        /// <c>[0, 4096]</c>, so the clip takes <c>RingClipJob</c>'s verbatim fast path — intended: this
-        /// tooth is about node/dispose pairing, not clipping arithmetic.</para></summary>
-        /// <param name="clipped">Whether to schedule the clip arm (<c>true</c>) or the select arm.</param>
+        /// <summary>Pairs <see cref="FillExtrusionGraphOutput.DebugBuffersAllocated"/> with
+        /// <see cref="FillExtrusionGraphOutput.DebugBufferDisposeNodes"/>, the idiom <c>FillGraphOutput</c> and
+        /// <c>LineGraphOutput</c> carry. A worker-side <c>Dispose(handle)</c> node cannot decrement a managed
+        /// counter, so balance is observable only as this pairing. The statics are process-wide and monotonic, so a
+        /// non-vacuity clause proves nothing; RED-verify by deleting one <c>ScheduleDispose</c> call.</summary>
+        /// <param name="clipped"><c>true</c> runs the clip arm and its dispose nodes. It adds no counted buffer,
+        /// and on this in-tile fixture it takes <c>RingClipJob</c>'s verbatim fast path.</param>
         [Test]
         public void Dispose_BufferDisposeNodesPairWithAllocations([Values(false, true)] bool clipped)
         {
@@ -158,11 +147,8 @@ namespace MapRenderer.Tests.Tiles
 
         // ── (a) Golden parity of the subdivided output, over the whole fixture corpus. ─────
 
-        // Frozen golden: captured from GlobeFillSubdivideDispatch.Run over
-        // FillMeshPipeline.Schedule's output — WriteGlobeSubdivided's own call — captured before both
-        // were deleted.
-        // Re-captured after the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
-        // moves the corpus's triangulated output, so this digest was recomputed against the fixed predicate.
+        // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It
+        // includes the degenerate-candidate ear-predicate fix in EarcutJob.PointInTriangle.
         private const string FrozenGoldens =
             "TriangleStream=rGzWbOAGcl9bEQyzuS336mSlkYFucl2qqTZO2cO5zdk=";
 
@@ -216,14 +202,8 @@ namespace MapRenderer.Tests.Tiles
                     if (Accumulate(input, vertBytes))
                         anySplitFired = true;
 
-                    // Arm 2: clip ENABLED — the arm production actually takes on a curved projection
-                    // (MapViewConfig.FillTileBufferClip = 0.0 decodes to KeepTileUnits(0.0), not Disabled;
-                    // this test uses 64 so TryWindow provably enters). Curved + clip-enabled is exactly what
-                    // the only shipped scene (OpenStreetMapLiberty, UseGlobe: 1) runs, and before the
-                    // reshape it had geometry parity coverage only incidentally, through the pre-subdivision
-                    // columns FillMeshGraphParityTests used to compare — which no longer exist post-reshape.
-                    // Assert the enabled arm was actually ENTERED, not merely configured — the same rule
-                    // FillMeshGraphParityTests already applies.
+                    // Arm 2: clip ENABLED, the arm the shipped globe scene takes (FillTileBufferClip 0.0 decodes to
+                    // KeepTileUnits(0.0)). 64 makes TryWindow enter; assert the arm is ENTERED, not only configured.
                     input.Clip = TileBufferClip.KeepTileUnits(64.0);
                     Assert.IsTrue(input.Clip.TryWindow(geometry.Extent, out _, out _),
                         $"precondition: [{fileName}/{layer.Name}] the enabled clip arm must actually enter TryWindow");
@@ -248,33 +228,15 @@ namespace MapRenderer.Tests.Tiles
                 "GlobeFillSubdivideDispatch.Run/FillMeshPipeline.Schedule goldens — a real regression, not a re-bake candidate.");
         }
 
-        /// <summary>Schedules the graph over <paramref name="input"/> (curved arm), appends its subdivided
-        /// World/Up/East/Tile/Feature vertex columns + triangle indices into the running accumulators (same
-        /// fixed corpus order the caller iterates in — the golden is a digest over that order), and returns
-        /// whether this layer's subdivided triangle count exceeded its SOURCE (pre-subdivision) triangle
-        /// count — a genuine split. BOTH builds suppress the boundary band (see the body's comment: the
-        /// frozen digest pins subdivision and predates the band). The source count comes from a second,
-        /// flat-arm Schedule call over the SAME geometry: triangulation runs identically before the arm split
-        /// (job-scheduling-design.md), so the flat arm's TriangleIndices.Length IS the curved arm's
-        /// pre-subdivision count, with no need for the retired synchronous pipeline as a witness.
-        ///
-        /// <para>The extra schedule is <b>deliberate, not an oversight</b>: neither <see cref="FillGraphOutput"/>
-        /// nor <see cref="FillGraphCounts"/> carries a pre-subdivision triangle count on the curved arm (Counts'
-        /// four fields stop at Polygon/Ring/Hole/ForceClip — see <c>FillMeshGraphParityTests</c>'s header), so
-        /// there is no cheaper read of that quantity than re-deriving it from a second, flat-projection
-        /// Schedule over the identical input.</para></summary>
+        /// <summary>Schedules the curved-arm graph over <paramref name="input"/>, appends its de-indexed vertex
+        /// stream in the caller's fixed corpus order, and returns whether it subdivided past the source triangle
+        /// count. The source count comes from a flat-arm Schedule over the same geometry: triangulation runs before
+        /// the arm split (job-scheduling-design.md), so the flat <c>TriangleIndices.Length</c> is that count.
+        /// Neither <see cref="FillGraphOutput"/> nor <see cref="FillGraphCounts"/> carries it.</summary>
         private static bool Accumulate(FillMeshPipeline.LayerInput input, List<byte> vertBytes)
         {
-            // BOTH builds are band-free. The frozen digest below predates the boundary band and pins
-            // SUBDIVISION; the curved arm now carries a band of its own, so hashing it would force a re-bake
-            // of a long-lived constant — and a digest re-bake is the one artifact an authorisation cannot
-            // meaningfully cover, because "it changed" is all it ever reports. Suppressing on both arms keeps
-            // the pin measuring exactly what it always measured, and keeps the flat build a valid
-            // source-triangle-count oracle for the split predicate.
-            //
-            // What is therefore NOT covered here: the curved arm's shipped (banded) output. The observing
-            // teeth for that are GlobeFillBandTests (jobs level, conformance + the displacement invariant)
-            // and GlobeFillBandRenderTests (rendered).
+            // Both builds suppress the boundary band: the digest pins subdivision without it, and the flat build
+            // stays a valid source-triangle oracle. GlobeFillBandTests and GlobeFillBandRenderTests cover the band.
             input.SuppressBoundaryBand = true;
             FillMeshPipeline.LayerInput flatInput = input;
             flatInput.Projection = new WebMercatorProjection();
@@ -292,14 +254,8 @@ namespace MapRenderer.Tests.Tiles
                 int subdividedTriCount = graphOutput.TriangleIndices.Length / 3;
                 bool split = subdividedTriCount > sourceTriCount;
 
-                // DE-INDEXED, per vertex sharing (T-C1): walk the INDEX buffer and dereference. Sharing
-                // changes storage between byte-identical vertices, so the raw column order and the raw
-                // index VALUES both legitimately move; the triangle stream a
-                // triangle-by-triangle reader actually sees does not. Hashing the columns in storage order
-                // (what this test did before the rebase) reports every sharing change as a regression.
-                //
-                // The constant is UNCHANGED across that reframing: before sharing the indices were the
-                // identity permutation, so the de-indexed walk reproduced the storage-order digest exactly.
+                // DE-INDEXED: walk the index buffer and dereference. Vertex sharing moves storage order and index
+                // values between identical vertices; the triangle stream a reader sees does not move.
                 for (int i = 0; i < graphOutput.TriangleIndices.Length; i++)
                 {
                     int vi = graphOutput.TriangleIndices[i];
@@ -319,13 +275,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── (b) The vertex budget still binds, through the SCHEDULED dispatcher. ───────────────────────────
 
-        /// <summary>Mirrors <c>GlobeFillSubdividerTests.Budget_BoundsTheOutput_NoLowZoomExplosion</c>, but
-        /// through <c>GlobeFillSubdivideDispatch.Schedule</c> — the same scheduled dispatcher
-        /// <c>FillMeshGraph.cs</c> uses. <c>FillMeshGraph.Schedule</c> itself has no budget parameter (it
-        /// always reads <c>GlobeFillSubdivideDispatch</c>'s own <c>Default*</c> constants), so this pins the
-        /// BOUND on the scheduled path directly rather than through the whole graph. It exercises that bound
-        /// at a small budget, and the default is NOT headroom: the shipped z0 countries fixture measures
-        /// 164 535 interior vertices, 82% of the 200 000, with no band at all — the measurement lives on
+        /// <summary>Mirrors <c>GlobeFillSubdividerTests.Budget_BoundsTheOutput_NoLowZoomExplosion</c> through
+        /// <c>GlobeFillSubdivideDispatch.Schedule</c>, the dispatcher <c>FillMeshGraph</c> uses, at a small budget.
+        /// <c>FillMeshGraph.Schedule</c> has no budget parameter (it reads the <c>Default*</c> constants), so the
+        /// test drives the dispatcher directly. The default is not headroom; its measurement lives on
         /// <c>GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices</c>.</summary>
         [Test]
         public void Budget_StillBinds_ThroughTheScheduledDispatcher()
@@ -394,20 +347,14 @@ namespace MapRenderer.Tests.Tiles
         // Matches "<...>-<z>-<x>-<y>.pbf.bytes" — every committed fixture's naming convention.
         internal static readonly Regex TileIdFromName = new Regex(@"-(\d+)-(\d+)-(\d+)\.pbf\.bytes$");
 
-        // WebMercator / Spherical — the two REAL projections ProjectionDispatch.Schedule's switch
-        // enumerates. `null` used to be a third case here (the switch's own `case null` default), but null
-        // is no longer a valid dispatch arm — ProjectionDispatch now throws on it (the default now lives
-        // once, in TileManager.TickCore) — so a parity SWEEP has nothing to compare there any more; the
-        // throw-on-null contract itself is asserted separately, by
-        // ProjectionDispatch_Schedule_RejectsNull below.
+        // The two real projections ProjectionDispatch.Schedule's switch enumerates. A null projection throws there
+        // (TileManager resolves the default); ProjectionDispatch_Schedule_RejectsNull pins that.
         internal static readonly IProjection[] ProjectionCases = { new WebMercatorProjection(), new SphericalProjection() };
 
         private static string ProjectionName(IProjection p) => p.GetType().Name;
 
-        // ── Frozen goldens — captured from FillMeshPipeline.Schedule before it was deleted.
-        // See this file's header comment for the capture methodology and provenance.
-        // Re-captured after the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
-        // moves the corpus's triangulated output, so these digests were recomputed against the fixed predicate.
+        // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the degenerate-candidate
+        // ear-predicate fix in EarcutJob.PointInTriangle.
         internal const string FrozenGoldensMercator =
             "Vertex=abw1RVTEKTX0q2SAH1frMmR5klneemBfwyLltWhcC9Q= World=ix/06MAQIOpWn5DSnMXHtCoVJJOMR5ZlDZ1RPmZ4jos= " +
             "Up=ewzYSZfuaKsiX83I/hDgjTGtdNN/hOAoc/9I01wENsQ= FeatIdx=9LQBKkxJtx4HO+DNPANmTtZ4ZXhWRF4muz+8lUw4UQw= " +
@@ -419,14 +366,11 @@ namespace MapRenderer.Tests.Tiles
             "PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= " +
             "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
 
-        /// <summary>Walks the same (corpus fixture × 2 clip arms) + 1 synthetic-hole-layer sequence, in the
-        /// same fixed order, that <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/>
-        /// captured its frozen goldens against — extracted so <c>GraphDeterminismTests</c> can reproduce
-        /// the EXACT same input sequence its own golden-equality
-        /// assertion needs, rather than a second hand-typed copy that could silently drift from this one.
-        /// <paramref name="visit"/> receives each case's <see cref="FillMeshPipeline.LayerInput"/> in
-        /// accumulation order; the two corpus-coverage preconditions (at least 4 fixtures, at least one
-        /// layer) are asserted here, once, for every caller.</summary>
+        /// <summary>Walks (corpus fixture × 2 clip arms) + 1 synthetic hole layer in the fixed order the goldens of
+        /// <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/> pin.
+        /// <c>GraphDeterminismTests</c> shares it, so the two input sequences cannot drift apart. It asserts the
+        /// corpus-coverage preconditions (at least 4 fixtures, at least one layer) once for every caller.</summary>
+        /// <param name="visit">Receives each case's <see cref="FillMeshPipeline.LayerInput"/>, in order.</param>
         internal static void WalkCorpusAndSynthetic(IProjection projection, Action<FillMeshPipeline.LayerInput> visit)
         {
             string fixturesDir = Path.Combine(Application.dataPath, "Fixtures");
@@ -473,11 +417,8 @@ namespace MapRenderer.Tests.Tiles
                     baseInput.Clip = default;
                     visit(baseInput);
 
-                    // Arm 2: clip ENABLED — the arm production actually takes (MapViewConfig.cs:98 +
-                    // TileBufferClip.FromInspectorUnits: 0.0 decodes to KeepTileUnits(0.0), not Disabled).
-                    // Assert the enabled arm truly entered TryWindow, not merely that Clip was configured —
-                    // a corpus sweep that never enters the branch it claims to cover is this repo's
-                    // most-catalogued false green.
+                    // Arm 2: clip ENABLED, the arm production takes (TileBufferClip.FromInspectorUnits decodes 0.0 to
+                    // KeepTileUnits(0.0)). Assert the arm truly enters TryWindow, not only that Clip is configured.
                     baseInput.Clip = TileBufferClip.KeepTileUnits(64.0);
                     Assert.IsTrue(baseInput.Clip.TryWindow(geometry.Extent, out _, out _),
                         $"precondition: [{fileName}/{layer.Name}] the enabled clip arm must actually enter TryWindow");
@@ -530,13 +471,8 @@ namespace MapRenderer.Tests.Tiles
                 output.Handle.Complete();
                 try
                 {
-                    // FillMeshGraph.Schedule only returns !IsCreated when Geometry/RingVisitOrder aren't
-                    // created or RingVisitOrder is empty (FillGraphOutput.cs's own doc). Every caller of
-                    // Accumulate has already ruled that out — HasPolygonFeature (corpus arm) and
-                    // AnyPolygonHasAtLeastTwoHoles (synthetic arm) both require a surviving polygon feature,
-                    // which means a non-empty RingVisitOrder — so Counts is always populated here. Asserted,
-                    // not silently normalized to zero: an uncreated output reaching this line would mean one
-                    // of those preconditions broke, which is worth a loud failure, not a quietly-absorbed one.
+                    // Both walk arms pass only layers with a polygon feature, so RingVisitOrder is non-empty and
+                    // the output is created. An uncreated output here means that precondition broke; fail on it.
                     Assert.IsTrue(output.IsCreated, "precondition: Accumulate's callers guarantee non-empty geometry");
                     polyBytes.AddRange(BitConverter.GetBytes(output.Counts[0].PolygonCount));
                     ringBytes.AddRange(BitConverter.GetBytes(output.Counts[0].RingCount));
@@ -545,13 +481,8 @@ namespace MapRenderer.Tests.Tiles
                     if (curved) return; // The curved arm's five geometry arrays are POST-subdivision —
                                          // not the same quantity FillMeshPipeline.Schedule returned; never pinned here.
 
-                    // The INTERIOR prefix only, never the whole column set. FillBandJob appends the outward
-                    // boundary band to these same columns, and the frozen goldens below are the digest of what
-                    // the retired synchronous pipeline produced — the interior. Narrowing keeps every constant
-                    // byte-identical (a digest is the one artifact a re-bake cannot be reviewed), and turns
-                    // this tooth into the stronger claim: the band perturbed NOTHING the interior owns.
-                    // Band vertices are always the suffix; band triangles are interleaved per feature, so
-                    // they are filtered by vertex index rather than by position.
+                    // The interior prefix only: FillBandJob appends the band as a vertex suffix, and the goldens pin
+                    // the interior. Band triangles interleave per feature, so they are filtered by vertex index.
                     int vc = output.TileVertices.Length - output.Counts[0].BandVertexCount;
                     int ic = output.TriangleIndices.Length;
                     Assert.GreaterOrEqual(vc, 0, "the band cannot claim more vertices than the layer has");
@@ -600,24 +531,11 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // ── (e) Projection dispatch coverage — job-scheduling-design.md. ────────────────────────────────────
-        //
-        // Deliberately NOT a corpus sweep: this is about ProjectionDispatch.Schedule's DISPATCH being wired
-        // to the right struct, not about coverage breadth — Tiles/FillMeshGraphGlobeParityTests.cs's corpus
-        // parity check already sweeps the whole corpus under SphericalProjection for the (separate) subdivide
-        // dispatcher. One small layer, a real non-zero origin (a zero origin would leave the sphere check
-        // vacuous — World is already origin-relative, so "add the origin back" only matters when it moves
-        // the point).
-        //
-        // Two assertions, two subjects, neither borrowing the other's machinery: a null projection reaching
-        // FillMeshGraph.Schedule mid-way (after RingSelect/RingClip/RingAssembly/sizing/gather/earcut/
-        // aggregate have already scheduled, all holding the caller's geometry as a live [ReadOnly] input)
-        // would strand those jobs when the dispatch throws — no terminal handle is ever constructed to
-        // Complete() them, so the caller's own cleanup then throws trying to dispose geometry the safety
-        // system still considers in flight (the bystander-fault signature, not the real defect — see
-        // FillMeshGraph.Schedule's own up-front null guard, which exists precisely so this never reaches the
-        // dispatch that way). So the null-rejection claim below is tested at the unit level, directly against
-        // ProjectionDispatch.Schedule, with no graph and nothing to strand.
 
+        /// <summary>Tests null rejection on <c>ProjectionDispatch.Schedule</c> alone, with no graph. A null that
+        /// reached the dispatch inside <c>FillMeshGraph.Schedule</c> would strand the jobs already scheduled on the
+        /// caller's geometry, and the caller's cleanup would then throw a misleading fault. That is why
+        /// <c>FillMeshGraph.Schedule</c> guards null up front.</summary>
         [Test]
         public void ProjectionDispatch_Schedule_RejectsNull()
         {
@@ -631,6 +549,9 @@ namespace MapRenderer.Tests.Tiles
                 "failed for some unspecified reason.");
         }
 
+        /// <summary>Checks the dispatch reaches the spherical struct, not coverage breadth; one small layer is
+        /// enough. The origin is non-zero because World is origin-relative, so a zero origin leaves the sphere
+        /// check vacuous.</summary>
         [Test]
         public void ProjectionDispatch_SphericalArmIsEntered()
         {
@@ -658,9 +579,8 @@ namespace MapRenderer.Tests.Tiles
                         string mercatorHash  = HashDouble3ArrayFromList(mercatorOut.WorldPositions, mercatorOut.WorldPositions.Length);
                         string sphericalHash = HashDouble3ArrayFromList(sphericalOut.WorldPositions, sphericalOut.WorldPositions.Length);
 
-                        // Precondition: an empty spherical arm would make the AreNotEqual below fail for an
-                        // uninformative reason (two empty-list hashes trivially match) instead of naming the
-                        // real problem. Checked before it fires, not after.
+                        // Precondition: an empty spherical arm would make AreNotEqual below fail for an
+                        // uninformative reason (two empty-list hashes match).
                         int n = sphericalOut.WorldPositions.Length;
                         Assert.Greater(n, 0, "precondition: the spherical arm produced vertices");
 
@@ -825,12 +745,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── (b) Not-completed-at-return ─────────────────────────────────────────────────────────────
 
-        /// <summary>What this proves and no more: an unflushed job cannot have started, so this cannot
-        /// false-red on a small fixture — and for the same reason it proves only that nothing completed
-        /// SYNCHRONOUSLY, which is exactly the defect it names. Statement order is load-bearing: the poll
-        /// must be immediate and precede <c>ScheduleBatchedJobs()</c>. Its honest complement is the
-        /// structural check, <c>FillMeshGraphStructureTests</c> — this test alone could pass on a builder
-        /// that happened to be slow enough not to finish before the poll runs, on THIS machine, THIS run.</summary>
+        /// <summary>An unflushed job cannot have started, so this proves only that nothing completed
+        /// SYNCHRONOUSLY, and it cannot false-red on a small fixture. The poll must come before
+        /// <c>ScheduleBatchedJobs()</c>. A builder slow enough to miss the poll also passes, so
+        /// <c>FillMeshGraphStructureTests</c> carries the structural complement.</summary>
         [Test]
         public void Schedule_ReturnsWithHandleNotCompleted_BeforeAnyFlush()
         {
@@ -861,12 +779,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── (d) Scratch freed ────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Baseline/delta against the three static counters — same idiom
-        /// <c>DisposalLeakGuardTests</c> uses against <c>MeshDataPayload.DebugLiveAllocCount</c>, since the
-        /// counters are process-wide and other tests in the same batch run also touch them.
-        /// <see cref="FillGraphOutput.DebugBufferDisposeNodes"/> vs. <see cref="FillGraphOutput.DebugBuffersAllocated"/>
-        /// is a PAIRING check, not a live count — a worker-side <c>Dispose(handle)</c> node cannot decrement
-        /// a managed counter on completion (it runs off the main thread).</summary>
+        /// <summary>Baseline/delta against the three process-wide static counters, the idiom
+        /// <c>DisposalLeakGuardTests</c> uses. <see cref="FillGraphOutput.DebugBufferDisposeNodes"/> vs.
+        /// <see cref="FillGraphOutput.DebugBuffersAllocated"/> is a PAIRING check, not a live count: a worker-side
+        /// <c>Dispose(handle)</c> node runs off the main thread and cannot decrement a managed counter.</summary>
         [Test]
         public void Dispose_ReturnsLiveOutputsToBaseline_AndBufferDisposeNodesPairWithAllocations()
         {
@@ -958,56 +874,27 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Full-pipeline headless test: decode → assemble → earcut over all 239 country features. Re-homed
-    /// onto the Burst arm — <see cref="EarcutJobGatherHarness.RunLayer"/> drives the real
-    /// RingSelect → RingAssembly → gather → <c>EarcutJob</c> chain, and each result is paired with its
-    /// OWN input rings (<c>PolygonRun.InputOuter</c>/<c>InputHoles</c>, reconstructed from the gather
-    /// state's own columns) rather than a separately assembled <c>PolygonAssembler</c> list — the two
-    /// decompositions are not guaranteed to agree in polygon order (RED-checked: on this fixture
-    /// the two orders happen to coincide exactly, 0 of 3218 polygons mismatched by index — evidence
-    /// about this fixture's order, not licence to pair by index on a different one).
-    /// Validates that:
-    ///   (a) The pipeline terminates (no infinite loops / stall-guard bails).
-    ///   (b) Every earcut index is within the valid vertex range.
-    ///   (c) Area is approximately conserved for simple polygons (no holes): |triArea − outerArea|
-    ///       / outerArea &lt; 1%. Self-intersecting simple rings are skipped for area conservation,
-    ///       but the skip count is pinned and EVERY skip is proved degenerate via a direct O(n²)
-    ///       segment-intersection + vertex-coincidence test before being counted.
-    ///   (c2) Area is approximately conserved for holed polygons: |triArea − (outerArea − ΣholeArea)|
-    ///       / expected &lt; 1%. Holed polygons are skipped only when ALL rings (outer + every hole)
-    ///       are proved self-intersecting via HasSelfIntersection(). Well-formed holed polygons
-    ///       (all rings clean) must conserve area.
-    ///   (d) the index-format check: the async StyledFillTileBuilder upload path is covered by
-    ///       MapViewAsyncMeshBuildTests.
-    ///
-    /// KNOWN SKIP POLYGONS (sample-tile fixture, all confirmed degenerate by HasSelfIntersection, and
-    /// re-measured byte-identical on the Burst arm — both assemblers agree on all four):
-    ///   Four tiny clip-boundary slivers with self-intersecting rings (MVT tile-boundary artefacts).
-    ///   All four have forceClips=0 (stall guard did NOT fire on them; the area inflation is purely
-    ///   geometric — the rings are intrinsically degenerate before the triangulator sees them):
-    ///     - 4-vert ring: verts (3265,1333)(3273,1328)(3274,1326)(3270,1333)
-    ///                    shoelace=12.0, triArea=23.0 (ratio 1.92x) — proper edge crossing
-    ///     - 5-vert ring: verts (1432,1432)(1433,1430)(1433,1429)(1433,1430)(1433,1433)
-    ///                    shoelace=1.5,  triArea=2.5  (ratio 1.67x) — repeated vertex at (1433,1430)
-    ///                    (positions i=1 and i=3 are identical; improper self-intersection)
-    ///     - 4-vert ring: verts (1140,1300)(1142,1298)(1149,1297)(1147,1297)
-    ///                    shoelace=3.0,  triArea=9.0  (ratio 3.0x)  — proper edge crossing
-    ///     - 4-vert ring: verts (3515,1651)(3517,1649)(3517,1648)(3516,1652)
-    ///                    shoelace=1.5,  triArea=3.5  (ratio 2.33x) — proper edge crossing
-    ///   If the pinned count fails after a change, DO NOT simply update the constant — verify each new
-    ///   skip is genuinely degenerate (a real area-inflating self-intersection, not just a ring
-    ///   HasSelfIntersection flags) before updating.
-    ///
-    /// KNOWN NON-SKIPS (same fixture): five more rings that HasSelfIntersection also
-    /// flags (a repeated-vertex or T-junction artefact of near-collinear points) but that do NOT skip,
-    /// because they do not inflate area — ratio 1.00x, triangulated correctly, no overlap. The (c) skip
-    /// gate is `triArea > outerArea * 1.5`, not bare self-intersection; these are the rings that prove
-    /// the gate needs both clauses:
-    ///     - (2804,890)(2804,891)(2805,900)(2804,897)         shoelace=3.0, triArea=3.0
-    ///     - (434,922)(435,923)(438,925)(439,927)             shoelace=2.0, triArea=2.0
-    ///     - (1171,1627)(1173,1627)(1175,1626)(1176,1627)     shoelace=1.5, triArea=1.5
-    ///     - (585,1340)(586,1338)(586,1337)(586,1341)         shoelace=1.5, triArea=1.5
-    ///     - (3601,2179)(3604,2175)(3604,2174)(3604,2176)     shoelace=1.5, triArea=1.5
+    /// Full-pipeline headless test: decode → assemble → earcut over all 239 country features, on the Burst
+    /// arm (<see cref="EarcutJobGatherHarness.RunLayer"/>). Each result pairs with its OWN input rings
+    /// (<c>PolygonRun.InputOuter</c>/<c>InputHoles</c>), because the gather and <c>PolygonAssembler</c> can
+    /// order polygons differently. It pins termination, the index range, and area conservation within 1% for
+    /// simple and holed polygons. A holed polygon skips only when every ring self-intersects.
+    /// <para>Non-obvious why: the pinned skip count rests on these sample-tile rings. KNOWN SKIPS, all
+    /// forceClips=0 and degenerate before earcut (ratio = triArea / shoelace):</para>
+    /// <code>
+    ///   (3265,1333)(3273,1328)(3274,1326)(3270,1333)             1.92x  proper edge crossing
+    ///   (1432,1432)(1433,1430)(1433,1429)(1433,1430)(1433,1433)  1.67x  repeated vertex (1433,1430)
+    ///   (1140,1300)(1142,1298)(1149,1297)(1147,1297)             3.00x  proper edge crossing
+    ///   (3515,1651)(3517,1649)(3517,1648)(3516,1652)             2.33x  proper edge crossing
+    /// </code>
+    /// <para>KNOWN NON-SKIPS: HasSelfIntersection flags these near-collinear rings, but they triangulate at
+    /// 1.00x, so the skip gate also needs <c>triArea &gt; outerArea * 1.5</c>:</para>
+    /// <code>
+    ///   (2804,890)(2804,891)(2805,900)(2804,897)       (434,922)(435,923)(438,925)(439,927)
+    ///   (1171,1627)(1173,1627)(1175,1626)(1176,1627)   (585,1340)(586,1338)(586,1337)(586,1341)
+    ///   (3601,2179)(3604,2175)(3604,2174)(3604,2176)
+    /// </code>
+    /// <para>Before changing the pinned count, verify each new skip self-intersects AND inflates area.</para>
     /// </summary>
     public class FullPipelineTests
     {
@@ -1040,10 +927,8 @@ namespace MapRenderer.Tests.Tiles
             int holedAreaChecks  = 0;
             double totalSimpleRelError = 0.0;
             double totalHoledRelError  = 0.0;
-            // Pinned count of self-intersecting polygons that legitimately skip area conservation.
-            // Each skip is proved self-intersecting via HasSelfIntersection() before being counted.
-            // If this assertion fails after a triangulator change, confirm the new skip is a real
-            // self-intersection before updating the constant — do not simply increment it.
+            // Self-intersecting polygons that skip area conservation; HasSelfIntersection() proves each one
+            // before it counts. The total is pinned below.
             int skipCount = 0;
             int totalForceClips = 0;
 
@@ -1067,11 +952,8 @@ namespace MapRenderer.Tests.Tiles
 
                 if (!hasHoles && run.Indices.Length >= 3)
                 {
-                    // (c) Area conservation for simple polygons (no holes), tile space.
-                    // Self-intersecting (bowtie) polygons in real MVT tiles have shoelace area ≠
-                    // sum-of-triangle-areas by definition. Before skipping, we PROVE the ring is
-                    // self-intersecting via a direct O(n²) segment-intersection test (HasSelfIntersection),
-                    // so the skip cannot silently hide a triangulator defect on well-formed polygons.
+                    // (c) Area conservation for simple polygons. A bowtie's shoelace area differs from its triangle
+                    // area, so a skip first proves self-intersection; it cannot hide a defect on a clean ring.
                     double outerArea = AbsArea(run.InputOuter);
                     double triArea = ComputeTriArea(run.Vertices, run.Indices);
                     if (outerArea > 1.0) // skip near-zero areas (degenerate slivers of <1 sq tile-unit)
@@ -1079,9 +961,8 @@ namespace MapRenderer.Tests.Tiles
                         bool likelySelfIntersecting = triArea > outerArea * 1.5;
                         if (likelySelfIntersecting)
                         {
-                            // Prove self-intersection before counting the skip.
-                            // A ring that is NOT self-intersecting but fails area conservation
-                            // indicates a triangulator defect; Assert.IsTrue surfaces it immediately.
+                            // Prove self-intersection before counting the skip. A clean ring that fails
+                            // area conservation is a triangulator defect.
                             Assert.IsTrue(
                                 HasSelfIntersection(run.InputOuter),
                                 $"Area skip for {run.InputOuter.Count}-vert polygon (triArea={triArea:F2}, " +
@@ -1105,20 +986,8 @@ namespace MapRenderer.Tests.Tiles
                 }
                 else if (hasHoles && run.Indices.Length >= 3)
                 {
-                    // (c2) Area conservation for holed polygons.
-                    // Gate: ALL rings (outer + every hole) must be non-self-intersecting to
-                    // require area conservation. Rings with proper crossings or repeated vertices
-                    // (MVT tile-boundary artefacts) produce inflated areas by definition and are
-                    // legitimately excused. Well-formed holed polygons must conserve area to < 1%.
-                    //
-                    // NOTE: a self-intersecting-but-non-inflating outer (a near-
-                    // collinear sliver — HasSelfIntersection's repeated-vertex/T-junction clauses can
-                    // fire on a ring that still triangulates without overlap) legitimately falls through
-                    // this branch uncounted — it is not a "skip" in the (c) sense, since nothing needs
-                    // excusing: its area was never wrong. The pinned skipCount (below) is about (c)'s
-                    // outer-alone case only; a genuinely holed polygon whose outer also fails the (c)
-                    // inflation heuristic has no precedent in this fixture and is deliberately left
-                    // unhandled rather than guessed at.
+                    // (c2) Area conservation for holed polygons, required only when every ring is clean. A holed
+                    // polygon with a flagged ring falls through uncounted; skipCount pins only (c)'s skips.
                     double outerArea = AbsArea(run.InputOuter);
                     if (outerArea > 1.0)
                     {
@@ -1164,19 +1033,13 @@ namespace MapRenderer.Tests.Tiles
                 totalTriangles += run.Indices.Length / 3;
             }
 
-            // Pinned polygon count (Burst arm, measured): RunLayer has no per-MVT-feature counter to
-            // compare against the fixture's 239 features directly (unlike the retired managed loop, which
-            // counted both), so this exact pin is the closest available proxy — a harness that silently
-            // dropped a feature (or a ring-assembly regression that dropped/merged polygons) would move it.
+            // Pinned polygon count: RunLayer has no per-feature counter to match against the 239 features, so
+            // this is the proxy. A dropped feature, or dropped or merged polygons, moves it.
             Assert.AreEqual(3218, runs.Count, "Countries fixture's assembled polygon count (Burst arm) moved.");
             Assert.Greater(totalTriangles, 0, "Should have produced at least one triangle.");
 
-            // Pinned skip count: re-measured for the Burst arm — the upstream is
-            // RingAssemblyJob, not PolygonAssembler, and the polygon decomposition may differ. Measured
-            // result: 4, byte-identical to the managed arm's pin — the two assemblers agree on this
-            // fixture's degenerate rings. If this fails after a triangulator or assembler change, DO NOT
-            // just update the constant — verify each new skip is genuinely self-intersecting AND
-            // area-inflating before changing the pin (see the class doc's KNOWN NON-SKIPS).
+            // Pinned skip count, measured with RingAssemblyJob upstream. Before changing it, verify each new skip
+            // self-intersects AND inflates area (see the class doc's KNOWN NON-SKIPS).
             Assert.AreEqual(4, skipCount,
                 $"Expected exactly 4 self-intersecting polygon skips in the countries fixture, " +
                 $"got {skipCount}. If a triangulator change caused this, verify each new skip is a real " +
@@ -1190,16 +1053,10 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // -----------------------------------------------------------------------------------------
-        // Regression test: worst-case CLEAN holed polygon from the fixture (any outer-vert count).
-        // History: tiny tile-boundary clip artefacts produce opposite-wound rings that are NOT
-        // spatially contained in their exterior. The original sign-only PolygonAssembler mis-nested
-        // them as holes, so the triangulator bridged across the gap to a far-away ring and inflated
-        // triangle area up to ~34x (this masqueraded as a "triangulator bridge bug"). The real fix is
-        // in PolygonAssembler (RingContainedIn drops disjoint rings); the triangulator is correct for
-        // genuine holes. This test takes the worst-ratio REAL holed polygon — all rings
-        // non-self-intersecting, hole(s) genuinely contained — and asserts area conservation, guarding
-        // against regression of EITHER the assembler nesting (a disjoint hole would re-inflate the
-        // ratio) or hole-bridging.
+        // Regression test: the worst-ratio CLEAN holed polygon must conserve area. Non-obvious why: tile-boundary
+        // clip artefacts make opposite-wound rings outside their exterior; an assembler that nested them as holes
+        // (sign-only, without RingContainedIn) would make earcut bridge to a far ring and inflate area. This
+        // guards that nesting and hole-bridging.
         // -----------------------------------------------------------------------------------------
 
         [Test]
@@ -1208,9 +1065,8 @@ namespace MapRenderer.Tests.Tiles
             byte[] mvtBytes = LoadSampleTile();
             var runs = EarcutJobGatherHarness.RunLayer(mvtBytes, "countries", SampleTileId, forceLinearEarScan: false);
 
-            // Worst holed polygon (largest triArea/expected ratio) among ALL holed polygons whose
-            // rings are all non-self-intersecting. No outer-vert-count restriction: after the
-            // assembler fix the worst real case has a many-vert outer, not a 4-vert sliver.
+            // Worst holed polygon (largest triArea/expected ratio) among ALL clean holed polygons, with no
+            // outer-vert-count restriction: the worst real case has a many-vert outer.
             double worstRatio = 0.0;
             EarcutJobGatherHarness.PolygonRun worstRun = default;
             double worstExpected = 0.0, worstTri = 0.0;
@@ -1268,37 +1124,23 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // -----------------------------------------------------------------------------------------
-        // (d) MeshBuilder is retired.
-        //     UInt32 index format and vertex/index count are covered by
-        //     MapViewAsyncMeshBuildTests.BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh
-        //     and StyledFillTileBuilder tests (same assertions via StyledFillTileBuilder.BuildMesh).
+        // (d) UInt32 index format and counts: MapViewAsyncMeshBuildTests and StyledFillTileBuilder tests.
         // -----------------------------------------------------------------------------------------
         // Helpers
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// O(n²) test for degenerate / self-intersecting rings. A ring is considered degenerate
-        /// (and a legitimate skip for area conservation) if any of the following holds:
-        ///   (1) Proper edge crossing: two non-adjacent edges cross in their interiors (bowtie).
-        ///   (2) Repeated vertex: any two non-adjacent vertices share the same coordinates
-        ///       (creates backtracking overlap that inflates triangle-area vs shoelace-area).
-        ///   (3) Vertex-on-non-adjacent-edge: a vertex lies strictly on a non-adjacent edge
-        ///       (T-junction degenerate case).
-        /// Returns true iff the ring is degenerate by any of these criteria.
-        /// Used to prove that each area-check skip is caused by a genuinely degenerate input,
-        /// not by a triangulator defect. If HasSelfIntersection returns false for a skipped
-        /// polygon, that polygon's area inflation must be a triangulator bug (stall-guard force-clip
-        /// producing garbage triangles on a well-formed ring).
+        /// O(n²) degeneracy test: true iff (1) two non-adjacent edges properly cross, (2) two non-adjacent
+        /// vertices coincide, or (3) a vertex lies on a non-adjacent edge (T-junction). It proves each area
+        /// skip comes from degenerate input; a skipped ring it calls clean is a triangulator defect.
         /// </summary>
         private static bool HasSelfIntersection(List<double2> ring)
         {
             int n = ring.Count;
             if (n < 3) return false;
 
-            // (2) Repeated vertices: any pair of non-adjacent vertices with identical coordinates.
-            // Adjacent vertices (i, i+1) sharing coords would be a zero-length edge, which is
-            // degenerate but handled separately; here we detect the topologically-significant case
-            // of non-adjacent vertex coincidence that creates backtracking overlap.
+            // (2) Repeated vertices: non-adjacent coincidence creates backtracking overlap. An adjacent
+            // pair is a zero-length edge and is not checked here.
             for (int i = 0; i < n; i++)
             {
                 for (int j = i + 2; j < n; j++)
@@ -1402,15 +1244,10 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Parity and integration tests for the jobified decode + mesh pipeline.
-    ///
-    /// Structure:
-    ///   (1) Decode job vs managed MvtGeometry.Decode — ring count + per-ring vertex content hash equal.
-    ///   (2) Ring assembly job vs managed PolygonAssembler — polygon/hole count match.
-    ///   (3) End-to-end jobified vs managed path — vertex+index CONTENT HASH equal (strict,
-    ///       no tolerance — tile-space integer coords are exact; projection uses same job on same input).
-    ///       Subsumes the count-only DataSourceRenderPathTests follow-up.
-    ///   (4) Multi-tile throughput — N tiles scheduled and completed; total verts == N × single-tile.
+    /// Parity tests for the jobified decode + mesh pipeline: (1) the decode job matches managed
+    /// <c>MvtGeometry.Decode</c> by ring count and vertex hash; (2) ring assembly matches <c>PolygonAssembler</c>
+    /// polygon/hole counts; (3) the end-to-end vertex+index hash matches with no tolerance, since tile-space
+    /// integer coordinates are exact; (4) N tiles give N × the single-tile vertex count.
     /// </summary>
     [TestFixture]
     public class JobifiedPipelineTests
@@ -1577,9 +1414,8 @@ namespace MapRenderer.Tests.Tiles
 
                 int ringCount = outRingCount[0];
 
-                // The assembler is kind-gated. This fixture hand-drives MvtDecodeJob (no
-                // materializer), so the column it would have produced is supplied here — every feature IS a
-                // polygon, which is exactly what the managed reference arm assembles.
+                // The assembler is kind-gated, and no materializer runs here, so supply its column: every
+                // feature is a polygon, as in the managed reference arm.
                 var featureKinds = new NativeArray<TileGeometryType>(
                     featureCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 for (int fi = 0; fi < featureCount; fi++) featureKinds[fi] = TileGeometryType.Polygon;
@@ -1827,22 +1663,13 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Tooth 1a: greppable presence — all expected marker names are declared ──
-        //
-        // This is a compile-time check: every entry below is a `const` reference into the owning type's
-        // nested ProfilerMarkerNames (the SSOT), so deleting or renaming a production marker breaks THIS
-        // FILE'S compile. The runtime "MapRenderer." prefix assertion is belt-and-suspenders on top.
-        //
-        // A bare string literal here would be worthless — it compiles whatever production does, so it can
-        // (and did) outlive the marker it names. Three such literals were removed when the last declaration
-        // sites moved to the SSOT pattern: "MapRenderer.Mesh.Build", "MapRenderer.Line.MeshBuild" and
-        // "MapRenderer.Symbol.BatchBuild.SoA.Project" named no marker anywhere in production. NEVER add a
-        // literal back — if a name has no const to point at, the marker does not exist.
+        /// <summary>A compile-time check: every entry is a <c>const</c> in its owner's nested
+        /// <c>ProfilerMarkerNames</c>, so deleting or renaming a production marker breaks this file's compile.
+        /// Never add a bare string literal: it compiles whatever production does, so it can outlive its marker.
+        /// </summary>
         [Test]
         public void ProfilerMarkers_AllExpectedNamesAreReachable()
         {
-            // Verify each marker name by constructing a new ProfilerMarker with the expected name
-            // and checking the name round-trips. This also confirms Unity.Profiling is accessible.
             string[] expectedNames =
             {
                 MapView.ProfilerMarkerNames.CameraAdvance,
@@ -1850,20 +1677,11 @@ namespace MapRenderer.Tests.Tiles
                 TileManager.ProfilerMarkerNames.FetchPoll,
                 TileManager.ProfilerMarkerNames.SchedulerRequest,
                 TileDecodeDispatch.ProfilerMarkerNames.TileDecode,
-                // vestige sweep: StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData removed — three
-                // such literals were removed when the last declaration sites moved to the SSOT pattern (see
-                // this file's own doctrine above); NEVER add a literal back. Its only opener was the
-                // synchronous WriteMeshData method, which had zero production callers and moved to the test
-                // assembly (MapRenderer.Tests.SyncMeshWrite.Fill) with it.
                 StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput,
                 TileManager.ProfilerMarkerNames.MeshUpload,
                 MvtDecoder.ProfilerMarkerNames.Decode, // The marker follows the decode it brackets
-                // FillMeshPipeline.ProfilerMarkerNames.Clip/
-                // RingAssembly/Earcut/Project retired with FillMeshPipeline.Schedule, the schedule-then-Complete
-                // main-thread path they bracketed — FillMeshGraph's nodes are scheduled, not run synchronously,
-                // and carry no marker of their own (the graph write step's Profiler coverage is
-                // StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput, already listed above).
-                // Per-frame MapView.LateUpdate sub-phases + EG-drive split (added to localise live zoom spikes).
+                // FillMeshGraph's nodes carry no marker; BuildLayerInput above covers the fill graph's prologue.
+                // Per-frame MapView.LateUpdate sub-phases + EG-drive split.
                 MapView.ProfilerMarkerNames.LateUpdate,
                 MapView.ProfilerMarkerNames.SceneFrame,
                 MapView.ProfilerMarkerNames.SymbolCollect,
@@ -1921,22 +1739,9 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Tooth 1b: wired-not-dead — ProfilerRecorder reads > 0 samples after a tile load ──
-        //
-        // Uses a [UnityTest] coroutine so we can yield a frame after the tile load completes,
-        // giving the profiler a chance to commit the sample data. The recorder is started BEFORE
-        // the tile load so it captures the samples fired in BuildTile.
-        //
-        // A fill layer's PRODUCTION path no longer fires
-        // WriteMeshData at all — the graph arm's prologue calls BuildLayerInput and the write step is a
-        // Burst job with no ProfilerMarker sample of its own. A marker named WriteMeshData around the
-        // prologue would make the telemetry contract a lie, since no mesh is written there any more.
-        // WriteMeshData is not in production at all any more (vestige sweep: moved to the test assembly,
-        // zero production callers) — so this tooth repoints at the marker production actually fires now.
-        //
-        // BuildMeshData (which fires PmBuildMesh) runs on a ThreadPool thread inside
-        // Task.Run. We must NOT use CollectOnlyOnCurrentThread — that would miss cross-thread samples.
-        // ProfilerRecorderOptions.Default collects samples from all threads.
+        /// <summary>Wired-not-dead: the recorder reads samples of <c>BuildLayerInput</c>, the marker a fill
+        /// layer's graph prologue fires, after a tile load. The graph's write step is a Burst job with no marker
+        /// of its own. The coroutine yields frames so the profiler commits the samples.</summary>
         [UnityTest]
         public IEnumerator ProfilerRecorder_BuildMarker_HasSamplesAfterTileLoad()
         {
@@ -1950,10 +1755,8 @@ namespace MapRenderer.Tests.Tiles
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
-            // Start both recorders BEFORE the tile load — must be open when samples fire.
-            // ProfilerCategory.Scripts matches the explicit category in each ProfilerMarker constructor.
-            // Negative control (bogus name) verifies the count metric discriminates real hits from frames.
-            // Use Default (not CollectOnlyOnCurrentThread) — build marker fires on ThreadPool.
+            // Start both recorders BEFORE the tile load, in the markers' Scripts category. The bogus name is a
+            // negative control: it proves the metric counts firings, not frames.
             using var recorder      = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, markerName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame);
@@ -1981,13 +1784,8 @@ namespace MapRenderer.Tests.Tiles
                 yield return null;
                 yield return null;
 
-                // Sum marker invocations across all recorded frames.
-                // ProfilerRecorderSample.Count is the number of times the marker Begin/End fired that frame.
-                // This is the correct hit-count metric — recorder.Count alone is the buffer entry count (frames),
-                // which would be non-zero even if the marker were never called.
-                // Clamp to the ring's CAPACITY, not Count: ProfilerRecorder is a fixed-size ring, and the
-                // pump above runs far more frames than that, so once it wraps `Count` stops being a valid
-                // index bound and GetSample() throws IndexOutOfRange (intermittently, on slow machines).
+                // Sum each sample's Count (firings per frame); recorder.Count counts frames. Clamp to CAPACITY:
+                // once the fixed-size ring wraps, Count is no valid index bound and GetSample() throws.
                 long realHits  = 0;
                 for (int i = 0; i < math.min(recorder.Count, RecorderCapacity); i++)
                     realHits += recorder.GetSample(i).Count;
@@ -2022,28 +1820,11 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance teeth, carried onto the reference-counted <see cref="SharedDisposable{T}"/>: the
-    /// mesh and symbol cadences of ONE kick observe the SAME <see cref="IDecodedTile"/> instance, in either
-    /// arrival order. Successor to <c>SharedTileDecodeTests</c>.
-    ///
-    /// <para><b>The claim got stronger and the tooth got weaker, deliberately.</b> Under the lazy handle this
-    /// asserted a real race outcome — whichever cadence read first performed the one decode and the other
-    /// reused it. Under the eager decode the tile is already built when the kick receives it, so sharing is
-    /// true BY CONSTRUCTION. It is still worth pinning: nothing else in the suite would notice a future
-    /// change that re-introduced a per-pass decode (say, a handle that cloned its tile per reader), and the
-    /// per-source-layer buffer sharing the whole design rests on is exactly what that would break.</para>
-    ///
-    /// <para><b>What retired here.</b> The cached-fault tooth
-    /// (<c>GetOrDecode_MalformedBytes_CachesTheFault_SameExceptionInstanceToEveryCaller</c>) is gone: there
-    /// is no cache because there is no second decode, and malformed bytes can no longer reach a lease at all
-    /// — <c>TileDecodeDispatch.DecodeAsync</c> faults the source's task and mints nothing. Its two surviving
-    /// halves moved: <b>a fault in the mesh pass still settles every payload slot</b> and <b>the symbol pass
-    /// PROPAGATES</b> are re-asserted in <c>TileLayerProcessorRunnerTests</c> against a released lease (the
-    /// only fault that still reaches the runner), and <b>the fault is reported, once, as a DECODE fault</b>
-    /// is <c>TileFeatureSourceGetTileTests</c>' and <c>EagerDecodeOwnershipTests</c>' now. The two-concurrent-caller
-    /// canary retired too, replaced by <c>SharedDisposableTests</c>' refcount race — the quantity under
-    /// contention changed from a lazy decode to a counter, and the old canary would be green against a
-    /// broken counter.</para>
+    /// The mesh and symbol cadences of ONE kick observe the SAME <see cref="IDecodedTile"/> instance through the
+    /// reference-counted <see cref="SharedDisposable{T}"/>, in either arrival order. The eager decode makes this
+    /// sharing structural, but nothing else would notice a per-pass decode, which breaks the per-source-layer
+    /// buffer sharing the design rests on. <c>TileLayerProcessorRunnerTests</c>, <c>TileFeatureSourceGetTileTests</c>
+    /// and <c>EagerDecodeOwnershipTests</c> pin fault handling; <c>SharedDisposableTests</c> pins the refcount race.
     /// </summary>
     [TestFixture]
     public class SharedDisposableSharingTests
@@ -2165,18 +1946,11 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Proves
-    /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> decodes the fetched bytes exactly once,
-    /// shares that same <see cref="IDecodedTile"/> reference across every processor in dense order, runs NO
-    /// tail (the tail is the caller's main-thread step), rejects a <see cref="LayerPhase.WorkerOnly"/>
-    /// processor (the mirrored guard), and propagates a decode fault rather than swallowing it (the
-    /// "fault policy: propagate, don't settle").
-    /// <para>It also pins the sharing half of the same claim: every processor of the pass borrows the
-    /// same per-source-layer buffer, read off the decoded layer. It remains the only tooth that can
-    /// see this: re-materializing per get is byte-identical in output.</para>
-    /// <para>Every pass here runs against a live lease reference, released in a <c>finally</c>, mirroring
-    /// the two production sites — reading a lease after its last release is a programming error and
-    /// throws.</para>
+    /// Pins that <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> hands the same
+    /// <see cref="IDecodedTile"/> reference to every processor in dense order, runs NO tail (the tail is the
+    /// caller's main-thread step), and rejects a <see cref="LayerPhase.WorkerOnly"/> processor. It is the only
+    /// tooth that sees each processor borrow the same per-source-layer buffer; a per-get copy is byte-identical.
+    /// Each pass runs against a live lease reference, released in a <c>finally</c> like the production sites.
     /// </summary>
     [TestFixture]
     public class TileSymbolWorkerPassTests
@@ -2193,13 +1967,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Test doubles (kept in the test assembly per convention — no production observability added) ──
 
-        /// <summary>Records ProcessOnWorker invocations (order + the observed decoded-tile reference + the
-        /// source-layer buffer that tile hands back) into a SHARED log, and counts CompleteOnMain calls
-        /// so a test can assert the runner never invokes the tail.
-        /// <para><b>The third column.</b> It records the actual <c>TileGeometryBuffers</c> the processor
-        /// borrows, read through the same <c>GetLayer(...).Geometry</c> expression the real consumers use.
-        /// A layer that re-materialized per get hands out a different backing pointer to each processor,
-        /// which is the silent regression this column exists to catch.</para></summary>
+        /// <summary>Logs each ProcessOnWorker call (order, decoded-tile reference, and the source-layer buffer
+        /// read through the consumers' <c>GetLayer(...).Geometry</c> expression) into a SHARED log, and counts
+        /// CompleteOnMain calls. The buffer column catches a layer that re-materializes per get: that hands each
+        /// processor a different backing pointer.</summary>
         private sealed class RecordingWorkerThenMainProcessor : ITileWorkerThenMainLayerProcessor
         {
             private const string ProbeSourceLayer = "countries"; // present in the committed fixture
@@ -2252,11 +2023,8 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreSame(log[0].tile, log[1].tile, "every processor must observe the SAME decoded tile reference");
             Assert.AreSame(log[0].tile, log[2].tile, "every processor must observe the SAME decoded tile reference");
 
-            // One materialization per source-layer, shared by
-            // every symbol layer of the pass. NativeArray<T>.Equals compares the backing pointer and length,
-            // so this is buffer IDENTITY, not content equality — a layer that re-materialized per get would
-            // hand each processor an equal-CONTENT but different-POINTER buffer and fail here, with output
-            // still byte-identical everywhere else in the suite.
+            // One materialization per source layer, shared by every symbol layer of the pass. NativeArray<T>.Equals
+            // compares pointer and length, so this checks buffer IDENTITY, which a per-get copy fails.
             Assert.IsTrue(log[0].buffer.IsCreated,
                 "precondition: the probe source-layer must really carry geometry, or the identity clauses " +
                 "below compare two default(NativeArray)s and assert nothing");
@@ -2289,23 +2057,14 @@ namespace MapRenderer.Tests.Tiles
             }
             finally
             {
-                // This test MINTS a lease, so it owns the creator's reference and owes exactly one release —
-                // on the throwing path too. Skipping it strands the decoded tile's Allocator.Persistent
-                // buffers for the rest of the run, and NativeLeakDetection is off in the batch gate, so
-                // nothing would say so.
+                // This test mints the lease, so it owes one release on the throwing path too. A skipped release
+                // strands Persistent buffers silently: NativeLeakDetection is off in the batch gate.
                 decode.Release();
             }
         }
 
-        // RunSymbolWorkerPass_WhenTheDecodedTileReadFaults_Propagates_AndInvokesNoProcessor is RETIRED
-        // here, not "made to pass". It drove the propagate-don't-settle
-        // policy through DecodedTileLease's own release-then-read ObjectDisposedException — the ONE fault
-        // that could still reach this runner post-eager-decode. SharedDisposable<T> is undefended by design
-        // (no throw after the last Release(); see its doc), so the anti-vacuity assertion this tooth opened
-        // with can no longer be satisfied, and neither can the fault it exists to drive: `decode.Value` after
-        // release just hands back the (disposed) instance, so RunSymbolWorkerPass's loop runs the
-        // RecordingWorkerThenMainProcessor fake — which never reads native memory — to completion instead of
-        // faulting. This mirrors DecodedTileLeaseTests' retirement exactly.
+        // Limitation: no test here drives the propagate-don't-settle fault policy. A SharedDisposable<T> read after
+        // its last Release() does not throw (only a DEBUG assertion fires), so no read fault reaches this runner.
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -2314,9 +2073,8 @@ namespace MapRenderer.Tests.Tiles
 
     public class VisibleTileSelectorDiagnosticTests : BaseTestFixture
     {
-        // Sweep tilt (heading 0) — the bug screenshot is ~60° from overhead (camera Y=3647,Z=-6317 ⇒
-        // atan(6317/3647)=60°), where the top of the frustum grazes the horizon — then sweep heading at a
-        // fixed steep tilt to show tilt+heading compounding. Watch MISSING grow.
+        // Sweep tilt at heading 0 up past 60°, where the frustum top grazes the horizon, then sweep heading at a
+        // fixed steep tilt, where tilt and heading compound.
         [TestCase(0.0,  0.0)]
         [TestCase(30.0, 0.0)]
         [TestCase(45.0, 0.0)]
@@ -2431,10 +2189,8 @@ namespace MapRenderer.Tests.Tiles
                     return outp;
                 }
 
-                // The tile's flat ground quad in render space (4 corners), and an EXACT test: the quad clipped
-                // against the six REAL Unity frustum planes is non-empty. This is the true "is it visible" oracle
-                // — unlike TestPlanesAABB, which tests the tile's AABB and so keeps false positives (a big box
-                // diagonally past a corner). The AABB test is a conservative superset of this.
+                // Exact visibility oracle: the tile's ground quad, clipped against the six Unity frustum planes, is
+                // non-empty. TestPlanesAABB tests the AABB instead, a superset with false positives.
                 Vector3[] TileQuad(TileId t)
                 {
                     var q = new Vector3[4];
@@ -2469,11 +2225,8 @@ namespace MapRenderer.Tests.Tiles
                     return true;
                 }
 
-                // ── (2) GROUND TRUTHS ──────────────────────────────────────────────────────────────────────
-                // exactTruth = genuinely visible (quad clip). truth = Unity's 6-plane AABB test (a superset —
-                // has false positives). The production ViewFrustum sits BETWEEN them: it covers every visible
-                // tile (conservative) but tightens the AABB test with a reverse frustum-AABB pre-cull, so it
-                // drops the worst false positives Unity keeps.
+                // ── (2) GROUND TRUTHS: exactTruth = visible (quad clip); truth = Unity's 6-plane AABB superset.
+                // ViewFrustum sits between: it covers every visible tile; a reverse pre-cull drops false positives.
                 var exactTruth = Traverse(QuadMeetsFrustum, out int tested);
                 var truth = Traverse(t =>
                 {
@@ -2484,9 +2237,8 @@ namespace MapRenderer.Tests.Tiles
                     return GeometryUtility.TestPlanesAABB(planes, b);
                 }, out _);
 
-                // ── LINCHPIN — the ENGINE-FREE ViewFrustum brackets between exact-visible and Unity's 6-plane
-                //    test: it covers every genuinely-visible tile (no false negatives) yet never exceeds the
-                //    plane test (its reverse pre-cull only removes exact false positives). ─────────────────────
+                // ── LINCHPIN — the engine-free ViewFrustum has no false negatives and never exceeds Unity's
+                //    6-plane test. ────────────────────────────────────────────────────────────────────────────
                 var frustum = ViewFrustum.FromPose(pos, fwd, up, fov, (double)ucam.aspect,
                                                    ucam.nearClipPlane, ucam.farClipPlane);
                 var truthEF = Traverse(t =>
@@ -2508,10 +2260,8 @@ namespace MapRenderer.Tests.Tiles
                 var missing = exactTruth.Where(t => !cs.Contains(t)).ToList(); // visible but NOT selected → gaps
                 var extra   = current.Where(t => !es.Contains(t)).ToList();    // selected but NOT visible → wasted
 
-                // ── LOD partition check — every ground-truth tile needs exactly one ANCESTOR-OR-SELF in the
-                // LOD cover. z == g.Z (self) counts; the walk goes all the way to z == 0 (the world tile is an
-                // ancestor of everything); a descendant branch is impossible (targetZ caps the cover and
-                // g.Z == targetZ, so no cover tile is below g).
+                // ── LOD partition check — each ground-truth tile needs exactly one ANCESTOR-OR-SELF in the LOD
+                // cover, walked to z == 0. No cover tile is below g: targetZ caps the cover and g.Z == targetZ.
                 var lodSet     = new HashSet<TileId>(lodCover);
                 var holes      = new List<TileId>();
                 var overlapped = new List<TileId>();
@@ -2544,32 +2294,26 @@ namespace MapRenderer.Tests.Tiles
                     $"selector MUST cover every visible tile (tilt={tiltDeg}° heading={headingDeg}°); " +
                     $"{missing.Count} MISSING: {Fmt(missing)}");
 
-                // LEVEL-OF-DETAIL ACCEPTANCE: exact set membership is the wrong question here — a coarse
-                // ancestor legitimately stands in for its children. Every ground-truth tile must instead be
-                // covered by exactly one ancestor-or-self. Holes and overlaps are different defects (a white
-                // gap vs. a double-covered patch, different costs, different fixes) — assert them separately.
+                // LOD ACCEPTANCE: a coarse ancestor stands in for its children, so assert one ancestor-or-self per
+                // truth tile. Holes (white gaps) and overlaps (double cover) are different defects; assert each.
                 Assert.AreEqual(0, holes.Count,
                     $"screen-space LOD left {holes.Count} visible tile(s) uncovered (white gaps) at " +
                     $"tilt={tiltDeg}° heading={headingDeg}°: {Fmt(holes)}");
-                // Tripwire, not a live check: the traversal emits a tile or descends into its children,
-                // never both (FrustumTileSelector's emit-then-continue), so the cover is prefix-free and
-                // n >= 2 is unreachable today. It becomes reachable under the planned retain-until-replaced
-                // change in TileLodStrategy, which is why the clause is live code rather than a comment.
+                // Tripwire: FrustumTileSelector emits a tile or descends, never both, so n >= 2 is unreachable.
+                // A retain-until-replaced TileLodStrategy would make it reachable.
                 Assert.AreEqual(0, overlapped.Count,
                     $"screen-space LOD covers {overlapped.Count} visible tile(s) more than once (a cover " +
                     $"tile and its own ancestor are both emitted) at tilt={tiltDeg}° heading={headingDeg}°: " +
                     $"{Fmt(overlapped)}");
 
-                // ANTI-VACUITY 1 — runs at EVERY pose. Holes and overlaps cannot see a cover that is
-                // uniformly too COARSE: every truth tile still has exactly one ancestor, so both stay zero.
-                // The near field must reach full detail, which is what the strategy promises.
+                // ANTI-VACUITY 1, at every pose: a uniformly too-COARSE cover has no holes or overlaps, so the
+                // near field must reach full detail.
                 Assert.AreEqual(targetZ, lodCover.Max(t => t.Z),
                     $"screen-space LOD never reaches full detail at tilt={tiltDeg}° " +
                     $"heading={headingDeg}° — the near field must hit the target zoom z={targetZ}");
 
-                // ANTI-VACUITY 2 — the LOD arm must not degenerate into a second flat arm (the wrong
-                // strategy wired in). Bounded to tilt >= 45 because below that the shipped cover is
-                // honestly single-zoom; asserting mixed-zoom there would red a correct tree.
+                // ANTI-VACUITY 2: the LOD arm must not be a second flat arm. Only at tilt >= 45, because below
+                // that the shipped cover is single-zoom.
                 if (tiltDeg >= 45.0)
                     Assert.Less(lodCover.Min(t => t.Z), lodCover.Max(t => t.Z),
                         $"screen-space LOD cover is single-zoom at tilt={tiltDeg}° heading={headingDeg}° — " +
@@ -2622,12 +2366,8 @@ namespace MapRenderer.Tests.Tiles
             public IDecodedTile Decode(TileId id, byte[] bytes) => throw new InvalidOperationException("boom");
         }
 
-        // Tooth 1/2 deliberately do NOT `await` — an async-Task test method resumes wherever the runner's
-        // SynchronizationContext/continuation lands, which is not necessarily this method's own thread, so
-        // `caller` read after an await would be an assumption about runner scheduling, not a fact about the
-        // scheduler under test. Instead: capture `caller` synchronously, kick the decode, then park on
-        // WaitOffPlayerLoop (the same off-PlayerLoop wait tooth 3 pins) and read the result with
-        // GetAwaiter().GetResult() — mirrors BurstJobRunOffMainSpikeTests.RunOnWorker.
+        // The two thread tests below do NOT await: an async test resumes wherever the runner's continuation
+        // lands, so `caller` after an await would measure the runner. They park on WaitOffPlayerLoop instead.
 
         [Test]
         public void InlineScheduler_RunsDecodeOnCallingThread()
@@ -2675,10 +2415,8 @@ namespace MapRenderer.Tests.Tiles
             UniTask<SharedDisposable<IDecodedTile>> task = TileDecodeDispatch.DecodeAsync(
                 SomeTile, SampleTileFixture.Bytes(), probe, new ThreadPoolWorkScheduler()).Preserve();
 
-            // The exact wait TileManager.DrainMeshBuilds/DoDispose use: parks on a kernel event with
-            // NO PlayerLoop pumping. A bridge that marshalled the UniTaskCompletionSource's completion via
-            // UniTask.SwitchToMainThread() would post the continuation to the PlayerLoop instead of firing
-            // it on the pool thread, and this would time out.
+            // The wait TileManager.DrainMeshBuilds/DoDispose use, with NO PlayerLoop pumping. A bridge that
+            // marshalled completion to the main thread would post it to the PlayerLoop, and this would time out.
             bool completed = task.WaitOffPlayerLoop(10000);
 
             Assert.IsTrue(completed,

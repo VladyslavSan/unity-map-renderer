@@ -16,14 +16,10 @@ namespace MapRenderer.Core.Json
     }
 
     /// <summary>
-    /// A minimal, dependency-free JSON DOM node (clean-room; no engine, no external libs — same
-    /// posture as <c>Mvt/ProtobufReader.cs</c>). Holds parsed JSON verbatim, which is what lets the
-    /// style model retain unknown / forward-compat sub-trees (<c>paint</c>/<c>layout</c>/<c>filter</c>
-    /// and tolerated root keys) without typing or discarding them.
-    ///
-    /// Numbers are stored as <see cref="double"/> (JSON has a single numeric type); accessors expose
-    /// integer/bool/string views. All accessors are tolerant: a type mismatch returns the supplied
-    /// fallback rather than throwing, so callers stay forward-compatible.
+    /// A minimal, dependency-free JSON DOM node. It holds parsed JSON verbatim, so the style model keeps
+    /// unknown and forward-compat sub-trees without typing or discarding them. Numbers are stored as
+    /// <see cref="double"/>, JSON's single numeric type. Accessors are tolerant: a type mismatch returns
+    /// the supplied fallback rather than throwing, so callers stay forward-compatible.
     /// </summary>
     public sealed class JsonValue
     {

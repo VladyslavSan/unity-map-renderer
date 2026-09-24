@@ -1,11 +1,5 @@
-// Style/StyleRestyleTests.cs — data-driven color baking, style-document parsing, symbol feature
-// extraction (icon + text), Fill.PaintProperties, and the retired whole-document restyle gate. Several
-// members exercise MapRenderer.Jobs.Mvt / Unity.Collections and are not registered in core-tests.csproj.
-//
-// StyleTransitionTests.cs/StyleSymbolTests.cs (UnityEngine-side, bare `Object`/`Color` = UnityEngine's)
-// and DevicePixelRatioBindingTests.cs stay separate files: this file's bare `Color` means
-// MapRenderer.Core.Expressions.Color (CS0104 otherwise) — see docs/conventions-short.md's "Plain-import
-// collisions" note.
+// Style/StyleRestyleTests.cs — uses MapRenderer.Jobs.Mvt / Unity.Collections; not in core-tests.csproj.
+// Bare `Color` here is MapRenderer.Core.Expressions.Color, so UnityEngine-side Style files stay separate.
 //
 // Contents:
 //   DataDrivenColorBakeTests           — data-driven vs constant color: which carrier bakes it, uniform or stream.
@@ -46,20 +40,9 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Data-driven paint evaluation over the real fixture: <see cref="StyleProperty{T}"/>
-    /// resolved once per decoded MVT feature, which is what <c>StyledFillTileBuilder</c> and
-    /// <c>StyledLineTileBuilder</c> do per feature while meshing a tile.
-    ///
-    /// The fixture (Assets/Fixtures/sample-tile.bytes) contains the "countries" layer with 239 polygon
-    /// features and a "CONTINENT" string property (confirmed: 8 distinct values, including "Asia" and
-    /// "South America").
-    ///
-    /// Teeth:
-    ///   1. Distinct-color tooth: a match expression on CONTINENT produces ≥2 distinct colors across
-    ///      the 239 baked features (robust against fixture ordering).
-    ///   2. Constant-input control: an expression that resolves identically for all features (match on
-    ///      a non-existent key → default) produces exactly 1 distinct color across all features.
-    ///   3. Constant-kind evaluator: bake with a constant expression → all colors identical.
+    /// Data-driven paint over the real fixture: <see cref="StyleProperty{T}"/> resolved once per decoded
+    /// feature, as the fill and line builders do. A match on "CONTINENT" (8 values across 239 countries)
+    /// bakes ≥2 distinct colors; a match on a missing key and a constant expression each bake exactly one.
     /// </summary>
     [TestFixture]
     public class DataDrivenColorBakeTests
@@ -364,11 +347,8 @@ namespace MapRenderer.Tests.Style
         }
 
         // =========================================================================================
-        // 0. A REAL published MapLibre Style JSON parses into the typed model (acceptance, sentence 1).
-        //    Fixture: Assets/Fixtures/maplibre-demo-style.json — MapLibre's public demo basemap style
-        //    (https://demotiles.maplibre.org/style.json), committed as data (clean-room-safe: it is a
-        //    style document, not MapLibre's parser source). Exercises real nested expression arrays,
-        //    metadata, template URLs, center/zoom — surfaces a synthetic literal omits.
+        // 0. A real published style (Assets/Fixtures/maplibre-demo-style.json, a style document committed
+        //    as data) parses into the typed model, including nested expressions a synthetic literal omits.
         // =========================================================================================
         [Test]
         public void RealMapLibreStyle_ParsesIntoTypedModel()
@@ -463,9 +443,8 @@ namespace MapRenderer.Tests.Style
         }
 
         // =========================================================================================
-        // 2. Missing-optional-field defaults — EXACT spec values.
-        //    Source: scheme="xyz", minzoom=0, maxzoom=22, bounds=[-180,-85.051129,180,85.051129].
-        //    Layer:  minzoom/maxzoom have NO default → stay null (absent = unbounded).
+        // 2. Missing-optional-field defaults: source scheme="xyz", zoom 0..22, bounds ±180/±85.051129;
+        //    layer minzoom/maxzoom have NO default and stay null (unbounded).
         // =========================================================================================
         [Test]
         public void MissingOptionalFields_UseSpecDefaults()
@@ -777,9 +756,7 @@ namespace MapRenderer.Tests.Style
     /// <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
     /// <see cref="SpriteAtlasView"/> resolves <c>icon-image</c> per feature and lays out an
     /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolFeature"/> (<c>Kind == Icon</c>)
-    /// independently of the existing text path (<c>Kind == Text</c>, unchanged). Mirrors
-    /// <c>SymbolFeatureExtractorTests</c>'s hand-encoded MultiPoint pattern. Unity EditMode only (see
-    /// file header) — it drives a Waist-1 <c>TileGeometryBuffers</c> extraction.
+    /// independently of the text path. Unity EditMode only: it drives a <c>TileGeometryBuffers</c> extraction.
     /// </summary>
     [TestFixture]
     public class SymbolFeatureExtractorIconTests
@@ -888,14 +865,10 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Extract_TextAndIcon_YieldsTwoSymbols_IconFirstThenText()
         {
-            // road-shields-design.md: a feature resolving BOTH a
-            // text and an icon is ONE placement instance. The icon (collision owner) is emitted first, the
-            // text rides as its Rider — ONE placement instance downstream (SymbolPairing / StagePointPair), so
-            // neither half's overlap flags are forced anymore; both carry their AUTHORED
-            // text-allow-overlap/text-ignore-placement (default false, unset here).
-            // NOTE (P-A): this layer leaves every anchor/offset at its default, i.e. the halves are CENTRED —
-            // the retired conjuncts were all inert at that value, so this test does NOT discriminate the
-            // pairing predicate. SymbolPairPredicateTests carries the teeth that do.
+            // A feature with BOTH text and icon is ONE placement instance: the icon (collision owner) comes
+            // first, the text rides it, and both keep their AUTHORED overlap flags (default false here).
+            // Limitation: the halves are CENTRED here, so this test does not discriminate the pairing
+            // predicate; SymbolPairPredicateTests does.
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
@@ -1048,9 +1021,8 @@ namespace MapRenderer.Tests.Style
             var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, symbols);
 
-            // The fixture has 250 centroids features; one symbol per point feature with a NON-EMPTY NAME.
-            // Two features have an absent/empty NAME → their "{NAME}" resolves empty → skipped (the skip
-            // rule proven on real data), so 248 symbols. Compute the expectation independently, then pin it.
+            // 250 centroids features, two with an empty NAME that "{NAME}" skips, so 248 symbols. The
+            // expectation is computed independently, then pinned.
             MvtLayer centroids = tile.GetLayer("centroids");
             Assert.AreEqual(250, centroids.Features.Count, "fixture pin: 250 centroids features");
             int pointFeaturesWithName = 0;
@@ -1068,9 +1040,8 @@ namespace MapRenderer.Tests.Style
             // First feature resolves to "Aruba".
             Assert.AreEqual("Aruba", symbols[0].Text, "feature[0]'s NAME is Aruba");
 
-            // Its anchor is the REAL tile→geo→project chain, not a stubbed origin. Recompute independently
-            // from the decoded first point and assert equality; also pin the fixture point (1252,1904).
-            // Arm A reads the command stream from the BYTES (a decoded feature carries none).
+            // The anchor is the REAL tile→geo→project chain: recompute it from the first point, read from the
+            // BYTES, and pin the fixture point (1252,1904).
             List<List<double2>> paths = MvtGeometry.Decode(
                 MvtFixtureStreams.ReadLayer(LoadFixture(), "centroids").Commands[0]);
             double2 firstPoint = paths[0][0];
@@ -1088,9 +1059,8 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(2f, symbols[0].PaddingPx, 1e-6, "text-padding spec default is 2");
         }
 
-        // ── Layer visibility predicate (MapLibre minzoom<=zoom<maxzoom, min inclusive / max EXCLUSIVE, null =
-        //    unbounded). This is evaluated at DISPLAY time against the live camera zoom (see the extraction test
-        //    below for WHY it is not gated at build time). ──
+        // ── Layer visibility: minzoom<=zoom<maxzoom (max EXCLUSIVE, null = unbounded), evaluated at
+        //    DISPLAY time against the live camera zoom. ──
         [Test]
         public void StyleLayer_IsVisibleAtZoom_MinInclusive_MaxExclusive_NullUnbounded()
         {
@@ -1107,12 +1077,8 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(L(15.0, 17.0).IsVisibleAtZoom(17.0), "at max of a bounded range → hidden");
         }
 
-        // ── Extraction is deliberately zoom-VISIBILITY-agnostic: it emits a layer's symbols regardless of the
-        //    layer's minzoom/maxzoom, because tile DATA tops out at a max source zoom (z14 for OpenFreeMap) and is
-        //    OVERZOOMED at higher camera zooms without rebuilding. Gating at build time would freeze visibility and
-        //    hide layers MapLibre reveals as you zoom past the data level; the gate lives at display time instead
-        //    (StyleLayer.IsVisibleAtZoom). This pins that a minzoom-15 layer STILL extracts at z14 (a build-time
-        //    gate here would be the regression). ──
+        // ── Non-obvious why: extraction ignores minzoom/maxzoom, because tile data is OVERZOOMED past its
+        //    max source zoom; the gate is StyleLayer.IsVisibleAtZoom. So a minzoom-15 layer extracts at z14. ──
         [Test]
         public void Extract_DoesNotGateByLayerZoom_SoOverzoomWorks()
         {
@@ -1301,9 +1267,8 @@ namespace MapRenderer.Tests.Style
             Assert.Greater(symbol.LineAnchors[0].Segment, 0,
                 "the anchor's segment index must be refined onto the finer path (0 would mean it never resubdivided)");
 
-            // (c) Resolves to the correct arc position on the RENDER curve. Independently project the
-            // geographic midpoint of the (still 2-vertex) tile-local line — the arc-length midpoint of a straight
-            // 2-point segment is its linear midpoint — and compare against what the anchor resolves to.
+            // (c) Resolves to the correct arc position on the RENDER curve: compare against the projected
+            // geographic midpoint of the 2-vertex tile-local line (its arc-length midpoint).
             double2 midTile = new double2(extent * 0.5, extent * 0.5);
             double2 midLonLat = tileId.ToLonLat(midTile.x, midTile.y, extent);
             double3 expectedRenderMid = projection.Project(
@@ -1314,11 +1279,8 @@ namespace MapRenderer.Tests.Style
             double3 segEnd = symbol.PathRender[anchor.Segment + 1];
             double3 resolved = segStart + (segEnd - segStart) * (double)anchor.T; // math.lerp has no double3 overload in the shim
             double resolveError = math.length(resolved - expectedRenderMid);
-            // FIXTURE FRAGILITY: this passes at ~0 error only because the z=1 diagonal (0,0)->(extent,extent)
-            // subdivides into an EVEN step count, which puts a subdivision vertex exactly at the arc-length
-            // midpoint. An odd count would put the anchor mid-sub-segment instead (~1 km sagitta on this
-            // geometry, over the 1.0 m tolerance below) and flip this tooth falsely RED. A geometry/zoom
-            // change here needs re-checking the resulting subdivision count's parity, not just re-running.
+            // Limitation: ~0 error holds only because the z=1 diagonal subdivides into an EVEN step count, so a
+            // vertex sits at the midpoint. An odd count reads falsely RED; recheck parity on a geometry/zoom change.
             Assert.Less(resolveError, 1.0,
                 "the anchor must resolve to (approximately) the true midpoint on the finer render curve");
         }
@@ -1348,10 +1310,8 @@ namespace MapRenderer.Tests.Style
         public void Extract_PointPlacement_ClipsOutOfBoundsAnchorsToTile()
         {
             const uint extent = 4096;
-            // In-bounds (kept): an interior point, another interior point, the min edge (inclusive), and the
-            // max edge (extent - 1, inclusive). Out-of-bounds (dropped):
-            // (extent*1.5, -extent*0.5, extent+1) plus the half-open upper-bound edges x==extent/y==extent
-            // (a shared-edge anchor belongs to the NEXT tile, not this one).
+            // Kept: two interior points, the min edge and extent - 1. Dropped: points outside, plus x==extent or
+            // y==extent, because a shared-edge anchor belongs to the NEXT tile.
             double2 inA = new double2(100, 200);
             double2 outXHigh = new double2(extent * 1.5, 200);
             double2 inB = new double2(300, 300);
@@ -1374,9 +1334,7 @@ namespace MapRenderer.Tests.Style
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
                 Paint = TestStyle.SymbolPaint(),
-                // Literal text-field (no {} interpolation) so resolution doesn't depend on feature properties
-                // — this feature carries none (properties: null) (mirrors the LineLayer literal-text pattern
-                // used elsewhere in this file).
+                // Literal text-field (no {} interpolation), because this feature carries no properties.
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\"}"),
             };
 
@@ -1802,12 +1760,9 @@ namespace MapRenderer.Tests.Style
         // ── fill-antialias: the boolean the Style Spec declares ─────────────────
 
         /// <summary>
-        /// <c>fill-antialias</c> is a JSON boolean, and <c>false</c> must survive the parse as 0.
-        /// It once did not: the converter projected the value through <c>Value.AsNumber()</c>, which
-        /// throws on a boolean, and the property's own <c>try</c>/<c>catch</c> swallowed that into the
-        /// default 1 — so the ONE value anybody writes the property to say was the one it could not
-        /// express. Everything that is not a boolean still falls to the default, which is the same
-        /// <c>catch</c> doing its intended job.
+        /// <c>fill-antialias</c> is a JSON boolean, and <c>false</c> must survive the parse as 0. A converter
+        /// that read it through <c>Value.AsNumber()</c> would throw, and the property's <c>catch</c> would
+        /// turn that into the default 1. A non-boolean still falls to the default.
         /// </summary>
         /// <param name="paintJson">The layer's paint block.</param>
         /// <param name="expected">The value <c>Antialias</c> must evaluate to.</param>
@@ -1818,9 +1773,8 @@ namespace MapRenderer.Tests.Style
         [TestCase("{\"fill-antialias\":[\"get\",\"aa\"]}", true)]
         public void FillPaint_Antialias_ParsesAsABoolean(string paintJson, bool expected)
         {
-            // MakeFillLayer parses with Parse's default antialiasDefault=true (the Style Spec's own
-            // default), so the cases that fall back land on true exactly as before. The project default
-            // is exercised by FillAntialiasBandTests.
+            // MakeFillLayer parses with antialiasDefault=true (the Style Spec default), so fallback cases land
+            // on true. FillAntialiasBandTests exercises the project default.
             var fp = MakeFillLayer(paintJson).Paint;
 
             Assert.AreEqual(expected, fp.Antialias.Evaluate(0.0),

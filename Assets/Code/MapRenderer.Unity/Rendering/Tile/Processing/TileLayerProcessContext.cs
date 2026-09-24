@@ -15,13 +15,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>The tile address being built.</summary>
         public TileId Tile { get; init; }
 
-        /// <summary>The evaluation zoom for THIS worker pass — the source differs by cadence. The mesh pass
-        /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) and a background tile's graph kick bake at
-        /// the tile's INTEGER zoom (<c>id.Z</c>); the symbol pass
-        /// (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional CAMERA
-        /// zoom captured at build start, because symbol layout/paint is evaluated at display zoom. The
-        /// shared decode feed (<c>SharedDisposable{IDecodedTile}</c>) carries no zoom, so sharing the
-        /// decoded tile across cadences cannot conflate their zoom sources.</summary>
+        /// <summary>The evaluation zoom for THIS worker pass. The mesh pass
+        /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) and a background graph kick bake at the tile's
+        /// integer zoom (<c>id.Z</c>); the symbol pass (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>)
+        /// uses the fractional camera zoom captured at build start. The shared decoded tile carries no zoom, so
+        /// the cadences cannot conflate their zoom sources.</summary>
         public double Zoom { get; init; }
 
         /// <summary>The tile's SW-corner projected render origin — shared by the mesh bake and the

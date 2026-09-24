@@ -1,8 +1,5 @@
-// TOCTOU-safe validation ordering. MapMaterialSet's base-material fields are live-mutable, and
-// MapView.SetStyle awaits BuildSourceSpecs before its commit, so validating at SetStyle ENTRY would pass
-// and a mutation during the await could still let a null base reach Layers.Build. SetStyle therefore
-// validates a CAPTURED MapMaterialSet reference immediately before the synchronous commit, with no await
-// between validate and use. PlayMode: the settle-poll yields real frames (never Thread.Sleep).
+// Non-obvious why: MapMaterialSet is live-mutable and SetStyle awaits before its commit, so SetStyle
+// validates a captured set right before the synchronous commit, not at entry.
 
 using System;
 using System.Collections;
@@ -44,9 +41,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64; view.Config.MaxMeshBuildsPerTick = 64;
-            // Defensive (mirrors MapViewBackgroundRestyleTests): the "https://example.com/..." template is a
-            // placeholder never meant to hit the network, even though this test's commit is expected to
-            // throw BEFORE SetSources would ever construct a real source from it.
+            // The "https://example.com/..." template is a placeholder that must never hit the network, even
+            // though the commit throws before SetSources builds a source from it.
             view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
             return view;
         }
@@ -81,9 +77,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.View.DocumentLoaderOverride = gate.Load;
                 UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundPlusUrlSourceStyle), "B").Preserve();
 
-                // Null FillMaterial mid-resolution — AFTER BuildSourceSpecs started, BEFORE it completes. A
-                // "validate at SetStyle entry" would have already passed by now; the captured-set validate
-                // runs AFTER this await, on a freshly-read reference, so it must still catch this.
+                // Null FillMaterial while BuildSourceSpecs is suspended. An entry-time validate has already
+                // passed here; the captured-set validate runs after this await, so it must catch it.
                 materialSet.FillMaterial = null;
                 gate.Release();
                 yield return SpinToCompleted(restyleTask);

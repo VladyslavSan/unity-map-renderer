@@ -1,9 +1,5 @@
-// Rendering-backend GPU/visual acceptance tests driven through a real camera view.
-//
-// Split from BackendTests.cs by a using collision (MapRenderer.Core.Geo.CameraProperties vs
-// UnityEngine.Rendering.CameraProperties, CS0104): every member here builds its test camera
-// via the bare Core.Geo.CameraProperties constructor, so none of them may import
-// UnityEngine.Rendering — the backend tests that do are in BackendTests.cs instead.
+// Rendering-backend GPU/visual acceptance tests through a real camera view. Split from BackendTests.cs by the
+// CS0104 `CameraProperties` collision: every class here uses the bare Core.Geo constructor.
 //
 // Contents:
 //   BrgBackendSnapshotTests        — acceptance tests for the BRG render backend.
@@ -32,25 +28,15 @@ using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.T
 
 namespace MapRenderer.Tests.Visual
 {
-    // BRG backend tests.
-    //
-    // Maps acceptance teeth to assertions:
-    //
-    //   Tooth 1 — toggle OFF parity: Backend=GameObject → BRG never constructed, GO path unchanged.
-    //   Tooth 2 — draw order mechanism (GPU-independent): emitted renderQueues in ascending declared order.
-    //   Tooth 2 pixel — fill-over-line draw order on real pixels: the top layer's colour dominates the
-    //               overlap region; reversing the declared order flips the dominant colour (FALSIFIABLE —
-    //               wrong order must produce a detectably different result). The comparison between style A
-    //               and style B is the proof; a broken renderQueue sort makes A == B and the assertion fails.
-    //   Tooth 3 — per-layer paint on BRG: _BaseColor non-white → red fill red-channel dominates green/blue
-    //               in the fill region (not just coverage). Zoom-dependent line width renders on BRG pixels
-    //               and produces more fill when width is larger.
-    //   Tooth 4 — floating-origin (GPU-independent): instance matrix translation == TileLocalToScene.
-    //   Tooth 5 — teardown: BRG.IsDisposed == true after Teardown; buffer released.
-    //   Tooth 6 — headless green: all GPU-independent assertions pass under ./Tools/run-tests.sh.
-    //
-    // GPU-dependent teeth (2-pixel, 3-per-layer-paint) fail loudly (Assert.Fail) on a blank render or a
-    // culling call that never fires — a real regression, not a vacuous skip.
+    // BRG backend tests. The teeth:
+    //   Tooth 1 — Backend=GameObject never constructs BRG.
+    //   Tooth 2 — draw commands in ascending declared renderQueue order; "2 pixel" flips the dominant colour
+    //             when the declared order reverses.
+    //   Tooth 3 — per-layer paint (a red fill reads red) and zoom-dependent line width, on BRG pixels.
+    //   Tooth 4 — instance matrix translation == TileLocalToScene (GPU-independent).
+    //   Tooth 5 — BRG.IsDisposed after Teardown; buffer released.
+    // Non-obvious why: GPU-dependent teeth Assert.Fail on a blank render or an unfired culling call, so a
+    // broken backend never reads as a vacuous skip.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // BrgBackendSnapshotTests — acceptance tests for the BRG render backend.
@@ -87,11 +73,7 @@ namespace MapRenderer.Tests.Visual
         }");
 
         // ── Tooth 2 pixel: fill-over-line draw order styles ──────────────────────────────────────
-        // Two styles over the same fixture: fill(red)+line(blue) vs line(blue)+fill(red).
-        // The order is the only variable — same geometry, same colours. Whichever is declared last
-        // (higher renderQueue) should composite on top and dominate the mean colour of overlap pixels.
-        // The geolines fixture layer (6 linestrings) overlaps the countries fill across the whole tile.
-        // A wide line-width (200 screen pixels) ensures the geolines are visually thick at test zoom.
+        // The last-declared layer composites on top; the geolines overlap the countries fill across the tile.
 
         /// <summary>Style A: line(blue, renderQueue lower) under fill(red, renderQueue higher). Fill is on top.</summary>
         private static StyleDocument StyleLineThenFill() => StyleParser.Parse(@"{
@@ -144,9 +126,7 @@ namespace MapRenderer.Tests.Visual
         }");
 
         // ── Tooth 3: zoom-dependent line width style ──────────────────────────────────────────────
-        // A line-only style with a zoom-interpolated line-width: narrower at low zoom, much wider at
-        // high zoom. Rendering at two zoom levels with a fixed-size camera frame should yield different
-        // pixel coverages — wider at the high zoom.
+        // A zoom-interpolated line-width, so the high zoom renders more coverage than the low zoom.
 
         private static StyleDocument StyleZoomDependentLine() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -172,15 +152,9 @@ namespace MapRenderer.Tests.Visual
         /// Deterministic settle: one <c>LateUpdate</c> kicks fetch + mesh build, <c>DrainMeshBuilds</c>
         /// blocks on the in-flight UniTasks and consumes them inline (after it returns
         /// <c>AllTilesSettled()</c> is guaranteed true), and a final <c>LateUpdate</c> lets the
-        /// backend rebuild its sorted draw list over the now-complete draw-item set.
-        ///
-        /// <para>This replaced a <c>LateUpdate</c> + <c>Thread.Sleep(1)</c> poll bounded by a frame
-        /// ceiling (500 here, 2500 in the draw-order teeth). That poll turned every assertion in this
-        /// fixture into a race against the threadpool: on a loaded machine the async decode/mesh-build
-        /// had not landed before the ceiling ran out, and the fixture failed with "Tiles must settle"
-        /// with nothing wrong in the code under test. Raising the ceiling only widens the window —
-        /// the ceiling itself is the defect, because it measures in wall-clock what is not a
-        /// wall-clock property. Do not reintroduce a sleep-poll here.</para>
+        /// backend rebuild its sorted draw list over the now-complete draw-item set. Non-obvious why: a
+        /// sleep-poll with a frame ceiling races the threadpool and fails on a loaded machine, because it
+        /// measures in wall-clock what is not a wall-clock property. Do not reintroduce one.
         /// </summary>
         private static void SettleDeterministically(MapView view)
         {
@@ -235,12 +209,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Draw order mechanism tooth (GPU-independent): the BRG backend emits draw commands in
-        /// ascending renderQueue order (declared layer order = painter's algorithm). This is a
-        /// structural/mechanical assertion that does not require GPU readback.
-        ///
-        /// With one fill layer, the single draw command's renderQueue must equal the material's
-        /// renderQueue (LayerDrawOrder.QueueFor(drawIndex) — fill uses LayerSubSlot.Base only).
-        /// No re-ordering must occur.
+        /// ascending renderQueue order (declared layer order = painter's algorithm). With one fill layer, the
+        /// single draw command's renderQueue equals the material's (LayerDrawOrder.QueueFor(drawIndex), Base
+        /// sub-slot).
         /// </summary>
         [Test]
         public void BrgBackend_EmitsDraw_InAscendingRenderQueueOrder()
@@ -297,27 +268,11 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 2 pixel: fill-over-line draw order on real pixels (GPU-dependent) ─────────────
 
         /// <summary>
-        /// Fill-over-line draw order tooth (GPU-dependent, FALSIFIABLE):
-        ///
-        /// Renders the fixture tile via BRG with TWO styles that differ only in layer declaration order
-        /// (same geometry, same colours, same zoom). The order determines which layer composites on top:
-        ///
-        ///   Style A — line(blue) declared BEFORE fill(red): line gets lower renderQueue → fill draws
-        ///             last → red fill is on top → red dominates the rendered mean colour.
-        ///
-        ///   Style B — fill(red) declared BEFORE line(blue): fill gets lower renderQueue → line draws
-        ///             last → blue line is on top → blue channel should increase vs Style A.
-        ///
-        /// The comparison between the two renders is the proof:
-        ///   • Style A mean-red must exceed Style B mean-red (fill hidden by line in B).
-        ///   • Style B mean-blue must exceed Style A mean-blue (line visible on top in B).
-        ///
-        /// A broken renderQueue sort (e.g. the `.Sort` in BrgTileRenderer.Rebuild is deleted) falls back
-        /// to insertion order = fills-registered-before-lines (type order, not style order). That makes
-        /// the fills always draw before lines regardless of the declared order, so A == B. The
-        /// comparative flip assertion then FAILS — this is the "wrong-order-must-fail" requirement.
-        ///
-        /// Fails loudly (Assert.Fail) on a blank render or a culling call that never fires.
+        /// Fill-over-line draw order tooth (GPU-dependent): two styles differ only in declaration order. Style
+        /// A declares line(blue) then fill(red), so red is on top; style B reverses it, so blue is on top.
+        /// Non-obvious why: without the renderQueue sort in <c>BrgTileRenderer.Rebuild</c>, fills always draw
+        /// before lines, so A == B and the flip assertion fails. A blank render or an unfired culling call
+        /// Assert.Fails.
         /// </summary>
         [Test]
         public void BrgBackend_FillOverLine_DrawOrderFlips()
@@ -325,9 +280,8 @@ namespace MapRenderer.Tests.Visual
             const int SnapW = 512, SnapH = 512;
             var bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
 
-            // Sample the full rendered frame (non-background pixels) for mean colour.
-            // We compare mean R and mean B across the two styles — the flip is the proof.
-            // Sample rect covers most of the frame (excluding a 32px border to skip edge artifacts).
+            // Mean colour over most of the frame (a 32 px border skips edge artifacts); the R/B flip across the
+            // two styles is the proof.
             const int SX0 = 32, SY0 = 32, SX1 = 480, SY1 = 480;
 
             using var cameraBag = new ObjectDisposalBag();
@@ -363,9 +317,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // ── Render A: line(blue) declared before fill(red) → fill on top → RED expected ──
-                // Its own scope + bag: mapGo/view/src must be fully torn down before Style B is built
-                // below, or both would render into snapB's camera pass (nothing here asserts "only one
-                // MapView is alive").
+                // Its own scope, so this MapView is torn down before Style B renders into the same camera.
                 {
                     using var bagA = new ObjectDisposalBag();
                     using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
@@ -427,10 +379,8 @@ namespace MapRenderer.Tests.Visual
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style B: BRG must load and settle tiles.");
 
-                        // Re-frame camera on Style B's own scene bounds.
-                        // Both styles use zoom=3 centered at (0,0), so the tile layout is the same, but
-                        // each MapView may use a different floating-origin scene placement. Using B's own
-                        // bounds ensures the camera is correctly centered on the actual rendered geometry.
+                        // Re-frame on Style B's own bounds: the tile layout matches A's, but each MapView may
+                        // place its floating origin differently.
                         float tileSize3B = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
                         var brgB = view.BrgRenderer();
                         Assert.IsNotNull(brgB, "BRG renderer must be present on BRG path (Style B).");
@@ -484,14 +434,8 @@ namespace MapRenderer.Tests.Visual
                 Debug.Log($"[BrgOrderTest] Style B (fill→line, line on top): " +
                           $"meanRGB=({meanB[0]:F3},{meanB[1]:F3},{meanB[2]:F3})");
 
-                // Guard: region must have rendered something beyond background.
-                // Both style A and B are already proven non-blank (above), so this is a sanity check.
-                // Background colour in float is ~(0.10, 0.11, 0.15); a region of all-background pixels
-                // has mean sum ≈ 0.36 which passes the old 0.05 threshold.
-                // Use the SnapshotCoverage blank verdict instead (already computed as aBlank/bBlank).
-                // We already know both are non-blank, so this guard only fires if SampleRegionMeanColor
-                // returns near-zero from a region that happens to be out of frame.
-                // Use a threshold of background brightness (sum ≈ 0.36); require mean sum > 0.20.
+                // Sanity guard (both renders are already non-blank): fires only if the region is out of frame
+                // and reads near zero. Background sums to ≈ 0.36, so the floor is 0.20.
                 if (meanA[0] + meanA[1] + meanA[2] < 0.20 || meanB[0] + meanB[1] + meanB[2] < 0.20)
                 {
                     Assert.Fail(
@@ -502,21 +446,9 @@ namespace MapRenderer.Tests.Visual
                 }
 
                 // ── Comparative flip assertion (the load-bearing tooth) ───────────────────────────
-                // The signal is the (red − blue) chromaticity of the overlap region: where the red
-                // fill composites on top it is red-dominant (R≫B); where the blue line composites on
-                // top it is pushed toward blue (R−B shrinks). Using the (R−B) DIFFERENCE cancels the
-                // contributions common to both renders — the blue-ish background (R−B≈−0.05), the
-                // fill-only regions, and the line-only regions — and isolates exactly the overlap flip.
-                //
-                // This is more robust than the raw single-channel means: the camera background is
-                // blue-dominant (B=0.15 is its largest channel), so a whole-frame mean-blue is swamped
-                // by however much background each render happens to expose (Style A here exposes more
-                // un-tiled background, inflating ITS mean-blue — the trap the prior single-channel
-                // assertion fell into). The (R−B) difference removes that common-mode background term.
-                //
-                // Falsifiability is preserved: a broken renderQueue sort makes both styles composite
-                // fills-before-lines identically → (R−B)_A == (R−B)_B → the strict GreaterThan FAILS.
-                // That is the "wrong-order-must-fail" requirement.
+                // Non-obvious why: the background is blue-dominant and each render exposes a different amount
+                // of it, which swamps a single-channel mean-blue. The (R−B) difference cancels that
+                // common-mode term and isolates the overlap flip.
                 double rmbA = meanA[0] - meanA[2]; // Style A: fill (red) on top  → larger R−B
                 double rmbB = meanB[0] - meanB[2]; // Style B: line (blue) on top → smaller R−B
                 Debug.Log($"[BrgOrderTest] R-B flip: A(fill-on-top)={rmbA:F3}, B(line-on-top)={rmbB:F3}");
@@ -529,9 +461,8 @@ namespace MapRenderer.Tests.Visual
                     "If A ≤ B, the layers did not flip with the declared order — " +
                     "renderQueue sort does not drive BRG on-screen compositing.");
 
-                // Corroborating single-channel check: the red fill on top in Style A must also raise
-                // the raw mean-red above Style B (line on top hides the fill). This is independently
-                // falsifiable and not background-contaminated (background red is low and ~equal).
+                // Corroboration: Style A's red fill on top raises mean-red above Style B's. Background red is
+                // low in both, so this channel is not background-contaminated.
                 Assert.That(meanA[0], Is.GreaterThan(meanB[0]),
                     $"Draw-order flip FAILED: Style A (fill on top) must have MORE red than Style B " +
                     $"(line on top). Style A mean-R={meanA[0]:F3}, Style B mean-R={meanB[0]:F3}. " +
@@ -550,13 +481,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Floating-origin tooth (GPU-independent): the packed instance matrix translation must
-        /// equal FloatingOrigin.TileLocalToScene(tileOriginMerc, sceneOrigin) for each loaded tile.
-        ///
-        /// Verified without GPU readback — reads the CPU-side buffer directly via
-        /// BrgTileRenderer.GetInstanceTranslation (test accessor).
-        ///
-        /// Also verifies: after an origin shift (look-at move), the translation updates to the new
-        /// origin (origin-relative coordinate stays correct).
+        /// equal FloatingOrigin.TileLocalToScene(tileOriginMerc, sceneOrigin) for each loaded tile, and follow
+        /// an origin shift. It reads the CPU-side buffer via BrgTileRenderer.GetInstanceTranslation.
         /// </summary>
         [Test]
         public void BrgBackend_InstanceMatrix_MatchesTileLocalToScene()
@@ -593,15 +519,13 @@ namespace MapRenderer.Tests.Visual
                 // Force Rebuild to populate the CPU buffer with the current sceneOrigin.
                 brg.Rebuild(SceneFrame.Mercator(sceneOrigin));
 
-                // Enumerate draw items and check each one for the z0/0/0 tile.
-                // We don't have a direct handle-to-tileId map here, but for z0/0/0 with one style layer,
-                // there is exactly 1 draw item. Verify via GetEmittedRenderQueues and GetInstanceTranslation.
+                // No handle-to-tileId map exists here, but z0/0/0 with one style layer has exactly one draw
+                // item, checked via GetEmittedRenderQueues and GetInstanceTranslation.
                 int[] queues = brg.GetEmittedRenderQueues();
                 Assert.Greater(queues.Length, 0, "Must have at least one draw item.");
 
-                // The handle for the first (only) draw item is 0.
-                // Note: handles are sequential starting from 0; the first registered tile-layer gets handle 0.
-                // We verify all draw items (there may be multiple layers per tile in the future).
+                // Handles are sequential from 0, so the first tile-layer is handle 0. The loop checks every draw
+                // item, so it also holds for several layers per tile.
                 bool foundMatchingTranslation = false;
                 for (int handle = 0; handle < queues.Length + 100; handle++)
                 {
@@ -715,14 +639,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Steady-state no-GC tooth: BrgTileRenderer.Rebuild must not allocate managed memory in
-        /// steady state (reused CPU buffer, no per-frame List/array allocation).
-        ///
-        /// Asserts the GC generation 0 count does not increase over N steady-state Rebuild calls
-        /// after the first call (which may grow the buffer).
-        ///
-        /// Note: GC.CollectionCount is a lower bound — this assertion verifies no managed allocation
-        /// inside Rebuild itself. Minor GC from unrelated Unity internals in EditMode is accepted
-        /// (the test uses a conservative threshold of 0 new GC cycles over the Rebuild loop only).
+        /// steady state (reused CPU buffer, no per-frame List/array allocation): the gen-0 GC count must not
+        /// rise over N Rebuild calls after the first, which may grow the buffer. Limitation:
+        /// GC.CollectionCount is only a lower bound on allocation.
         /// </summary>
         [Test]
         public void BrgBackend_Rebuild_NoManagedAllocInSteadyState()
@@ -750,10 +669,8 @@ namespace MapRenderer.Tests.Visual
                 brg.Rebuild(SceneFrame.Mercator(origin));
                 brg.Rebuild(SceneFrame.Mercator(origin));
 
-                // Measure: N more Rebuilds must not trigger GC gen-0.
-                // We check GC generation-0 collection count before and after.
-                // This is a heuristic — managed allocations inside Rebuild would eventually trigger GC.
-                // At our instance count (1 tile, 1 layer), a single float[] allocation would be detected.
+                // Heuristic: N more Rebuilds must not trigger a gen-0 GC. Allocations inside Rebuild would
+                // eventually trigger one.
                 System.GC.Collect(0, System.GCCollectionMode.Forced, blocking: true);
                 int gcBefore = System.GC.CollectionCount(0);
 
@@ -779,17 +696,9 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 3: per-layer paint on BRG — fill color (GPU-dependent) ─────────────────────
 
         /// <summary>
-        /// Per-layer paint tooth (GPU-dependent, FALSIFIABLE): renders the fixture tile via BRG and
-        /// asserts:
-        ///   1. Non-blank coverage (same gate as MapViewSnapshotTests).
-        ///   2. The fill is rgba(200,80,80) — RED. The non-background pixel mean red channel must
-        ///      DOMINATE green and blue in the fill region. A plain white fill passes the coverage
-        ///      gate but would have R≈G≈B, so this assertion is falsifiable: a non-red _BaseColor
-        ///      (e.g., white or wrong color) FAILS this assertion.
-        ///
-        /// The Assert.Ignore escape hatch from the original implementation is REMOVED. When
-        /// OnPerformCulling is never called (cullingCalls==0), the test produces Assert.Fail — a real
-        /// failure, not a vacuous skip.
+        /// Per-layer paint tooth (GPU-dependent): the BRG render passes the coverage gate, and the
+        /// rgba(200,80,80) fill's red channel DOMINATES green and blue. A white fill passes coverage but reads
+        /// R≈G≈B. If OnPerformCulling never runs, the test Assert.Fails rather than skipping.
         /// </summary>
         [Test]
         public void BrgBackend_RendersNonBlankFill_OnRealPixels()
@@ -842,16 +751,12 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "BRG path must load + settle tiles.");
 
-                // Settle-loop staleness fix: the loop exits as soon as AllTilesSettled() is true,
-                // WITHOUT running another Tick. Within MapView.LateUpdate, BrgRebuild runs BEFORE the
-                // TileManager consumes the final tile's draw items, so _sortedItems (read by
-                // ComputeSceneBounds and OnPerformCulling) lags one frame behind _items. One more
-                // Tick mirrors production's next frame and rebuilds _sortedItems from the full set.
+                // Non-local invariant: BrgRebuild runs BEFORE TileManager consumes the last tile, so _sortedItems
+                // lags _items by one frame when the settle loop exits. One more Tick rebuilds it.
                 view.LateUpdate();
 
-                // BRG path: no child MeshRenderers exist. Frame the camera on the BRG scene bounds.
-                // Compute the tile size at z=3 (Web Mercator), then query ComputeSceneBounds so the
-                // camera covers all loaded tiles — matches the MapViewSnapshot FitTo approach.
+                // BRG has no child MeshRenderers, so frame the camera on ComputeSceneBounds with the z=3 tile
+                // size, so it covers all loaded tiles.
                 float tileSizeZ3 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
                 var brg0 = view.BrgRenderer();
                 Assert.IsNotNull(brg0, "BRG renderer must be present on BRG path.");
@@ -904,10 +809,8 @@ namespace MapRenderer.Tests.Visual
                     NUnit.Framework.Is.GreaterThanOrEqualTo(MinBuckets),
                     "BRG fill must be spatially spread across multiple regions.");
 
-                // ── Tooth 3: per-layer paint color assertion (FALSIFIABLE) ────────────────────
-                // The fill uses rgba(200,80,80,1) — a saturated RED. Sample the non-background
-                // region mean colour and assert red channel dominates green and blue.
-                // A plain-white fill (wrong _BaseColor) would have R≈G≈B and FAIL this assertion.
+                // ── Tooth 3: per-layer paint color ─────────────────────────────────────────────
+                // The rgba(200,80,80,1) fill's red must dominate; a white _BaseColor reads R≈G≈B.
                 double[] fillMean = SnapshotCoverage.SampleRegionMeanColor(
                     snap.Pixels, ColorSX0, ColorSY0, ColorSX1, ColorSY1);
                 Debug.Log($"[BrgBackendSnapshot] fill region mean RGB=({fillMean[0]:F3},{fillMean[1]:F3},{fillMean[2]:F3})");
@@ -937,22 +840,10 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 3 line: zoom-dependent line width on BRG pixels (GPU-dependent) ─────────────
 
         /// <summary>
-        /// Zoom-dependent line width tooth (GPU-dependent, FALSIFIABLE): renders the geolines fixture
-        /// layer via BRG at two different zoom levels using a zoom-interpolated line-width expression.
-        ///
-        /// Style: line-width = ["interpolate", ["linear"], ["zoom"], 1, 4, 5, 400].
-        /// At zoom=1: _Width=4px, metersPerPixel≈large → narrow world-space band.
-        /// At zoom=5: _Width=400px, metersPerPixel≈small but 100x wider px → much wider world-space band.
-        ///
-        /// Each render is framed on its OWN tile bounds (camera orthoSize = tile extent × 0.55), so
-        /// the tile fills the camera equally in both renders. Under per-tile framing, line coverage
-        /// scales as (lineWidthPx × metersPerPixel) / tileWidth, which is ~100x larger at zoom=5.
-        /// The zoom=5 render should therefore cover FAR MORE pixels than the zoom=1 render.
-        /// This proves zoom-dependent line width — ZoomStyleApplier wired, the _Width uniform
-        /// reaching the shader — on the BRG path. Falsifiable, because a broken ApplyZoom or a
-        /// wrong _Width uniform would yield equal (≈ zoom=1) coverage at zoom=5.
-        ///
-        /// Fails loudly (Assert.Fail) on a blank render.
+        /// Zoom-dependent line width tooth (GPU-dependent): the geolines layer via BRG at zoom 1 and 5, with
+        /// line-width <c>["interpolate", ["linear"], ["zoom"], 1, 4, 5, 400]</c>. Each render frames its own
+        /// tile, so coverage scales as widthPx × mpp / tileWidth, ~100× larger at zoom 5. A broken ApplyZoom
+        /// or <c>_Width</c> uniform gives equal coverage. A blank render Assert.Fails.
         /// </summary>
         [Test]
         public void BrgBackend_ZoomDependentLineWidth_RendersOnBrgPixels()
@@ -993,8 +884,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // ── Render at zoom=1 (narrow line: ~4px) ─────────────────────────────────────
-                // Its own scope + bag: mapGo/view/src must be fully torn down before the zoom=5 block
-                // below builds a second MapView, or both would render into the shared camera.
+                // Its own scope, so this MapView is torn down before the zoom=5 one renders.
                 {
                     using var bagLow = new ObjectDisposalBag();
                     using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
@@ -1058,10 +948,8 @@ namespace MapRenderer.Tests.Visual
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=5 render: BRG must settle tiles.");
 
-                        // Frame camera on zoom=5 tile bounds (each tile is 1/32 of the zoom=1 extent).
-                        // Both renders must be framed on their own tile bounds so they fill the camera
-                        // view equally — otherwise the large zoom=1 camera view dwarfs the zoom=5 tile
-                        // and the 100x wider line (in pixels) still covers less screen area.
+                        // Frame on the zoom=5 tile's own bounds; a zoom=1 frame would dwarf the tile and hide
+                        // the wider line.
                         float tileSize5 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 5));
                         var brgHigh = view.BrgRenderer();
                         Assert.IsNotNull(brgHigh, "BRG renderer must be present (zoom=5).");
@@ -1110,13 +998,7 @@ namespace MapRenderer.Tests.Visual
                 }
 
                 // ── Zoom-dependent width assertion ─────────────────────────────────────────────
-                // Each render is framed on its own tile bounds so the tile fills the camera view.
-                // With each camera sized to its own tile extents, coverage ∝ lineWorldWidth / tileWidth.
-                // lineWorldWidth = widthPx * metersPerPixel(zoom).
-                //   zoom=1: 4 * mpp(1); tileWidth = WorldExtent   → coverage ∝ 4*mpp(1)/WorldExtent
-                //   zoom=5: 400 * mpp(5) = 400 * mpp(1)/16 = 25*mpp(1); tileWidth = WorldExtent/16
-                //           coverage ∝ 25*mpp(1) / (WorldExtent/16) = 400*mpp(1)/WorldExtent  → 100× zoom=1
-                // We require at least 1.5x more coverage (generous tolerance for AA and framing variance).
+                // Coverage is 100× larger at zoom 5; ≥ 1.5× leaves room for AA and framing variance.
                 Debug.Log($"[BrgZoomLine] coverage: zoom=1 filled={filledLowZoom:P2}, zoom=5 filled={filledHighZoom:P2}");
 
                 Assert.That(filledHighZoom, Is.GreaterThan(filledLowZoom * 1.5f),
@@ -1140,16 +1022,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// GPU cross-backend line parity: renders the geolines line-only style via Entities
-        /// (default) and BRG and asserts that BRG line coverage is within 20% of Entities coverage
-        /// AND above a non-degenerate floor.
-        ///
-        /// Falsifiability: a BRG plan that omits the line props makes them read garbage from
-        /// byte offset 0 (the transform matrix). BRG line coverage is then near-zero (wrong
-        /// width) while Entities coverage is correct, and the BRG/Entities ratio fails the
-        /// within-tolerance assertion.
-        ///
-        /// Fails loudly (Assert.Fail) when either render is blank or the coverage diverges more
-        /// than 20%.
+        /// (default) and BRG, and BRG line coverage must be within 20% of Entities' and above a floor. A BRG
+        /// plan without the line props reads them from byte 0 (the transform), so its coverage is near
+        /// zero. A blank render Assert.Fails.
         /// </summary>
         [Test]
         public void BrgBackend_LineParity_MatchesEntities()
@@ -1192,8 +1067,7 @@ namespace MapRenderer.Tests.Visual
                 var style = StyleZoomDependentLine();
 
                 // ── Render via Entities (default backend) ─────────────────────────────────────
-                // Its own scope + bag: mapGo/view/src must be fully torn down before the BRG block
-                // below builds a second MapView, or both would render into the shared camera.
+                // Its own scope, so this MapView is torn down before the BRG one renders.
                 {
                     using var bagEntities = new ObjectDisposalBag();
                     using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
@@ -1214,13 +1088,8 @@ namespace MapRenderer.Tests.Visual
                             "Entities render: must settle tiles at zoom=5.");
                         view.LateUpdate();
 
-                        // Frame camera via the first loaded tile's world position.
-                        // Entities backend uses GameObjects, so ComputeChildBounds applies — but for
-                        // simplicity we use a fixed large orthoSize (tiles are at scene-relative positions).
-                        // Render through MapView's OWN camera (production path). A hand-rolled ortho camera is
-                        // an unsupported configuration for the screen-space line width: the shader
-                        // MEASURES px->world from the live projection matrix and _ScreenParams, so only the
-                        // camera the pipeline actually renders through yields the scale the styling assumed.
+                        // Non-obvious why: the line shader measures px→world from the live projection and
+                        // _ScreenParams, so only MapView's OWN camera gives the styled width.
                         view.Camera.SyncToCamera();
                         snapEntities.Render(view.Camera.Camera);
                         snapEntities.WritePng("brg-parity-entities.png");
@@ -1286,10 +1155,7 @@ namespace MapRenderer.Tests.Visual
                 // (All-blank guard above handles the all-blank case.)
 
                 // ── Parity assertion: BRG within 20% of Entities ──────────────────────────────
-                // The 20% tolerance accommodates slight camera-framing differences between the two backends
-                // (Entities places tiles via GameObject transform; BRG via SoA O2W). The key signal is that
-                // BRG coverage is in the same ballpark as Entities. With the line props missing from the BRG
-                // plan, BRG line width is garbage → near-zero coverage against Entities' wide lines.
+                // 20% absorbs framing differences (GameObject transform vs SoA O2W).
                 Debug.Log($"[BrgParity] Entities filled={filledEntities:P2}, BRG filled={filledBrg:P2}");
 
                 float ratio = filledEntities > 0f ? filledBrg / filledEntities : float.NaN;
@@ -1311,13 +1177,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Returns true when <paramref name="snap"/> contains no non-background pixels —
-        /// i.e. the BRG render produced only the camera clear colour (background).
-        ///
-        /// This is the correct "BRG/DOTS did not composite" probe for headless EditMode: the camera
-        /// clear itself always works, so a raw black check would never catch BRG geometry silently
-        /// failing to composite on top of a non-black background. SnapshotCoverage.Analyse uses a
-        /// Manhattan-distance tolerance=15 around the background colour to classify each pixel;
-        /// IsBlank=true when ≥97% of pixels are background.
+        /// i.e. the BRG render produced only the camera clear colour. The clear always works, so a raw
+        /// black check would miss BRG geometry that failed to composite. IsBlank is ≥97% of pixels within
+        /// Manhattan distance 15 of the background.
         /// </summary>
         private static bool IsRenderBlank(SnapshotRenderer snap, Color32 background)
         {
@@ -1327,19 +1189,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GameObject render backend tests — the restored RenderBackend.GameObject path.
-    //
-    // Proves the GameObject backend engine independently of the live MapView/TileManager wiring, mirroring
-    // EntitiesTileRendererTests so the two debuggable backends are held to the same contract:
-    //   • Lifecycle: AddTileLayer creates per-layer child GameObjects under one per-tile container; RemoveItem
-    //     destroys the right child and tears the container down once its last layer is gone.
-    //   • Naming: each layer GameObject is named after its style layer id (fallback to the material name).
-    //   • Floating-origin rebase: the container's position equals FloatingOrigin.TileLocalToScene(tileOrigin,
-    //     sceneOrigin) and updates on an origin shift — the same formula the instanced backends use.
-    //   • Spawn-position flash regression: a layer consumed AFTER a frame's Rebuild is positioned immediately.
-    //   • Dispose: idempotent; destroys the backend root (and with it every container + layer child).
-    //
-    // All assertions read the live Transform hierarchy (GPU-independent).
+    // GameObject backend engine tests, held to EntitiesTileRendererTests' contract: lifecycle, layer naming,
+    // floating-origin rebase, spawn position, and idempotent Dispose, all read from the live Transforms.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GameObjectTileRendererTests — GameObject render backend tests
@@ -1395,12 +1246,9 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        /// <summary>The layer children are POOLED (ObjectPool + detach on release), so a removed child must
-        /// come back on the next add rather than being rebuilt — its two AddComponent calls are the whole
-        /// reason the pool exists. Nothing else in this fixture would notice a Release that destroys or a Get
-        /// that always creates: behaviour would stay correct and just cost what it did before pooling.
-        /// Also pins that a recycled child carries NO state from its previous tenancy (the Mesh belongs to
-        /// TileManager and may be destroyed the moment RemoveItem returns).</summary>
+        /// <summary>Layer children are POOLED, so a removed child comes back on the next add instead of two new
+        /// AddComponent calls; nothing else would notice a pool that never recycles. A recycled child
+        /// carries NO state from its last tenancy, because TileManager may destroy that Mesh at once.</summary>
         [Test]
         public void RemovedLayerChild_IsRecycled_NotRebuilt_AndCarriesNoStaleState()
         {
@@ -1522,10 +1370,8 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── Spawn-position flash regression ───────────────────────────────────────────────────────
-        // MapView runs Rebuild BEFORE consuming new tiles, so a layer added after the frame's Rebuild must
-        // be created at its correct scene position — NOT at the world origin where it would render for one
-        // frame. Rebuild first (seeds the cached origin, as the live loop does), THEN add, and assert the
-        // new container is already positioned before any further Rebuild runs.
+        // Non-obvious why: MapView runs Rebuild BEFORE it consumes new tiles, so a layer added after Rebuild
+        // must spawn at its scene position, not at the origin, where it would flash for one frame.
 
         [Test]
         public void AddTileLayer_AfterRebuild_PositionedImmediately_NotAtOrigin()
@@ -1572,9 +1418,8 @@ namespace MapRenderer.Tests.Visual
             Assert.IsTrue(rootGo == null, "Dispose must destroy the backend root GameObject (and its children).");
             Assert.DoesNotThrow(() => r.Dispose(), "Dispose must be idempotent.");
 
-            // The post-dispose invariant is the line above (the root GameObject is destroyed) plus the
-            // ObjectDisposedException below. Reading a disposed backend is a caller bug, not a supported
-            // query, so no accessor answers it with a plausible-looking null or 0.
+            // After dispose the root is destroyed and use throws; reading a disposed backend is a caller bug,
+            // so no accessor answers it with a plausible null or 0.
             Assert.Throws<System.ObjectDisposedException>(() => r.AddTileLayer(
                 mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid),
                 "a disposed backend must reject use, not absorb it.");
@@ -1669,12 +1514,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Entities backend wired through MapView/TileManager.
-    //
-    // Proves the live path (not just the EntitiesTileRenderer unit): selecting RenderBackend.Entities
-    // constructs the backend, ConsumeMeshBuild creates one entity per tile-layer, and the per-frame
-    // InstancedRebuild positions them via FloatingOrigin.TileLocalToScene. GPU-independent (reads the
-    // entity's LocalToWorld translation), mirroring BrgBackendSnapshotTests' floating-origin tooth.
+    // Entities backend through MapView/TileManager: one entity per tile-layer, positioned by InstancedRebuild
+    // via FloatingOrigin.TileLocalToScene. GPU-independent: it reads each entity's LocalToWorld.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapViewEntitiesBackendTests — the Entities backend through MapView/TileManager

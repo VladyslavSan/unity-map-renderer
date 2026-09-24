@@ -22,12 +22,10 @@ namespace MapRenderer.Core.Text.Placement
         /// <param name="repAnchorRender">The symbol's representative anchor, PRE-RTC render space (the space
         /// <c>projection.Project(geo)</c> emits) — <c>SymbolBatch.RepAnchor</c>.</param>
         /// <param name="sceneOriginRender">The per-frame floating-origin rebase (<c>SceneFrame.SceneOriginRender</c>).</param>
-        /// <param name="rebase">The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>) — applied
-        /// AFTER the double subtract, mirroring <c>SymbolScreenProjection.TryProjectPoint</c>'s narrowing so the
-        /// cull decision agrees with where the symbol actually projects.</param>
-        /// <param name="cameraRelative">The camera's position relative to the floating origin
-        /// (<c>SceneFrame.CameraRelativePosition</c> / <c>CameraPoseMath.ComputeRelativePose</c>'s <c>pos</c>) —
-        /// already expressed in the rebased look-at frame, no further rebase.</param>
+        /// <param name="rebase">The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>), applied after
+        /// the double subtract as in <c>SymbolScreenProjection.TryProjectPoint</c>, so cull and projection agree.</param>
+        /// <param name="cameraRelative">The camera position relative to the floating origin
+        /// (<c>SceneFrame.CameraRelativePosition</c>), already in the rebased look-at frame.</param>
         /// <param name="globeCentreRelative">The occluding sphere's centre, relative to the floating origin
         /// (<c>IProjection.TryGetHorizonOccluder</c>'s <c>renderCentre</c>) — already in the rebased frame.</param>
         /// <param name="globeRadiusSq">The occluding sphere's radius squared; negative ⇒ planar projection (no

@@ -5,14 +5,10 @@ namespace MapRenderer.Tests.TestSupport
 {
     /// <summary>
     /// Groups a feature's decoded MVT rings (as produced by MvtDecodeJob) into polygons with explicit
-    /// outer + hole lists. Classification uses the signed-area sign relative to the first ring of
-    /// this feature, per the MVT spec ordering guarantee: exterior rings come first, holes follow.
-    ///
-    /// Rule: the first ring defines the "exterior sign." A subsequent ring with the SAME sign starts
-    /// a new Polygon (multipolygon case — islands, enclaves). A ring with the OPPOSITE sign is a hole
-    /// attached to the current polygon.
-    ///
-    /// Near-zero-area rings (degenerate/slivers) are pre-skipped to prevent downstream stalls.
+    /// outer + hole lists, per the MVT spec order (exterior rings first, holes follow). The first ring
+    /// sets the exterior sign. A later ring with the SAME signed-area sign starts a new Polygon; a
+    /// ring with the OPPOSITE sign is a hole of the current polygon. Near-zero-area rings are skipped
+    /// to prevent downstream stalls.
     /// </summary>
     public static class PolygonAssembler
     {
@@ -55,12 +51,9 @@ namespace MapRenderer.Tests.TestSupport
                     }
                     else
                     {
-                        // Opposite sign → candidate hole. An MVT hole must lie INSIDE its exterior,
-                        // so only attach it if it is spatially contained in the current outer ring.
-                        // A disjoint opposite-wound ring is a clip/winding artefact (common in tiny
-                        // tile-boundary slivers): mis-nesting it makes Earcut bridge across the gap to
-                        // a far-away ring and emit overlapping garbage triangles (area inflated up to
-                        // ~34x). Drop it instead of corrupting the exterior's triangulation.
+                        // Non-obvious why: a disjoint opposite-wound ring is a clip artefact; nesting
+                        // it makes Earcut bridge to a far ring and emit overlapping triangles. So attach
+                        // only a ring contained in the current outer ring.
                         if (current != null && RingContainedIn(ring, current.Outer))
                             current.Holes.Add(ring);
                         // else: misplaced ring — drop it.

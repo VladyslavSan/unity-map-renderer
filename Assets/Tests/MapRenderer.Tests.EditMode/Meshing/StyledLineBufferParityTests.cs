@@ -44,16 +44,10 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The teeth on moving <c>StyledLineTileBuilder</c> off its own managed
-    /// <c>MvtGeometry.Decode</c> and onto the shared <see cref="TileGeometryBuffers"/>.
-    ///
-    /// <para><b>Why a differential oracle rather than a snapshot.</b> A move that only relocates a call
-    /// path can argue byte-identity; this one cannot — two different decoder implementations
-    /// (managed <c>List&lt;List&lt;double2&gt;&gt;</c> vs Burst flat <c>NativeArray</c>), a different ring
-    /// iteration shape, and a new per-feature kind gate. Equality is therefore <b>measured</b>: the same tile,
-    /// the same features, decoded both ways in the same test run and compared element-wise at the exact seam
-    /// that moved. A snapshot could only say "a number moved"; this says "these two decoders disagree, at ring
-    /// k, at point i".</para>
+    /// <c>StyledLineTileBuilder</c> reads the shared <see cref="TileGeometryBuffers"/>, checked against the
+    /// managed <c>MvtGeometry.Decode</c>. Non-obvious why: two different decoders and ring shapes cannot argue
+    /// byte-identity, so both run in the same test and compare element-wise, which names the ring and point
+    /// where they disagree; a snapshot would only say that a number moved.
     /// </summary>
     [TestFixture]
     public class StyledLineBufferParityTests
@@ -69,14 +63,10 @@ namespace MapRenderer.Tests.Meshing
         // ── the differential oracle ────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The ring list the line consumer iterates, read out of the shared buffer, is element-wise
-        /// identical to the one the managed decoder produces for the same features, running live in the
-        /// same process. Everything downstream of this ring list does not depend on where the list came
-        /// from, so ring-level equality is mesh-level equality; the line pixel suites are the end-to-end
-        /// confirmation of that implication.
-        /// <para>Exact comparison, no tolerance: both decoders accumulate <c>long</c> deltas and emit
-        /// <c>(double)</c> of integer magnitudes far inside <c>double</c>'s exact range, so the vertices are
-        /// bit-identical. A tolerance here would be a weakened tooth.</para>
+        /// The ring list the line consumer reads from the shared buffer is element-wise identical to the
+        /// managed decoder's; nothing downstream depends on its source, so ring-level equality is mesh-level
+        /// equality. The comparison is exact: both decoders accumulate <c>long</c> deltas and emit integer
+        /// magnitudes far inside <c>double</c>'s exact range.
         /// </summary>
         [Test]
         public void LineRings_FromTheSharedBuffer_MatchTheManagedDecodeOracle()
@@ -629,9 +619,8 @@ namespace MapRenderer.Tests.Meshing
             },
         };
 
-        // Measured (2026-09-04, square+courtyard, this file's own sibling StyledFillExtrusionGraphWriteTests)
-        // — the ceiling stated in the file header. Not re-measured per fixture; see the header for why that
-        // is safe here.
+        // The ULP ceiling measured by StyledFillExtrusionGraphWriteTests on the same square+courtyard wall
+        // chain. See docs/job-scheduling-design.md § "Invariants that constrain what is built next".
         private const int WallNormalTangentMaxUlp = 5;
 
         [TestCase("square", false), TestCase("square", true)]
@@ -695,14 +684,8 @@ namespace MapRenderer.Tests.Meshing
                     AssertBounded(pn.Normal.y, golden.NormHex[i * 3 + 1], WallNormalTangentMaxUlp, fixtureName, label, i, "Normal.y");
                     AssertBounded(pn.Normal.z, golden.NormHex[i * 3 + 2], WallNormalTangentMaxUlp, fixtureName, label, i, "Normal.z");
 
-                    // ExtrudeUpAndT.xyz = upA * factor: BOUNDED, not bit-exact — upA is math.normalize(Up[idx]),
-                    // and normalize was measured (see this file's header) to diverge
-                    // from managed data-dependently on SOME inputs. It happened to be bit-exact on every edge
-                    // of the square+courtyard fixture but is NOT bit-exact on high-latitude/Spherical (found
-                    // running this exact tooth, RED-verified by the discovery itself — a 1-ULP divergence at
-                    // ExtrudeUpAndT.x[0] on that fixture is what corrected this from an earlier, overclaimed
-                    // bit-exact assumption). .w (=t) stays bit-exact — it is the literal constant 0f/1f, never
-                    // touches a projected value.
+                    // ExtrudeUpAndT.xyz is BOUNDED, not bit-exact: math.normalize diverges from managed on some
+                    // inputs (1 ULP at .x[0] on high-latitude/Spherical). .w stays bit-exact (the constant 0f/1f).
                     AssertBounded(eb.ExtrudeUpAndT.x, golden.ExtrudeHex[i * 4 + 0], WallNormalTangentMaxUlp, fixtureName, label, i, "ExtrudeUpAndT.x");
                     AssertBounded(eb.ExtrudeUpAndT.y, golden.ExtrudeHex[i * 4 + 1], WallNormalTangentMaxUlp, fixtureName, label, i, "ExtrudeUpAndT.y");
                     AssertBounded(eb.ExtrudeUpAndT.z, golden.ExtrudeHex[i * 4 + 2], WallNormalTangentMaxUlp, fixtureName, label, i, "ExtrudeUpAndT.z");
@@ -734,39 +717,15 @@ namespace MapRenderer.Tests.Meshing
         /// <summary>
         /// The wall chain honours the tile-buffer clip: it takes the SAME select-or-clip branch on
         /// <c>LayerInput.Clip</c> the roof takes, so a building crossing the tile-buffer window is extruded
-        /// from the CLIPPED footprint, not the full one. Before the fix the walls ran
-        /// <c>RingSelectJob</c> unconditionally, and with the shipped <c>FillTileBufferClip: 0</c> config —
-        /// which decodes to the ENABLED <c>KeepTileUnits(0.0)</c>, only a negative value disables — two
-        /// neighbouring tiles each raised a crossing building's whole wall set.
-        ///
-        /// <para><b>Fixture and the arithmetic behind every number below.</b> Two squares at
-        /// <c>Extent = 4096</c>, window <c>[0, 4096]²</c> under <c>KeepTileUnits(0.0)</c>:
-        /// <c>straddling</c> at (3900,3900)+500 crosses the window's far corner; <c>whollyOutside</c> at
-        /// (5000,5000)+300 lies entirely beyond it. Clipped, <c>whollyOutside</c>'s ring is DROPPED
-        /// (<c>RingClipJob</c>: <c>clippedLen == 0 ⇒ continue</c>) and contributes no wall at all, while
-        /// <c>straddling</c> becomes (3900,3900) (4096,3900) (4096,4096) (3900,4096) — still 4 vertices,
-        /// hence 4 edges, since the wall job closes the ring with <c>(i+1) % len</c>. At 4 vertices +
-        /// 6 indices per edge that is <b>16 wall vertices / 24 wall indices</b>. Unclipped, both squares
-        /// survive at 4 edges each: <b>32 / 48</b>.</para>
-        ///
-        /// <para><b>Why 16 and not 8.</b> 8 would be the rejected alternative — walls suppressed along the
-        /// two edges the clip CUT. This renderer emits a wall for EVERY edge of the clipped ring, cut edges
-        /// included, because what is extruded is the clipped polygon; the cut quads are hidden inside the
-        /// opaque solid in steady state and are what keeps a building at the edge of the loaded cover CLOSED
-        /// rather than a hollow shell. The one condition that reopens the alternative is translucent
-        /// fill-extrusion (<c>depth-and-render-regimes-design.md</c>) — until then, a "simplification"
-        /// to 8 is a regression, and this number is what stops it landing silently.</para>
-        ///
-        /// <para><b>The disabled-arm control (32/48) is not decoration.</b> Without it assertion 1 would be a
-        /// statement about wall emission in general rather than about the clip: it is what pins that the
-        /// <c>RingSelectJob</c> arm did not move, inside the tooth that changes.</para>
-        ///
-        /// <para><b>Reachability witness.</b> The roof vertex counts of the two arms must differ — that is
-        /// what proves <c>whollyOutside</c>'s ring really reaches <c>RingClipJob</c>'s drop branch rather
-        /// than the fixture quietly ceasing to exercise it. Post-fix the roof and the walls now BOTH lose
-        /// that ring; the roof half is the independent half, since the wall counts are what the assertions
-        /// below are testing.</para>
+        /// from the CLIPPED footprint. The shipped <c>FillTileBufferClip: 0</c> decodes to the ENABLED
+        /// <c>KeepTileUnits(0.0)</c>; walls that skipped the clip would be raised by both neighbouring tiles.
         /// </summary>
+        /// <remarks>
+        /// Clipped: <c>whollyOutside</c> drops and <c>straddling</c> keeps 4 edges, so 16 wall vertices / 24
+        /// indices; unclipped: 32 / 48, the control that pins the <c>RingSelectJob</c> arm. The differing roof
+        /// counts prove the drop branch is reached. 16, not 8: every clipped edge gets a wall, cut edges too.
+        /// See docs/job-scheduling-design.md § "Invariants that constrain what is built next".
+        /// </remarks>
         [Test]
         public void Walls_HonourTheTileBufferClip()
         {
@@ -918,27 +877,11 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Mesh-triangulation testbench over real OpenFreeMap water tiles (many-holed polygons — the case that
-    /// breaks a hand-rolled ear-clipper). See docs/mesh-triangulation-robustness-design.md.
-    ///
-    /// This corpus runs on the REAL jobified fill path —
-    /// <see cref="FillMeshGraph.Schedule"/>, the Burst <see cref="EarcutJob"/> — the same production
-    /// dispatch <c>JobifiedWaterTriangulationTests</c> already proves for water-8-135-80 (kept there,
-    /// not duplicated here; together the two files cover all 8 corpus tiles on the Burst arm, none on
-    /// the retired managed twin). <b>Band setting: <c>SuppressBoundaryBand</c> is left unset (band ON)</b>
-    /// here — the boundary band's outer vertices share their inner twin's coordinate (see
-    /// <c>FillMeshGraph</c>'s own comment), so every band triangle has near-zero area, sign 0, and is
-    /// ignored by <see cref="MeshCoverageValidator.ValidateTriangulation"/>'s winding majority and raster
-    /// coverage — this is the only place where band-on is correct.
-    ///
-    /// Always-on (green): the validator is correct on a clean synthetic polygon, and the corpus tiles decode,
-    /// assemble, and triangulate their OUTER rings cleanly — so any regression in decode/assemble/outer is
-    /// caught, and the localisation "only hole handling is broken" is pinned.
-    ///
-    /// Corpus_Water_*_TriangulatesFaithfully: the full water layer of each corpus tile must triangulate
-    /// faithfully — the acceptance teeth for the stage-2 hole-handling fix (the cure → split → mirror-retry
-    /// cascade <see cref="EarcutJob"/> carries forward). Always-on regression guards now that the fix has
-    /// landed.
+    /// Triangulation testbench over real many-holed OpenFreeMap water tiles, on the Burst fill path
+    /// (<see cref="FillMeshGraph.Schedule"/>, <see cref="EarcutJob"/>). The boundary band stays ON: its
+    /// triangles have ~zero area, so <see cref="MeshCoverageValidator.ValidateTriangulation"/> ignores them.
+    /// <c>JobifiedWaterTriangulationTests</c> covers water-8-135-80.
+    /// See docs/mesh-triangulation-robustness-design.md.
     /// </summary>
     public class WaterTriangulationTests
     {
@@ -1059,9 +1002,8 @@ namespace MapRenderer.Tests.Meshing
         {
             foreach (string name in Corpus)
             {
-                // The command streams come from the test-side fixture reader, not from a decoded
-                // MvtFeature — a decoded feature carries no geometry now, and reading production's buffer
-                // instead would make this oracle audit itself.
+                // The command streams come from the test-side fixture reader: reading production's buffer
+                // would make this oracle audit itself.
                 var layer = MvtFixtureStreams.ReadLayer(LoadFixture(name), "water");
                 Assert.IsNotNull(layer, $"{name}: water layer present");
                 int polys = 0;
@@ -1096,13 +1038,9 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void Corpus_Water_6_32_20_TriangulatesFaithfully()
         {
-            // water-6-32-20's poly 0 (outer=879, 13 holes) hits ONE locus the cure -> split cascade cannot
-            // resolve, and drops it cleanly. Measured at the drop site (managed arm): 5 live
-            // vertices, residual signed area +33.5 tile-space units^2 in a 4096^2 tile — sub-pixel at z6,
-            // ~13x below MeshCoverageValidator's raster resolution, so ForceClips is the only instrument
-            // that observes it (that argument survives the arm change unchanged). Re-measured for the
-            // Burst arm: ForceClips=1, byte-identical to the managed pin — the two arms agree on
-            // this tile's cascade. The count is pinned EXACTLY, not bounded, to keep that sentinel armed.
+            // Non-obvious why: water-6-32-20's poly 0 drops ONE sub-pixel locus the cure -> split cascade
+            // cannot resolve, below the validator's raster resolution, so ForceClips is its only observer and
+            // the count is pinned EXACTLY.
             var rep = RunOnBurstArm("water-6-32-20.pbf.bytes", new TileId { Z = 6, X = 32, Y = 20 }, "water");
             TestContext.WriteLine($"water-6-32-20 (Burst arm): {rep.Summary}");
             Assert.AreEqual(0, rep.WindingFlips, "water z6/32/20: NO folds/inversions allowed - " + rep.Summary);
@@ -1116,10 +1054,8 @@ namespace MapRenderer.Tests.Meshing
                 "ForceClips is the only instrument in this suite that can see a sub-cell drop. " + rep.Summary);
         }
 
-        // ---- real coastline-dense tiles (fjords / archipelagos) — the case the fix targets --------------
-        // These are real OpenFreeMap water tiles chosen for pathological hole counts. The 4 CLEAN ones
-        // triangulate perfectly (the strict bar); the 2 HARD ones exercise the design's graceful-
-        // degradation path — a bounded, SURFACED clean drop, never a fold.
+        // ---- real coastline-dense tiles (fjords / archipelagos) with pathological hole counts ----------
+        // 4 CLEAN ones triangulate perfectly; 2 HARD ones drop a bounded, counted locus, never a fold.
 
         // CLEAN real tiles — strict bar: ForceClips==0, WindingFlips==0, area+coverage within 1%.
         private static readonly (string File, TileId Id)[] CleanRealCorpus =
@@ -1142,14 +1078,8 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // HARD real tiles — graceful-degradation bar: the critical invariant is
-        // WindingFlips==0 (NO fold/inversion — the visible-corruption failure mode is impossible), with
-        // area conserved to <1% and a bounded, surfaced clean-drop count. Measured for the Burst arm in
-        // croatia-dalmatia ForceClips=1, indonesia-rajaampat ForceClips=1 — both at the bound, same
-        // as the managed arm's own `<=1` allowance (the design's own tolerance, not a placeholder copied
-        // from a tighter managed value). A clean drop is a VISIBLE signal (it is counted), never silent
-        // garbage. This documents that the fix degrades correctly on the hardest real input rather than
-        // folding.
+        // HARD real tiles: WindingFlips==0 (no fold), area conserved to <1%, and ForceClips <= 1, the
+        // design's own tolerance. Both tiles sit at the bound; a clean drop is counted, never silent.
         private static readonly (string File, TileId Id)[] HardRealCorpus =
         {
             ("water-real-croatia-dalmatia-9-279-187.pbf.bytes", new TileId { Z = 9, X = 279, Y = 187 }),
@@ -1170,11 +1100,8 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // Permanent unit tooth — the reversed-concave ring flagged in review (a simple concave quad).
-        // The invariant: no fold (WindingFlips==0) and area conserved. NB: fed through the triangulator the
-        // outer is winding-normalised first, so this specific ring never actually reproduced the reversed-
-        // residual overlap on either the pre- or post-fix code; it is kept as a permanent regression guard
-        // for the concave-triangulation-with-no-fold contract.
+        // A reversed concave quad: no fold (WindingFlips==0) and area conserved. Limitation: the outer is
+        // winding-normalised first, so this ring does not reproduce the reversed-residual overlap itself.
         [Test]
         public void Unit_ReversedConcaveQuad_NoFold_AreaConserved()
         {
@@ -1201,10 +1128,8 @@ namespace MapRenderer.Tests.Meshing
         private static readonly TileId Tile = new TileId { Z = 0, X = 0, Y = 0 };
         private const double Zoom = 0.0;
 
-        // CONSTANT paint (no data-driven expression): both Width and Opacity are literal values, so
-        // paint.Width/Opacity.DependsOnFeature are false and their per-feature TryEvaluate branches
-        // never run — isolates the tooth to the three array allocations (the Rank-3 fence), not
-        // expression evaluation.
+        // CONSTANT paint: Width/Opacity do not depend on the feature, so the per-feature TryEvaluate branches
+        // do not run and the tooth measures only the three attribution arrays.
         private const string PaintJson = @"{""line-color"": ""#ff0000"", ""line-width"": 4}";
 
         /// <summary>
@@ -1231,9 +1156,8 @@ namespace MapRenderer.Tests.Meshing
             var paint  = styleLayer.Paint;
             var layout = styleLayer.Layout;
 
-            // Non-vacuity: a constant style really does bypass both per-feature bake branches — otherwise
-            // this tooth would be measuring the expression-eval path (out of the Rank-3 fence) instead of
-            // the three attribution arrays.
+            // Non-vacuity: a constant style bypasses both per-feature bake branches, so the tooth measures the
+            // three attribution arrays and not the expression-eval path.
             Assert.IsFalse(paint.Width.DependsOnFeature,
                 "precondition: line-width must be a CONSTANT — a data-driven width would exercise the " +
                 "TryEvaluate bake branch, which is out of this stage's fence");

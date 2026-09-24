@@ -1,6 +1,4 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
-// (Tools/core-tests). Do NOT add any UnityEngine reference.
-//
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine reference.
 // Tests the Angle value type: deg↔rad round-trips, trig association, shortest-path lerp.
 
 
@@ -99,11 +97,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── LerpShortest — shortest-path heading lerp ──────────────────────────────────────────────
-        //
-        // The decisive acceptance test: 350°→10° must traverse +20° (NOT −340°).
-        // A naive linear lerp yields (350 + (10-350)*t = 350 - 340t), landing at 180° at t=0.5
-        // and at 10° at t=1 (but going the LONG way around).
-        // LerpShortest must recognize the +20° short path and land near 0°/360° at t=0.5.
+        // 350°→10° must traverse +20°; a naive lerp goes −340° and passes 180° at t=0.5.
 
         [Test]
         public void LerpShortest_350To10_At_t1_ReturnsNear10()
@@ -129,9 +123,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void LerpShortest_350To10_NotNaiveMidpoint()
         {
-            // The naive linear midpoint between 350° and 10° going the long way would be ≈180°.
-            // The correct short-path midpoint is ≈0° (as pinned above).
-            // This assertion provides a direct contrast: result is NOT near 180°.
+            // A naive long-way lerp puts the midpoint near 180°; the short-path midpoint is ≈0°.
             Angle result = Angle.LerpShortest(Angle.FromDegrees(350.0), Angle.FromDegrees(10.0), 0.5);
             double d     = result.Degrees;
             Assert.False(d > 170.0 && d < 190.0,
@@ -159,9 +151,7 @@ namespace MapRenderer.Tests.Cameras
         }
     }
 
-// Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
-// (Tools/core-tests). Do NOT add any UnityEngine reference.
-//
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine reference.
 // Tests ConstrainedAngle: Heading Wrap, Tilt Clamp, runtime Clamped, operator+.
 
 
@@ -203,9 +193,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── Tilt — Clamp to [0, 90] ──────────────────────────────────────────────────────────────
-        //
-        // This is the CameraProperties.Tilt invariant. The existing test
-        // suite uses tilt ≤ 60 and never exercised the clamp; these tests pin it explicitly.
+        // The CameraProperties.Tilt invariant; other tests keep tilt ≤ 60 and never reach the clamp.
 
         [Test]
         public void Tilt_Above90_ClampsTo90()
@@ -236,10 +224,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── Clamped — runtime range ≠ the [0,90] Tilt preset ─────────────────────────────────────
-        //
-        // ViewInput.ApplyTiltDelta's maxPitch limit is a runtime value, distinct from the [0,90] Tilt
-        // type invariant. If both were collapsed into the Tilt preset, Clamped(75,0,60) would return
-        // 75° (accepted by the [0,90] preset) — but with the correct separate Clamped path it returns 60°.
+        // ViewInput.ApplyTiltDelta's runtime maxPitch is not the [0,90] Tilt preset: Clamped(75,0,60) is 60°.
 
         [Test]
         public void Clamped_AboveHi_ClampsToHi()
@@ -284,9 +269,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── default(ConstrainedAngle) ─────────────────────────────────────────────────────────────
-        //
-        // Documents the degenerate-default behavior: reads return 0°, matching default(double).
-        // Never rely on a defaulted value re-clamping anything; always construct through a preset.
+        // A defaulted value reads 0° and re-clamps nothing; construct through a preset.
 
         [Test]
         public void Default_Degrees_IsZero()

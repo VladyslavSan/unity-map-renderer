@@ -137,15 +137,10 @@ namespace MapRenderer.Tests.Text.Sprites
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Teeth for the padded repack's PIXEL half (<see cref="SpriteSheetComposer"/>). Two properties carry
-    /// the whole fix: a sprite's content must survive the move <b>byte-for-byte</b> (a repack that resampled
-    /// would be a silent quality regression nobody would trace back here), and the manufactured border must
-    /// be <b>alpha 0 with the content's own RGB</b> — the rule that turns the silhouette into a ramp bilinear
-    /// can antialias WITHOUT ringing a dark halo around every icon.
-    ///
-    /// <para><c>NoDarkFringe</c> is the direct tooth for that second rule: a border written with a plain
-    /// <c>Array.Clear</c> (i.e. <c>(0,0,0,0)</c>) satisfies "alpha 0" and still fails, because bilinear
-    /// interpolates RGB and alpha independently and would drag black into every edge pixel.</para>
+    /// Teeth for the padded repack's PIXEL half (<see cref="SpriteSheetComposer"/>): a sprite's content
+    /// survives the move <b>byte-for-byte</b>, and the border is <b>alpha 0 with the content's own RGB</b>.
+    /// <c>NoDarkFringe</c> pins the second rule: bilinear interpolates RGB and alpha independently, so a
+    /// <c>(0,0,0,0)</c> border drags black into every edge pixel.
     /// </summary>
     [TestFixture]
     public class SpriteSheetComposerTests
@@ -371,14 +366,8 @@ namespace MapRenderer.Tests.Text.Sprites
     /// Teeth for the padded repack's RECT half (<see cref="SpriteSheetPadder"/>): every sprite ends up with
     /// its own one-texel border that no neighbour's content can reach into, the plan is byte-for-byte
     /// reproducible regardless of dictionary insertion order, aliased names stay aliased, and a malformed
-    /// sheet's degenerate entries survive untouched.
-    ///
-    /// <para>The separation tooth
-    /// (<see cref="EveryPlacedRect_IsSeparatedByAtLeastTwoTexels_AndKeptOffTheSheetEdge"/>) is
-    /// the one that makes the border REAL: a plan that placed cells correctly but let two content rects sit
-    /// one texel apart would give them a SHARED border texel, and the whole point is that each sprite's
-    /// ramp is its
-    /// own.</para>
+    /// sheet's degenerate entries survive untouched. Two content rects one texel apart would SHARE a border
+    /// texel, which the separation tooth rules out.
     /// </summary>
     [TestFixture]
     public class SpriteSheetPadderTests
@@ -538,12 +527,8 @@ namespace MapRenderer.Tests.Text.Sprites
         [Test]
         public void ASourceRectThatOVERFLOWS_PassesThroughUnpadded_AndDoesNotPoisonTheValidSprites()
         {
-            // `x: 2147483647, width: 1` is malformed but PARSEABLE — SpriteIndex.Parse tolerates a bad sheet
-            // rather than throwing, so this reaches the planner in production. In 32-bit signed arithmetic
-            // `X + Width` wraps to int.MinValue, which sails past a naive `<= sourceSize.x` bound; the entry
-            // is then packed, its blit copies from a NEGATIVE byte offset, and Buffer.BlockCopy throws — out
-            // of the SpriteSheet constructor, before either the texture or the index is installed. One
-            // malformed line of sprite JSON would make EVERY icon on the map disappear.
+            // Non-obvious why: this malformed rect parses and `X + Width` wraps, so a naive bound lets its blit
+            // throw out of the SpriteSheet constructor, and one bad JSON line removes EVERY icon on the map.
             SpriteIndex index = SpriteIndex.Parse(
                 "{\"ok\":{\"x\":0,\"y\":0,\"width\":4,\"height\":4,\"pixelRatio\":1}," +
                 "\"overflowX\":{\"x\":2147483647,\"y\":0,\"width\":1,\"height\":1,\"pixelRatio\":1}," +

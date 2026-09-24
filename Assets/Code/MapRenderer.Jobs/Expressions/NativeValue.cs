@@ -4,13 +4,10 @@ using Unity.Burst;
 namespace MapRenderer.Jobs.Expressions
 {
     /// <summary>
-    /// A blittable, filter-only runtime value for the native filter VM — the Burst-safe counterpart of
-    /// the managed <see cref="Value"/>. Field order mirrors <see cref="Mvt.MvtValueNative"/> (double
-    /// first). Only the tags a <see cref="NativeFilterCompiler"/>-accepted filter can ever produce are
-    /// modeled: <see cref="ValueType.Null"/>, <see cref="ValueType.Boolean"/> (1.0/0.0 in the number
-    /// field), <see cref="ValueType.Number"/>, and <see cref="ValueType.String"/> (an id into a
-    /// per-tile-layer value-string table, never inline bytes). Color/Array/Object never occur — no
-    /// accepted filter's op subset can produce them.
+    /// A blittable, filter-only runtime value for the native filter VM, the Burst-safe counterpart of
+    /// <see cref="Value"/>; field order mirrors <see cref="Mvt.MvtValueNative"/>. It models only the tags an
+    /// accepted filter produces: Null, Boolean (1.0/0.0 in the number field), Number, and String (an id into
+    /// a per-tile-layer value-string table).
     /// </summary>
     [BurstCompile]
     internal readonly struct NativeValue
@@ -59,14 +56,11 @@ namespace MapRenderer.Jobs.Expressions
         }
 
         /// <summary>
-        /// Mirrors <c>DecisionOps.CompareValues</c>'s type gate for the shapes the VM's compile-time
-        /// restriction (one <c>get</c> operand, one number literal — see <see cref="NativeFilterCompiler"/>)
-        /// can ever produce: true only when both operands are <see cref="ValueType.Number"/>, with
-        /// <paramref name="cmp"/> set via <see cref="System.Double.CompareTo(double)"/> (not raw
-        /// <c>&lt;</c>, to match managed's <c>CompareTo</c> exactly); otherwise false and
-        /// <paramref name="cmp"/> is 0 — the type-mismatch case managed throws on and
-        /// <c>CompiledFilter</c> catches into an exclude. String-vs-string ordering is unreachable under
-        /// that restriction, so it is not modeled here. Never throws.
+        /// Mirrors <c>DecisionOps.CompareValues</c>'s type gate for the shapes the compiler admits (one
+        /// <c>get</c>, one number literal): true only when both are <see cref="ValueType.Number"/>, with
+        /// <paramref name="cmp"/> from <see cref="System.Double.CompareTo(double)"/> to match managed.
+        /// Otherwise false and 0, the mismatch managed throws on and <c>CompiledFilter</c> excludes.
+        /// Never throws.
         /// </summary>
         internal static bool TryCompare(in NativeValue a, in NativeValue b, out int cmp)
         {

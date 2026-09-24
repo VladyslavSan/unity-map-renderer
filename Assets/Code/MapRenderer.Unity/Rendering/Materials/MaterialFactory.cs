@@ -18,12 +18,10 @@ namespace MapRenderer.Unity.Rendering.Materials
     {
         /// <summary>
         /// Creates a per-style-layer fill Material by cloning <paramref name="settings"/>'s base fill
-        /// material (a Material Variant in the Editor — see <c>MaterialExtensions.CloneWithParent</c>),
-        /// so the base asset is the single editable source of styling. The clone inherits the base's
-        /// import-baked keywords; <c>FillTweaker.ApplyPainterContract</c> then re-asserts the
-        /// code-owned render-state + color-identity contract. Returns <c>null</c> (with a warning) when no
-        /// config/base material is assigned — there is no shader-name fallback; production wires a
-        /// <see cref="MapMaterialSet"/>.
+        /// material (a Material Variant in the Editor), so the base asset is the single editable source of
+        /// styling. The clone inherits the base's import-baked keywords; <c>FillTweaker.ApplyPainterContract</c>
+        /// then re-asserts the code-owned render-state + color-identity contract. Returns <c>null</c> (with a
+        /// warning) when no base material is assigned; there is no shader-name fallback.
         /// </summary>
         public static Material CreateFillMaterial(MapMaterialSet settings)
         {
@@ -64,9 +62,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.OutlineColorIsFallback && !paint.OutlineColor.DependsOnFeature)
                 applier.BindColor(paint.OutlineColor, ShaderProperties.Fill.PropertyId.FillOutlineColor);
 
-            // fill-antialias is NOT bound: the _FillAntialias uniform is read by no pass
-            // (docs/fill-parity-design.md). The property stays declared in the CBUFFER, which
-            // MapFillUnlitMaterialTests pins.
+            // fill-antialias is NOT bound: no pass reads _FillAntialias (docs/fill-parity-design.md). The
+            // property stays declared in the CBUFFER, which MapFillUnlitMaterialTests pins.
 
             // fill-translate: a px offset through Fill_VertexModify's MapPixelsToWorld, in line-translate's
             // device-px space. It parses as always-Constant, so the per-frame applier cannot animate it.
@@ -85,12 +82,10 @@ namespace MapRenderer.Unity.Rendering.Materials
         }
 
         /// <summary>
-        /// Creates a per-style-layer fill-extrusion Material by cloning
-        /// <paramref name="settings"/>'s <see cref="MapMaterialSet.FillExtrusionMaterial"/> base (a dedicated
-        /// <c>Map/FillExtrusion</c> material), then applies <c>FillExtrusionTweaker.ApplyElevatedContract</c>:
-        /// opaque and depth-writing, not the flat painter contract FILL/LINE use, because buildings must
-        /// occlude one another and their own walls. Returns <c>null</c> (with a warning) when no
-        /// config/base material is assigned — mirrors <see cref="CreateFillMaterial"/>.
+        /// Creates a per-style-layer fill-extrusion Material by cloning <paramref name="settings"/>'s
+        /// <see cref="MapMaterialSet.FillExtrusionMaterial"/> base, then applies the opaque, depth-writing
+        /// <c>FillExtrusionTweaker.ApplyElevatedContract</c>, because buildings must occlude one another and
+        /// their own walls. Returns <c>null</c> (with a warning) when no base material is assigned.
         /// </summary>
         public static Material CreateFillExtrusionMaterial(MapMaterialSet settings)
         {
@@ -110,14 +105,11 @@ namespace MapRenderer.Unity.Rendering.Materials
         }
 
         /// <summary>
-        /// Binds constant/zoom fill-extrusion paint properties from <paramref name="paint"/> to the
-        /// dedicated <c>Map/FillExtrusion</c> material built by <see cref="CreateFillExtrusionMaterial"/>.
-        /// Height/Base: Constant/Zoom rides the <c>_ExtrusionHeight</c>/<c>_ExtrusionBase</c> uniforms;
-        /// Feature/Composite is skipped here AND zeroed, because
-        /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> bakes the evaluated value per-vertex and the
-        /// VS composes uniform+bake additively — a stray non-zero uniform under the baked path would
-        /// double the elevation. <c>fill-extrusion-color</c>'s alpha is NOT special-cased to 1, matching
-        /// <see cref="BindFillPaintToApplier"/>.
+        /// Binds constant/zoom fill-extrusion paint properties from <paramref name="paint"/> to the material.
+        /// Non-local invariant: a data-driven height/base uniform is zeroed, because
+        /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> bakes that value per vertex and the VS adds
+        /// uniform and bake, so a stray non-zero uniform doubles the elevation. <c>fill-extrusion-color</c>'s
+        /// alpha is not special-cased to 1, matching <see cref="BindFillPaintToApplier"/>.
         /// </summary>
         /// <param name="paint">The layer's parsed fill-extrusion paint properties.</param>
         /// <param name="applier">The layer's per-frame zoom→uniform applier; constant bindings apply
@@ -198,21 +190,18 @@ namespace MapRenderer.Unity.Rendering.Materials
             // "no translate" (background has no fill-translate equivalent).
             mat.SetVector(ShaderProperties.Fill.PropertyId.FillTranslate, Vector4.zero);
 
-            // Same defence for the pattern uniforms, and load-bearing here: a base .mat carrying
-            // _FillPattern=1 would make the fill shader clip the ENTIRE background quad
-            // (background-pattern is not implemented).
+            // Load-bearing: a base .mat with _FillPattern=1 would make the fill shader clip the ENTIRE
+            // background quad (background-pattern is not implemented).
             mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, 0f);
             mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
         }
 
         /// <summary>
         /// Creates a per-style-layer line Material by cloning <paramref name="settings"/>'s base line
-        /// material (a Material Variant in the Editor — see <c>MaterialExtensions.CloneWithParent</c>),
-        /// so the base asset is the single editable source of styling. The clone inherits the base's
-        /// import-baked keywords; <c>LineTweaker.ApplyPainterContract</c> then re-asserts the
-        /// code-owned render-state + color-identity contract. Returns <c>null</c> (with a warning) when no
-        /// config/base material is assigned — there is no shader-name fallback; production wires a
-        /// <see cref="MapMaterialSet"/>.
+        /// material (a Material Variant in the Editor), so the base asset is the single editable source of
+        /// styling. The clone inherits the base's import-baked keywords; <c>LineTweaker.ApplyPainterContract</c>
+        /// then re-asserts the code-owned render-state + color-identity contract. Returns <c>null</c> (with a
+        /// warning) when no base material is assigned; there is no shader-name fallback.
         /// </summary>
         public static Material CreateLineMaterial(MapMaterialSet settings)
         {

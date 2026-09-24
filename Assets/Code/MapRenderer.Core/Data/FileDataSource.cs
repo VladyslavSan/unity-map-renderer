@@ -9,15 +9,10 @@ namespace MapRenderer.Core.Data
     /// <summary>
     /// Fetches tile bytes from the local filesystem. Path template tokens: <c>{z}</c>, <c>{x}</c>, <c>{y}</c>
     /// (default <c>{z}/{x}/{y}.mvt</c>, relative to <see cref="RootDirectory"/>). Y convention: XYZ, with no
-    /// TMS Y-flip. A missing file returns <c>HasData=false</c>; an I/O error throws.
-    /// <para>The threading below is a non-obvious why. <see cref="FetchAsync"/> switches to the ThreadPool,
-    /// reads, and returns without switching back, so the task completes with no PlayerLoop dependency. The
-    /// default <c>configureAwait: true</c> posts its last continuation to the PlayerLoop, which never advances
-    /// when test helpers or <c>DrainMeshBuilds</c> poll synchronously. <c>RunOnThreadPool</c> with
-    /// <c>configureAwait: false</c> is the same pattern, but the NetCore build (<c>dotnet test</c>)
-    /// lacks it.</para>
-    /// <para>A WebGL player's ThreadPool has no workers, so the switch is desktop/editor only and the read runs
-    /// inline there: an accepted cost against a permanent silent hang (docs/web-target.md).</para>
+    /// TMS Y-flip. Missing file: <c>HasData=false</c>; I/O error: throws. Non-obvious why: FetchAsync
+    /// switches to the ThreadPool and never back, as a PlayerLoop continuation never runs under synchronous
+    /// polling; <c>RunOnThreadPool(configureAwait: false)</c> is absent from the <c>dotnet test</c> build.
+    /// On WebGL the read runs inline (docs/web-target.md).
     /// </summary>
     public sealed class FileDataSource : IDataSource
     {

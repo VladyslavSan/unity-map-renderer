@@ -5,27 +5,17 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Expressions
 {
     /// <summary>
-    /// A color in the expression type system: RGBA components in the sRGB color space, each a float in
-    /// [0,1] (alpha is opacity, linear in [0,1]). This mirrors the Style Spec "color" type, whose literal
-    /// forms are CSS color strings (<c>#rgb</c>/<c>#rrggbb</c>, <c>rgb()/rgba()</c>, <c>hsl()/hsla()</c>,
-    /// and the CSS named colors).
-    ///
-    /// Clean-room color-space math. Constants are taken from citable standards, NOT from MapLibre source:
-    ///  - sRGB transfer function (gamma): IEC 61966-2-1, threshold 0.04045 / 12.92 / ((x+0.055)/1.055)^2.4.
-    ///  - sRGB → CIE XYZ matrix and D65 reference white (Xn,Yn,Zn) = (0.95047, 1.0, 1.08883): sRGB spec.
-    ///  - CIELAB and CIELCh(ab): CIE 15. LCh is LAB in polar form; "HCL" here is LCh(ab) with H in degrees.
-    /// Expected values in the tests are hand-derived from these same constants (self-consistency is the
-    /// clean-room bar; there is no MapLibre output to match).
+    /// A color in the expression type system (the Style Spec "color" type): sRGB RGBA, each in [0,1].
+    /// Constants come from citable standards: the sRGB transfer function from IEC 61966-2-1 (0.04045 / 12.92 /
+    /// ((x+0.055)/1.055)^2.4), the sRGB → XYZ matrix and D65 white (0.95047, 1.0, 1.08883) from the sRGB spec, and
+    /// CIELAB/CIELCh(ab) from CIE 15 ("HCL" here is LCh(ab), H in degrees). Tests hand-derive expected values from
+    /// the same constants; there is no MapLibre output to match, so no parity oracle.
     /// </summary>
     public readonly struct Color : IEquatable<Color>
     {
-        /// <summary>sRGB red, green, blue, and alpha — each nominally in [0,1].
-        ///
-        /// <para>The range is enforced by the <i>producers</i>, not by this constructor: every way a color
-        /// enters the type clamps or rejects at its own boundary — <see cref="ColorParser"/> clips per CSS,
-        /// <see cref="Ops.ColorCtors"/> raises an evaluation error, <see cref="FromLab"/> clamps the
-        /// out-of-gamut result of its conversion. The constructor stays a plain field assignment so it can
-        /// also carry the intermediate values of a color-space round-trip without clipping them.</para></summary>
+        /// <summary>sRGB red, green, blue, and alpha — each nominally in [0,1]. The producers enforce the range
+        /// (<see cref="ColorParser"/> clips, <see cref="Ops.ColorCtors"/> raises an error, <see cref="FromLab"/>
+        /// clamps); the constructor does not, so it can carry a color-space round-trip's intermediate values.</summary>
         public readonly double R, G, B, A;
 
         public Color(double r, double g, double b, double a)

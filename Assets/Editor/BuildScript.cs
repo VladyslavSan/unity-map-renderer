@@ -9,31 +9,11 @@ using UnityEngine;
 namespace MapRenderer.Build
 {
     /// <summary>
-    /// Headless player-build entry points for unity-map-renderer: a release and a <c>…Development</c> method per
-    /// platform (Android / macOS / Linux), the release three plus the macOS development player also mirrored as
-    /// <c>Tools ▸ Build ▸ …</c> menu items for in-Editor use.
-    ///
-    /// <para>The method name is the ONLY thing that decides what gets built — platform, variant, and output
-    /// path. That is what lets <c>Tools/build.sh &lt;target&gt; [--dev]</c> be a pure name lookup with no
-    /// side-channel arguments, and what makes the menu items behave identically to the shell.</para>
-    ///
-    /// <para><c>Tools/build.sh</c> drives them through the <c>unity</c> CLI's <c>build</c> command, which
-    /// <i>requires</i> <c>--execute-method</c>: Unity has no built-in command-line build, so these entry points
-    /// are not replaceable by the CLI. The output path is composed HERE, not passed in — the CLI's
-    /// <c>--output-path</c> is deliberately unused, because the menu items have no shell to get a path from and
-    /// one source of truth beats two. <c>build.sh</c>'s header lists the other CLI flags that are inert for the
-    /// same reason.</para>
-    ///
-    /// <para><b>Which scene ships is Build Settings' job, not this script's.</b> The scene list comes from
-    /// <see cref="EditorBuildSettings.scenes"/> (the enabled entries). For a PUBLIC build, enable the
-    /// <c>OpenStreetMapLiberty</c> scene (which carries the attribution overlay) and DISABLE the internal
-    /// <c>MapDemo</c> scene first — otherwise the build ships the dev scene with no on-screen credit. The
-    /// script logs the exact scene list it is about to build and hard-fails if none are enabled.</para>
-    ///
-    /// <para>Output goes under <c>Builds/&lt;platform&gt;/</c> (git-ignored). Every path calls
-    /// <see cref="EditorApplication.Exit"/> explicitly (0 = ok, 1 = fail) so the shell wrapper gets a
-    /// trustworthy exit code, and prints a grep-able <c>BUILD OK &lt;path&gt;</c> / <c>BUILD FAIL …</c>
-    /// sentinel that <c>build.sh</c> echoes back.</para>
+    /// Headless player-build entry points, one release and one development method per platform, driven by
+    /// <c>Tools/build.sh</c> through the <c>unity build</c> CLI. Non-local invariant: the method name alone picks
+    /// platform, variant and output path under <c>Builds/</c>, so the shell and the menu items build the same thing.
+    /// The enabled Build Settings scenes ship: a public build must enable <c>OpenStreetMapLiberty</c> (it carries
+    /// the attribution) and disable <c>MapDemo</c>. Every path exits 0/1 with a <c>BUILD OK</c>/<c>BUILD FAIL</c> line.
     /// </summary>
     public static class BuildScript
     {
@@ -41,10 +21,7 @@ namespace MapRenderer.Build
         private const string ProductBase = "UnityMapRenderer"; // file-name base (productName without spaces)
 
         // ── Entry points ─────────────────────────────────────────────────────────────────────────────
-        // Each platform has a release and a DEVELOPMENT entry point, so `Tools/build.sh <target> --dev`
-        // means the same thing on every target rather than being macOS-only. Menu items exist for the
-        // release three plus the macOS development player (the one used for profiling); the other two
-        // development entry points are reached by name from the shell.
+        // `Tools/build.sh <target> --dev` works on every target; macOS is the only development variant with a menu item.
 
         [MenuItem("Tools/Build/Android (APK)")]
         public static void BuildAndroid()            => RunAndroid(development: false);
@@ -71,9 +48,8 @@ namespace MapRenderer.Build
 
         private static void RunAndroid(bool development)
         {
-            // APK (sideload/preview), not an AAB. An empty keystore => Unity debug-signs it: installable
-            // by sideload, NOT Play-Store-publishable. First Android build is slow (target switch =
-            // full reimport + IL2CPP/NDK compile).
+            // APK, not an AAB. An empty keystore makes Unity debug-sign it: installable by sideload, not
+            // publishable to the Play Store.
             EditorUserBuildSettings.buildAppBundle = false;
             RunBuild(BuildTarget.Android, BuildTargetGroup.Android,
                      "Android", ProductBase + ".apk", development);
@@ -81,10 +57,8 @@ namespace MapRenderer.Build
 
         private static void RunMacOS(bool development)
         {
-            // Architecture follows Player Settings (Edit ▸ Project Settings ▸ Player ▸ macOS ▸ Architecture).
-            // Set it to "Intel 64-bit + Apple silicon" (Universal) if the .app must run on other Macs.
-            // NOTE: an unsigned .app is Gatekeeper-blocked elsewhere ("damaged"): recipients right-click ▸
-            // Open or `xattr -cr <app>`; a proper fix needs an Apple Developer cert + notarization.
+            // Architecture follows Player Settings (Universal runs on other Macs). Gatekeeper blocks this
+            // unsigned .app elsewhere: recipients run `xattr -cr <app>`, or it needs signing + notarization.
             RunBuild(BuildTarget.StandaloneOSX, BuildTargetGroup.Standalone,
                      "macOS", ProductBase + ".app", development);
         }
@@ -96,21 +70,10 @@ namespace MapRenderer.Build
         }
 
         /// <summary>
-        /// The web player. Two settings are forced here rather than left to the project, because on this
-        /// target they are not preferences — a build with either one wrong does not start at all:
-        ///
-        /// <para><b>Burst AOT is enabled for Web.</b> It is what buys worker threads: a Burst body is native
-        /// code the job system can hand to a worker pthread, while an IL2CPP managed body cannot be and runs
-        /// inline on the main thread. It was OFF through Unity 6000.5 / Burst 1.8.29, where
-        /// `com.unity.entities` + Burst AOT trapped during static init before any managed entry point ran
-        /// (WebGPU hung instead of trapping) — reproduced from a stock project with no ECS code. Unity
-        /// 6000.6 / Burst 2.0 fixed it: a Burst-on player with Entities present renders correctly
-        /// (2026-09-02). Set <c>UMR_WEB_BURST=off</c> to build the other way if that trap ever returns.</para>
-        ///
-        /// <para><b>Threads support is ON</b>, and now buys what it costs. The cost is a serving constraint:
-        /// the player requires a cross-origin-isolated host (COOP/COEP on every response, which
-        /// <c>Tools/serve-web.sh</c> sends and most static hosts do not). Do not turn it off to escape that
-        /// without turning Burst off too — a Burst job with nowhere to run is the worst of both.</para>
+        /// The web player. It forces Burst AOT (unless <c>UMR_WEB_BURST=off</c>) and threads support, because
+        /// Burst is the only route to a worker thread on web. Threads need a cross-origin-isolated host
+        /// (COOP/COEP, which <c>Tools/serve-web.sh</c> sends). Do not turn threads off without turning Burst off.
+        /// See docs/web-target.md § "The three settings that decide whether a web player starts".
         /// </summary>
         /// <param name="development">Whether to build the development variant.</param>
         private static void RunWeb(bool development)
@@ -191,13 +154,9 @@ namespace MapRenderer.Build
         /// <summary>Whether the graphics jobs Player Setting is being overridden for this build, and to what.
         /// <c>UMR_GRAPHICS_JOBS</c> unset means LEAVE IT ALONE.</summary>
         /// <returns>Null to keep the project's committed value; otherwise the value to build with.</returns>
-        /// <remarks>Tri-state, unlike the development switches, and deliberately so: those name machinery a
-        /// release player simply does not have, whereas graphics jobs is a committed rendering setting with a
-        /// real value that a build must not silently redefine. It is also the one switch here that changes
-        /// what a RELEASE player does, which is why it is applied in <see cref="RunBuild"/> around both
-        /// variants rather than inside the development path — and why its previous value is captured and put
-        /// back: writing it modifies the committed <c>ProjectSettings.asset</c>, which is exactly the leak
-        /// <see cref="ApplyDevelopmentSettings"/> documents.</remarks>
+        /// <remarks>Tri-state, because graphics jobs is a committed rendering setting a build must not silently
+        /// redefine. It also affects release players, so <see cref="RunBuild"/> applies it around both variants
+        /// and restores it, since writing it modifies the committed <c>ProjectSettings.asset</c>.</remarks>
         private static bool? GraphicsJobsRequested()
         {
             string requested = Environment.GetEnvironmentVariable("UMR_GRAPHICS_JOBS")?.Trim().ToLowerInvariant();
@@ -232,10 +191,8 @@ namespace MapRenderer.Build
         /// <c>Tools/build.sh web</c> performs it.</remarks>
         private static void SetWebBurstAot(bool enabled)
         {
-            // Look the type up by name across every loaded assembly rather than in a named one. Burst 2.0
-            // (Unity 6.6) turned com.unity.burst into a shim package and moved the editor code into the
-            // built-in UnityEditor.BurstModule, so the old `Unity.Burst.Editor` assembly no longer exists
-            // — and the miss was silent, producing Burst-less players from Burst-on requests.
+            // Search every loaded assembly: Burst 2.0 keeps this type in the built-in UnityEditor.BurstModule,
+            // and a lookup in a named assembly that lacks it would build a Burst-less player silently.
             const string SettingsType = "Unity.Burst.Editor.BurstPlatformAotSettings";
             Type t = AppDomain.CurrentDomain.GetAssemblies()
                 .Select(a => a.GetType(SettingsType, throwOnError: false))
@@ -295,10 +252,7 @@ namespace MapRenderer.Build
                 $"to this Burst version.");
 
         /// <param name="platformDir">Output subfolder under <c>Builds/</c>. A development build appends
-        /// <c>-Development</c> to it, so it never writes over the release artifact of the same platform —
-        /// the two differ in stripping and profiler content and are not interchangeable.
-        /// Nothing here removes a previous build; <c>--clean</c> is what deletes an output directory,
-        /// and only the one it is building.</param>
+        /// <c>-Development</c>, so it never overwrites the release one. Only <c>--clean</c> deletes output.</param>
         private static void RunBuild(BuildTarget target, BuildTargetGroup group,
                                      string platformDir, string fileName, bool development)
         {
@@ -334,12 +288,8 @@ namespace MapRenderer.Build
                 // too, not development machinery. Null when nothing was overridden.
                 Action restoreGraphicsJobs = ApplyGraphicsJobsOverride();
 
-                // EVERYTHING after the settings were applied runs inside this try, so the finally puts them back
-                // however we leave — including a throw from the path setup, which would otherwise reach the outer
-                // catch, Exit the process, and strand ProjectSettings.asset modified.
-                //
-                // The restore CANNOT move to an outer finally: every exit path here calls
-                // EditorApplication.Exit, which never returns, so an enclosing finally would simply not run.
+                // Everything after the settings change runs in this try, so the finally restores them on any exit.
+                // An outer finally would not run: every exit path calls EditorApplication.Exit, which never returns.
                 BuildSummary summary;
                 try
                 {
@@ -352,9 +302,8 @@ namespace MapRenderer.Build
                         locationPathName = locationPathName,
                         target           = target,
                         targetGroup      = group,
-                        // Development defines ENABLE_PROFILER, so the counters exist in the player either
-                        // way. ConnectWithProfiler is the separate question of whether the player also goes
-                        // looking for an Editor at startup — opt-in, see ConnectProfilerRequested.
+                        // Development defines ENABLE_PROFILER, so the counters exist either way.
+                        // ConnectWithProfiler (opt-in) makes the player look for an Editor at startup.
                         options          = development
                             ? BuildOptions.Development
                               | (flags.ConnectProfiler ? BuildOptions.ConnectWithProfiler        : BuildOptions.None)
@@ -369,11 +318,8 @@ namespace MapRenderer.Build
 
                 if (summary.result == BuildResult.Succeeded)
                 {
-                    // Report the SHIPPABLE payload size — the platform output dir minus the sibling
-                    // _BackUpThisFolder / _DoNotShip symbol dirs Unity drops next to it (which
-                    // summary.totalSize wrongly counts, reading as multi-GB). Measuring the dir (not just
-                    // locationPathName) is also what makes Linux correct: its .x86_64 is a tiny launcher
-                    // and the real payload is the sibling _Data folder + UnityPlayer.so.
+                    // Report the shippable size of the whole output dir minus Unity's non-ship symbol dirs,
+                    // which summary.totalSize counts. The dir, because a Linux .x86_64 is only a launcher.
                     double mb = ShippableSizeBytes(locationPathName) / (1024.0 * 1024.0);
                     Console.WriteLine($"BUILD OK {locationPathName} ({mb:F1} MB shippable, built in {summary.totalTime})");
                     EditorApplication.Exit(0);
@@ -410,25 +356,10 @@ namespace MapRenderer.Build
             PlayerSettings.SetScriptingBackend(nbt, ScriptingImplementation.IL2CPP);
             PlayerSettings.SetIl2CppCompilerConfiguration(nbt, Il2CppCompilerConfiguration.Release);
 
-            // Managed code stripping = HIGH (maximum). The usual High hazard is reflection-only types
-            // getting stripped, but this codebase has none in shipped code: style/TileJSON parsing is a
-            // hand-written recursive-descent parser (JsonParser -> JsonValue -> manual field reads), not
-            // JsonUtility/Newtonsoft, and the only System.Reflection usage lives in EditMode tests (never
-            // built). So nothing app-side depends on metadata High would remove.
-            //   CAVEAT: High is a RUNTIME concern — a stripped build can compile clean yet break only when
-            //   run (missing type/method surfaces as a NullRef/empty result, not a build error). If a
-            //   package's internal reflection ever trips, preserve the needed types with an
-            //   Assets/link.xml (or a [Preserve] attribute) rather than dropping the level. Smoke-test a
-            //   High-stripped build (map loads, tiles render, input works) before publishing.
+            // High stripping: style JSON is parsed by hand, not by reflection. Limitation: a stripping break shows
+            // only at run time (a web player can hang at 100%), so smoke-test before publishing, and fix a break
+            // with Assets/link.xml or [Preserve], not a lower level.
             PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.High);
-
-            // Web carried an exception to Minimal from 2026-09-01 to 2026-09-02: on Unity 6000.5, High built
-            // clean and then never finished initialising — the loader stuck at 100% with no error, which is
-            // exactly the runtime hazard the caveat above describes. Unity 6.6 / Burst 2.0 fixed it together
-            // with the Entities + Burst startup trap, and a High-stripped web player was confirmed loading
-            // and rendering (17.3 MB -> 14.2 MB shippable). Recorded because a recurrence will look the same:
-            // a silent hang at 100%, not a build error, and the answer then is an Assets/link.xml preserving
-            // what reflects, not dropping the level for the whole target.
 
             // Drop unused engine modules.
             PlayerSettings.stripEngineCode = true;
@@ -439,30 +370,11 @@ namespace MapRenderer.Build
         }
 
         /// <summary>
-        /// Development counterpart to <see cref="ApplyReleaseSettings"/>: a profileable player, then the committed
-        /// Player Settings put back. Development defines <c>ENABLE_PROFILER</c>, so
-        /// <c>ProfilerCounterTelemetry</c> is compiled in and the <c>MapRenderer.Tiles.*</c> / <c>.Cache.*</c> /
-        /// <c>.Symbols.*</c> counters appear in the Profiler once it attaches.
-        ///
-        /// <para><b>Same scripting backend as release (IL2CPP), deliberately.</b> A Mono development build would
-        /// compile far faster, but this project's perf work is about MANAGED main-thread cost (the label Stage
-        /// loop, the batch build), and Mono and IL2CPP do not generate comparable code for it — a Mono profile
-        /// would produce numbers that do not describe what ships. Building IL2CPP also exercises the reachability
-        /// risk in <c>docs/telemetry-design.md</c> § "Risks": the generic instantiations over
-        /// <c>ProfilerCounterValue&lt;int/long/double&gt;</c> have to be statically reachable, and a build that
-        /// produces working counters is the proof.</para>
-        ///
-        /// <para><b>Stripping is lowered to Minimal for development builds only.</b> Release uses High; that is
-        /// safe there precisely because the counters do not exist in a release player at all (the whole file is
-        /// behind <c>ENABLE_PROFILER</c>), so aggressive stripping cannot remove them wrongly. Here they DO exist
-        /// and are reached only through generic instantiation, so Minimal keeps the question "are the counters
-        /// reachable" separate from "did the stripper eat them".</para>
-        ///
-        /// <para><b>Why the restore matters.</b> <c>EditorUserBuildSettings</c> is per-user state under
-        /// <c>Library/</c>, but the scripting backend and stripping level live in
-        /// <c>ProjectSettings/ProjectSettings.asset</c>, which IS committed — so a development build that simply
-        /// left them lowered would show up as a stray repo diff and, worse, silently weaken the NEXT release build
-        /// if someone ran it from the Editor rather than through <see cref="ApplyReleaseSettings"/>.</para>
+        /// Development counterpart to <see cref="ApplyReleaseSettings"/>: a profileable player with the
+        /// <c>ENABLE_PROFILER</c> counters compiled in. Non-obvious why: it keeps IL2CPP, because a Mono profile
+        /// does not describe what ships, and IL2CPP proves the counters' generic instantiations are reachable
+        /// (<c>docs/telemetry-design.md</c> § "Risks"); Minimal stripping keeps "reachable" apart from "stripped".
+        /// The caller restores these settings, because they live in the committed <c>ProjectSettings.asset</c>.
         /// </summary>
         /// <param name="group">Build target group whose Player Settings are being staged.</param>
         /// <param name="flags">The development switches this build was asked for. Each is independent of
@@ -484,15 +396,8 @@ namespace MapRenderer.Build
             ManagedStrippingLevel        stripping   = PlayerSettings.GetManagedStrippingLevel(nbt);
             bool                         stripEngine = PlayerSettings.stripEngineCode;
 
-            // IL2CPP in the RELEASE compiler configuration — the same one release ships (see
-            // BuildMacOSDevelopment's rationale).
-            //
-            // Do NOT lower this to Debug to save build time. Under IL2CPP the managed code IS the generated C++,
-            // so Debug (C++ optimisations off) de-optimises exactly the managed main-thread work this build
-            // exists to measure — the label Stage loop and batch build — while Burst jobs, which compile
-            // natively on their own path, are untouched. The result is a player several times slower than the
-            // Editor (Mono JIT, optimised) in precisely the code under study: timings that describe nothing that
-            // ships. Development-build overhead is unavoidable; an unoptimised backend is not.
+            // IL2CPP in the Release compiler configuration, as release ships. Debug would de-optimise the
+            // generated C++ of the managed main-thread code this build exists to measure.
             PlayerSettings.SetScriptingBackend(nbt, ScriptingImplementation.IL2CPP);
             PlayerSettings.SetIl2CppCompilerConfiguration(nbt, Il2CppCompilerConfiguration.Release);
             PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.Minimal);
@@ -506,9 +411,8 @@ namespace MapRenderer.Build
             Console.WriteLine("[build] ENABLE_PROFILER is defined => ProfilerCounterTelemetry is compiled in; " +
                               "look for MapRenderer.Tiles.* / .Cache.* / .Symbols.* counters in the Profiler.");
 
-            // Returned rather than hooked onto an editor event: batch mode calls EditorApplication.Exit as soon
-            // as the build finishes, so anything deferred to afterAssemblyReload would never run and would leave
-            // ProjectSettings.asset modified. The caller invokes this in a finally around BuildPlayer.
+            // Returned, not hooked onto an editor event: batch mode exits right after the build, so a deferred
+            // restore would never run. The caller invokes this in a finally around BuildPlayer.
             return () =>
             {
                 PlayerSettings.SetScriptingBackend(nbt, backend);

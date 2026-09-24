@@ -10,12 +10,10 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Test-only adapter between the per-feature <c>uint[]</c> command streams fixtures still author
-    /// (<c>MvtCommandStream</c>, <c>MvtFixtureStreams</c>, hand-written literals) and the native-flat
+    /// Test-only adapter from the per-feature <c>uint[]</c> command streams fixtures author
+    /// (<c>MvtCommandStream</c>, <c>MvtFixtureStreams</c>, literals) to the native-flat
     /// <c>(commands, featureOffsets, featureLengths)</c> shape <see cref="MvtGeometryMaterializer"/>'s
-    /// constructor takes. Production (<c>MvtDecoder</c>) builds that shape directly off the wire and has no
-    /// need of this; test fixtures find the per-feature-array shape the readable one to author, so this is
-    /// the one place that converts between the two.
+    /// constructor takes. Production (<c>MvtDecoder</c>) builds that shape directly off the wire.
     /// </summary>
     internal static class MvtGeometryMaterializerTestFactory
     {

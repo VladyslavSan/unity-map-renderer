@@ -8,13 +8,11 @@ using Unity.Collections;
 namespace MapRenderer.Jobs.Expressions
 {
     /// <summary>
-    /// Compiles a style layer's raw filter JSON into a <see cref="NativeFilterProgram"/> when it falls
-    /// inside the VM's fast-path subset (the <c>TryEmit*</c> methods are the accepted shapes); anything
-    /// else — or a program over the VM's op-count/stack-depth capacity — is refused and the layer stays on
-    /// the managed <see cref="CompiledFilter"/> path.
-    /// <para>Two non-obvious facts: it compiles from the normalised expression-dialect JSON, not the parsed
-    /// <see cref="Expression"/> tree — whose <c>==</c>/<c>!=</c>/<c>!</c> are indistinguishable opaque
-    /// closures — and it requires a statically-Boolean root.</para>
+    /// Compiles a style layer's raw filter JSON into a <see cref="NativeFilterProgram"/> when it fits the VM's
+    /// fast-path subset (the <c>TryEmit*</c> shapes) and capacity; anything else stays on the managed
+    /// <see cref="CompiledFilter"/> path. Non-obvious why: it compiles from the normalised expression JSON,
+    /// not the parsed <see cref="Expression"/> tree, whose <c>==</c>/<c>!=</c>/<c>!</c> are opaque closures.
+    /// The root must be statically Boolean.
     /// </summary>
     internal static class NativeFilterCompiler
     {
@@ -32,9 +30,8 @@ namespace MapRenderer.Jobs.Expressions
         /// labels).</summary>
         private const int MaxLiterals = 256;
 
-        // The expression-dialect operator/keyword heads this compiler accepts, each named once so the
-        // accept-list (IsBooleanRootHead), the dispatch switch (TryEmit) and the compare-code map
-        // (CompareOperatorCode) reference one literal apiece and cannot drift out of step.
+        // The accepted operator heads, each named once, so IsBooleanRootHead, TryEmit and
+        // CompareOperatorCode share one literal apiece and cannot drift.
         private const string OpGet = "get";
         private const string OpGeometryType = "geometry-type";
         private const string OpAll = "all";
@@ -77,9 +74,8 @@ namespace MapRenderer.Jobs.Expressions
             if (builder.Operations.Count > MaxOperations || builder.MaxDepth > MaxStackDepth) return false;
             if (builder.LiteralStrings.Count > MaxLiterals) return false; // bound the InStringSet loop / Rebind / binding
 
-            // Fix up LiteralString/InStringSet operands: both emitted as a 0-based index into LiteralStrings
-            // (InStringSet's is its first label's index), offset here by the final KeyNames count so both
-            // tables share one binding array (see Mvt.NativeFilterRebind).
+            // LiteralString/InStringSet operands are 0-based LiteralStrings indices, offset here by the
+            // KeyNames count so both tables share one binding array (see Mvt.NativeFilterRebind).
             int keyCount = builder.KeyNames.Count;
             for (int i = 0; i < builder.Operations.Count; i++)
             {
@@ -200,12 +196,9 @@ namespace MapRenderer.Jobs.Expressions
             return true;
         }
 
-        /// <summary>Emits an ordered comparison (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;</c>/<c>&gt;=</c>),
-        /// restricted to exactly one <c>get</c> operand and one JSON number literal, for byte identity:
-        /// any other shape (two <c>get</c>s, <c>get</c> vs a string, a
-        /// <c>geometry-type</c> operand, or literal-vs-literal) could compare strings, whose ordinal
-        /// bytes the VM's string-id representation cannot reproduce, so it stays refused (managed
-        /// path).</summary>
+        /// <summary>Emits an ordered comparison (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;</c>/<c>&gt;=</c>) only for
+        /// exactly one <c>get</c> operand and one JSON number literal: any other shape could compare strings,
+        /// whose ordinal bytes the VM's string ids cannot reproduce, so it stays managed.</summary>
         private static bool TryEmitCompare(IReadOnlyList<JsonValue> items, string comparisonOperator, Builder b)
         {
             if (items.Count != 3) return false;
@@ -284,18 +277,10 @@ namespace MapRenderer.Jobs.Expressions
                 return true;
             }
 
-            // Refuse the two shapes where string equality by value-string ID is NOT byte-identical to
-            // managed Value.Equals — both accepted by everything above but unsound, and BOTH absent from
-            // every covered filter (all 44 are get/geometry-type vs a string literal), so refusing them
-            // costs zero coverage:
-            //  - literal == literal: two DIFFERENT string literals both absent from a layer's ValueStrings
-            //    each rebind to the -1 never-equal sentinel (NativeFilterRebind), so the VM reports them
-            //    EQUAL while managed compares bytes and reports unequal.
-            //  - get == get: two string columns holding equal bytes at DISTINCT value-string ids (the
-            //    decoder appends value strings without dedup) compare UNEQUAL by id while managed compares
-            //    bytes and reports equal. Rebind's duplicate-refusal guards literal-vs-column only, never
-            //    column-vs-column.
-            // The safe generic-Equal shape is exactly one dynamic operand (get) against one literal.
+            // Non-local invariant: refuse the two shapes where string-id equality differs from managed
+            // Value.Equals. literal == literal: two absent literals both rebind to the -1 sentinel and compare
+            // EQUAL. get == get: equal bytes at distinct value-string ids (no decoder dedup) compare UNEQUAL.
+            // The safe shape is exactly one get against one literal.
             if (!a.IsArray && !c.IsArray) return false;
             if (IsGetNode(a) && IsGetNode(c)) return false;
 

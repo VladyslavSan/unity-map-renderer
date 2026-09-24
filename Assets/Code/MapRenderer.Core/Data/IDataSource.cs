@@ -46,13 +46,10 @@ namespace MapRenderer.Core.Data
 
     /// <summary>
     /// BYO data-source abstraction. HTTP, local files, PMTiles, in-memory tiles — all look
-    /// identical to the pipeline.
-    ///
-    /// Returns UniTask&lt;TileResponse&gt; (not Task) so the contract is engine-free AND
-    /// compatible with the headless dotnet-test path (UniTask NetCore NuGet build).
-    /// Core implementations use only the PlayerLoop-independent UniTask subset:
-    /// UniTask.RunOnThreadPool, UniTaskCompletionSource, UniTask.FromResult.
-    /// The Unity layer adds SwitchToMainThread and UnityWebRequest.ToUniTask().
+    /// identical to the pipeline. Returns UniTask&lt;TileResponse&gt; so the contract stays
+    /// engine-free and runs on the headless dotnet-test path. Core implementations use only the
+    /// PlayerLoop-independent UniTask subset; the Unity layer adds SwitchToMainThread and
+    /// UnityWebRequest.ToUniTask().
     /// </summary>
     public interface IDataSource : IDisposable
     {

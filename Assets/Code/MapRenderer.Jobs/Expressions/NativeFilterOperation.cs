@@ -19,12 +19,10 @@ namespace MapRenderer.Jobs.Expressions
     }
 
     /// <summary>
-    /// One compiled instruction: an opcode plus two payload fields whose meaning depends on it — written by
-    /// <see cref="NativeFilterCompiler"/>, read by <c>NativeFilterEvaluationJob</c>.
-    /// <para>The one contract not visible from either side alone: <c>InStringSet</c> reads its labels as the
-    /// contiguous run <c>Binding[Operand..Operand+Immediate)</c>, so the compiler must emit a match's label
-    /// strings into consecutive <see cref="NativeFilterProgram.LiteralStrings"/> slots, nothing between
-    /// them.</para>
+    /// One compiled instruction: an opcode plus two opcode-dependent payload fields, written by
+    /// <see cref="NativeFilterCompiler"/> and read by <c>NativeFilterEvaluationJob</c>. Non-local invariant:
+    /// <c>InStringSet</c> reads its labels from <c>Binding[Operand..Operand+Immediate)</c>, so the compiler
+    /// emits a match's labels into consecutive <see cref="NativeFilterProgram.LiteralStrings"/> slots.
     /// </summary>
     internal readonly struct NativeFilterOperation
     {

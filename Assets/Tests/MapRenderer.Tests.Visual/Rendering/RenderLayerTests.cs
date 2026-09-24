@@ -1,8 +1,5 @@
-// Render-layer draw-order and draw-gate GPU/visual acceptance tests, part 1 of 2.
-//
-// Split by a using collision, not the line cap: `MapRenderer.Core.Geo.CameraProperties` vs
-// `UnityEngine.Rendering.CameraProperties` (CS0104). Every file with a bare CameraProperties
-// reference is in RenderLayerTests2.cs instead.
+// Render-layer draw-order and draw-gate GPU/visual acceptance tests, part 1 of 2. Split by the CS0104
+// `CameraProperties` collision: a bare CameraProperties user goes in LayerOcclusionTests.cs instead.
 //
 // Contents:
 //   LayerOrderSnapshotTests           — multi-layer painter's-algorithm "clean composite" snapshot test.
@@ -37,16 +34,10 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Multi-layer painter's-algorithm "clean composite" snapshot test.
-    ///
-    /// Draw-order dominance and the reorder flip are covered live by
-    /// <c>BrgBackendSnapshotTests</c>. What lives here is the no-z-fighting clean composite (low
-    /// region-color variance), over the live material path (MaterialFactory + LayerDrawOrder +
-    /// SyntheticLineMesh), with a synthetic uniform fill quad so the sample region is a single flat colour
-    /// (a fixture fill would straddle polygon edges and inflate variance for reasons unrelated to
-    /// z-fighting).
-    ///
-    /// Camera: top-down ortho (512×512, Y=200, orthoSize=70), dark-slate background.
+    /// Multi-layer painter's-algorithm "clean composite" snapshot test: no z-fighting (low region-colour
+    /// variance) over the live material path. <c>BrgBackendSnapshotTests</c> covers draw-order dominance.
+    /// A synthetic uniform fill quad keeps the sample region one flat colour; a fixture fill would straddle
+    /// polygon edges and inflate variance. Camera: top-down ortho (512×512, Y=200, orthoSize=70).
     /// </summary>
     [TestFixture]
     public class LayerOrderSnapshotTests : VisualTestFixture
@@ -99,9 +90,8 @@ namespace MapRenderer.Tests.Visual
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             {
-                // Declared draw order via renderQueue (painter's algorithm, single transparent band):
-                //   [0]=green fill (bottom), [1]=blue line (mid), [2]=red fill (top).
-                // FILL-ON-TOP-OF-LINE is present (index 2 fill over index 1 line) — the keystone case.
+                // Painter's order via renderQueue: [0]=green fill (bottom), [1]=blue line, [2]=red fill (top).
+                // Fill on top of a line is the keystone case.
                 int[] queues = LayerDrawOrder.ComputeQueues(3);
 
                 BuildFillQuad(sceneGo, FillBottom, OverlapHalf, queues[0], bag);
@@ -127,19 +117,15 @@ namespace MapRenderer.Tests.Visual
                         "Likely no GPU context or a framing problem.");
                 }
 
-                // ── Non-vacuous guard: the TOP layer (red fill, queue 3004 under the sub-slot band stride —
-                // see road-shields-design.md) must win the composite. With fill quads wound the wrong way
-                // they render NOTHING (front-facing under _Cull:1), only the blue line draws, this region
-                // reads BLUE and the variance tooth below passes vacuously. Requiring red-dominance proves
-                // all three layers render AND that painter order puts the top fill on top. ──
+                // ── Non-vacuous guard: the TOP red fill must win. Mis-wound fill quads render nothing, the
+                // region reads blue, and the variance tooth below would pass vacuously. ──
                 Assert.That(mean[0], Is.GreaterThan(mean[1]).And.GreaterThan(mean[2]),
                     $"Top layer (red fill) must dominate the composite (meanRGB=" +
                     $"({mean[0]:F3},{mean[1]:F3},{mean[2]:F3})). A blue/green-dominant region means the fill " +
                     "quads did not render (a winding bug — docs/coordinates-and-projections.md § \"Handedness, winding & why the ECEF reflection is load-bearing\") or painter order is wrong.");
 
-                // ── No-z-fighting tooth: a clean composite has low colour variance. ──
-                // A coplanar ZWrite-On approach would speckle between the saturated layer colours
-                // and inflate this far past the threshold.
+                // ── No-z-fighting tooth: a clean composite has low colour variance. Coplanar ZWrite-On
+                // layers would speckle and inflate it. ──
                 Assert.That(variance, Is.LessThan(CleanVarianceMax),
                     $"Coplanar overlap variance ({variance:F5}) must be < {CleanVarianceMax} (clean composite). " +
                     "Coplanar ZWrite-On layers would speckle (z-fight) and inflate this.");
@@ -173,11 +159,8 @@ namespace MapRenderer.Tests.Visual
             };
             mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
             mesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
-            // This quad is hand-built (it does NOT flow through StyledFillTileBuilder's boundary winding reversal),
-            // so it must be wound to be Unity-front under the shipped MapFill.mat _Cull:2 (stock Cull Back).
-            // Viewed from above (+Y normal), the Unity-front-facing order is {0,2,1,0,3,2}; {0,1,2,0,2,3} would
-            // render INVISIBLE (back-facing → culled), re-creating the vacuous-composite failure. (Pre-flip this
-            // was inverted: Cull Front + {0,1,2,0,2,3}. Same render, mirrored convention.)
+            // Hand-built, so no StyledFillTileBuilder winding reversal: {0,2,1,0,3,2} is Unity-front from above
+            // under stock Cull Back; {0,1,2,0,2,3} would be culled and make the composite vacuous.
             mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
             mesh.RecalculateBounds();
 
@@ -244,16 +227,12 @@ namespace MapRenderer.Tests.Visual
     // Unity-only: render tests requiring a GPU context (SnapshotRenderer).
     // NOT included in Tools/core-tests/core-tests.csproj.
     //
-    // The RENDERED half of the layer draw gate. LayerFadeGateTests observes the C# half — the pushed
-    // opacity and the PaintsSomething predicate — and BackendDrawGateTests observes each backend's own
-    // mechanism against its own state. This one closes the chain at the only place that cannot be argued with:
-    // pixels. It drives the real GameObjects backend, the one backend whose gated draw item is visible to
-    // a camera in EditMode, and asserts the building is simply not there.
+    // The RENDERED half of the layer draw gate (LayerFadeGateTests and BackendDrawGateTests cover the C# and
+    // per-backend halves). It drives the GameObjects backend, whose gated draw item a camera sees in EditMode.
     //
-    // Why fill-extrusion specifically: FillExtrusionTweaker.ApplyElevatedContract blends One/Zero with
-    // DepthWrite.On, so the destination factor is zero and ALPHA IS DISCARDED. Nothing about an opacity value
-    // can hide a submitted fill-extrusion draw — if the draw reaches the GPU the building is there, fully solid,
-    // writing depth. That makes it the sharpest possible probe for "was the draw submitted at all".
+    // Non-obvious why: the probe is fill-extrusion because FillExtrusionTweaker.ApplyElevatedContract blends
+    // One/Zero with DepthWrite.On, so alpha is discarded. A submitted draw is always a solid building, so pixels
+    // show whether the draw was submitted at all.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillExtrusionDrawGateTests — Unity-only: render tests requiring a GPU context (SnapshotRenderer).
@@ -364,13 +343,9 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// A gated-out fill-extrusion slot produces NO pixels — the background survives where the building
-        /// would otherwise be.
-        ///
-        /// <para>Two renders, one scene, one variable. Arm 1 (ungated) proves the building draws there and
-        /// that the camera frames it; arm 2 changes only the gate. Both arms author opacity 1, so nothing
-        /// about a uniform can explain arm 2: One/Zero blending discards alpha, and a submitted draw comes
-        /// back as a fully solid, depth-writing building.</para>
+        /// A gated-out fill-extrusion slot produces NO pixels: the background survives where the building
+        /// would be. Arm 1 (ungated) proves the building draws and is framed; arm 2 changes only the gate.
+        /// Both arms author opacity 1, and One/Zero blending discards alpha, so no uniform explains arm 2.
         /// </summary>
         [Test]
         public void GatedFillExtrusion_RendersBackground_NotASolidBuilding()
@@ -393,17 +368,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — uses MonoBehaviour + per-layer material inspection (mirrors MapViewStyledFillTests).
-    //
-    // Render mode is a property of the MapMaterialSet the config references: a Lit set puts the view in lit,
-    // an Unlit set in unlit, with no separate config flag and no per-material mix. This end-to-end tooth
-    // proves the unlit shader twin flows
-    // through the material pipeline: the material MapView resolves for a fill layer carries the shader of the
-    // set's FillMaterial base — Map/Fill from a lit set, Map/FillUnlit from an unlit set.
-    //
-    // Drives the REAL production entry point, MapView.SetStyle (not the LoadTestStyle test helper). A
-    // tiles[]-only vector source needs no TileJSON fetch, so SetStyle never actually awaits network — the
-    // TileSourceFactoryOverride seam supplies the fixture bytes when SetSources lazily constructs the source.
+    // Unity EditMode only. The fill material carries the configured MapMaterialSet's shader (Map/Fill or
+    // Map/FillUnlit). Awaiting the real SetStyle is safe: a tiles[]-only source makes no TileJSON fetch.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // RenderModeMaterialSelectionTests — the fill layer's material comes from the configured set
@@ -448,12 +414,8 @@ namespace MapRenderer.Tests.Visual
         {
             var litSet = MapMaterialSetTestUtil.Load();
 
-            // Under Unlit, build a throwaway set (never the shared production asset — same posture as
-            // MapMaterialSetValidationTests.NewSet) whose RenderMode is Unlit and whose FillMaterial is the
-            // real Map/FillUnlit twin. Line/Symbol bases reuse the lit ones — Validate() (called inside
-            // SetStyle) requires all three regardless of mode, and symbols are already unlit.
-            // Under Lit, the shared production set already carries Map/Fill and
-            // its default RenderMode.Lit.
+            // Unlit: a throwaway set with the real Map/FillUnlit twin; Line/Symbol reuse the lit bases because
+            // Validate() needs all three. Lit: the shared production set already carries Map/Fill.
             using var bag = new ObjectDisposalBag();
             var isUnlit  = mode == RenderMode.Unlit;
             var unlitSet = bag.Track(isUnlit ? ScriptableObject.CreateInstance<MapMaterialSet>() : null);

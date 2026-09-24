@@ -32,10 +32,8 @@ namespace MapRenderer.Core.Expressions
             }
         }
 
-        // The string→id key hoist's key layout: one entry per constant-key get/has node routed to
-        // FeatureKeyExpression, in parse order — that node's `slot` is its index here. A caller that wants
-        // the layout uses the Parse(JsonValue, out) overload; the plain Parse overloads discard it, so
-        // their nodes still carry slots but no binding is ever supplied for them (always the string path).
+        // Key layout: one entry per constant-key get/has FeatureKeyExpression, in parse order (its `slot`).
+        // Only Parse(JsonValue, out) returns it; other overloads' nodes get no binding (string path).
         private readonly List<string> _keyLayout = new List<string>();
 
         /// <summary>Parse from a JSON string (a single expression).</summary>
@@ -75,10 +73,8 @@ namespace MapRenderer.Core.Expressions
                 case JsonKind.String:
                     return new LiteralExpression(Value.String(node.AsString()));
                 case JsonKind.Object:
-                    // MapLibre Style Spec v7 "legacy stops" format:
-                    // { "stops": [[z0,v0],[z1,v1],...], "base": b } where each stop pair is [zoom, value].
-                    // Equivalent modern expression: ["interpolate",["exponential",b],["zoom"],z0,v0,...].
-                    // The parser converts this to an InterpolateExpression so the kind is correctly Zoom.
+                    // Style Spec v7 legacy stops { "stops": [[z0,v0],...], "base": b } convert to a zoom
+                    // interpolate, so the kind is Zoom.
                     if (node.TryGet("stops", out var stopsNode) && stopsNode.IsArray && stopsNode.Items.Count >= 2)
                         return ParseLegacyStopsObject(node, stopsNode, scope);
                     // A bare object without "stops" is a literal object value.
@@ -96,9 +92,8 @@ namespace MapRenderer.Core.Expressions
             if (items.Count == 0)
                 throw new ExpressionParseException("Empty expression array.");
 
-            // First element must be the operator string. A non-string first element means this is a literal
-            // array of values (the spec permits this only via ["literal", [...]]; a bare [1,2,3] is invalid
-            // as an expression), so we treat it as an error to surface mistakes.
+            // The first element must be the operator string: the spec allows a literal array only via
+            // ["literal", [...]], so a bare [1,2,3] is an error.
             if (items[0].Kind != JsonKind.String)
                 throw new ExpressionParseException("Expression operator must be a string.");
 
@@ -176,8 +171,7 @@ namespace MapRenderer.Core.Expressions
                 case "id": return FeatureData.Id(args);
 
                 // ---- type assertions (assert-and-return; distinct from to-* coercions) --------------
-                // These must thread the caller's zoomAllowed flag to their value arg so that
-                // ["number",["zoom"]] is legal as a ramp input (zoomAllowed=true from ParseInputAllowingZoom).
+                // They pass zoomAllowed to their value arg, so ["number",["zoom"]] is legal as a ramp input.
                 case "boolean": return ParseAssert("boolean", ValueType.Boolean, args, scope, zoomAllowed);
                 case "number":  return ParseAssert("number",  ValueType.Number,  args, scope, zoomAllowed);
                 case "string":  return ParseAssert("string",  ValueType.String,  args, scope, zoomAllowed);
@@ -253,9 +247,8 @@ namespace MapRenderer.Core.Expressions
         {
             if (args.Count == 1)
             {
-                // Constant-key fast form: get("name") -> hoistable, EvaluationContext.KeyBinding-aware.
-                // Gated on a BARE JSON string, not "folds to a constant" — a dynamic key like ["get",5] or
-                // ["get",["get","x"]] stays on the closure below verbatim (same error/ordering behaviour).
+                // Constant-key fast form, gated on a bare JSON string: a dynamic key like ["get",["get","x"]]
+                // stays on the closure below, with the same error and ordering behaviour.
                 if (args[0].Kind == JsonKind.String)
                 {
                     string name = args[0].AsString();
@@ -524,15 +517,8 @@ namespace MapRenderer.Core.Expressions
         /// Wrap a bare array (first element not an operator string) as <c>["literal", array]</c>. For an
         /// operator call, do the same to its direct arguments (one level — enough for step/interpolate
         /// stop outputs), except <c>"literal"</c> whose argument is a raw value, not an expression.
-        ///
-        /// <para>A property whose spec type is itself an array (<c>line-dasharray</c>, <c>fill-extrusion-
-        /// translate</c>, …) is commonly written as a bare JSON array — <c>[2, 1]</c>, or the per-stop
-        /// outputs of <c>["step",["zoom"],[1,1],10,[2,1]]</c> — but <see cref="ParseArray"/> rejects an
-        /// array whose first element is not an operator string (<c>"Expression operator must be a
-        /// string."</c>), because the Style Spec requires wrapping a literal array/object in
-        /// <c>["literal", …]</c> to disambiguate it from an operator call. Calling this FIRST on such a
-        /// property's raw JSON restores that wrapping before <see cref="Parse(JsonValue)"/> sees it, so a
-        /// zoom/interpolate array-valued expression parses and classifies instead of throwing.</para>
+        /// Non-obvious why: array-typed properties (<c>line-dasharray</c>, …) are often written as bare
+        /// arrays, which <see cref="ParseArray"/> rejects; calling this first lets them parse and classify.
         /// </summary>
         /// <param name="json">The property's raw JSON value (may itself be a bare array, an operator call,
         /// or neither — anything else passes through unchanged).</param>
@@ -665,15 +651,9 @@ namespace MapRenderer.Core.Expressions
 
         /// <summary>
         /// Parses a MapLibre v7 legacy stops object <c>{ "stops": [[z0,v0],[z1,v1],...], "base": b }</c>
-        /// as a modern <c>interpolate</c> / <c>step</c> expression with a <c>["zoom"]</c> input.
-        ///
-        /// Semantics (clean-room from the MapLibre Style Spec):
-        ///   • Each stop is a [zoom, value] pair. Stops must be arrays of length ≥ 2.
-        ///   • "base" (optional, default 1.0) is the exponential interpolation base:
-        ///       base == 1.0 → linear interpolation (equivalent to ["interpolate",["linear"],["zoom"],...])
-        ///       base != 1.0 → exponential interpolation with the given base.
-        ///   • Output values may be numbers or colors (parsed via ParseNode with zoomAllowed=false).
-        ///   • Invalid stops (non-number zoom key, non-ascending, &lt;2 stops) fall back to a constant null.
+        /// as a modern <c>interpolate</c> / <c>step</c> expression with a <c>["zoom"]</c> input. Each stop is
+        /// a [zoom, value] array; "base" (default 1.0) is the exponential base, and 1.0 is linear. Outputs
+        /// parse with zoom disallowed. Invalid stops (non-number zoom, unsorted, &lt;2) give constant null.
         /// </summary>
         private Expression ParseLegacyStopsObject(JsonValue node, JsonValue stopsArr, Scope scope)
         {

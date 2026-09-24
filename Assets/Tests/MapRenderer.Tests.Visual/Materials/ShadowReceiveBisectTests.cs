@@ -1,7 +1,5 @@
-// Shadow-receive bisection GPU/visual acceptance test.
-//
-// Stays its own file regardless of size or topic — docs/test-conventions.md records it as the fixture
-// that reds under -testFilter and passes only in a full run.
+// Shadow-receive bisection GPU/visual acceptance test. It stays its own file: docs/test-conventions.md
+// records it as the fixture that reds under -testFilter and passes only in a full run.
 //
 // Contents:
 //   ShadowReceiveBisectTests  — Localises "buildings cast into the shadow map but nothing on screen darkens" by rendering the same shadow scene through five configurations, each one step closer to the map's real one — see the file header for the ladder, the oracle and why each rung is…
@@ -25,15 +23,12 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual
 {
-    // RUN THIS FIXTURE ONLY IN A FULL `./Tools/run-tests.sh`. Under -testFilter it reds 16 of 19 for reasons
-    // unrelated to the code under test: every case reads ZERO darkening, including the stock-URP rung that
-    // uses none of our shaders. A GPU context IS present (PaintColorRenderTests renders green in the same
-    // session), so the failures look real. docs/lessons-learned.md carries the discriminator.
-    // Unity EditMode only — off-screen GPU render (SnapshotRenderer). NOT registered in core-tests.csproj.
+    // Limitation: run this fixture only in a full `./Tools/run-tests.sh`. Under -testFilter every case reads
+    // zero darkening, even the stock-URP rung, although a GPU context is present, so the failures look real.
+    // docs/lessons-learned.md carries the discriminator. EditMode only (off-screen GPU render, SnapshotRenderer).
     //
-    // A LADDER, not a single assertion. Building shadows render into the shadow map (confirmed in the Frame
-    // Debugger) but nothing on screen darkens. Each rung below moves ONE step closer to the map's real
-    // configuration, so the first rung that fails names the cause:
+    // A ladder: building shadows render into the shadow map but nothing on screen darkens. Each rung moves
+    // ONE step closer to the map's real configuration, so the first rung that fails names the cause:
     //
     //   Rung 1  stock URP Lit ground + stock URP Lit cube ........ harness/pipeline control
     //   Rung 2  Map/Fill ground (forced opaque) + URP Lit cube .... does OUR shader code receive at all
@@ -44,25 +39,17 @@ namespace MapRenderer.Tests.Visual
     //   Rung 5  rungs 4's meshes+materials drawn through
     //           Entities Graphics instead of MeshRenderers ....... the demo's actual backend
     //
-    // Only the RECEIVER changes between rungs 1→3 and only the CASTER between 3→4, so a rung that reddens
-    // while its predecessor is green isolates exactly one variable.
+    // Only the RECEIVER changes between rungs 1→3 and only the CASTER between 3→4, so a red rung after a
+    // green one isolates one variable.
     //
-    // The oracle, per rung. The ground is a flat plane under a directional light: N·L is identical at every
-    // point on it, so two ground regions can differ in luminance for exactly one reason — one of them is
-    // shadowed. Each rung therefore samples two equal, mirror-symmetric ground boxes (one inside the cube's
-    // projected shadow, one the same distance on the opposite side) and renders the scene TWICE — once with
-    // the light's shadows enabled, once disabled.
-    //
-    // That gives four numbers and makes the claim non-vacuous three ways over:
-    //   • the shadows-OFF frame must read the two boxes as EQUAL — proving the boxes really are
-    //     interchangeable, so any difference in the ON frame is shadowing and not a spatial gradient, a
-    //     mis-placed sample box, or one box straddling the cube;
-    //   • the ON frame must be non-blank, non-uniform and show real coverage — a "dark region exists"
-    //     assertion passes trivially on an empty frame;
-    //   • exactly ONE box must darken when shadows are switched on. Both darkening would mean the whole
-    //     ground dimmed (not a shadow); neither darkening is the bug under diagnosis.
-    // Because the verdict is "which box changed between two renders", it does not depend on the pixel
-    // buffer's vertical origin — a flipped readback would swap the two boxes without inverting the answer.
+    // Non-obvious why: on a flat plane under a directional light N·L is uniform, so two ground regions differ
+    // in luminance only when one is shadowed. Each rung samples two mirror-symmetric ground boxes (one inside
+    // the cube's shadow) and renders twice, with the light's shadows on and off:
+    //   • shadows OFF: the boxes read EQUAL, so an ON difference is shadowing, not a gradient or a bad box;
+    //   • shadows ON: the frame is non-blank, non-uniform and covered, so the check is not vacuous;
+    //   • exactly ONE box darkens: both darkening means the whole ground dimmed; neither is the bug.
+    // The verdict is "which box changed between two renders", so a flipped readback swaps the boxes
+    // without inverting the answer.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // ShadowReceiveBisectTests — Localises "buildings cast into the shadow map but nothing on screen darkens" by rendering…
@@ -70,13 +57,9 @@ namespace MapRenderer.Tests.Visual
 
     /// <summary>
     /// Localises "buildings cast into the shadow map but nothing on screen darkens" by rendering the same
-    /// shadow scene through five configurations, each one step closer to the map's real one — see the file
-    /// header for the ladder, the oracle and why each rung is non-vacuous.
-    ///
-    /// <para>Each rung is its OWN <c>[Test]</c> rather than a stage of one method: the results XML then
-    /// names the first failing rung directly, which is the whole point of a bisect. Every rung also logs
-    /// its material state, the pipeline's shadow keyword state and the four measured luminances, so a red
-    /// rung reports <i>what</i> was wrong and not merely <i>that</i> something is.</para>
+    /// shadow scene through five configurations, each one step closer to the map's real one. The file header
+    /// holds the ladder and the oracle. Each rung is its own <c>[Test]</c>, so the results XML names the
+    /// first failing rung, and it logs its material state, shadow keywords and the four luminances.
     /// </summary>
     [TestFixture]
     public class ShadowReceiveBisectTests : BaseTestFixture
@@ -128,17 +111,11 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color CubeColor = new Color(0.85f, 0.45f, 0.25f, 1f);
 
         /// <summary>
-        /// The basemap's REAL ground albedo: <c>liberty.json</c>'s background layer paints
-        /// <c>#f8f4f0</c>, converted to linear ≈ (0.939, 0.905, 0.871) — Rec.709 luminance 0.910, i.e.
-        /// near-white. <see cref="GroundColor"/>'s 0.62 was chosen for "plenty of headroom above and
-        /// below", which is the headroom the app does not have, so every rung above it measures
-        /// a scene brighter than the one under diagnosis cannot be.
-        ///
-        /// <para><c>Color.linear</c> rather than a baked triple, because that is the exact conversion
-        /// production performs: <c>StyledFillTileBuilder</c> and <c>StyledFillExtrusionTileBuilder</c> bake
-        /// <c>featureColor.linear</c> into the mesh COLOUR stream over a white <c>_BaseColor</c>, and this
-        /// fixture's meshes carry white vertex colours over a coloured <c>_BaseColor</c> — the shader
-        /// multiplies both, so a linear value here reproduces the app's albedo exactly.</para>
+        /// The basemap's REAL ground albedo: <c>liberty.json</c>'s background <c>#f8f4f0</c>, linear
+        /// ≈ (0.939, 0.905, 0.871), Rec.709 luminance 0.910 — near-white, without the headroom that
+        /// <see cref="GroundColor"/>'s 0.62 has. Non-obvious why: production bakes <c>featureColor.linear</c>
+        /// into the vertex colour over a white <c>_BaseColor</c> and the shader multiplies both, so a
+        /// <c>Color.linear</c> <c>_BaseColor</c> over white vertices gives the same albedo.
         /// </summary>
         private static readonly Color AppGroundColor =
             new Color(248f / 255f, 244f / 255f, 240f / 255f, 1f).linear;
@@ -244,9 +221,8 @@ namespace MapRenderer.Tests.Visual
         /// Rung 3 — the same <c>Map/Fill</c> receiver, now in the render state the map actually gives it:
         /// <see cref="FillTweaker.ApplyPainterContract"/> (alpha blend, depth write off, the
         /// <c>_SURFACE_TYPE_TRANSPARENT</c> keyword) at a transparent-band queue from
-        /// <see cref="LayerDrawOrder.QueueFor"/>. The caster is still stock URP Lit. A failure here with a
-        /// green rung 2 means the receiving is killed by the queue/blend/keyword state, not by the shader
-        /// code.
+        /// <see cref="LayerDrawOrder.QueueFor"/>. The caster is still stock URP Lit. Red here with rung 2
+        /// green means the queue/blend/keyword state kills receiving, not the shader code.
         /// </summary>
         [Test]
         public void MapFillReceiver_PainterContractInTransparentQueue_GroundDarkensUnderACastShadow()
@@ -298,12 +274,9 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Rung 5 — rung 4's meshes and materials drawn through Entities Graphics instead of
         /// <see cref="MeshRenderer"/>s: the backend the demo actually runs
-        /// (<c>RenderBackend.Entities</c>), whose draws reach the GPU as DOTS-instanced BRG batches. This
-        /// is the rung that answers the keyword hypothesis — if the DOTS-instancing variants of
-        /// <c>Map/Fill</c> lack shadow sampling, every earlier rung is green and this one is red.
-        ///
-        /// <para>Reachable headlessly only because the presentation system group is ticked by hand before
-        /// each render; <c>EntitiesGraphicsSpikeTests</c> established that recipe.</para>
+        /// (<c>RenderBackend.Entities</c>), as DOTS-instanced BRG batches. If the DOTS-instancing variants
+        /// of <c>Map/Fill</c> lack shadow sampling, every earlier rung is green and this one is red.
+        /// It runs headlessly because the presentation system group is ticked by hand before each render.
         /// </summary>
         [Test]
         public void EntitiesGraphicsBackend_GroundDarkensUnderACastShadow()
@@ -441,16 +414,11 @@ namespace MapRenderer.Tests.Visual
                 boxHalfExtents:         new Vector3(3f, 0f, 4f));
 
             /// <summary>
-            /// The app's own rig at a chosen camera altitude: the tilted perspective camera, sun and ground
-            /// plane the maintainer captured in the Frame Debugger — camera at (0, A, -0.518A) looking
-            /// along (0, -0.888, 0.4598) with a 60° vertical FOV, sun at Euler(50, 30, 0) (which reproduces
-            /// the captured <c>_MainLightPosition</c> of (-0.321, 0.766, -0.557) exactly).
-            ///
-            /// <para>Every length scales with the altitude, so the SCREEN picture is identical at each one
-            /// and the only variable across the sweep is absolute distance from the camera — which is what
-            /// URP's shadow fade and shadow distance are both functions of. The building is proportionally
-            /// taller than a real one (0.25A rather than 30 m) purely so its shadow is more than a couple
-            /// of pixels wide at 256²; neither fade nor shadow distance depends on the occluder's size.</para>
+            /// The app's own rig from a Frame Debugger capture: camera at (0, A, -0.518A) looking along
+            /// (0, -0.888, 0.4598), 60° vertical FOV, sun at Euler(50, 30, 0) (the captured
+            /// <c>_MainLightPosition</c> (-0.321, 0.766, -0.557)). Every length scales with A, so camera
+            /// distance is the only variable. The building is 0.25A tall so its shadow spans more than a
+            /// few pixels at 256²; neither shadow fade nor shadow distance depends on occluder size.
             /// </summary>
             /// <param name="altitude">Camera altitude above the ground plane, metres.</param>
             /// <param name="ambient">Ambient mode — the sweep uses Flat to stay comparable with rungs 1-5;
@@ -478,23 +446,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Rung 6 — the app's OWN rig at four camera altitudes. Rungs 1-5 all pass, which rules out the
-        /// shaders, the transparent queue and the Entities Graphics backend; the remaining difference
-        /// between this fixture and the running app is scale, and scale is what URP's shadow distance and
-        /// its distance-based shadow fade are both functions of.
-        ///
-        /// <para>The camera rig, sun and field of view are the maintainer's Frame Debugger capture; every
-        /// length scales with the altitude, so the screen picture is identical at each one and camera
-        /// distance is the sole variable. The altitude at which this stops darkening is the number the
-        /// diagnosis turns on: the pipeline's 1200 m shadow distance and the captured
-        /// <c>_MainLightShadowParams</c> fade band (no fade below ~1072 m from the camera, fully faded past
-        /// ~1201 m) both predict a boundary near 950-1070 m of altitude, since the ground at screen centre
-        /// sits ~1.126× the altitude away.</para>
-        ///
-        /// <para>NOT varied here, so a failure has one cause: ambient (a separate test below)
-        /// and the floating origin. The latter is left for last because <c>SceneFrame</c> rebases the
-        /// camera and the geometry together and URP rebuilds its light matrices from the live transforms
-        /// each frame, so it has no mechanism to desynchronise them — it is the weakest of the three.</para>
+        /// Rung 6 — the app's OWN rig (<see cref="SceneLayout.MapScale"/>) at four camera altitudes. Rungs
+        /// 1-5 rule out the shaders, the transparent queue and Entities Graphics; scale is left, and URP's
+        /// shadow distance and fade depend on it. The 1200 m shadow distance and the fade band (~1072-1201 m
+        /// from the camera) predict a boundary near 950-1070 m altitude (the ground at screen centre is
+        /// ~1.126× the altitude away). Ambient and the floating origin are not varied here.
         /// </summary>
         /// <param name="altitude">Camera altitude in metres; the app sits at ~1014 m at z16 and ~279 m at z18.</param>
         [Test]
@@ -521,10 +477,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Rung 7 — the app's rig at its real altitude under the app's real ambient environment
         /// (<see cref="AmbientMode.Skybox"/>, which the demo scene uses), rather than the near-black flat
-        /// ambient every rung above runs. A shadow only removes the light's DIRECT contribution, so a
-        /// bright indirect term can leave a mathematically-correct shadow visually invisible. This rung
-        /// tells the two apart: a red result here with rung 6 green at the same altitude means the shadow
-        /// IS being applied and is simply being washed out.
+        /// ambient every rung above runs. A shadow removes only DIRECT light, so bright indirect light can
+        /// hide a correct shadow: red here with rung 6 green at the same altitude means it is washed out.
         /// </summary>
         [Test]
         public void MapScale_UnderTheAppsSkyboxAmbient_GroundDarkensUnderACastShadow()
@@ -548,26 +502,11 @@ namespace MapRenderer.Tests.Visual
         private const float SweepAltitude = 1000f;
 
         /// <summary>
-        /// Rung 9 — the app's REAL palette. Every rung above it runs a 0.62 mid-grey ground under a
-        /// near-black flat ambient, chosen for "plenty of headroom above and below"; the app is a LIGHT
-        /// basemap whose ground is <c>#f8f4f0</c> (linear luminance 0.910) under a skybox probe at full
-        /// intensity, and has no headroom at all. This rung changes only the two albedos and nothing else
-        /// — same rig, same backend, same materials, same 1000 m altitude, sun 1.0, skybox ambient 1.0, at
-        /// the <see cref="InstalledShadowDistance"/> the maintainer already raised the pipeline to.
-        ///
-        /// <para><b>This rung is EXPECTED to fail</b>, and its value is entirely in HOW. The diagnostics it
-        /// emits before the assertion — the shadow region's lit luminance in 8-bit terms and the fraction of
-        /// it on the ceiling, via <see cref="ClippingVerdict"/> — separate the only two stories that produce
-        /// the same near-zero darkening: a shadow that is applied to a surface already at 255 (invisible,
-        /// but correct), and a shadow that is never applied at all. If instead this rung PASSES, the harness
-        /// still does not reproduce the app and the difference lies somewhere nobody has named yet — a
-        /// louder finding than either story, and one to report rather than tune away.</para>
-        ///
-        /// <para>Post-processing is NOT added to reach the app's tonemapped frame:
-        /// <c>DefaultVolumeProfile.asset</c> sets Tonemapping <c>mode = None</c>, so UberPost performs no
-        /// highlight compression and the LDR conversion hard-clamps at 1.0 — which this fixture's ARGB32
-        /// target already does. A real tonemapper would have PRESERVED highlight contrast, not destroyed
-        /// it, so adding one would make the harness kinder than the app rather than equal to it.</para>
+        /// Rung 9 — the app's REAL palette: a near-white <c>#f8f4f0</c> ground under a full skybox probe,
+        /// with no headroom. Only the two albedos change; rig, backend, 1000 m altitude, sun and ambient
+        /// 1.0 stay, at <see cref="InstalledShadowDistance"/>. <see cref="ClippingVerdict"/> separates a
+        /// shadow applied to a surface already at 255 from a shadow never applied. No tonemapper is added:
+        /// <c>DefaultVolumeProfile.asset</c> sets Tonemapping to None, so the app clamps at 1.0 as ARGB32 does.
         /// </summary>
         [Test]
         public void MapScale_AtTheAppsRealAlbedo_GroundDarkensUnderACastShadow()
@@ -602,28 +541,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Rung 8 — the parameter sweep. Rung 6 shows the shadow IS applied at 1000 m but only removes
-        /// 4.30% of the ground's luminance, and rung 7 shows the app's own skybox ambient cuts that to
-        /// 0.26%. Three knobs could plausibly restore it, and this rung measures all three rather than
-        /// arguing about them: URP's shadow distance (which sets the distance-fade band), the ambient
-        /// probe's intensity (the indirect term a shadow cannot remove), and the sun's intensity DOWNWARD
-        /// (if the lit ground is clipping at 1.0 there is no headroom for a shadow to darken into, and
-        /// dimming the sun would restore contrast that brightening it destroys — the maintainer measured
-        /// intensity 3 turning the app fully white).
-        ///
-        /// <para>The sweep walks one axis at a time from the maintainer's current configuration and then
-        /// crosses the two most promising values, so the SHAPE of the surface is the finding: a row that
-        /// moves names the dominant lever, and a table that stays flat says none of these three is the
-        /// blocker. Every row also reports the absolute 8-bit luminance step, because "4.30%" and "a
-        /// difference a human can see" are different questions.</para>
-        ///
-        /// <para>The sweep runs the app's real palette (<see cref="AppGroundColor"/>,
-        /// <see cref="AppBuildingColor"/>) under the app's real <see cref="AmbientMode.Skybox"/>
-        /// environment throughout, so rung 9 is its baseline row: a sweep against the 0.62 grey and
-        /// near-black flat ambient of rungs 1-6 tunes numbers that do not transfer to a near-white basemap,
-        /// which is exactly how an earlier pass concluded that shadow distance alone restored the shadow
-        /// while the maintainer's app — already at 6000 — still showed none. The clipped column is what
-        /// makes each row readable: while it stays high, the row is measuring exposure, not shadowing.</para>
+        /// Rung 8 — the parameter sweep over three knobs: URP's shadow distance (the fade band), the ambient
+        /// probe's intensity (indirect light a shadow cannot remove) and the sun's intensity DOWNWARD (a lit
+        /// ground clipped at 1.0 leaves no headroom to darken). It walks one axis at a time, then crosses two.
+        /// It uses the app's real palette and skybox, so rung 9 is its baseline row; a 0.62-grey sweep does
+        /// not transfer to a near-white basemap. A high clipped column means the row measures exposure.
         /// </summary>
         [Test]
         public void MapScale_ShadowKnobSweep_FindsAKnobThatRestoresTheShadow()
@@ -728,24 +650,11 @@ namespace MapRenderer.Tests.Visual
         private const double MinShadowLengthFraction = 0.60;
 
         /// <summary>
-        /// Rung 10 — SHADOW-MAP TEXEL DENSITY, the one app/harness difference every rung above is blind to.
-        /// Rung 9 proved the shadow is neither clipped nor faded at the maintainer's own settings, and the
-        /// sweep found no exposure knob that matters; what is left is that the harness occluder is 250 m
-        /// tall while the basemap's buildings are <c>render_height</c> 10-50 m.
-        ///
-        /// <para>Bias and PCF erode a shadow by a number of shadow-map TEXELS that does not depend on the
-        /// occluder's size, so the quantity that decides visibility is the shadow's length measured IN
-        /// TEXELS. That makes resolution a faithful stand-in for building height: halving the map doubles
-        /// the texel, and URP scales its depth and normal bias by texel size, so 2048→256 puts a 250 m
-        /// occluder at exactly the texels-per-shadow ratio a 31 m building has at the shipped 2048.
-        /// Substituting resolution for height keeps the geometry, the camera and the sample boxes identical
-        /// to rung 9, so this rung still changes one variable.</para>
-        ///
-        /// <para>The measurement is the shadow's LENGTH, not a fixed box's luminance: erosion eats a shadow
-        /// from its EDGE inward, and a box in the interior of a 210 m shadow has room to spare at any
-        /// resolution — it would report green and mean nothing. So the rung scans the ground along the sun's
-        /// track, finds the furthest point still darkened, and compares that against the length the
-        /// geometry demands.</para>
+        /// Rung 10 — shadow-map texel density: the harness occluder is 250 m tall, basemap buildings 10-50 m.
+        /// Non-obvious why: bias and PCF erode a shadow by a texel count independent of occluder size, and
+        /// URP scales bias by texel size, so 2048→256 gives a 250 m occluder the texels-per-shadow of a 31 m
+        /// building at 2048, with rung 9's geometry unchanged. Erosion eats from the EDGE, so the rung scans
+        /// the sun's track for the furthest darkened point, not a box inside the shadow.
         /// </summary>
         /// <param name="shadowMapResolution">Main-light shadow-map resolution; 2048 is what the project
         /// ships, and each halving stands in for halving the building's height.</param>
@@ -891,27 +800,14 @@ namespace MapRenderer.Tests.Visual
         private const string ExtrusionHeightProperty = "_ExtrusionHeight";
 
         /// <summary>
-        /// Rung 11 — THE REGRESSION TOOTH for "buildings cast flat footprint shadows". A fill-extrusion mesh
-        /// is a HEIGHT-AGNOSTIC footprint at elevation 0: every metre of a building's silhouette is produced
-        /// by <c>MapVertexModify</c> from the <c>TEXCOORD3</c>/<c>TEXCOORD4</c> streams
-        /// <c>StyledFillExtrusionTileBuilder</c> writes. A caster pass that declares those inputs on any
-        /// other semantic reads Unity's zero-fill for an absent stream, computes zero elevation, and draws a
-        /// caster lying flat ON the ground — and a ground-coplanar caster casts nothing onto the ground.
-        ///
-        /// <para>Every rung above this one is blind to that, because all of them cast with a PRIMITIVE CUBE
-        /// whose height is mesh geometry: <c>_ExtrusionHeight</c> defaults to 0 in <c>FillExtrusion.mat</c>
-        /// and the cube supplies no extrusion streams, so <c>MapVertexModify</c> contributes nothing to them
-        /// either way. <see cref="ExtrusionHeightSource.MeshGeometry"/> reproduces exactly that caster here,
-        /// as the control: it shares this rung's scene, scan, materials and shader, and differs only in
-        /// where the 250 m comes from. A defect in the extrusion streams' semantics reddens the two
-        /// stream-driven variants and leaves the control green; anything that reddens all three is a fault
-        /// in shadows at large, not in this channel mapping.</para>
-        ///
-        /// <para>The measurement is the shadow's LENGTH along the sun's ground track, reusing rung 10's
-        /// scan: a luminance box on the building itself cannot tell a footprint shadow from an extruded one
-        /// (both darken the roof area), whereas only a RAISED caster throws its shadow 0.839 x its height
-        /// clear of its own footprint.</para>
+        /// Rung 11 — pins "buildings cast flat footprint shadows". Non-local invariant: a fill-extrusion mesh
+        /// is a footprint at elevation 0, raised by <c>MapVertexModify</c> from the <c>TEXCOORD3</c>/
+        /// <c>TEXCOORD4</c> streams <c>StyledFillExtrusionTileBuilder</c> writes; a caster pass on other
+        /// semantics reads zero-fill and casts nothing. Rungs 1-10 cast a primitive cube, which is blind to
+        /// that; <see cref="ExtrusionHeightSource.MeshGeometry"/> is that cube here, as the control.
         /// </summary>
+        /// <remarks>It measures shadow length along the sun's track (rung 10's scan): a box on the building
+        /// cannot tell a footprint shadow from an extruded one, but only a RAISED caster shadows past it.</remarks>
         /// <param name="heightSource">Where this variant's 250 m of caster height comes from.</param>
         [Test]
         public void FillExtrusionCaster_ShadowFollowsTheExtrudedSilhouette(
@@ -952,9 +848,8 @@ namespace MapRenderer.Tests.Visual
                 if (heightSource != ExtrusionHeightSource.MeshGeometry)
                 {
                     bool dataDriven = heightSource == ExtrusionHeightSource.BakedStream;
-                    // Bag-tracked (idempotent — the null check in Dispose also catches a mesh Measure's
-                    // own teardown already destroyed): Measure normally takes ownership and destroys it,
-                    // this only catches one built for a Measure call that threw before installing it.
+                    // Measure's teardown normally destroys it; the bag (null-safe on a destroyed mesh) catches
+                    // one left by a Measure call that threw before installing it.
                     caster = Track(BuildExtrusionCasterMesh(roofHeight, dataDriven));
                     if (!dataDriven) cube.SetFloat(ExtrusionHeightProperty, roofHeight);
                 }
@@ -1006,11 +901,9 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Builds the caster the way the tile pipeline does — the REAL
-        /// <c>StyledFillExtrusionTileBuilder</c> write, so the mesh carries the production vertex layout and
-        /// this rung pins both halves of the mesh-writes/shader-reads contract rather than the shader half
-        /// alone. Asserts the two fixture properties the rung's verdict rests on: the footprint is flat (so
-        /// all of the silhouette comes from the shader) and the bake stream carries the height on the
+        /// Builds the caster through the REAL <c>StyledFillExtrusionTileBuilder</c> write, so the rung pins
+        /// both halves of the mesh-writes/shader-reads contract. Asserts the two fixture properties the
+        /// verdict rests on: the footprint is flat, and the bake stream carries the height on the
         /// data-driven path and zero on the uniform one.
         /// </summary>
         /// <param name="roofHeight">Height in metres the caster must reach once extruded.</param>
@@ -1080,9 +973,8 @@ namespace MapRenderer.Tests.Visual
             casterObject.transform.position   =
                 new Vector3(-footprint.center.x * scale, 0f, -footprint.center.z * scale);
 
-            // The imported bounds describe the FLAT footprint; the silhouette that has to survive culling
-            // only exists after the vertex stage runs. Production never notices — a tile's footprint is
-            // kilometres across and a building is tens of metres — but this caster inverts that ratio.
+            // The bounds describe the FLAT footprint; the silhouette exists only after the vertex stage. A
+            // tile's kilometre-wide bounds hide that in production; this narrow, tall caster does not.
             casterMesh.bounds = new Bounds(
                 footprint.center, footprint.size + new Vector3(0f, 4f * roofHeight, 0f));
         }
@@ -1236,9 +1128,8 @@ namespace MapRenderer.Tests.Visual
         /// <param name="scanPoints">Ground points to sample in both frames, or null for no scan. Locates
         /// the shadow's far edge, which a fixed sample box cannot see.</param>
         /// <param name="scanHalfExtent">Half-extent of each scan sample, world metres.</param>
-        /// <param name="configureCaster">Runs on the occluder object after it is built and BEFORE the
-        /// entity conversion reads its mesh and transform, or null to cast with the primitive cube as
-        /// every rung above rung 11 does. Whatever mesh the object holds afterwards is destroyed with it.</param>
+        /// <param name="configureCaster">Runs on the built occluder BEFORE entity conversion reads it, or null
+        /// for the primitive cube. The mesh the object then holds is destroyed with it.</param>
         /// <returns>The rung's readings, for <see cref="AssertRungReceivesShadows"/>.</returns>
         private static ShadowReading Measure(
             string label, in SceneLayout layout,
@@ -1276,10 +1167,8 @@ namespace MapRenderer.Tests.Visual
                 light.shadowStrength = 1f;
                 lightGo.transform.rotation = layout.LightRotation;
 
-                // The skybox probe is baked LAST, and only here: it needs both the skybox material and
-                // the sun, and the sun is this light, which does not exist until now. Without both, a
-                // "Skybox ambient" rung bakes whatever scene the EditMode runner carries — far darker
-                // than the demo scene, which gives the shadow contrast the app does not have.
+                // Bake the skybox probe only after this light exists: it needs the skybox and the sun. Without
+                // both it bakes the runner's darker scene, giving the shadow contrast the app does not have.
                 if (layout.Ambient == AmbientMode.Skybox)
                 {
                     RenderSettings.skybox = AssetDatabase.GetBuiltinExtraResource<Material>(

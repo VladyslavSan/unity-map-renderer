@@ -36,13 +36,10 @@ namespace MapRenderer.Core.Text.Placement
             GridX = gridX; GridZ = gridZ; GridY = gridY; LayerId = layerId; Text = text; IconImage = iconImage;
         }
 
-        /// <summary>The single canonical dedup+fade grid, in metres. The production dedup key
-        /// (<c>SymbolReconciler</c>'s <c>DedupKey</c>) and the fade id quantize to it, so a symbol's dedup cell
-        /// is a pure function of the tile set. It is fixed, not zoom-scaled: the cover is a quadtree cut, so a parent
-        /// never overlaps its child, and the duplicates are edge/buffer copies between neighbouring tiles and
-        /// cross-source copies. 4 m, the same as the fade grid: one tuning knob. Seam: a cover that overlaps a
-        /// parent and its child needs a zoom-scaled grid (finest zoom wins); only this constant's use and the
-        /// store's grid input change.</summary>
+        /// <summary>The single canonical dedup+fade grid, in metres: <c>SymbolReconciler</c>'s <c>DedupKey</c>
+        /// and the fade id quantize to it. It is fixed, not zoom-scaled, because the cover is a quadtree cut, so
+        /// duplicates are only neighbour-edge and cross-source copies. Limitation: a cover that overlapped a
+        /// parent and its child would need a zoom-scaled grid.</summary>
         public const double CanonicalGridMeters = 4.0;
 
         /// <summary>

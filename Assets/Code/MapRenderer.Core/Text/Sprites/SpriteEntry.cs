@@ -1,19 +1,14 @@
-// Engine-free. NOT a blittable job type: this is a parse-time name-keyed lookup value living inside
-// MapRenderer.Core.Text.Sprites.SpriteIndex's managed Dictionary — it never crosses into a
-// NativeArray/Burst job, so it carries no BLITTABLE-field constraint (contrast GlyphAtlasEntry).
+// Not a blittable job type: a parse-time value in SpriteIndex's managed Dictionary that never crosses
+// into a NativeArray/Burst job, so it has no blittable-field constraint (contrast GlyphAtlasEntry).
 
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
     /// One sprite's location + metadata inside a MapLibre sprite sheet, as parsed from the sprite
     /// JSON index (e.g. <c>sprite.json</c> alongside <c>sprite.png</c>). Pixel rect is in the sprite
-    /// sheet's own pixel space; <see cref="PixelRatio"/> distinguishes @1x/@2x sheets.
-    ///
-    /// <para><b>The rect is always the CONTENT rect</b> — the sprite's own ink, never a padded cell.
-    /// <see cref="Padding"/> records how many texels of border surround that rect on every side in the
-    /// sheet the entry indexes. A raw <see cref="SpriteIndex.Parse"/>d index reports <c>0</c> (a published
-    /// sheet reserves no inter-sprite padding); <c>SpriteSheetPadder.Plan</c> relocates the same content
-    /// rects into a repacked sheet and reports the border it actually laid down there.</para>
+    /// sheet's own pixel space; <see cref="PixelRatio"/> distinguishes @1x/@2x sheets. The rect is always the
+    /// CONTENT rect, never a padded cell; <see cref="Padding"/> is the border around it (0 from
+    /// <see cref="SpriteIndex.Parse"/>, the laid-down border after <c>SpriteSheetPadder.Plan</c>).
     /// </summary>
     public readonly struct SpriteEntry
     {

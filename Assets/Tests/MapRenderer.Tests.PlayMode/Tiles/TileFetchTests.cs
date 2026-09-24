@@ -1,9 +1,5 @@
 // Tiles/TileFetchTests.cs — fetch-cancellation and symbol-kick teeth, PlayMode half.
 //
-// Split from Tiles/TileCacheTests.cs by a using collision: both files here import System and always
-// qualify Object as UnityEngine.Object.Destroy/DestroyImmediate; TileCacheTests.cs's two files call bare
-// Object.Destroy without importing System, so the two groups must not merge.
-//
 // Contents:
 //   TileFetchCancellationTests  — rapid zoom/cover churn must not flood the log with unobserved fetch exceptions.
 //   TileSymbolKickTests         — the symbol kick fires via the normal PumpPending path once the off-main decode lands between ticks.
@@ -57,22 +53,16 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         /// <summary>
         /// A fetch that stays IN-FLIGHT (spins on the ThreadPool) until its token is cancelled, then faults
-        /// with a NON-OCE exception — mimicking an aborted UnityWebRequest's "Unknown Error". The non-OCE
-        /// fault matters: UniTask tends to suppress unobserved OCE, so an OCE-based fake would let the test
-        /// pass vacuously. This faults the way the real bug does. Driven through the shared
-        /// <see cref="TestDataSource"/> via its (id, ct) delegate ctor.
-        /// A blocking wait on the cancellation token's WaitHandle simulates the fetch latency ON THE
-        /// THREADPOOL (not a test-frame wait) — it stays; the settle waits in the test body yield real
-        /// frames. Parks (no poll) until cancelled or the ~60s safety cap.
+        /// with a NON-OCE exception, like an aborted UnityWebRequest's "Unknown Error". UniTask tends to
+        /// suppress unobserved OCE, so an OCE-based fake would let the test pass vacuously. The blocking
+        /// wait runs on the ThreadPool, not the test frame; the test body's settle waits yield real frames.
         /// </summary>
         private static async UniTask<TileResponse> SpinThenFault(TileId id, CancellationToken ct)
         {
             await UniTask.SwitchToThreadPool();
-            // Park until cancelled or the ~60s safety cap. Guard the WaitHandle access: Release cancels AND
-            // disposes the linked CTS, and if that disposal wins the race to here (ThreadPool starvation),
-            // `ct.WaitHandle` throws ObjectDisposedException. Swallowing it and falling through to the fault
-            // is correct — a disposed source means the fetch WAS released — and it keeps the FaultMarker
-            // oracle armed (an escaping ODE would carry no marker and pass the test vacuously).
+            // Non-obvious why: Release cancels AND disposes the linked CTS, so `ct.WaitHandle` can throw
+            // ObjectDisposedException. A disposed source means the fetch was released, so fall through to the
+            // marked fault; an escaping ODE carries no marker and would pass the test vacuously.
             try { ct.WaitHandle.WaitOne(60000); }
             catch (ObjectDisposedException) { }
             // Always fault non-OCE (even on the safety-cap path) so a dropped task would be unobserved.
@@ -295,10 +285,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         }
 
         // ── Two fault domains — a contract-violating symbol throw never strands a mesh array ────────────
-        // AllTilesSettled() is NOT decisive (ConsumeMeshBuild's faulted-task guard settles either way via
-        // silent-discard). The decisive observable is MeshDataPayload.DebugLiveAllocCount: WITH the wrap the
-        // kick task completes with a real TilePrologueOutput (consume runs, array disposed); WITHOUT it, the
-        // kick-allocated writable array leaks past settle.
+        // Non-obvious why: AllTilesSettled() settles either way, so the decisive observable is
+        // DebugLiveAllocCount — without the wrap, the kick-allocated writable array leaks past settle.
         [UnityTest]
         public IEnumerator SymbolFaultNeverStrandsMeshArray_LambdaWrapCatches()
         {
@@ -340,9 +328,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             }
             finally { view.Teardown(); }
 
-            // (The confirmatory managed-side CountMeshObjects delta the EditMode form carried is dropped here:
-            // Object.Destroy is deferred to end-of-frame in PlayMode, so an absolute Mesh count is unreliable.
-            // The decisive native-leak tooth above — DebugLiveAllocCount, a code-maintained counter — stands.)
+            // Limitation: no CountMeshObjects delta here — PlayMode defers Object.Destroy to end-of-frame, so an
+            // absolute Mesh count is unreliable.
         }
 
         // ── A symbol-only source kicks; a mesh-only source runs no symbol pass ─────────────────────────

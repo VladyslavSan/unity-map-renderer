@@ -1,9 +1,5 @@
-// Jobs/FillJobTests.cs — the fill boundary-band job and the tile geometry buffer/materializer/producer teeth (EditMode).
-//
-// Two namespace blocks, kept exactly as each file already declared them (MapRenderer.Tests.EditMode.Jobs
-// for FillBandJobTests, MapRenderer.Tests.Jobs for the other four) — unifying them would change every
-// test's fullname, which a file merge must never do. FillGraphBurstProbeTests.cs and
-// GraphDeterminismTests.cs both stay their own files (Burst schedule probe; size).
+// The fill boundary-band job and the tile geometry buffer/materializer/producer tests (EditMode). Two
+// namespace blocks stay as they are, because unifying them would change every test's fullname.
 //
 // Contents:
 //   FillBandJobTests                   — the outward boundary band at FillBandJob's own output — orientation, winding, no rendering.
@@ -37,21 +33,11 @@ namespace MapRenderer.Tests.EditMode.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The outward boundary band, read at the job's own output — no rendering, so every property below is
-    /// about the geometry and the attribute rather than about pixels.
-    ///
-    /// <para><b>Why a band quad's orientation cannot simply be read.</b> The quad is DEGENERATE in tile
-    /// space: its outer vertices carry the same coordinate as their inner twins, because the one device
-    /// pixel is added by the vertex shader. Every test here that talks about direction or winding therefore
-    /// reconstructs the shader's displacement first — <c>tileOutward = (dirEast, -dirNorth)</c>, undoing the
-    /// y-down flip the job applies at its write site.</para>
-    ///
-    /// <para><b>What a winding tooth cannot catch, deliberately.</b> A band mirrored north↔south is still
-    /// consistently wound and passes <see cref="BandTriangles_CarryEarcutsCanonicalWinding_ForEitherRingSign"/>
-    /// unchanged. That is
-    /// why <see cref="NorthEdgeBand_PointsNorth_NotSouth"/> and
-    /// <see cref="OuterRingPointsOutOfTheFill_AndAHoleRingPointsIntoTheHole"/> exist: a band on the wrong
-    /// side IS a ramp placed inside the boundary, which is the one placement the mechanism forbids.</para>
+    /// The outward boundary band at the job's own output, with no rendering. The band quad is DEGENERATE in
+    /// tile space (the vertex shader adds the pixel), so direction tests first rebuild the displacement
+    /// <c>tileOutward = (dirEast, -dirNorth)</c>. A north↔south mirrored band still winds correctly, so
+    /// <see cref="NorthEdgeBand_PointsNorth_NotSouth"/> and
+    /// <see cref="OuterRingPointsOutOfTheFill_AndAHoleRingPointsIntoTheHole"/> pin the side.
     /// </summary>
     public class FillBandJobTests
     {
@@ -265,9 +251,8 @@ namespace MapRenderer.Tests.EditMode.Jobs
                 new List<List<double2[]>> { new List<double2[]> { NorthMidVertexSquare() } }, new[] { 0 });
             Run(c);
 
-            // Ring vertex 1 is (2,0): both its edges run along +x, so its miter is the edge normal exactly.
-            // Tile +y is SOUTH, so the outward normal of the y = 0 edge is tile -y, which is NORTH — and the
-            // attribute is consumed in a frame whose north is cross(east, up). dirNorth must therefore be +1.
+            // Ring vertex 1 (2,0) has both edges along +x. Tile +y is SOUTH, so the y = 0 edge's outward
+            // normal is NORTH and dirNorth must be +1.
             float3 band = c.VertexBand[c.InteriorVertexCount + 2 * 1 + 1];
             Assert.AreEqual(0.0, band.x, 1e-12, "a due-north band has no east component");
             Assert.AreEqual(1.0, band.y, 1e-12,
@@ -307,14 +292,8 @@ namespace MapRenderer.Tests.EditMode.Jobs
             }
         }
 
-        // Earcut normalises every outer ring to CCW-on-screen (area2 < 0 in this Y-down space) before it
-        // triangulates, so the interior's winding is the SAME whichever way the source wound its rings — and
-        // MVT (positive) and GeoJSON (negative) do not agree on that. The band must land on earcut's
-        // orientation for BOTH, or it is back-face culled against the interior it borders for one of them and
-        // the fill renders exactly as it did before this stage. Both signs are driven here for that reason.
-        //
-        // RED: drop the reversal in FillBandJob.EmitRing and the positively-wound arm reds while the
-        // negatively-wound one stays green — which is precisely the asymmetry that hid the defect.
+        // Earcut normalises every outer ring's winding, and MVT and GeoJSON wind rings oppositely, so the band
+        // must match earcut for BOTH signs or be back-face culled. RED: drop FillBandJob.EmitRing's reversal.
         [Test]
         public void BandTriangles_CarryEarcutsCanonicalWinding_ForEitherRingSign([Values(false, true)] bool reversedRing)
         {
@@ -361,9 +340,8 @@ namespace MapRenderer.Tests.EditMode.Jobs
                 new[] { 0, 1 });
             Run(c);
 
-            // Read the feature of every triangle in emission order. Feature 1's interior must never appear
-            // before feature 0's band: these fills are painter-ordered, so a whole-layer band appended last
-            // would draw each feature's band over every other feature's interior regardless of fill-sort-key.
+            // Feature 1's interior must not precede feature 0's band: fills are painter-ordered, so a band
+            // appended last draws over other features regardless of fill-sort-key.
             var order = new List<(int Feature, bool IsBand)>();
             for (int i = 0; i + 2 < c.TriangleIndices.Length; i += 3)
             {
@@ -397,16 +375,9 @@ namespace MapRenderer.Tests.EditMode.Jobs
         }
 
         // ── Clip-edge suppression ─────────────────────────────────────────────────────────────────────
-        //
-        // At the shipped FillTileBufferClip: 0, RingClipJob cuts every fill ring exactly at the tile boundary
-        // and the neighbouring tile carries the mirrored cut — so a band drawn along a clip edge paints a rim
-        // over a fill that already abuts there. The predicate is exact rather than epsilon-based because
-        // RingClipJob.Intersect writes the boundary value VERBATIM into the clipped axis.
-        //
-        // What the predicate actually tests is "both endpoints on the same window line", which is a superset
-        // of "clip-introduced": a genuine feature edge that happens to run exactly along the tile boundary is
-        // suppressed too. That population is measure-zero, and it abuts the neighbour's own boundary in the
-        // same way, so it wants the same treatment.
+        // Non-obvious why: a band along a clip edge paints a rim where the neighbour tile's fill abuts. The
+        // exact "both endpoints on one window line" test works because RingClipJob.Intersect writes the
+        // boundary VERBATIM; it also suppresses a real edge on the boundary, which abuts the neighbour too.
 
         /// <summary>A ring already cut at the east window line: the shape RingClipJob hands over for a
         /// feature that overran the tile. Edge 1 is the clip-introduced one; edges 0 and 2 each have exactly
@@ -611,17 +582,9 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void Clip_AtZeroMargin_LeavesTheFullExtentBackgroundRingUntouched()
         {
-            // The plan calls NonMvtDecoderFanOutTests + TileBackgroundQuadProjectionTests "free falsifiers" for
-            // this claim, but BOTH build a TileLayerProcessContext with BufferClip UNSET — i.e. disabled — so
-            // neither is armed once the default margin is enabled. This is the armed version: the synthetic
-            // full-extent ring sits exactly ON the b=0 window and must come out as the same 4 corners.
-            //
-            // What it does NOT test, so nobody credits it with more than it carries: this ring's bbox EQUALS
-            // the window, so BboxInsideWindow short-circuits and no half-plane arithmetic runs. It cannot
-            // catch a duplicated on-boundary vertex or an exclusive-vs-inclusive slip — those live in
-            // Clip_DoesNotDuplicateAVertexLyingExactlyOnTheWindowEdge, whose ring straddles the boundary.
-            // What this pins is the end-to-end claim the background quad depends on: at b = 0 the full-extent
-            // ring survives untouched, by whichever path.
+            // With the clip ENABLED, the full-extent ring ON the b=0 window comes out as the same 4 corners.
+            // Limitation: its bbox equals the window, so no half-plane arithmetic runs; on-boundary duplicates
+            // are pinned by Clip_DoesNotDuplicateAVertexLyingExactlyOnTheWindowEdge.
             var fullExtent = new[]
             {
                 new double2(   0.0,    0.0),
@@ -650,10 +613,8 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void Clip_DoesNotDuplicateAVertexLyingExactlyOnTheWindowEdge()
         {
-            // The duplicate hazard, isolated. `onEdge` sits exactly on x = 4096 with an INSIDE predecessor and
-            // an OUTSIDE successor: textbook Sutherland–Hodgman emits it once as an inside vertex and then
-            // AGAIN as the exit intersection (t = 0). The bbox exceeds the window, so the fast path cannot
-            // mask it — this ring really does go through the arithmetic.
+            // `onEdge` on x = 4096 between an inside and an outside vertex: textbook Sutherland–Hodgman emits it
+            // twice. The bbox exceeds the window, so the ring goes through the arithmetic.
             var ring = new[]
             {
                 new double2(2048.0, 2048.0), // inside
@@ -685,25 +646,10 @@ namespace MapRenderer.Tests.Jobs
         // ── the RING INDIRECTION itself ───────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The job reads <b>the rings <c>RingVisitOrder</c> names, in the order it names them</b> — not
-        /// <c>0..RingVisitOrder.Length</c>. A sparse, permuted order (<c>[2, 0]</c> over three rings) must
-        /// produce ring 2's geometry first, then ring 0's, each carrying <b>its own</b> feature index, and
-        /// ring 1 must not appear at all.
-        ///
-        /// <para><b>Why it exists — this loop was unobserved on the branch that actually runs.</b> The shared buffer replaced
-        /// <c>for (ri = 0; ri &lt; RingCount; ri++)</c> with <c>for (k…) { int ri = RingVisitOrder[k]; … }</c>.
-        /// Every other clip fixture in the repo — the rest of this file, <c>RingWindowClipperParityTests</c>,
-        /// <c>Jobs/TileGeometryMaterializerSeamTests</c>, <c>Jobs/TileGeometryStoreTests</c>,
-        /// <c>Visual/TileSeamSnapshotTests</c> — supplies an <b>identity</b> visit order, under which
-        /// <c>ri == k</c> is true by construction, and the one fixture with a genuinely permuted, subsetted
-        /// order (<c>Meshing/FillSharedBufferTests</c>) ran only with the clip DISABLED, i.e. down the
-        /// <c>RingSelectJob</c> branch. Collapsing the indirection back to <c>int ri = k;</c> was therefore
-        /// inert against the whole gate — while <c>MapViewConfig.FillTileBufferClip = 0.0</c> makes the clip
-        /// branch the PRODUCTION path for every fill layer.</para>
-        ///
-        /// <para>Both output branches are exercised on purpose: ring 2 straddles the window (so the visited
-        /// index feeds Sutherland–Hodgman via <c>rStart</c>) and ring 0 lies wholly inside it (so the visited
-        /// index feeds the verbatim bbox fast path).</para>
+        /// The job reads the rings <c>RingVisitOrder</c> names, in that order: <c>[2, 0]</c> over three rings
+        /// gives ring 2 then ring 0, each with its own feature index, and no ring 1. Other clip fixtures use an
+        /// identity order, where <c>ri == k</c> hides the indirection, and the clip branch is the production
+        /// path. Ring 2 straddles the window (Sutherland–Hodgman) and ring 0 is inside (bbox fast path).
         /// </summary>
         [Test]
         public void Clip_VisitsTheRingsTheVisitOrderNames_InThatOrder_WithTheirOwnFeatureIndices()
@@ -900,9 +846,7 @@ namespace MapRenderer.Tests.Jobs
                     Assert.IsTrue(unclipped.IsCreated, $"{fixture}/{layerName}: unclipped produced no buffers.");
                     Assert.IsTrue(clipped.IsCreated, $"{fixture}/{layerName}: clipped produced no buffers.");
 
-                    // Non-vacuity is a claim about the FIXTURE, not about each of its layers: a small layer
-                    // (croatia-dalmatia's `park`) can legitimately sit wholly inside the tile. Counted here
-                    // and asserted once per fixture below.
+                    // Non-vacuity holds per FIXTURE, not per layer: a small layer can sit wholly inside the tile.
                     if (CountOutsideExtent(unclipped, extent) > 0) bufferedLayers++;
 
                     // (a) after the clip, nothing is drawn outside the tile.
@@ -1185,20 +1129,10 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The ownership teeth for <see cref="TileGeometryBuffers"/> — the struct that now owns the
-    /// ring-stage buffers <c>FillMeshPipeline.Schedule</c> used to hold as private locals.
-    ///
-    /// <para>Every case asserts a <b>non-vacuity precondition</b> first (the buffers really were allocated,
-    /// really were readable) so the post-<c>Dispose</c> assertions cannot pass over a buffer that was never
-    /// created.</para>
-    ///
-    /// <para><b>How "the backing list was freed" is observed.</b> <c>NativeList&lt;T&gt;.IsCreated</c> reads a
-    /// pointer stored <i>in the struct copy</i>, and <c>Dispose()</c> nulls it only on the copy it was called
-    /// on — so a test-side copy of a list the buffer disposed still reports <c>IsCreated == true</c>. The
-    /// observable that <i>does</i> cross copies is the shared atomic safety handle: once the list is freed the
-    /// handle is released, and any access through any copy faults. The exact exception type is a Collections-
-    /// package detail (an <c>ObjectDisposedException</c> today), so the assertion is "it faults", paired with a
-    /// pre-Dispose read that must succeed.</para>
+    /// Ownership tests for <see cref="TileGeometryBuffers"/>, which owns the ring-stage buffers. Each case
+    /// first checks the buffers were allocated and readable. Non-obvious why: "freed" is observed as a fault,
+    /// because a copied <c>NativeList&lt;T&gt;</c> still reports <c>IsCreated</c> after the owner disposes it,
+    /// while the shared safety handle makes any access through any copy fault.
     /// </summary>
     [TestFixture]
     public class TileGeometryBuffersTests
@@ -1236,15 +1170,9 @@ namespace MapRenderer.Tests.Jobs
                 "double free");
         }
 
-        /// <summary>The list-backed mode frees the backing <b>lists</b> and never the <c>AsArray()</c>
-        /// views over them. This is the tooth that catches a wrong backing-mode discriminator — and it is
-        /// the <b>only</b> one.
-        /// <para><b>Measured, not assumed:</b> disposing an <c>AsArray()</c> view is a <b>silent no-op</b>
-        /// under Collections 6.5.0 — <i>not</i> a throw. A RED sweep set the discriminator so
-        /// <c>Dispose()</c> freed the views instead of the lists: no exception was raised, the backing lists
-        /// simply leaked, and the <b>entire behavioural clip corpus stayed green</b>; this test was the single
-        /// failure. Do not assume the collections safety system catches view-vs-list ownership mistakes, and
-        /// do not weaken this test on the belief that a behavioural test backs it up. Nothing does.</para></summary>
+        /// <summary>The list-backed mode frees the backing <b>lists</b>, never the <c>AsArray()</c> views.
+        /// Limitation: disposing a view was measured a silent no-op under Collections 6.5.0, so a wrong discriminator
+        /// leaks the lists while every behavioural clip test stays green; only this test catches it.</summary>
         [Test]
         public void AdoptDerivedLists_ThenDispose_FreesTheBackingLists_AndNeverTheViews()
         {
@@ -1382,20 +1310,10 @@ namespace MapRenderer.Tests.Jobs
             buffers.Dispose();
         }
 
-        /// <summary>
-        /// The per-feature kind column must survive a <b>derive</b>, and the derived buffer's
-        /// <c>Dispose</c> must not reach into the buffer it was derived from.
-        ///
-        /// <para>The source is <b>borrowed</b> — it is the store's shared buffer, several fill layers
-        /// derive from it — so it must be left completely intact, and the derived buffer gets a
-        /// <b>copy</b>.</para>
-        ///
-        /// <para>Why this needs a test at all: an <c>AdoptDerivedLists</c> that <i>took</i> the array instead
-        /// of copying it would pass every behavioural fill test in the repo. The first layer to derive would
-        /// work; the second would read a freed column, or the store's <c>Dispose</c> would double-free — and
-        /// the collections safety system does <b>not</b> reliably surface either (measured: a whole green
-        /// corpus over a leaking-view discriminator). The observable difference is here, in the source
-        /// buffer's state after the derived one dies.</para></summary>
+        /// <summary>The per-feature kind column survives a <b>derive</b>: the source is the store's shared,
+        /// borrowed buffer, so the derived buffer gets a <b>copy</b> and its <c>Dispose</c> leaves the source
+        /// intact. An <c>AdoptDerivedLists</c> that took the array passes every behavioural fill test, and the
+        /// safety system does not reliably catch the later freed read or double free.</summary>
         [Test]
         public void AdoptDerivedLists_CopiesTheKindColumn_SoTheSourceSurvivesTheDerivedBuffersDispose()
         {
@@ -1445,8 +1363,8 @@ namespace MapRenderer.Tests.Jobs
                 "the derived column must be a distinct allocation — an alias would show the write here, and " +
                 "the two buffers would then double-free it");
 
-            // (d) disposing the derived buffer leaves the source fully usable. Under Collections 6.5.0 a
-            //     two-owner mistake is a SILENT no-op rather than a throw, so read the value back.
+            // (d) disposing the derived buffer leaves the source fully usable. A two-owner mistake was measured
+            //     a silent no-op under Collections 6.5.0, not a throw, so read the value back.
             derived.Dispose();
             Assert.IsTrue(source.FeatureGeometryType.IsCreated,
                 "the source's column must survive the derived buffer's Dispose");
@@ -1469,17 +1387,10 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The teeth on Waist 1's producer seam as seen from <c>FillMeshGraph.Schedule</c>.
-    ///
-    /// <para>The fixture is one GeoJSON polygon <b>with a hole</b>, authored by inverting a chosen tile's own
-    /// <c>ToLonLat</c> so both rings land on exact tile-local integers well inside the tile, and sliced by the
-    /// production <c>GeoJsonParser</c> → <c>GeoJsonProjectedDataset</c> → <c>GeoJsonTileSlicer</c> stack. The
-    /// extent is <b>8192, never 4096</b>: every fill fixture in the repo uses 4096, so an implementation that
-    /// substituted that literal for the buffer's own extent would be undiscriminated by all of them.</para>
-    ///
-    /// <para><b>The geojson arm drives the PRODUCTION decoder</b>, <see cref="GeoJsonTileDecoder"/>, not
-    /// a test-side double: a second implementation of the same join can drift, and every test using
-    /// the double would then go green against a shape production does not produce.</para>
+    /// Waist 1's producer seam as <c>FillMeshGraph.Schedule</c> sees it, over one GeoJSON polygon with a hole
+    /// on exact tile-local integers, sliced by the production stack and <see cref="GeoJsonTileDecoder"/>. The
+    /// extent is <b>8192, never 4096</b>: every other fill fixture uses 4096, so a hard-coded 4096 would pass
+    /// them all.
     /// </summary>
     [TestFixture]
     public class TileGeometryMaterializerSeamTests
@@ -1620,9 +1531,8 @@ namespace MapRenderer.Tests.Jobs
 
             try
             {
-                // Quantization is at most 0.5 tile units per arm, and one tile unit at extent E is
-                // (tile edge in world metres) / E. So the two arms can disagree by at most half a tile unit
-                // of each — no magic number, and nothing about the pipeline is assumed.
+                // Each arm quantizes by at most half a tile unit, (tile edge in metres) / E, so the arms may
+                // differ by the sum of the two half-units.
                 double tileEdgeWorld = 2.0 * WebMercator.WorldExtent / math.pow(2.0, FixtureTile.Z);
                 double tolerance     = 0.5 * tileEdgeWorld / ExtentLow + 0.5 * tileEdgeWorld / ExtentHigh;
 
@@ -1793,15 +1703,10 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <b>Waist 1's two producers agree on the feature count, and the lockstep is a
-    /// property of the type rather than of one writer.</b>
-    ///
-    /// <para>Three consumers size a per-feature column from a count and then index it by
-    /// <c>SelectedTileFeature.Ordinal</c>. That only works while the buffer's feature column and
-    /// <c>ITileLayer.Features</c> hold the same number of entries. <see cref="MvtGeometryMaterializer"/>
-    /// guaranteed it (it early-outs on the FEATURE count); <see cref="PathGeometryMaterializer"/> did not
-    /// (it early-outed on the RING total, reachable with features present), and <c>MvtLayer.Geometry</c> was
-    /// a public mutable field that anything could desync. Both are closed here.</para>
+    /// Waist 1's two producers agree on the feature count, as a property of the type. Non-local invariant:
+    /// three consumers size a per-feature column from one count and index it by
+    /// <c>SelectedTileFeature.Ordinal</c>, so the buffer's feature column and <c>ITileLayer.Features</c> must
+    /// hold the same number of entries, even when a feature has no rings.
     /// </summary>
     [TestFixture]
     public class WaistOneProducerAgreementTests
@@ -1836,9 +1741,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, geometry.RingCount,    "no paths ⇒ no rings");
                 Assert.AreEqual(0, geometry.VertexCount,  "no paths ⇒ no vertices");
 
-                // The kind column is not merely present, it is CORRECT — a buffer that carried the right
-                // length and the wrong kinds would satisfy the count assertions above and still mis-classify
-                // every consumer's ring gate.
+                // The kind column is CORRECT, not just the right length; wrong kinds mis-classify every ring gate.
                 Assert.AreEqual(TileGeometryType.LineString, geometry.FeatureGeometryType[0]);
                 Assert.AreEqual(TileGeometryType.Point,      geometry.FeatureGeometryType[1]);
                 Assert.AreEqual(TileGeometryType.Polygon,    geometry.FeatureGeometryType[2]);
@@ -1929,11 +1832,8 @@ namespace MapRenderer.Tests.Jobs
 
             Assert.IsFalse(layer.Geometry.IsCreated, "a rejected buffer must not be adopted");
 
-            // Cleanup runs AFTER the assertions, deliberately not in a `finally`. If the guard is gone the
-            // layer adopts `mismatched`, and a finally disposing both the local and the layer would free the
-            // same three NativeArrays twice — an ObjectDisposedException that REPLACES the assertion failure
-            // and hides which property actually broke. A failing run leaking two buffers is the cheaper
-            // trade (batch leak detection is off, and a red gate is not a shipping state).
+            // Not in a `finally`: without the guard the layer adopts `mismatched`, and a double dispose would
+            // throw and hide the real assertion failure. A failing run leaks two buffers instead.
             mismatched.Dispose();
             layer.Dispose();
         }

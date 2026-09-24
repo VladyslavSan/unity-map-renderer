@@ -7,12 +7,9 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// The draw-side payload of one collision candidate: the contiguous range of staged <see cref="PlacedQuad"/>s
-    /// to emit if it survives, and the material/mesh slot to emit them into. Blittable, so the staging math can
-    /// fill it in a Burst job.
-    /// <para>NOT keyed by <see cref="SymbolCandidate.SymbolIndex"/>: a centred icon+text pair is ONE candidate
-    /// with TWO emits (the halves use different atlases), so a candidate owns the range
-    /// <see cref="SymbolCandidate.EmitStart"/>/<see cref="SymbolCandidate.EmitCount"/>. Indexing by
-    /// <c>SymbolIndex</c> reads the wrong emit after the first pair. Sorting candidates leaves the ranges valid.</para>
+    /// to emit if it survives, and the slot to emit them into; blittable, for a Burst job. A candidate owns the
+    /// range <see cref="SymbolCandidate.EmitStart"/>/<see cref="SymbolCandidate.EmitCount"/>, not one entry per
+    /// <see cref="SymbolCandidate.SymbolIndex"/>, because an icon+text pair is one candidate with two emits.
     /// </summary>
     public struct CandidateEmit
     {
@@ -29,12 +26,10 @@ namespace MapRenderer.Core.Text.Placement
         /// from <see cref="PointStageInput.AtlasKind"/>. Default <see cref="SymbolKind.Text"/>.</summary>
         public SymbolKind AtlasKind;
 
-        /// <summary>The world-anchored draw payload, read ONLY by
-        /// <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/> when <see cref="IsWorld"/> is
-        /// true — never a batch tile array indexed by <c>tileIndex</c>.
-        /// <see cref="AnchorLocal"/>/<see cref="TileOriginRender"/> mirror <see cref="PointStageInput"/>'s
-        /// identically-named fields (the SAME bake); <see cref="TileKey"/> keys the renderer's per-
-        /// (tile,slot,kind) slot dictionary.</summary>
+        /// <summary>The world-anchored draw payload, read only by
+        /// <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/> when <see cref="IsWorld"/> is true.
+        /// It mirrors <see cref="PointStageInput"/>'s same-named fields; <see cref="TileKey"/> keys the
+        /// renderer's per-(tile,slot,kind) dictionary.</summary>
         public float3 AnchorLocal;
 
         /// <summary>See <see cref="PointStageInput.TileOriginRender"/> — the render-space origin
@@ -46,12 +41,9 @@ namespace MapRenderer.Core.Text.Placement
         /// <see cref="IsWorld"/> is false there).</summary>
         public long TileKey;
 
-        /// <summary>The additive screen-space corner offset from
-        /// <c>text-translate</c>, computed by <see cref="SymbolStagingMath.StagePoint"/> as
-        /// <c>screenPx − s.ScreenPx</c> (both already resolved there). The world path does not project the
-        /// anchor, so it cannot fold the translate into the anchor's screen position; instead
-        /// <c>BillboardMath.BuildWorldQuad</c> adds this to every corner's <c>Offset</c> (same Y negation
-        /// as the corner). Default <c>float2.zero</c> — no-op for the common (untranslated) case.</summary>
+        /// <summary>The <c>text-translate</c> screen offset (<c>screenPx − s.ScreenPx</c>). The world path does not
+        /// project the anchor, so <c>BillboardMath.BuildWorldQuad</c> adds this to every corner's <c>Offset</c>
+        /// instead. Zero when untranslated.</summary>
         public float2 TranslateDeltaPx;
 
         /// <summary>True when the world-anchored draw sink should read this candidate — set by BOTH
@@ -68,15 +60,10 @@ namespace MapRenderer.Core.Text.Placement
         public bool AlongLine;
 
         /// <summary>
-        /// A constant CPU-side quad rotation (radians) added to the shader's live tangent rotation. Read ONLY when
-        /// <see cref="AlongLine"/> is true, where the renderer forces <see cref="PlacedQuad.RotationRadians"/> to 0.
-        /// The only source is <c>icon-rotate</c> on a map-aligned line icon; curved text leaves it 0. It is not
-        /// folded into <see cref="PlacedQuad.RotationRadians"/>, which curved text fills with a tangent angle, so
-        /// composing both would double-rotate.
-        /// <para>Sign, a non-local invariant: the value is ALREADY in <c>BillboardMath</c>'s sense (positive =
-        /// counter-clockwise on screen). <c>StageCurvedAnchor</c> writes it through
-        /// <see cref="SymbolBearing.IconRotationRadians"/>, the ONE place <c>icon-rotate</c>'s clockwise-positive
-        /// convention is converted. Do not negate it again.</para>
+        /// A constant quad rotation (radians) added to the shader's tangent rotation, read only when
+        /// <see cref="AlongLine"/> is true; its one source is <c>icon-rotate</c> on a line icon (curved text: 0).
+        /// Non-local invariant: it is already in <c>BillboardMath</c>'s counter-clockwise sense, converted once by
+        /// <see cref="SymbolBearing.IconRotationRadians"/>, so do not negate it again.
         /// </summary>
         public float ExtraRotationRadians;
 
@@ -88,15 +75,11 @@ namespace MapRenderer.Core.Text.Placement
         public float3 SurfaceUp;
 
         /// <summary>
-        /// The UNIT of this emit's corner offsets. <c>0</c> (the struct's zero value, which every point emit and
-        /// every non-map-pitched curved emit keeps) ⇒
-        /// <c>WorldBillboardVertex.Offset</c> is in LOGICAL SCREEN PIXELS. <c>&gt; 0</c> ⇒ it is in WORLD METRES,
-        /// and this is the metres-per-logical-pixel factor (<c>BuildWorldQuad</c>'s <c>emScale = TextSizePx · this</c>).
-        /// <para>One value carries both the conversion and the shader's bit2, a non-local invariant: a separate
-        /// flag could disagree with the scale and make the shader read pixels as metres.
-        /// <c>WorldSymbolRenderer.Emit</c> derives both from it. Only <see cref="SymbolStagingMath.StageCurved"/>'s
-        /// <c>worldArc</c> predicate writes it, with the value <c>arcScale</c> spaces the glyphs by, so a
-        /// map-pitched symbol's spacing and size foreshorten together.</para>
+        /// The UNIT of this emit's corner offsets: 0 (point and viewport-pitched curved emits) = logical screen
+        /// px; &gt; 0 = world metres, with this as the metres-per-logical-pixel factor (<c>emScale = TextSizePx · this</c>).
+        /// Non-local invariant: <c>WorldSymbolRenderer.Emit</c> derives both the scale and the shader's bit2 from
+        /// this one value, so they cannot disagree; only <see cref="SymbolStagingMath.StageCurved"/> writes it,
+        /// with the factor that spaces the glyphs.
         /// </summary>
         public float CornerMetresPerLogicalPixel;
 

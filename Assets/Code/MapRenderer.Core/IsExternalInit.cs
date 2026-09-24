@@ -1,6 +1,5 @@
-// C# 9 `init`-only setters require System.Runtime.CompilerServices.IsExternalInit, which Unity 6000.5's
-// netstandard reference assemblies do NOT ship (compile fails with CS0518). This internal polyfill supplies
-// it for this assembly. One copy is needed per assembly that DEFINES init-only members.
+// Polyfill: C# 9 `init` setters need IsExternalInit, which Unity 6000.5's netstandard reference assemblies
+// do not ship (CS0518). Each assembly that defines init-only members needs its own copy.
 namespace System.Runtime.CompilerServices
 {
     internal static class IsExternalInit { }

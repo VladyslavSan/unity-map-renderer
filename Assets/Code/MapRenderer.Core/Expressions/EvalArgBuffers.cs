@@ -8,25 +8,11 @@ namespace MapRenderer.Core.Expressions
     /// managed allocation during feature selection: features × filter-nodes, per tile).
     /// </summary>
     /// <remarks>
-    /// This is a <b>free-list of whole arrays</b>, not one growable buffer with a cursor, for two
-    /// non-local reasons that a single body does not reveal:
-    /// <list type="bullet">
-    ///   <item><b>Thread affinity.</b> The parsed expression tree is shared across whatever threads build
-    ///     tiles concurrently (<c>FeatureSelector.SelectFeatures</c> can run on a ThreadPool worker, or on the
-    ///     MAIN THREAD under the WebGL/Inline dispatch policy), so the buffer cannot live on the shared
-    ///     <see cref="FunctionExpression"/> instance — it is <c>[ThreadStatic]</c> here so each thread owns
-    ///     its own pool regardless of which threads are actually in play.</item>
-    ///   <item><b>Re-entrancy.</b> Evaluation nests — a node's argument is itself an expression that borrows
-    ///     a buffer while the outer node's buffer is still half-filled — so two frames on one thread are live
-    ///     at once. Distinct arrays (never a shared backing store) mean no frame can alias or reallocate
-    ///     another's buffer.</item>
-    /// </list>
-    /// <para><b>Contract:</b> every <see cref="Rent"/> MUST be paired with a <see cref="Return"/> of the same
-    /// array in a <c>finally</c> — an argument's <see cref="Expression.Evaluate"/> or a typed
-    /// <see cref="Value"/> accessor can throw mid-fill, and a leaked buffer silently drains the pool back to
-    /// per-call allocation (the exact cost this removes). Rented arrays are length ≥ the request; the caller
-    /// slices to the exact count (<c>AsSpan(0, n)</c>) so an oversized buffer is transparent. <see cref="Return"/>
-    /// clears the array before pooling, so no pooled buffer roots a (possibly reference-typed) argument.</para>
+    /// Non-local invariant: this is a free-list of whole arrays, not one growable buffer, because the shared
+    /// expression tree evaluates on several threads (hence <c>[ThreadStatic]</c>) and evaluation nests, so two
+    /// frames on one thread hold buffers at once. Every <see cref="Rent"/> pairs with a <see cref="Return"/> in a
+    /// <c>finally</c>, because an argument can throw mid-fill and a leak drains the pool. A rented array may be
+    /// longer than requested, so the caller slices <c>AsSpan(0, n)</c>; <see cref="Return"/> clears it.
     /// </remarks>
     internal static class EvalArgBuffers
     {

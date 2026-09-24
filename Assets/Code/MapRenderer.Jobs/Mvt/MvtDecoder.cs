@@ -9,26 +9,11 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
-    /// Decodes the Mapbox Vector Tile protobuf into <see cref="MvtTile"/>. Clean-room, built from the
-    /// open MVT spec.
-    ///
-    /// Single decode point: the Burst <c>MvtDecodeJob</c> in <c>MapRenderer.Jobs</c> operates only on the
-    /// pre-extracted command stream (NativeArray-compatible) and never sees the protobuf or managed
-    /// strings/dictionaries. Therefore this managed decoder is the single point that decodes the full MVT
-    /// message — feature properties, id, geometry type, and geometry are all decoded here.
-    ///
-    /// <para><b>The decode takes the <see cref="TileId"/> and materializes EAGERLY.</b> Each layer's rings
-    /// are flattened into its own <c>TileGeometryBuffers</c> before <see cref="Decode"/> returns, and no
-    /// per-feature <c>uint[]</c> command array is minted on the way: each feature's geometry field is
-    /// captured as a byte range only, and every feature's commands are flattened directly into one shared
-    /// <c>Allocator.Persistent</c> <c>NativeArray&lt;uint&gt;</c>. Feature tag words are flattened the same
-    /// way, into <c>MvtLayer.FeatureTagWords</c>.</para>
-    ///
-    /// <para><b>Why eager, and why the id is a parameter.</b> Lazy per-layer materialization would mutate
-    /// the tile on a second thread <i>after</i> the wrapping <c>SharedDisposable{IDecodedTile}</c> publishes
-    /// it, breaking that class's safe-publication argument; eager keeps every write inside the decode. And
-    /// the tile address enters the pipeline exactly ONCE, here, at the fetch, rather than coming from
-    /// whichever caller happened to want geometry.</para>
+    /// Decodes the MVT protobuf into <see cref="MvtTile"/>, built from the open MVT spec. It is the single
+    /// point that decodes the full message; the Burst <c>MvtDecodeJob</c> sees only the command stream.
+    /// It materializes every layer's geometry and tag words eagerly, into shared native buffers, before
+    /// <see cref="Decode"/> returns. The tile address enters the pipeline once, here. See
+    /// docs/tile-geometry-ir-design.md § "Why decode is eager and whole-tile".
     /// </summary>
     public static class MvtDecoder
     {
@@ -96,9 +81,8 @@ namespace MapRenderer.Jobs.Mvt
             }
             catch
             {
-                // A malformed tile throws part-way, after N layers have already minted Allocator.Persistent
-                // buffers. Nothing downstream ever sees this MvtTile (the throw propagates), so this is the
-                // ONLY place those N buffers can be freed — without it a decode fault is a silent native leak.
+                // A malformed tile throws after earlier layers allocated Persistent buffers. Nothing downstream
+                // sees this tile, so this is the only place that frees them.
                 tile.Dispose();
                 throw;
             }
@@ -109,29 +93,19 @@ namespace MapRenderer.Jobs.Mvt
         {
             var layer = new MvtLayer();
 
-            // Pre-size every per-feature / per-table list from a read-only counting pass over the layer bytes
-            // (a struct COPY of the cursor). MVT decode is streaming — the true counts are only known after
-            // the read loop — so without this the Features / Keys / Values lists and the four per-feature
-            // scratch lists grow by doubling, discarding a chain of backing arrays per layer. The extra scan
-            // is off-main CPU traded for less GC (the goal). A miscount could only mis-SIZE a list, never
-            // change what is decoded, so this cannot alter behaviour.
+            // Pre-size every list from a counting pass, so no list grows by doubling and discards arrays to the
+            // GC. A miscount only mis-sizes a list; it never changes what is decoded.
             var (featureCount, keyCount, valueCount) = CountLayerElements(r);
             layer.Features.Capacity = featureCount;
             layer.Keys.Capacity     = keyCount;
 
-            // Transient GROWABLE scratch, not a valueCount-sized NativeArray — CountLayerElements' counts are
-            // hints (a miscount only mis-SIZES a list, never changes what is decoded, see its doc); a fixed
-            // native array sized at valueCount would turn an undercount into an out-of-bounds crash. The
-            // native array is materialized below, inside the try, once the true count is known.
+            // Growable lists, not a valueCount-sized NativeArray: the count is a hint, and a fixed array would
+            // turn an undercount into an out-of-bounds crash. The native array is built inside the try below.
             var sortValues = new List<MvtValueNative>(valueCount);
             var stringBuffer = new List<string>(valueCount);
 
-            // Per-feature tag-word BYTE BOUNDS only (two small int lists, not a uint[] per feature) — the
-            // words themselves are never parsed into managed memory; resolved to Properties after the full
-            // layer is read (order-independent: keys/values may follow features in the serialised stream).
-            // See DecodeFeature's doc. Lists, not fixed arrays: CountLayerElements's count is a hint (a
-            // miscount only mis-sizes the capacity, never breaks decoding — see its doc), so the real loop
-            // must not assume the counted and actual feature counts are identical.
+            // Per-feature tag-word byte bounds only; the words are resolved after the full layer is read,
+            // because keys and values may follow features in the stream. Lists, because the count is a hint.
             var tagStart = new List<int>(featureCount);
             var tagEnd   = new List<int>(featureCount);
             // Per-feature geometry BYTE BOUNDS only, same shape as the tag bounds above — the command
@@ -139,10 +113,8 @@ namespace MapRenderer.Jobs.Mvt
             var geomStart = new List<int>(featureCount);
             var geomEnd   = new List<int>(featureCount);
 
-            // Per-feature header data (geometry kind + id) buffered here rather than written onto an
-            // MvtFeature yet: a feature is built COMPLETE — with its property store — only after the layer's
-            // key/value/tag tables exist (below), which is what lets MvtFeature be an immutable, construct-once
-            // value instead of a two-phase one (see MvtFeature.Store).
+            // Per-feature headers wait here: a feature is built complete, with its store, only after the key,
+            // value and tag tables exist, so MvtFeature stays construct-once (see MvtFeature.Store).
             var headers = new List<(TileGeometryType Kind, Value Id)>(featureCount);
 
             while (r.HasMore)
@@ -187,38 +159,22 @@ namespace MapRenderer.Jobs.Mvt
                 }
             }
 
-            // The key→index map is built HERE — once per layer, inside the decode, before any store exists —
-            // never lazily on first read: a decoded tile is published across threads afterwards, and a
-            // first-read build would be a write racing concurrent readers (the same publication hazard
-            // MvtLayer.Geometry documents for lazy per-layer geometry).
+            // Build the key→index map here, not lazily: the tile is published across threads afterwards, and a
+            // first-read build would be a write racing concurrent readers.
             var keyIndex = new Dictionary<string, int>(layer.Keys.Count);
             for (int i = 0; i < layer.Keys.Count; i++)
                 keyIndex[layer.Keys[i]] = i;
 
-            // Materialize this layer's rings and tag words NOW, from the byte bounds collected above, and
-            // let the scratch fall out of scope. `layer.Extent` is fully resolved by this point —
-            // the extent field may appear anywhere in the layer message, which is why this runs after the
-            // read loop and not inside it. The kind column is read off the same features, in the same order,
-            // as the command list.
+            // Materialize after the read loop: the extent field may appear anywhere in the layer message. The
+            // kind column follows the same feature order as the command list.
             var kinds = new List<TileGeometryType>(headers.Count);
             for (int i = 0; i < headers.Count; i++)
                 kinds.Add(headers[i].Kind);
 
-            // Flatten tags, then geometry — both through FlattenFeatureColumn — into ONE shared
-            // Allocator.Persistent NativeArray<uint> apiece.
-            // The geometry buffers are BORROWED by the materializer (never disposed by it — see its ctor
-            // doc); the tag-words buffer is adopted by the layer (see AdoptFeatureTagWords below) — this
-            // method remains the sole owner of every buffer until it hands ownership off, and frees whatever
-            // is still its own in `finally`, on every exit path.
-            //
-            // Both flatten calls re-read raw varints from the tile's own bytes (ReadVarint throws on a
-            // truncated/over-long varint — reachable on a malformed tile), so BOTH sit inside the try: a
-            // throw there must not leak whichever buffers already exist. Each of the six locals below is
-            // declared `default` first; FlattenFeatureColumn takes its three outputs by `ref`, not `out`
-            // (see its doc), so a throw partway through either call still leaves THESE locals pointing at
-            // whatever that call had already allocated — visible to `finally` below and disposed there under
-            // no IsCreated guard: NativeArray.Dispose() early-returns on a default value, so the finally
-            // frees whatever was allocated and no-ops on the rest.
+            // Non-local invariant: this method owns every buffer below until it hands it off, and `finally`
+            // frees whatever it still owns on every exit path. The materializer borrows the geometry buffers.
+            // Both flatten calls can throw on a malformed varint, so they sit inside the try, and their `ref`
+            // outputs leave each partial allocation visible to `finally`. Disposing a default array is a no-op.
             int featCount = headers.Count;
             var featOffsets = default(NativeArray<int>);
             var featLengths = default(NativeArray<int>);
@@ -239,26 +195,17 @@ namespace MapRenderer.Jobs.Mvt
 
                 FlattenFeatureColumn(r, tagStart, tagEnd, featCount, ref tagOffsets, ref tagLengths, ref tagWords);
 
-                // Validate the tag-slice columns' feature-count lockstep HERE — before AdoptGeometry — not
-                // only inside AdoptFeatureTagColumns (which keeps its own copy as defence-in-depth). By the
-                // time AdoptFeatureTagColumns runs, AdoptGeometry has already handed the layer its geometry; a
-                // throw at that point would leak it, because the layer is not yet reachable from tile.Layers
-                // and Decode's catch can only free what IS reachable.
-                // Unreachable — FlattenFeatureColumn always builds tagOffsets/tagLengths at featCount — but
-                // this converts "unreachable in practice" into "structurally cannot fire after the adopt".
-                // See ValidateTagSliceColumnsMatchFeatureCount's regression tooth.
+                // Non-obvious why: validate here, before AdoptGeometry, because a throw after it leaks the
+                // adopted geometry; the layer is not yet in tile.Layers, so Decode's catch cannot free it.
                 ValidateTagSliceColumnsMatchFeatureCount(tagOffsets.Length, tagLengths.Length, featCount, layer.Name);
 
-                // Resolver takes the tag-words, value-table AND per-feature (offset,count) columns here (all
-                // borrowed, all local) — nothing between this point and the adopts below depends on the
-                // resolver, so it can move as late as the buffers it needs.
+                // The resolver borrows the tag-words, value table and per-feature (offset,count) columns; all
+                // are still local here.
                 var propertyResolver = new MvtLayerPropertyResolver(
                     layer.Keys, values, valueStrings, keyIndex, tagWords, tagOffsets, tagLengths);
 
-                // Build every feature COMPLETE now — geometry kind + id from its parsed header, and its
-                // property store — so MvtFeature is constructed once and never mutated (its fields are
-                // init-only). Each store holds only its ordinal; its (offset,count) slice is read from the
-                // layer's columns through the resolver, so the slice lives in one place, not copied per store.
+                // Build every feature complete, so MvtFeature is constructed once and never mutated. Each store
+                // holds only its ordinal and reads its slice from the layer's columns through the resolver.
                 for (int i = 0; i < headers.Count; i++)
                     layer.Features.Add(new MvtFeature
                     {
@@ -276,20 +223,13 @@ namespace MapRenderer.Jobs.Mvt
                 using (PmDecode.Auto())
                 {
                     var materializer = new MvtGeometryMaterializer(id, layer.Extent, kinds, commands, featOffsets, featLengths);
-                    // INVARIANT: nothing between this AdoptGeometry and the AdoptFeatureTagWords/AdoptValues
-                    // below may throw. All three adopts must run, in order, before the method returns — the
-                    // layer is not yet in tile.Layers, so Decode's catch cannot free any buffer if a throw
-                    // lands between them (it would only free buffers already reachable from an added layer).
-                    // A future edit that inserts a throwing statement here would leak whatever was already
-                    // adopted.
+                    // Non-local invariant: nothing between this adopt and the adopts below may throw. The layer
+                    // is not yet in tile.Layers, so Decode's catch cannot free a buffer already adopted.
                     layer.AdoptGeometry(materializer.Materialize());
                 }
 
-                // Adopt LAST, after the geometry has been adopted — see the invariant comment above. Null
-                // each local on transfer (the "transfer nulls the source" double-free guard): the `finally`
-                // below still runs each Dispose(), but on a default array that is a no-op, so a just-adopted
-                // buffer is never freed out from under the layer. The (offset,count) columns are adopted here
-                // too — the resolver borrows them, so they must outlive the transient decode scope.
+                // Each transfer resets its local to default, so `finally` never frees an adopted buffer. The
+                // resolver borrows the (offset,count) columns, so the layer adopts them too.
                 layer.AdoptFeatureTagWords(tagWords);
                 tagWords = default;
                 layer.AdoptFeatureTagColumns(tagOffsets, tagLengths);
@@ -313,17 +253,11 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// Throws unless <paramref name="tagOffsetsLength"/> and <paramref name="tagLengthsLength"/>
-        /// both equal <paramref name="featCount"/> — the lockstep <see cref="MvtLayer.AdoptFeatureTagColumns"/>
-        /// also enforces, called here <b>before <see cref="MvtLayer.AdoptGeometry"/></b> so a mismatch throws
-        /// while every decode buffer is still local to <see cref="DecodeLayer"/> and its <c>finally</c> can
-        /// free them (see the call site's comment for why a throw after <c>AdoptGeometry</c> would leak it).
-        ///
-        /// <para>Broadened from <c>private</c> to <c>internal</c> so the regression tooth can drive it
-        /// directly with a synthetic mismatch — a REAL mismatch is unreachable through <see cref="Decode"/>
-        /// (<see cref="FlattenFeatureColumn"/> builds both columns at <paramref name="featCount"/> by
-        /// construction), so there is no malformed-tile input that reaches this check from the public
-        /// decode entry point.</para>
+        /// Throws unless both tag-slice column lengths equal <paramref name="featCount"/>, the lockstep
+        /// <see cref="MvtLayer.AdoptFeatureTagColumns"/> also enforces. <see cref="DecodeLayer"/> calls it before
+        /// <see cref="MvtLayer.AdoptGeometry"/>, while its <c>finally</c> can still free every buffer. It is
+        /// <c>internal</c> so a test can drive a synthetic mismatch: <see cref="FlattenFeatureColumn"/> builds
+        /// both columns at <paramref name="featCount"/>, so no tile reaches this throw through <see cref="Decode"/>.
         /// </summary>
         internal static void ValidateTagSliceColumnsMatchFeatureCount(
             int tagOffsetsLength, int tagLengthsLength, int featCount, string layerName)
@@ -335,29 +269,11 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// Flattens one per-feature byte-bounds column — <paramref name="starts"/>/<paramref name="ends"/>,
-        /// as recorded by <see cref="DecodeFeature"/> for either the tag or the geometry field — into ONE
-        /// shared <c>Allocator.Persistent</c> native buffer. Two-pass count-then-fill: a first pass over
-        /// each feature's <c>[start, end)</c> slice on a throwaway cursor copy counts its varints (so
-        /// <paramref name="words"/> can be allocated at its exact total size), then a second pass re-slices
-        /// and fills it. Both passes re-read raw varints from the tile's own bytes via
-        /// <c>ProtobufReader.ReadVarint</c>, which throws on a truncated/over-long varint — reachable on a
-        /// malformed tile — so this method can throw after allocating <paramref name="offsets"/>/
-        /// <paramref name="lengths"/> and/or <paramref name="words"/>.
-        ///
-        /// <para><b>Why the three outputs are <c>ref</c>, not <c>out</c>.</b> An <c>out</c> parameter is
-        /// copied back to the caller only on NORMAL return, so a throw mid-body would leave the caller's
-        /// local unchanged — stranding whatever this method had already allocated, invisible to any
-        /// <c>finally</c> the caller wraps the call in. A <c>ref</c> parameter IS the caller's own storage:
-        /// each assignment here (<c>offsets = …</c>, then <c>words = …</c>) is visible to the caller the
-        /// instant it executes, so a throw between the two still leaves the caller holding a valid reference
-        /// to whichever buffers this method finished allocating before the throw — exactly what
-        /// <see cref="DecodeLayer"/>'s enclosing <c>try</c>/<c>finally</c> depends on to free every buffer on
-        /// every exit path (see <see cref="DecodeLayer"/>'s comment at the call sites).</para>
-        ///
-        /// <para>Callers own everything written into <paramref name="offsets"/>/<paramref name="lengths"/>/
-        /// <paramref name="words"/> and are responsible for disposal — this method never disposes, on the
-        /// success path or the throw path.</para>
+        /// Flattens one per-feature byte-bounds column (tag or geometry) into one shared Persistent buffer, in
+        /// two passes: count the varints, then fill. It throws on a malformed varint, possibly after it allocates.
+        /// Non-local invariant: the outputs are <c>ref</c>, not <c>out</c>, because each assignment reaches the
+        /// caller's local at once, so <see cref="DecodeLayer"/>'s <c>finally</c> frees a partial allocation.
+        /// The caller owns and disposes all three outputs; this method never disposes them.
         /// </summary>
         /// <param name="r">A reader over the layer's bytes; re-sliced per feature via <c>Slice(start, end)</c>,
         /// never advanced itself.</param>
@@ -451,25 +367,11 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// Decodes one Feature sub-message. Returns the feature HEADER (geometry type + id, the latter
-        /// <see cref="Value.Null"/> when field 1 was absent), the tag-word stream's byte bounds (to be
-        /// flattened after the layer's key/value tables are fully read) and the geometry command stream's
-        /// byte bounds — all as OUT-OF-BAND results the caller consumes to build the feature once,
-        /// complete, later: none of them belongs on the feature, and <see cref="MvtFeature"/> is
-        /// construct-once, so it is not built until its store exists.
-        ///
-        /// <para><b>Neither the tag field nor the geometry field is parsed here.</b>
-        /// <c>ReadLengthDelimited</c> returns <c>[start,end)</c> as absolute offsets into the tile's root byte
-        /// buffer (every <see cref="ProtobufReader"/> slice shares the same backing array — see
-        /// <c>ProtobufReader.Slice</c>), so the caller can re-open that exact byte range later with its OWN
-        /// reader and flatten every feature's tag words / commands straight into one shared
-        /// <c>NativeArray&lt;uint&gt;</c> apiece — no per-feature managed <c>uint[]</c> ever exists. A second
-        /// (or later) occurrence of either field overwrites its bounds, so the last occurrence wins. Absent
-        /// field ⇒ <c>(0, 0)</c>, meaning "zero words".</para>
-        ///
-        /// <para><b>A repeated tag or geometry field is also lazily parsed.</b> Only the LAST occurrence's bounds
-        /// survive here, and those bytes are parsed once, later, by the caller — so a malformed EARLIER
-        /// occurrence (e.g. an unterminated packed varint) is never parsed and is not rejected.</para>
+        /// Decodes one Feature sub-message into its header (kind, id or <see cref="Value.Null"/>) and the byte
+        /// bounds of its tag and geometry fields. Neither field is parsed here: the bounds are absolute offsets
+        /// into the tile's bytes, which the caller flattens later. An absent field gives <c>(0, 0)</c>.
+        /// Limitation: a repeated field keeps only its last bounds, so a malformed earlier occurrence is never
+        /// parsed and never rejected.
         /// </summary>
         private static (TileGeometryType kind, Value id, int tagStart, int tagEnd, int geomStart, int geomEnd)
             DecodeFeature(ProtobufReader r)

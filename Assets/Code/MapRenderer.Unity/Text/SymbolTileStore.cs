@@ -1,6 +1,5 @@
-// Unity-side: CaptureSnapshot/OrderedBlocks read SymbolTileBlock's native columns directly, so this file is
-// Unity-EditMode-only, not in the engine-free core-tests loop. Entry.Block wraps plain IDisposable, not the
-// concrete type — see Entry's comment for why T can't narrow.
+// CaptureSnapshot/OrderedBlocks read SymbolTileBlock's native columns, so only the Unity EditMode runner
+// compiles and runs this file, not the core-tests fast loop.
 
 using System;
 using System.Collections.Generic;
@@ -12,28 +11,13 @@ using MapRenderer.Unity.Text.Placement;
 
 namespace MapRenderer.Unity.Text
 {
-    /// <summary>Per-<c>(source, tile)</c> symbol bookkeeping, mirroring the tile MESH lifecycle
-    /// (<c>TileManager</c> Model B): a tile is <b>active</b> (in cover, renders) or <b>cached</b> (out of cover,
-    /// held warm in the <c>PreparedTileCache</c>, not rendered), moving between the two on release / cache-hit.
-    ///
-    /// <para>Release-to-cache KEEPS symbols (a cache HIT has no re-fetch to rebuild them) in a bounded FIFO sized
-    /// to the mesh cache. A build awaits glyph fetches, so a tile can be released mid-build:
-    /// <see cref="BeginBuild"/>/<see cref="CompleteBuild"/> use a generation token so a released-mid-build tile
-    /// still commits (into the cached entry) and a superseded build is discarded.</para>
-    ///
-    /// <para><b>Reference model.</b> A committed block is owned by a <see cref="SharedDisposable{T}"/>; the last
-    /// reference out disposes it, exactly once.
-    /// <list type="bullet">
-    /// <item>The store's entry holds exactly one reference, created with the wrapper at commit
-    /// (<see cref="CompleteBuild"/>) and released when the entry stops naming that block — whether the entry is
-    /// overwritten or removed from the map. Moves that keep the block (<see cref="BeginBuild"/>'s stale-survive,
-    /// <see cref="Restore"/>'s cache-hit) transfer the entry, not the reference, and release nothing.</item>
-    /// <item>A snapshot holds one reference per slice, taken in <see cref="SymbolSnapshot.Add"/> and dropped in
-    /// <see cref="SymbolSnapshot.Clear"/> — the only two sites permitted to touch <see cref="TileSlice.Pin"/>.
-    /// Every path that ends a snapshot's service (<see cref="ReleasePins"/>, or the next
-    /// <see cref="CaptureSnapshot"/>, which clears first) goes through <see cref="SymbolSnapshot.Clear"/>, so
-    /// acquire/release balance is structural, not a discipline.</item>
-    /// </list></para></summary>
+    /// <summary>Per-<c>(source, tile)</c> symbol bookkeeping, mirroring the tile mesh lifecycle: a tile is
+    /// <b>active</b> (in cover, renders) or <b>cached</b> (out of cover, kept warm in a bounded FIFO, not rendered).
+    /// A generation token lets a tile released mid-build still commit, and discards a superseded build.
+    /// Non-local invariant: a committed block is a <see cref="SharedDisposable{T}"/> whose last reference
+    /// disposes it. The entry holds one reference, moved (not released) on stale-survive and cache-hit. Each
+    /// snapshot slice holds one, taken in <see cref="SymbolSnapshot.Add"/> and dropped in
+    /// <see cref="SymbolSnapshot.Clear"/>.</summary>
     public sealed class SymbolTileStore
     {
         public readonly struct Key : System.IEquatable<Key>
@@ -46,13 +30,8 @@ namespace MapRenderer.Unity.Text
             public override int GetHashCode() => (SourceId?.GetHashCode() ?? 0) * 397 ^ Tile.GetHashCode();
         }
 
-        // One tile's baked block (a SymbolTileBlock) + the owning build's generation (stale-guard). Mutable so an
-        // in-flight build can write Block after a release moved the entry between maps. The wrapper's T is
-        // IDisposable, NOT SymbolTileBlock: CompleteBuild is public and SymbolTileBlock is internal (a narrower T
-        // would be CS0051), and test doubles (FakeBlock/FakeDisposableBlock) commit plain IDisposables that are
-        // not SymbolTileBlock. Kept on stale-survive / cache-hit moves (the entry's reference transfers with it,
-        // released nothing); released at every real drop site (commit-overwrite, FIFO-evict, true-release, Clear)
-        // — the last reference out disposes the block, see the class doc's reference model.
+        // One tile's baked block + its build generation; mutable so a build can commit after a release moved it.
+        // T is IDisposable: public CompleteBuild cannot take internal SymbolTileBlock (CS0051), and fakes use it.
         private sealed class Entry
         {
             public int Generation;
@@ -78,10 +57,8 @@ namespace MapRenderer.Unity.Text
         private readonly int _cacheCap;
         private int _genCounter;
 
-        // Monotonic "collect-relevant state changed" counter. CollectInto is a pure function of the loaded set, so
-        // a consumer caching the generation it last collected at can reuse its buffers while this is unchanged.
-        // Bumped (MarkCollectDirty) only on an ACTUAL collect-relevant change, never unconditionally — see
-        // ReconcileActiveSet, which runs every frame and must NOT dirty a stable cover.
+        // Monotonic counter of collect-relevant changes; a consumer reuses its buffers while it is unchanged.
+        // Only a real change bumps it, since ReconcileActiveSet runs every frame and must not dirty a stable cover.
         private int _collectGeneration;
 
         // Store-owned string→int interning for the dedup key. Mutated in CompleteBuild, Reset in Clear (SetStyle).
@@ -92,9 +69,8 @@ namespace MapRenderer.Unity.Text
         // table. Exposed to the subsystem's tail bake, not public. See SymbolStringTable's threading note.
         internal SymbolStringTable StringTable => _stringTable;
 
-        // Retain-as-departing: a tile released within a grace window is still collected (as departing) so it fades
-        // out instead of popping. key -> expiry (s). Invariant: departing ⊆ cached (every path out of cached
-        // clears the stamp via RemoveCached). Empty ⇒ CollectInto emits ACTIVE only (off when grace ≤ 0).
+        // Key -> expiry (s) of a released tile still collected as departing, so it fades out instead of popping.
+        // Departing ⊆ cached: every path out of cached clears the stamp via RemoveCached.
         private readonly Dictionary<Key, double> _departing = new Dictionary<Key, double>();
 
         public SymbolTileStore(int cacheCap)
@@ -187,9 +163,8 @@ namespace MapRenderer.Unity.Text
             if (RemoveCached(key, out Entry e)) { _active[key] = e; MarkCollectDirty(); }
         }
 
-        // Per-collect ordered block list — one entry per scanned tile, in the order a winner's BlockId indexes
-        // into (active scan first, then departing). A COPY TARGET: the plan-aware CollectInto copies
-        // SymbolReconciler's OrderedBlocks here so the existing tests/oracle still work.
+        // One block per scanned tile, in winner BlockId order (active first, then departing). CollectInto copies
+        // SymbolReconciler's OrderedBlocks here for the tests/oracle.
         private readonly List<SymbolTileBlock> _orderedBlocks = new List<SymbolTileBlock>();
 
         /// <summary>The blocks the last plan-aware <see cref="CollectInto(List{int}, List{int}, List{byte},
@@ -197,23 +172,16 @@ namespace MapRenderer.Unity.Text
         // Internal (not public): SymbolTileBlock is internal, so a public property over it is CS0053.
         internal IReadOnlyList<SymbolTileBlock> OrderedBlocks => _orderedBlocks;
 
-        /// <summary>Aggregate every ACTIVE tile's winners into the out-params for this frame's placement pass
-        /// (cached tiles excluded — they must not render). POINT symbols are deduped across tiles by their
-        /// <see cref="CrossTileSymbolKey"/> (finest zoom wins, ties by lowest tile key) on the fixed
-        /// <see cref="CrossTileSymbolKey.CanonicalGridMeters"/> grid, so the winner set is zoom-independent; line
-        /// symbols pass through. <paramref name="quantizeMeters"/> is retained for callers but never branched on.
-        ///
-        /// <para>Winner identity is <c>(blockId, localIndex)</c>: <paramref name="outBlockId"/> indexes
-        /// <see cref="OrderedBlocks"/>, <paramref name="outLocalIndex"/> is the raw block position;
-        /// <paramref name="outIsDeparting"/> is 0 for the first <paramref name="activeCount"/> records, 1 after.
-        /// The scan is delegated to <see cref="SymbolReconciler"/> (the production off-main impl), so this overload
-        /// is a synchronous byte-identical shim for the tests/oracle.</para></summary>
+        /// <summary>A synchronous shim over <see cref="SymbolReconciler"/> for the tests/oracle. Point symbols dedup
+        /// across tiles by <see cref="CrossTileSymbolKey"/> on the fixed canonical grid (finest zoom wins, ties by
+        /// lowest tile key); line symbols pass through; <paramref name="quantizeMeters"/> is unused. Winner identity
+        /// is <c>(blockId, localIndex)</c>, with <paramref name="outBlockId"/> indexing <see cref="OrderedBlocks"/>;
+        /// <paramref name="outIsDeparting"/> is 1 after the first <paramref name="activeCount"/> records.</summary>
         public void CollectInto(List<int> outBlockId, List<int> outLocalIndex, List<byte> outIsDeparting,
             double quantizeMeters, out int activeCount)
         {
-            // Capture → run the shared off-main reconciler → copy out (the shim and the subsystem's per-frame path
-            // both run SymbolReconciler.Run, so the store/oracle suite is a byte-identical oracle). This shim has
-            // no async borrow, so it releases the pins right after Run.
+            // Capture, run the same SymbolReconciler.Run as the per-frame path, copy out. No async borrow, so the
+            // pins are released right after Run.
             CaptureSnapshot(_oracleSnapshot);
             // try/finally so the pins are released even if Run ever faults.
             try { _oracleReconciler.Run(_oracleSnapshot, _oracleResult); }
@@ -292,9 +260,8 @@ namespace MapRenderer.Unity.Text
         public void ReconcileActiveSet(IReadOnlyList<Key> loaded, bool keepWarmOnRelease,
             double nowSeconds = 0.0, double departingGraceSeconds = 0.0)
         {
-            // Does NOT MarkCollectDirty() here: it runs EVERY frame and on a stable cover moves
-            // nothing, so a self-bump would dirty every frame and the memo would never fire. Real effects inherit
-            // their bumps from Release/Restore/PurgeExpiredDeparting. (THE critical correctness point.)
+            // No MarkCollectDirty() here: this runs every frame, so a self-bump would defeat the memo. Real
+            // effects bump inside Release/Restore/PurgeExpiredDeparting.
             _loadedKeys.Clear();
             for (int i = 0; i < loaded.Count; i++) _loadedKeys.Add(loaded[i]);
 
@@ -322,9 +289,8 @@ namespace MapRenderer.Unity.Text
             PurgeExpiredDeparting(nowSeconds);
         }
 
-        // Drop departing stamps whose grace elapsed or whose cached entry was evicted. A purged tile stops being
-        // collected as departing but stays warm on the cached side. Grace exceeds the fade duration, so a purge
-        // only drops an already-invisible symbol — never mid-fade.
+        // Drop departing stamps whose grace elapsed or whose entry was evicted; the tile stays warm in cache.
+        // Grace exceeds the fade duration, so a purge never drops a symbol mid-fade.
         private readonly List<Key> _departingPurgeKeys = new List<Key>();
         private void PurgeExpiredDeparting(double nowSeconds)
         {

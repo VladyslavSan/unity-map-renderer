@@ -7,17 +7,10 @@ namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
     /// A blittable, non-owning VIEW over one <c>SymbolTileBlock</c>'s 20 <c>Allocator.Persistent</c>
-    /// arrays — indexable from a Burst job without a managed call.
-    ///
-    /// <para><b>Lifetime — read this before touching a view.</b> Every <see cref="UnsafeList{T}"/> field is
-    /// built from a raw pointer (<c>UnsafeList(T* ptr, int length)</c>, no allocator) — it owns nothing and
-    /// <c>Dispose()</c> on it is a no-op. A view is valid only for the duration of the SYNCHRONOUS gather that
-    /// built it (<c>SymbolPlacementSystem.BuildBlockViews</c> + the immediately following
-    /// <c>SymbolGatherJob.Run()</c>) — it must never be stored across a frame boundary.</para>
-    ///
-    /// <para>Field order mirrors <c>SymbolTileBlock</c>'s so the two read side by side. Per-block pool
-    /// COUNTS are omitted: the gather only ever indexes a block's arrays by a winner's own
-    /// <c>LocalIndex</c>/<c>Detail</c>/<c>*Start</c>, never by a block-level pool count.</para>
+    /// arrays — indexable from a Burst job without a managed call, in <c>SymbolTileBlock</c>'s field order.
+    /// Non-local invariant: each field wraps a raw pointer and owns nothing, so a view is valid only during
+    /// the synchronous gather that built it (<c>SymbolPlacementSystem.BuildBlockViews</c> + the following
+    /// <c>SymbolGatherJob.Run()</c>) and must never be stored across a frame boundary.
     /// </summary>
     public struct BlockView
     {

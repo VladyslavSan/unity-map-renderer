@@ -4,18 +4,10 @@ namespace MapRenderer.Core.Lifetime
 {
     /// <summary>
     /// Template-method <see cref="IDisposable"/> base: one idempotency guard, one
-    /// <see cref="ThrowIfDisposed"/>, and a (DEBUG/Editor-only) leaked-without-Dispose finalizer warning —
-    /// avoiding the <c>_disposed</c> field / guard / <see cref="GC.SuppressFinalize"/> boilerplate a
-    /// hand-rolled concrete disposable class would otherwise duplicate.
-    ///
-    /// <para>Derived types implement <see cref="DoDispose"/> instead of <c>Dispose()</c> — the base's
-    /// <see cref="Dispose"/> is sealed (non-virtual) and guarantees <see cref="DoDispose"/> runs AT MOST ONCE,
-    /// even under repeated/concurrent <see cref="Dispose"/> calls (single-threaded idempotency; this class does
-    /// not add its own locking — a derived type that needs disposal to be thread-safe still owns that).</para>
-    ///
-    /// <para>Engine-free (lives in <c>MapRenderer.Core</c>, <c>System.*</c> only) so both Core classes
-    /// (e.g. <c>TileScheduler</c>) and Unity classes can derive from it without Core taking a
-    /// <c>MapRenderer.Unity</c>/<c>UnityEngine</c> dependency.</para>
+    /// <see cref="ThrowIfDisposed"/>, and a DEBUG/Editor-only leaked-without-Dispose finalizer warning.
+    /// Derived types implement <see cref="DoDispose"/>; the non-virtual <see cref="Dispose"/> runs it at most
+    /// once. The class adds no locking, so a derived type that needs thread-safe disposal owns that itself.
+    /// Engine-free, so both Core and Unity classes derive from it.
     /// </summary>
     public abstract class VerifiedDisposable : IDisposable
     {

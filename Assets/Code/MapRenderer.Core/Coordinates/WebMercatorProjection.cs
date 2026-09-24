@@ -6,30 +6,21 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// Web Mercator implementation of <see cref="IProjection"/>.
-    /// Composes <see cref="WebMercator"/> statics; the only home of the pixel↔ground math for the
-    /// planar case. The Mercator forward/inverse formulas live on <see cref="WebMercator"/>; this
-    /// class applies the viewport + camera-pose arithmetic on top.
-    ///
-    /// <para><b>Screen convention:</b> +x right, +y up, origin bottom-left — matches Unity's
-    /// <c>Mouse.current.position</c>. Bearing (heading) rotates the pixel offset into (east, north)
-    /// Mercator axes: <c>east = sx·cosH + sy·sinH</c>, <c>north = −sx·sinH + sy·cosH</c>.</para>
-    ///
-    /// <para><b>Overhead-only:</b> <see cref="ScreenToGround"/> ignores tilt, so it is exact only at
-    /// <c>tilt=0</c>. Under tilt it returns the overhead answer, not the ground point the pixel's ray hits.
-    /// <see cref="SphericalProjection"/> ray-casts instead.</para>
+    /// Web Mercator implementation of <see cref="IProjection"/>: the planar pixel↔ground math, on top of the
+    /// <see cref="WebMercator"/> formulas. Screen: +x right, +y up, origin bottom-left (Unity's
+    /// <c>Mouse.current.position</c>); heading rotates the pixel offset: <c>east = sx·cosH + sy·sinH</c>,
+    /// <c>north = −sx·sinH + sy·cosH</c>. Limitation: <see cref="ScreenToGround"/> ignores tilt, so under tilt it
+    /// returns the overhead answer, not the ground point the pixel's ray hits.
     /// </summary>
     public readonly struct WebMercatorProjection : IProjection
     {
         // ── Projection math — the single shared kernel (stateless struct → usable in Burst & managed) ──
 
         /// <summary>
-        /// The Web Mercator projection kernel: geodetic → render-space position + surface up. STATELESS —
-        /// the only input is the geodetic point (the EPSG:3857 radius is the fixed <see cref="WebMercator.R"/>).
-        /// Uses only <c>Unity.Mathematics</c> via <see cref="WebMercator.Forward"/> (the single-sourced
-        /// formula), so Burst compiles it when <c>ProjectPointsJob&lt;WebMercatorProjection&gt;</c> calls it
-        /// through the generic constraint; the OOP <see cref="Project"/>/<see cref="UpAt"/> call it too.
-        /// Mercator up is the constant planar +Y.
+        /// The Web Mercator projection kernel: geodetic → render-space position + surface up (constant +Y).
+        /// Stateless: the EPSG:3857 radius is the fixed <see cref="WebMercator.R"/>. It uses only
+        /// <c>Unity.Mathematics</c>, so Burst compiles it when <c>ProjectPointsJob&lt;WebMercatorProjection&gt;</c>
+        /// calls it; <see cref="Project"/>/<see cref="UpAt"/> call it too.
         /// </summary>
         public ProjectedPoint ProjectPoint(in GeoCoordinate geo)
             => new ProjectedPoint
@@ -113,9 +104,8 @@ namespace MapRenderer.Core.Geo
             });
             double mpp = WebMercator.GroundResolution(camera.Zoom);
 
-            // Mercator offset divided by mpp gives the (east, north) pixel offset.
-            // Reciprocal multiply, NOT `/ mpp`. `v * (1/m)` and `v / m` differ in the last bit for about a
-            // third of all values, and every GroundToScreen golden was baked against this expression.
+            // Reciprocal multiply, not `/ mpp`: `v * (1/m)` and `v / m` differ in the last bit for about a third
+            // of all values, and every GroundToScreen golden is baked against this expression.
             double2 d     = (groundMerc - centreMerc) * (1.0 / mpp);
             double  e     = d.x;
             double  n     = d.y;

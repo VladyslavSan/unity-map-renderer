@@ -1,10 +1,5 @@
-// Unity EditMode only — real MapCamera + Camera/RenderTexture, the lit-ambient recipe every tilted line
-// snapshot fixture uses.
-// NOT registered in Tools/core-tests/core-tests.csproj.
-//
-// The SHARED tilt-measurement harness. CONTENT-AGNOSTIC on purpose: it knows nothing about lines, styles,
-// materials or symbols — the consumer attaches its own GameObject(s) — which is what lets the line/join
-// fixtures and the symbol fixtures share one harness.
+// Unity EditMode only (not in Tools/core-tests) — the SHARED tilt-measurement harness. It is content-agnostic
+// (the consumer attaches its own GameObjects), so line and symbol fixtures share it.
 
 #if UNITY_EDITOR
 using System;
@@ -24,9 +19,8 @@ namespace MapRenderer.Tests
     /// </summary>
     internal sealed class TiltedGroundSceneConfig
     {
-        // Plain { get; set; }, not init: MapRenderer.Tests.EditMode has no IsExternalInit polyfill of its
-        // own (only Core and Unity define init-only members), so a test-owned carrier stays mutable rather
-        // than adding a polyfill file for one fixture class.
+        // Plain { get; set; }, not init: the test assembly has no IsExternalInit polyfill, and one fixture
+        // class does not justify adding it.
         /// <summary>The whole point of the harness; 0 is the inert control a tooth's RED-verification forces
         /// it to.</summary>
         public double TiltDegrees { get; set; } = 55.0;
@@ -101,16 +95,10 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Builds the scene: ambient/light (if <see cref="TiltedGroundSceneConfig.LitAmbient"/>) →
-        /// camera + off-screen RT → <see cref="MapCamera"/>, in that order.
-        ///
-        /// <para><b>Safe against a partial failure.</b> The ambient/light block mutates
-        /// PROCESS-GLOBAL state that only <see cref="Dispose"/> restores — but nothing owns that restore
-        /// until this method RETURNS. If <c>new RenderTexture</c> / <c>new CameraProperties</c> /
-        /// <c>new MapCamera</c> below were to throw, the light and the ambient override would otherwise leak
-        /// with no owner, corrupting every lit render for the rest of the batch process — the stale
-        /// shader-global genre <c>docs/line-rendering-design.md</c> records. The <c>try</c>/<c>catch</c>
-        /// below is this constructor being its own <c>Dispose</c> for the window before one
-        /// exists.</para></summary>
+        /// camera + off-screen RT → <see cref="MapCamera"/>, in that order. Non-local invariant: the
+        /// ambient/light block mutates PROCESS-GLOBAL state that only <see cref="Dispose"/> restores, and
+        /// nothing owns it until this method returns. The <c>try</c>/<c>catch</c> restores it on a throw, or
+        /// it would corrupt every later lit render in the batch process.</summary>
         public static TiltedGroundScene Create(TiltedGroundSceneConfig config)
         {
             (int quality, UnityEngine.Rendering.AmbientMode mode, Color light) savedAmbient = default;
@@ -155,9 +143,8 @@ namespace MapRenderer.Tests
             }
             catch
             {
-                // Nothing has an owner yet (the constructor hasn't returned), so THIS is the cleanup —
-                // restore the exact process-global state Dispose() would, and destroy whatever partially
-                // built.
+                // Nothing has an owner yet, so THIS is the cleanup: restore the process-global state
+                // Dispose() would, and destroy whatever was partially built.
                 if (camGo != null) UnityEngine.Object.DestroyImmediate(camGo);
                 if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
                 if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
@@ -184,13 +171,9 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>The identity-rebase <see cref="SceneFrame"/> for this scene's look-at: <c>SceneOriginRender
-        /// = projection.Project(LookAt)</c>, <c>Rebase = float3x3.identity</c>.
-        ///
-        /// <para><b>THE NAME CARRIES THE CAVEAT.</b> Identity rebase is correct for Web-Mercator and is NOT
-        /// spherical staging; the name makes that unusable by accident rather than merely commented.
-        /// A spherical consumer (a tooth passing <see cref="TiltedGroundSceneConfig.Projection"/> =
-        /// <c>SphericalProjection</c>) must build its own frame; this method must not be renamed or wrapped
-        /// in a way that hides that limitation.</para></summary>
+        /// = projection.Project(LookAt)</c>, <c>Rebase = float3x3.identity</c>. Limitation: identity rebase is
+        /// correct for Web-Mercator only, and the name carries that caveat; a <c>SphericalProjection</c>
+        /// consumer must build its own frame. Do not rename or wrap this method to hide it.</summary>
         public SceneFrame BuildIdentityRebaseSceneFrame()
             => new SceneFrame
             {

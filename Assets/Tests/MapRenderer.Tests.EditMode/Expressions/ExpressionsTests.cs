@@ -1,13 +1,5 @@
-// Expressions/ExpressionsTests.cs — the expression engine's per-category behaviour: operators
-// (color/decision/variable-binding/lookup/ramps/string/zoom) and semantics (type assertions,
-// classification, color coercion, the error model, feature-data, the constant-key int-path optimisation,
-// and literal/type coercions). Engine-free: compiled verbatim by both the Unity EditMode runner and the
-// fast dotnet test project (Tools/core-tests/). Do NOT add any UnityEngine, MeshBuilder, NativeArray, or
-// MonoBehaviour references.
-//
-// MathOpTests.cs stays its own file: it carries a bare `using System;` that collides with the bare
-// `ValueType` references here (`System.ValueType` vs `MapRenderer.Core.Expressions.ValueType`, CS0104) —
-// see docs/conventions-short.md's "Plain-import collisions" note.
+// The expression engine's per-category operators and semantics. Engine-free: Tools/core-tests also compiles
+// it. MathOpTests.cs is separate because its `using System;` makes the bare ValueType here ambiguous.
 //
 // Contents:
 //   ColorTests                             — rgb/rgba constructors, to-rgba, CSS literal parsing.
@@ -136,11 +128,8 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void ToLab_MidGray_ExercisesCbrtBranch()
         {
-            // Belt-and-suspenders for the Math.Cbrt -> math.pow(t, 1.0/3.0) migration in Color.cs.
-            // Mid-gray (128,128,128) has t = SrgbToLinear(128/255) ≈ 0.2158 >> delta^3 ≈ 0.00886,
-            // so the f(t) = t^(1/3) branch is always exercised.
-            // Expected values pinned from the pre-migration Math.Cbrt output: tolerance 1e-6 is
-            // far tighter than the sub-ULP (~1e-15) difference between Cbrt and pow(t,1/3).
+            // Mid-gray has t ≈ 0.2158 >> delta^3, so Color.cs's f(t) = pow(t, 1/3) branch runs. The expected
+            // values come from a Math.Cbrt reference; 1e-6 is far wider than their sub-ULP difference.
             var c = Color.From255(128.0, 128.0, 128.0, 1.0);
             var (L, a, b, alpha) = c.ToLab();
             Assert.AreEqual(1.0, alpha, 1e-9, "alpha must be preserved");
@@ -150,9 +139,7 @@ namespace MapRenderer.Tests.Expressions
         }
 
         // ---- CSS out-of-range components are CLIPPED, not rejected (CSS Color 4 §4.1) ----------------
-        // The counterpart to Rgb_OutOfRangeChannel_IsError / Rgba_OutOfRangeAlpha_IsError above: the
-        // EXPRESSION constructors raise on a 300, the CSS-string parse path clamps it. Both are tested so
-        // a future "unify them" edit has to break one of these two assertions to land.
+        // The EXPRESSION constructors raise on a 300 (tests above); the CSS-string path clamps it.
 
         [Test]
         public void CssRgbString_ChannelAboveRange_ClampsTo255()
@@ -468,11 +455,8 @@ namespace MapRenderer.Tests.Expressions
     // RampCurveTests — step, interpolate (linear/exponential/cubic-bezier), -hcl, -lab
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // Color-space expected values below are hand-derived from the SAME citable standards the implementation
-    // cites (IEC 61966-2-1 sRGB transfer function; sRGB->XYZ matrix; D65 white (0.95047, 1.0, 1.08883);
-    // CIELAB / CIELCh per CIE 15). Clean-room: there is no MapLibre output to match — the bar is
-    // self-consistency with the standard math. Numbers were precomputed from those formulae (see the LAB/HCL
-    // derivations in the stage notes), NOT lifted from any renderer's fixtures.
+    // Expected colours derive from IEC 61966-2-1 sRGB, D65 white (0.95047, 1.0, 1.08883) and CIE 15 LAB/LCh.
+    // There is no MapLibre output to match, so no parity oracle: the bar is self-consistency with that math.
     [TestFixture]
     public class RampCurveTests
     {
@@ -572,10 +556,8 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void Interpolate_Color_DefaultSpace_Alpha1_ReducesToStraightLerp()
         {
-            // black -> white at t=0.5 with alpha=1 on both stops.
-            // At alpha=1: premult is identity (R*1=R), unpremult divides by 1 (no-op).
-            // Result equals straight sRGB lerp: R=127.5. This is the regression pin.
-            // Stops use alpha=1 so straight-vs-premultiplied cannot diverge.
+            // black -> white at t=0.5, alpha=1 on both stops: premultiplying is the identity, so the result is
+            // the straight sRGB lerp, R=127.5.
             string e = "[\"interpolate\", [\"linear\"], 0.5, " +
                        "0, [\"to-color\", \"#000000\"], 1, [\"to-color\", \"#ffffff\"]]";
             Value c = Expr.Eval(e);
@@ -590,10 +572,8 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void Interpolate_Color_DefaultSpace_PremultAlpha_TransparentToOpaque()
         {
-            // Canonical premult case: rgba(0,0,0,0) → rgba(255,255,255,1) at t=0.5.
-            // Premult math: lerp premult (0,0,0,0) and (1,1,1,1) at t=0.5 → (0.5,0.5,0.5,0.5),
-            // then unpremult /0.5 → (1.0, 1.0, 1.0, 0.5). So R=255/255=1, A=0.5.
-            // Straight sRGB lerp (old behavior) would give R=0.5=127.5/255.
+            // rgba(0,0,0,0) → rgba(255,255,255,1) at t=0.5: premultiplied lerp (0.5,0.5,0.5,0.5), unpremult
+            // → R=1, A=0.5. A straight sRGB lerp would give R=0.5.
             string e = "[\"interpolate\", [\"linear\"], 0.5, " +
                        "0, [\"rgba\", 0, 0, 0, 0], 1, [\"rgba\", 255, 255, 255, 1]]";
             Value c = Expr.Eval(e);
@@ -637,9 +617,8 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void InterpolateHcl_HueWrap_TakesShortestArcThroughZero()
         {
-            // Two colors whose HCL hues are ~350 and ~10. The midpoint must pass through hue 0 (short arc),
-            // giving a reddish color ~ (209.6,115.9,146.0). The long-arc bug (through 180) would give a
-            // cyan ~ (0.2,163.0,143.7) — far away on the red channel, so R is the discriminator.
+            // HCL hues ~350 and ~10: the short-arc midpoint is reddish (209.6,115.9,146.0). A long arc through
+            // 180 gives cyan (0.2,163.0,143.7), so R discriminates.
             string e = "[\"interpolate-hcl\", [\"linear\"], 0.5, " +
                        "0, [\"rgb\", 205, 117, 158], 1, [\"rgb\", 212, 116, 134]]";
             var rgba = ToRgba(Expr.Eval(e));
@@ -736,18 +715,10 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Type-assertion operators (spec "Types / Assertion"):
-    /// <c>boolean</c> / <c>number</c> / <c>string</c> / <c>object</c> / <c>array</c>.
-    ///
-    /// These are distinct from the <c>to-*</c> coercions:
-    ///   - Assert: return the input if the type matches; error if it does not.
-    ///   - Coerce (<c>to-number</c>, <c>to-string</c>, …): convert the value.
-    ///
-    /// Also verifies that <c>["number",["zoom"]]</c> parses and classifies as Zoom-kind — the key
-    /// "legal wrapped zoom" form used by the per-frame interpolate path.
-    ///
-    /// Allocation test (no-GC sweep) is in <see cref="MapRenderer.Tests.Style.StylePropertyTests"/>
-    /// which covers the full zoom-evaluation path including these assertion wrappers.
+    /// Type-assertion operators (spec "Types / Assertion"): <c>boolean</c> / <c>number</c> / <c>string</c> /
+    /// <c>object</c> / <c>array</c> return the input when the type matches and error otherwise, unlike the
+    /// <c>to-*</c> coercions. <c>["number",["zoom"]]</c> classifies as Zoom-kind. The no-GC sweep over
+    /// these wrappers is in <see cref="MapRenderer.Tests.Style.StylePropertyTests"/>.
     /// </summary>
     [TestFixture]
     public class AssertionTests
@@ -910,9 +881,8 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void Number_WrappingZoom_ParsesAsZoomKind()
         {
-            // The assertion wraps zoom inside a ramp input slot — valid only with zoomAllowed=true.
-            // ParseInputAllowingZoom calls ParseNode with zoomAllowed:true; the "number" assertion
-            // must thread that flag through to the inner zoom arg.
+            // Zoom inside a ramp input slot is valid only with zoomAllowed=true; the "number" assertion must
+            // pass that flag through to the inner zoom arg.
             var expr = ExpressionParser.Parse(
                 "[\"interpolate\", [\"linear\"], [\"number\", [\"zoom\"]], 5, 0.0, 10, 1.0]");
             Assert.AreEqual(ExpressionKind.Zoom, expr.Kind,
@@ -1031,11 +1001,8 @@ namespace MapRenderer.Tests.Expressions
     // ColorCoercionTests — a CSS color string coerces to a color at every color seam
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // Regression for the "Expected color but found string" crash: production styles (OpenFreeMap "liberty")
-    // emit color expressions whose branch/stop literals are CSS color STRINGS, not pre-parsed colors. The
-    // spec's to-color coercion parses strings in color context; we apply it at every color seam
-    // (StyleProperty<Color> constant + zoom, interpolate/Ramps). These tests pin
-    // that a constant string, a step over string stops, and an interpolate over string stops all yield colors.
+    // Real styles (OpenFreeMap "liberty") use CSS color STRINGS as branch/stop literals. A constant string, a
+    // step over string stops and an interpolate over string stops must all yield colors.
     [TestFixture]
     public class ColorCoercionTests
     {
@@ -1091,12 +1058,8 @@ namespace MapRenderer.Tests.Expressions
     [TestFixture]
     public class ExpressionErrorTests
     {
-        // Each of these is an EVALUATION error: TryEvaluate returns false with a message, never throws.
-        // Only the ops with NO per-op `_IsError` twin remain here (! and upcase). The coercion / lookup /
-        // comparison / math / color rows were duplicates of the per-op error tests (same op + same error
-        // condition, several byte-identical) and were retired to those files
-        // (LiteralType/Lookup/Decision/MathOp/Color) — this stays the boundary-never-crashes table for the
-        // two ops those files do not cover.
+        // EVALUATION errors: TryEvaluate returns false with a message and never throws. Only ops with no
+        // per-op `_IsError` test elsewhere are listed here.
         [TestCase("[\"!\", 5]")]                 // ! on a non-boolean
         [TestCase("[\"upcase\", 5]")]            // upcase on a non-string
         public void EvaluationError_ReturnsFalse_NeverThrows(string json)
@@ -1194,16 +1157,10 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T3 (string→id key hoist) — a constant-key <c>get</c>/<c>has</c> node stays byte-identical for any
-    /// feature that is NOT <see cref="IIndexedFeature"/>-capable: <see cref="GeoJsonFeature"/> (no key
-    /// table — RFC 7946 has none), and the <c>DictionaryFeature</c> test double. Production never builds
-    /// a binding for these —
-    /// none of their owning tile layers implement <see cref="IIndexedFeatureSource"/>, so
-    /// <see cref="EvaluationContext.KeyBinding"/> is always null on their real call path — but the node's
-    /// own capability gate (<c>is IIndexedFeature</c>) is the thing actually proven here, by supplying a
-    /// (nonsense) non-null binding anyway: if the gate were dropped and the node took the int path
-    /// unconditionally, evaluating against a non-<see cref="IIndexedFeature"/> feature would throw or
-    /// misbehave, not fall back quietly.
+    /// A constant-key <c>get</c>/<c>has</c> node takes the string path for a feature that is NOT
+    /// <see cref="IIndexedFeature"/>-capable (<see cref="GeoJsonFeature"/>, <c>DictionaryFeature</c>). Their
+    /// layers never build a <see cref="EvaluationContext.KeyBinding"/>, so the tests pass a nonsense binding
+    /// to prove the node's own <c>is IIndexedFeature</c> gate.
     /// </summary>
     [TestFixture]
     public class FeatureKeyExpressionCapabilityTests
@@ -1259,9 +1216,8 @@ namespace MapRenderer.Tests.Expressions
             Assert.That(feature, Is.Not.InstanceOf<IIndexedFeature>(),
                 "precondition: GeoJsonFeature must not be index-capable, or this tooth proves nothing");
 
-            // A binding a real bind site would never build for a GeoJSON source (no IIndexedFeatureSource
-            // capability) — nonsense (slot 0 -> key index 999) so a wrongly-taken int path
-            // would visibly misbehave rather than coincidentally answering right.
+            // A nonsense binding (slot 0 -> key 999), so a wrongly taken int path misbehaves visibly instead of
+            // answering right by chance.
             var nonsenseBinding = new[] { 999 };
             Value result = ExpressionParser.Parse("[\"get\",\"name\"]")
                 .Evaluate(new EvaluationContext(0.0, feature, nonsenseBinding));
@@ -1283,12 +1239,9 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T1a (string→id key hoist) — the structural proof that a constant-key <c>get</c>/<c>has</c> node
-    /// takes the int-keyed <see cref="IIndexedFeature"/> path when it can, and the string
-    /// <see cref="IFeature.TryGetProperty"/> path only when it can't. Uses a call-counting double so both
-    /// halves assert a real call fired, not merely that the right VALUE came back — a shallow
-    /// implementation that always falls to the string path would still return the right value here (the
-    /// double answers the same content on either path) but would fail the call-count assertions.
+    /// A constant-key <c>get</c>/<c>has</c> node takes the int-keyed <see cref="IIndexedFeature"/> path when
+    /// it can, and <see cref="IFeature.TryGetProperty"/> only when it can't. A call-counting double answers
+    /// the same value on both paths, so only the call counts catch a node that always takes the string path.
     /// </summary>
     [TestFixture]
     public class FeatureKeyExpressionTests

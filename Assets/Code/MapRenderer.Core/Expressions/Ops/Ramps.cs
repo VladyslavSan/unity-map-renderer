@@ -50,14 +50,9 @@ namespace MapRenderer.Core.Expressions.Ops
     /// <summary>
     /// <c>interpolate</c> / <c>interpolate-hcl</c> / <c>interpolate-lab</c>: produce a value interpolated
     /// between the outputs of the two stops bracketing the input. The progress between the two stop inputs
-    /// is shaped by the curve (linear / exponential base / cubic-bezier), then applied to the two outputs.
-    ///
-    /// Numeric formulae (clean-room, first-principles):
-    ///  - linear: t = (x - lo) / (hi - lo)
-    ///  - exponential(base b): t = (b^(x-lo) - 1) / (b^(hi-lo) - 1), with b==1 the linear limit
-    ///  - cubic-bezier(p1,p2): unit-square easing of the linear t, with control points (p1x,p1y),(p2x,p2y)
-    /// Outputs interpolate component-wise: number → lerp; color → per-channel lerp in the selected space
-    /// (Default = premultiplied-alpha sRGB; Lab / Hcl = the named CIE spaces); array of numbers → element-wise lerp.
+    /// is shaped by the curve, then applied to the two outputs: linear t = (x - lo) / (hi - lo); exponential
+    /// t = (b^(x-lo) - 1) / (b^(hi-lo) - 1), linear at b == 1; cubic-bezier eases the linear t. Numbers and
+    /// number arrays lerp element-wise; colors lerp per channel in premultiplied-alpha sRGB, or in Lab / Hcl.
     /// </summary>
     public sealed class InterpolateExpression : Expression
     {
@@ -136,10 +131,8 @@ namespace MapRenderer.Core.Expressions.Ops
             if (a.Type == ValueType.Number && b.Type == ValueType.Number)
                 return Value.Number(a.AsNumber() + (b.AsNumber() - a.AsNumber()) * t);
 
-            // Color interpolation — accept Color stops OR CSS color strings (production styles like
-            // "liberty" use string color stops in interpolate). Number is handled above, so a numeric
-            // string won't reach here; ColorParser only matches real color syntax, so arbitrary strings
-            // won't be mis-coerced.
+            // Accept Color stops or CSS color strings (production styles use string color stops). ColorParser
+            // matches only real color syntax, so arbitrary strings are not mis-coerced.
             if (Coercions.TryToColor(a, out Color ca) && Coercions.TryToColor(b, out Color cb))
                 return LerpColor(ca, cb, t);
 
@@ -179,11 +172,8 @@ namespace MapRenderer.Core.Expressions.Ops
                         LerpHue(h1, h2, t), Lin(c1, c2, t), Lin(l1, l2, t), Lin(al1, al2, t)));
                 }
                 default:
-                    // Default interpolate: premultiplied-alpha sRGB (matching MapLibre semantics).
-                    // MapLibre premultiplies alpha before blending, then unpremultiplies the result.
-                    // Lab/Hcl branches are left as straight-alpha interpolation (scoped to default only).
-                    // Hoisted to Color.MixPremultiplied: a style-transition ease is the same arithmetic
-                    // over the same two colors, and now shares this one implementation.
+                    // Default: premultiplied-alpha sRGB, as MapLibre does; Lab/Hcl stay straight-alpha. A style
+                    // transition ease shares Color.MixPremultiplied.
                     return Value.OfColor(Color.MixPremultiplied(a, b, t));
             }
         }

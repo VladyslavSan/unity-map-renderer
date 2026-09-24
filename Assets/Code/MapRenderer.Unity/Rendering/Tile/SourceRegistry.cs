@@ -80,17 +80,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         public void ReleaseTile(int slot, TileId id) => _pipelines[slot].FeatureSource?.Release(id);
 
         /// <summary>
-        /// The "nothing would change" predicate of <see cref="Rebuild"/> — true iff calling it with the
-        /// same arguments would keep every pipeline and add none: same count, same order, and for each
-        /// real slot <c>SourceId</c>/resolved <c>DefKey</c>/<c>MinZoom</c>/<c>MaxZoom</c> all equal.
-        /// Kept in step with <see cref="Rebuild"/> — placed directly above it so the two
-        /// read together.
-        ///
-        /// <para>Compares the RESOLVED specs, not the raw style JSON <c>sources</c> object: a <c>url</c>
-        /// source resolves through a TileJSON fetch, so two documents with byte-identical raw
-        /// <c>sources</c> can still resolve to different specs, and two with different raw JSON can
-        /// resolve to the same ones. Both this check and the raw-JSON one in
-        /// <see cref="MapRenderer.Unity.Rendering.Style.SurvivingLayerGate"/> are cheap and both fail closed.</para>
+        /// True iff <see cref="Rebuild"/> with the same arguments would keep every pipeline and add none: same count,
+        /// same order, and equal <c>SourceId</c>/resolved <c>DefKey</c>/<c>MinZoom</c>/<c>MaxZoom</c> per real slot.
+        /// Keep it in step with <see cref="Rebuild"/>. It compares RESOLVED specs, not raw style JSON: a <c>url</c>
+        /// source resolves through a TileJSON fetch, so equal raw <c>sources</c> can resolve differently.
+        /// <see cref="MapRenderer.Unity.Rendering.Style.SurvivingLayerGate"/> checks raw JSON. Both fail closed.
         /// </summary>
         internal bool Matches(IReadOnlyList<TileManager.SourceSpec> specs, bool hasBackground)
         {

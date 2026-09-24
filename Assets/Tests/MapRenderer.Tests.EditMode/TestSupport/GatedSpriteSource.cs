@@ -1,6 +1,5 @@
-// A test double, so it lives in the test assembly rather than in engine-free Core. Engine-free itself
-// (mirrors TestGlyphSource.cs's delegate-ctor shape), but NOT added to Tools/core-tests/core-tests.csproj —
-// its only production consumer (SymbolSubsystem) is engine-bound, so the tooth it serves is [UnityTest]-only.
+// A test double, engine-free itself, but NOT added to Tools/core-tests/core-tests.csproj: its only
+// production consumer (SymbolSubsystem) is engine-bound, so the tooth it serves is [UnityTest]-only.
 
 using System.Threading;
 using Cysharp.Threading.Tasks;
@@ -10,11 +9,9 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// A road-shields test double: an <see cref="ISpriteSource"/> whose
-    /// <see cref="FetchAsync"/> defers entirely to a caller-supplied delegate — typically a held
-    /// <c>UniTaskCompletionSource</c>'s <c>.Task</c>, so a test can drive a symbol build INTO the "sprite fetch
-    /// still pending" state and then release it on demand. Mirrors <see cref="TestGlyphSource"/>'s delegate-ctor
-    /// shape and the gated-glyph pattern already used by <c>SymbolSubsystemPumpTests</c>
-    /// (<c>RestyleMidBuild_CancelsInFlightBuild_Silently_NoDisposedStateTouch</c>).
+    /// <see cref="FetchAsync"/> defers to a caller-supplied delegate — typically a held
+    /// <c>UniTaskCompletionSource</c>'s <c>.Task</c>, so a test can hold a symbol build in the "sprite fetch
+    /// still pending" state and release it on demand. Same shape as <see cref="TestGlyphSource"/>.
     /// </summary>
     public sealed class GatedSpriteSource : ISpriteSource
     {

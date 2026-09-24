@@ -7,20 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// The <c>GatherSymbolPoints</c> Cull pass, ported to Burst — per record, the SAME
-    /// dropped → departing → coverage → zoom → horizon → distance → none verdict chain the managed loop ran,
-    /// so the perf win is the per-element native READ moving under Burst (no <c>AtomicSafetyHandle</c> per
-    /// array access), not a changed decision. <c>.Run()</c>, like <see cref="SymbolProjectionJob"/>: no
-    /// Schedule/Complete round-trip, no worker hand-off — the caller blocks here regardless (the Compact pass
-    /// reads <see cref="OutTrigger"/> immediately after).
-    ///
-    /// <para>Note: Burst compiles this job only when Jobs ▸ Burst ▸ Enable Compilation is on AND it compiles —
-    /// a compile failure falls back to managed IL SILENTLY (<c>FillGraphBurstProbeTests</c>), so the runner
-    /// alone doesn't decide it. In this project's practice the Unity <b>batch</b> gate
-    /// (<c>./Tools/run-tests.sh</c>, confirmed via its log) is the Burst-compiled path; the interactive
-    /// EditMode Test Runner is not verified that way, so a green result there proves numeric correctness
-    /// only. Under the gate, <c>SymbolCullJobTests</c> is therefore a real Burst-vs-managed differential, not
-    /// a managed-only check.</para>
+    /// The <c>GatherSymbolPoints</c> Cull pass in Burst. Per record, it writes the first verdict of the chain
+    /// dropped → departing → coverage → zoom → horizon → distance → none into <see cref="OutTrigger"/>.
+    /// Limitation: a Burst compile failure falls back to managed IL silently (<c>FillGraphBurstProbeTests</c>),
+    /// so <c>SymbolCullJobTests</c> is a Burst-vs-managed differential only under the batch gate
+    /// (<c>./Tools/run-tests.sh</c>), not in the interactive Test Runner.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct CullJob : IJobParallelFor
@@ -85,9 +76,8 @@ namespace MapRenderer.Jobs.Symbols
             OutTrigger[index] = t;
         }
 
-        // Record r's owning material slot is out of the live camera zoom's [minzoom, maxzoom) — mirrors
-        // SymbolPlacementSystem's (now-removed) managed IsOutOfLiveZoom. SlotCount, NOT SlotVisible.Length,
-        // bounds the read — the native list is grown-only and may be longer than this frame's slot count.
+        // Record r's material slot is out of the live camera zoom's [minzoom, maxzoom). SlotCount, NOT
+        // SlotVisible.Length, bounds the read, because the grow-only list may be longer than this frame's slots.
         private bool IsOutOfLiveZoom(int r)
         {
             if (SlotCount == 0) return false;

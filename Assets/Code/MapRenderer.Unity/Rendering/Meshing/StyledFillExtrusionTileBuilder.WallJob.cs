@@ -9,32 +9,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static partial class StyledFillExtrusionTileBuilder
     {
         /// <summary>
-        /// One quad per boundary edge over the flat (pre-earcut) ring vertices <see cref="RingSelectJob"/>
-        /// gathers (job-scheduling-design.md). Reads no tile coordinates: <see cref="Geo"/>/<see cref="World"/>/
-        /// <see cref="Up"/> are the already-projected per-flat-vertex columns <see cref="TileToGeoJob"/> and
-        /// <see cref="ProjectionDispatch"/> produced; this job only walks ring topology and emits quads.
-        ///
-        /// <para>No output ceiling: exactly 4 vertices and 6 indices per edge over a ring set whose total
-        /// length is fixed by the input columns — there is no runtime-derived multiplier (unlike line's
-        /// subdivision), so the always-bound-loops rule is already satisfied without one.</para>
-        ///
-        /// <para><see cref="Up"/> is already unit at the source — <c>WebMercatorProjection</c>
-        /// returns the literal constant <c>(0,1,0)</c>, and <c>SphericalProjection</c>'s radial ECEF normal is
-        /// unit length because sin²+cos²=1 — and <see cref="ProjectPointsJob{TProj}"/> passes it straight through
-        /// (<c>Normals[index] = pp.Up</c>, no renormalization). This job still casts to <c>float3</c> then
-        /// calls <c>math.normalize</c> on it — NOT because the value needs normalizing, but to guard the
-        /// sub-ULP length error the <c>(float3)</c> narrowing can introduce into an otherwise-exact unit
-        /// vector.</para>
-        ///
-        /// <para><see cref="Globe"/> is computed ONCE on the calling thread
-        /// (<c>!double.IsInfinity(proj.MaxRefineAngleRad)</c>) — <c>IProjection</c> is managed, so a job
-        /// cannot read the property itself.</para>
-        ///
-        /// <para><c>internal</c>, and its five ring/flat-vertex fields are <see cref="NativeList{T}"/>
-        /// resolved directly inside <see cref="Execute"/>: <see cref="FillExtrusionMeshGraph"/> schedules
-        /// this job, and <see cref="ProjectionDispatch.Schedule"/> requires its world/normal columns as
-        /// <c>NativeList</c>s. An <c>IJob</c> may hold a <c>NativeList</c> field directly, same as this job
-        /// already does for its <see cref="OutPositionNormal"/> family below.</para>
+        /// One quad (4 vertices, 6 indices) per edge of the pre-earcut rings, read from the projected
+        /// <see cref="Geo"/>/<see cref="World"/>/<see cref="Up"/> columns; its <c>NativeList</c> fields resolve
+        /// inside <see cref="Execute"/>, and the input fixes the output size. <see cref="Up"/> is already unit;
+        /// <c>math.normalize</c> after the <c>(float3)</c> cast only removes the narrowing error.
+        /// <see cref="Globe"/> is set on the calling thread, because a job cannot read the managed projection.
         /// </summary>
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         internal struct WallQuadJob : IJob

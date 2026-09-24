@@ -1,13 +1,8 @@
-// Unity EditMode only (UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() — the only trustworthy
-// allocation meter on Unity Mono, see MapRenderer.Tests.EditMode/Meshing/LineBuildAllocTests.cs). NOT
-// registered in core-tests.csproj (MeshDataPayload/Mesh.MeshDataArray are Unity types).
+// Unity EditMode only: Is.Not.AllocatingGCMemory() is the only trustworthy allocation meter on Unity Mono.
+// TileMeshLayerProcessor and MeshDataPayload are rented from ConcurrentBag-backed pools, not `new`d per kick.
 //
-// perf/gc-elimination: TileMeshLayerProcessor and MeshDataPayload — the
-// per-dense-layer kick-time objects — are rented from TileMeshLayerProcessorPool/MeshDataPayloadPool,
-// rather than `new`d fresh on every AllocateForKick/Complete() call (~208 alloc events / ~16.5 KB per
-// tile-build on a liberty-shaped style). The pools are ConcurrentBag-backed, mirroring TileBuildBuffersPool —
-// both objects cross the main/worker thread boundary between allocation and release, which is what rules
-// out UnityEngine.Pool here).
+// Non-obvious why: both objects cross the main/worker thread boundary between allocation and release,
+// which rules out the main-thread-only UnityEngine.Pool.
 
 using System;
 using System.Collections.Generic;
@@ -91,15 +86,11 @@ namespace MapRenderer.Tests.Tiles
         // ── Tooth 1: zero-alloc, warmed repeat kick+release cycle ────────────────────────────────────
 
         /// <summary>
-        /// The tooth: a warmed repeat of <see cref="TileMeshLayerProcessor.AllocateForKick"/> →
-        /// <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> → <see cref="TileMeshLayerProcessor.Release"/>,
-        /// over two style layers, must allocate zero managed bytes once the kick-time wrapper is rented from
-        /// its pool instead of `new`d. RED-verified by reverting <c>AllocateForKick</c> back to
-        /// `new TileMeshLayerProcessor(...)` — must fail.
-        ///
-        /// <para>Nothing is allocated at kick, so there is no <see cref="MeshDataPayload"/> for this cycle to
-        /// Upload or Dispose. What this tooth observes is <see cref="TileMeshLayerProcessor"/>'s OWN object
-        /// pooling (<see cref="TileMeshLayerProcessorPool"/>).</para>
+        /// A warmed repeat of <see cref="TileMeshLayerProcessor.AllocateForKick"/> →
+        /// <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> → <see cref="TileMeshLayerProcessor.Release"/>
+        /// over two style layers allocates zero managed bytes, because the kick-time wrapper comes from
+        /// <see cref="TileMeshLayerProcessorPool"/>. No <see cref="MeshDataPayload"/> exists in this cycle, so the
+        /// tooth observes only the processor's own pooling.
         /// </summary>
         [Test]
         public void KickProcessRelease_OverTwoLayers_WarmedRepeat_AllocatesNoGCMemory()
@@ -157,27 +148,17 @@ namespace MapRenderer.Tests.Tiles
         // ── Tooth 2: cross-build isolation — Upload() must not itself return to the pool ────────────
 
         /// <summary>
-        /// The regression tooth: <see cref="MeshDataPayload.Dispose"/>,
-        /// not <see cref="MeshDataPayload.Upload"/>, is the sole pool-return point. <c>TileManager.ConsumeMeshBuild</c>
-        /// calls <c>payload.Upload(); payload.Dispose();</c> back-to-back on the same reference — if
-        /// <c>Upload()</c>'s success path also returned <c>this</c> to the pool, a concurrent build's
-        /// <c>Rent()</c> could receive and <c>Reset()</c> the SAME instance in the gap before the original
-        /// caller's own following <c>Dispose()</c> runs, corrupting cross-build state (the double-free /
-        /// wrong-native-array risk Correction 2 describes). This test proves the window doesn't exist: the
-        /// instance a concurrent renter observes immediately after a successful <c>Upload()</c> is never the
-        /// one just uploaded.
-        ///
-        /// <para>RED-verified by temporarily adding <c>MeshDataPayloadPool.Return(this);</c> to <c>Upload</c>'s
-        /// success path — the very next <c>Rent()</c> then returns the
-        /// same instance, failing this assertion.</para>
+        /// <see cref="MeshDataPayload.Dispose"/>, not <see cref="MeshDataPayload.Upload"/>, is the sole
+        /// pool-return point. Non-local invariant: <c>TileManager.ConsumeMeshBuild</c> calls <c>Upload()</c>
+        /// then <c>Dispose()</c> on the same reference, so a return from <c>Upload()</c> would let a concurrent
+        /// build <c>Rent()</c> and <c>Reset()</c> that instance before the caller's <c>Dispose()</c> runs
+        /// (a double free on a wrong native array).
         /// </summary>
         [Test]
         public void Upload_DoesNotReturnThePayloadToThePool_OnlyDisposeDoes()
         {
-            // This tooth's subject is MeshDataPayload's OWN pool contract — it never needed the runner, only a
-            // vehicle to obtain a real, vertex-bearing payload. Get one directly: allocate a tracked writable
-            // MeshDataArray, write real geometry into it with StyledFillTileBuilder.WriteMeshData, then wrap it
-            // with MeshDataPayloadPool.Rent() + Reset(...).
+            // The subject is MeshDataPayload's own pool contract, so no runner: write real geometry into a
+            // tracked MeshDataArray and wrap it with MeshDataPayloadPool.Rent() + Reset(...).
             var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             const string sourceLayerName = "isolation-fixture-layer";
@@ -205,9 +186,8 @@ namespace MapRenderer.Tests.Tiles
             {
                 Assert.IsNotNull(mesh, "precondition: a real vertex-bearing payload must upload successfully");
 
-                // The probe: if Upload() incorrectly returned `payload` to the pool, this Rent() would very
-                // likely hand it straight back out (ConcurrentBag's uncontended same-thread behaviour is
-                // effectively LIFO) — the exact alias a concurrent build's Rent()+Reset() would corrupt.
+                // If Upload() returned `payload` to the pool, this Rent() would hand it straight back out:
+                // an uncontended same-thread ConcurrentBag behaves as LIFO.
                 MeshDataPayload other = MeshDataPayloadPool.Rent();
                 try
                 {

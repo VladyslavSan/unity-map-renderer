@@ -117,13 +117,11 @@ namespace MapRenderer.Unity.Rendering.Style
             return mesh;
         }
 
-        /// <summary>Main-thread: dispose the writable array WITHOUT applying (empty layer, mid-flight
-        /// discard, or teardown), then return the instance to the pool. The native-array free is a no-op after
-        /// <see cref="Upload"/> (already freed), but the pool-return is NOT folded into that guard: it fires
-        /// exactly once, whichever call did the real free (see <see cref="_returnedToPool"/>). The return
-        /// lives here, not in <see cref="Upload"/>: <c>ConsumeMeshBuild</c> calls Upload then Dispose
-        /// back-to-back on the same reference, and a pool-return from Upload's success path would let a
-        /// concurrent build Rent+Reset the instance before this call runs.</summary>
+        /// <summary>Main-thread: dispose the writable array WITHOUT applying, then return the instance to the
+        /// pool once (<see cref="_returnedToPool"/>); the array free is a no-op after <see cref="Upload"/>.
+        /// Non-local invariant: the pool return lives here, not in Upload, because <c>ConsumeMeshBuild</c> calls
+        /// Upload then Dispose on the same reference, and an earlier return would let a concurrent build
+        /// Rent+Reset the instance before this call runs.</summary>
         public void Dispose()
         {
             if (!_consumed)

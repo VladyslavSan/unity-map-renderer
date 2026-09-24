@@ -1,14 +1,10 @@
 namespace MapRenderer.Core.Expressions
 {
     /// <summary>
-    /// How an expression's value depends on its inputs — the classification that decides where to evaluate
-    /// it. The spec's three-way scheme (constant / zoom / data-driven) is refined to a four-way lattice so a
-    /// pure-zoom expression (→ per-frame uniform) is distinguished from one that also depends on the feature
-    /// (→ per-vertex attribute):
-    ///   - <see cref="Constant"/>  : no zoom, no feature — evaluate once.
-    ///   - <see cref="Zoom"/>      : depends on camera zoom only ("camera expression").
-    ///   - <see cref="Feature"/>   : depends on feature data only ("source"/"data-driven" expression).
-    ///   - <see cref="Composite"/> : depends on both zoom and feature ("composite expression").
+    /// How an expression's value depends on its inputs, which decides where to evaluate it. The spec's
+    /// three-way scheme becomes four, so a pure-zoom expression (a per-frame uniform) differs from one that
+    /// also reads the feature (a per-vertex attribute): <see cref="Constant"/> (evaluate once),
+    /// <see cref="Zoom"/> (camera only), <see cref="Feature"/> (data-driven), <see cref="Composite"/> (both).
     /// </summary>
     public enum ExpressionKind
     {

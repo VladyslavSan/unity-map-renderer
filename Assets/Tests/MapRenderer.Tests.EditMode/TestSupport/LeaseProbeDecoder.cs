@@ -13,16 +13,9 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Wraps a REAL <see cref="ITileDecoder"/> — so the output under test is genuine production output, not
     /// a stub's — while counting decodes and recording each decoded tile's disposal.
-    ///
-    /// <para><b>Why a probe and not <c>NativeLeakDetection</c>:</b> leak detection is OFF in the batch gate,
-    /// so a real <c>Allocator.Persistent</c> leak is <b>invisible</b> there. Counting who disposed what, and
-    /// how often, is the only instrument in this repo that can fail on one.</para>
-    ///
-    /// <para><b>This is the leak teeth's whole instrument.</b> No production observability exists for the
-    /// reference count and none was added for it: the probe is injected through a fake
-    /// <c>ITileFeatureSource</c> at <c>TileManager.SetSources</c>' <c>SourceSpec.CreateSource</c> seam, which
-    /// already exists. A <c>LiveLeaseCount</c> static with no production caller would violate the
-    /// test-code-bloat rule, and would see strictly less than this does.</para>
+    /// Non-obvious why: leak detection is off in the batch gate, so counting who disposed what is the only
+    /// instrument here that can fail on an <c>Allocator.Persistent</c> leak. The probe enters through a fake
+    /// <c>ITileFeatureSource</c> at the <c>SourceSpec.CreateSource</c> seam, so production needs no counter.
     /// </summary>
     internal sealed class LeaseProbeDecoder : ITileDecoder
     {
@@ -91,12 +84,9 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Blocks the calling thread until <paramref name="predicate"/> is true, or
-        /// <paramref name="timeoutMs"/> elapses — parks on <c>Monitor.Wait(_gate)</c> instead of polling.
-        /// <paramref name="predicate"/> typically reads <see cref="DecodeCount"/>/<see cref="DisposedCount"/>/
-        /// <see cref="UnbalancedCount"/>, each of which re-locks <see cref="_gate"/>; the C# <c>lock</c> is
-        /// reentrant, so calling them from inside this method's own <c>lock (_gate)</c> is safe.
-        /// <c>Decode</c>/<c>CountingTile.Dispose</c> pulse <see cref="_gate"/> whenever a counted quantity
-        /// changes, waking this wait to re-check.</summary>
+        /// <paramref name="timeoutMs"/> elapses. <c>Decode</c>/<c>CountingTile.Dispose</c> pulse <c>_gate</c> on
+        /// every count change. The predicate may read the counters, which re-lock <c>_gate</c>: the C#
+        /// <c>lock</c> is reentrant, so that is safe inside this method's own lock.</summary>
         /// <param name="predicate">The condition to wait for; re-checked on every pulse.</param>
         /// <param name="timeoutMs">The maximum time to wait, in milliseconds.</param>
         /// <returns>True if <paramref name="predicate"/> became true within <paramref name="timeoutMs"/>;

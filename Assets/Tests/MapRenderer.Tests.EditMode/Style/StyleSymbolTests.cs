@@ -1,10 +1,5 @@
-// Style/StyleSymbolTests.cs — the symbol text-color carrier split, partial-survival restyle semantics,
-// the restyle survivor gate, and the per-layer fade gate. Unity EditMode only — real Materials via
-// MapMaterialSetTestUtil/MaterialFactory, real RenderLayerSet; not registered in core-tests.csproj.
-//
-// Carries both `using System;` (FileNotFoundException) and `using UnityEngine;` safely: no member here
-// imports MapRenderer.Core.Expressions bare, so `Color` (UnityEngine's) stays unambiguous, and no member
-// calls bare `Object.*`, so `System`'s presence never collides with it.
+// Style/StyleSymbolTests.cs — Unity EditMode only (real Materials, real RenderLayerSet; not in core-tests).
+// `using System;` and `using UnityEngine;` coexist: nothing imports Core.Expressions bare or calls `Object.*`.
 //
 // Contents:
 //   SymbolTextColorCarrierTests  — symbol text-color: constant rides the uniform, else bakes into the stream.
@@ -213,11 +208,9 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>A data-driven <c>text-halo-color</c> is skipped by its own <c>!DependsOnFeature</c>
         /// guard in <c>BindTextPaint</c>; the <c>text-color</c> arm is a separate, independent guard, so a
-        /// data-driven halo cannot suppress it. RED-verify: hoist all four binds back under one
-        /// <c>try</c>/<c>catch (ArgumentException)</c> and evaluate the halo first — the swallowed exception
-        /// then skips the text-color bind too, leaving the uniform white while the vertex is already white
-        /// (invisible text). Each bind sits behind its own guard, so nothing can break this property today —
-        /// but the recipe above still fires the assert below if something re-couples them.</summary>
+        /// data-driven halo does not suppress it. RED-verify: put all four binds under one <c>try</c>/<c>catch
+        /// (ArgumentException)</c> with the halo first; the swallowed exception skips the text-color bind, so
+        /// the text-color uniform stays white over the white vertex and the styled colour is lost.</summary>
         [Test]
         public void DataDrivenHalo_DoesNotSwallowTheConstantTextColorBind()
         {
@@ -247,10 +240,8 @@ namespace MapRenderer.Tests.Style
 
         /// <summary><c>RidesUniform</c> is true for Constant, and false for Zoom/Feature/Composite — the
         /// discriminator is <c>Kind == Constant</c>, not <c>!DependsOnFeature</c>, because Zoom stays on the
-        /// vertex-bake carrier by design (a Zoom-kind ease path is out of scope,
-        /// see <see cref="RestyleSurvivorGateTests"/>'s <c>SymbolLayer_ZoomKindTextColorChange_IsRefused</c>).
-        /// RED-verify: widen the predicate to <c>!DependsOnFeature</c> — the Zoom row is the one that then
-        /// wrongly reads true.</summary>
+        /// vertex-bake carrier (see <c>RestyleSurvivorGateTests.SymbolLayer_ZoomKindTextColorChange_IsRefused</c>).
+        /// A <c>!DependsOnFeature</c> predicate reads true on the Zoom row.</summary>
         [Test]
         public void RidesUniform_IsTrueOnlyForConstant()
         {
@@ -277,11 +268,9 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>The in-place restyle in <c>MapView.cs</c> skips <c>SymbolSubsystem.SetStyle</c>, so a
         /// Constant <c>text-color</c> change between two otherwise-identical symbol layers must extract
-        /// IDENTICAL <see cref="SymbolPaint"/>s (white vertex RGB both sides), which is what makes
-        /// <c>SymbolSubsystem</c> keeping the previous document's
-        /// symbol layers checkable rather than asserted. RED-verify: delete the <c>RidesUniform</c> guard in
-        /// <c>SymbolFeatureExtractor.EvaluatePaint</c> — the two extractions then carry different vertex
-        /// colours and the <c>TextColor.x</c> assertion fires.</summary>
+        /// IDENTICAL <see cref="SymbolPaint"/>s (white vertex RGB both sides); that is what lets
+        /// <c>SymbolSubsystem</c> keep the previous document's symbol layers. Without the <c>RidesUniform</c>
+        /// guard in <c>SymbolFeatureExtractor.EvaluatePaint</c>, the <c>TextColor.x</c> assertion fires.</summary>
         [Test]
         public void ConstantTextColorChange_LeavesTheExtractedPaintIdentical()
         {
@@ -643,13 +632,9 @@ namespace MapRenderer.Tests.Style
             set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.30));
             Assert.AreEqual(0, set.TransitioningCount, "settled at exactly the default duration (300ms).");
 
-            // Second clause (decision 0a): a style document carrying a root `transition` block AND a
-            // `fill-color-transition` key must produce IDENTICAL timing, because nothing parses either —
-            // MapView.StyleTransition is the only source. The extra keys sit on BOTH sides (not just the
-            // new style) so the gate's own "unknown root/paint key" fail-closed rule (correct, unrelated
-            // to this clause) does not refuse before the timing question is even reached. There is no
-            // parse site to point a RED injection at: this clause is a guard against a future regression
-            // (someone adding one), not a property provable today.
+            // Second clause: a root `transition` block and a `fill-color-transition` key give IDENTICAL timing,
+            // because MapView.StyleTransition is the only source. The keys sit on BOTH sides, so the gate's
+            // unknown-key fail-closed rule does not refuse first. Limitation: no parse site exists to RED it.
             string WithTransitionHints(string fillColorRgba) => @"{
     ""version"": 8, ""name"": ""T"", ""transition"": { ""duration"": 5000, ""delay"": 5000 },
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1204,14 +1189,9 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// Fill-extrusion gates INSTANTLY: ONE frame outside the range reads 0, with the gate transition
-        /// left at production's default.
-        ///
-        /// <para>The only observer of <c>FillExtrusionRenderLayer.SetFade</c> substituting
-        /// <c>StyleTransition.Instant</c> for the transition it is handed. Pass the argument through and
-        /// this frame lands at <c>elapsed == 0</c>, where the ease returns false and the authored value
-        /// survives — so it reads 0.5. That is not a cosmetic difference: the elevated contract blends
-        /// One/Zero, so alpha is DISCARDED and an intermediate fade renders a fully solid building
-        /// for the whole fade.</para>
+        /// left at production's default. It is the only observer of <c>FillExtrusionRenderLayer.SetFade</c>
+        /// substituting <c>StyleTransition.Instant</c>. Non-obvious why: the elevated contract blends One/Zero,
+        /// so alpha is discarded and an intermediate fade renders a fully solid building.
         /// </summary>
         [Test]
         public void FillExtrusionLayer_GatesInstantly_NotOverTheTransition()
@@ -1234,13 +1214,10 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// A layer mid-fade scales ONLY its opacity. <c>fill-translate-anchor</c> — a second float binding
-        /// on the same material — must still read its authored <c>viewport</c> while fade sits at 0.5.
-        ///
-        /// <para>The only observer of the applier's <c>ScaledByFade</c> flag. Without it every settled float
-        /// on a fading layer is re-pushed multiplied by fade: the anchor drifts from viewport toward map
-        /// for the length of the fade, and a building's height shrinks toward the ground with it. The
-        /// device-pixel tests cannot see this — <c>_Width</c> and its family live in a separate binding list
-        /// whose push loop carries no fade term at all.</para>
+        /// on the same material — must still read its authored <c>viewport</c> while fade sits at 0.5. It is
+        /// the only observer of the applier's <c>ScaledByFade</c> flag: without it every settled float on a
+        /// fading layer is multiplied by fade. The device-pixel tests cannot see this, because <c>_Width</c>
+        /// and its family live in a separate binding list with no fade term.
         /// </summary>
         [Test]
         public void FadingLayer_ScalesOnlyItsOpacity_NotItsOtherFloats()

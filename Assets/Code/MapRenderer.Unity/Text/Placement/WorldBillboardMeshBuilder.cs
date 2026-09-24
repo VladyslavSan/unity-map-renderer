@@ -1,6 +1,5 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header comment for the full explanation): this
-// file lives in MapRenderer.Unity.Text.Placement and uses Unity.Mathematics — TOP-LEVEL
-// `using Unity.Mathematics;` + unqualified types, NEVER an inline `Unity.Mathematics.X`.
+// Namespace-collision guard (see GlyphAtlasTexture.cs's header): TOP-LEVEL `using Unity.Mathematics;` and
+// unqualified types, never an inline `Unity.Mathematics.X`.
 
 using System;
 using Unity.Collections;
@@ -11,34 +10,14 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// The type-explicit builder that assembles a two-stream world-anchored symbol <see cref="Mesh"/> from
-    /// CPU corner data. Shared by the per-(tile,DrawIndex,kind) emit and the test scaffold.
-    ///
-    /// <para><b>Two streams</b> (so a per-frame fade update never touches topology): stream 0 is
-    /// <see cref="WorldBillboardVertex"/> — Position(AnchorLocal)/Color(ColorRGB)/TexCoord0(Uv)/
-    /// TexCoord1(Page)/TexCoord2(Offset)/TexCoord3(AlignFlags)/TexCoord5(Tangent)/TexCoord6(Up),
-    /// FROZEN load-bearing byte layout (see <see cref="WorldBillboardVertex"/>'s header). Stream 1 is a single
-    /// <c>float</c> Opacity (TexCoord4), re-uploaded alone per frame for the fade.</para>
-    ///
-    /// <para>Thin and testable: no projection/collision logic here — this type
-    /// only turns already-computed corner data into a GPU mesh. Main-thread only (touches <see cref="Mesh"/>,
-    /// mirrors every other GPU-resource boundary in this codebase).</para>
+    /// Assembles a two-stream world-anchored symbol <see cref="Mesh"/> from already-computed CPU corner data.
+    /// Stream 0 is the frozen <see cref="WorldBillboardVertex"/> layout. Stream 1 is one <c>float</c> Opacity
+    /// (TexCoord4), re-uploaded alone per frame, so a fade update never touches topology. Main-thread only.
     /// </summary>
     public static class WorldBillboardMeshBuilder
     {
-        // Combined stream-0 + stream-1 descriptor set. ORDER IS LOAD-BEARING for stream 0 (mirrors
-        // WorldBillboardVertex's header / SymbolPlacementSystem.VertexDescriptors' identical rule): the array
-        // MUST stay in globally-ASCENDING VertexAttribute enum order ACROSS THE WHOLE ARRAY regardless of
-        // stream — Position=0, Color=3, TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord4=8
-        // (stream 1!), TexCoord5=9, TexCoord6=10 — declaring them out of order triggers a silent
-        // "non-standard order" layout re-adjustment that reads the wrong bytes for the wrong attribute (at
-        // worst: 0 ink pixels). TexCoord4 (Opacity) is stream 1 — a SEPARATE vertex buffer, so re-uploading
-        // it per frame never touches stream 0 — but it still occupies enum slot 8, so
-        // TexCoord5 (Tangent, enum 9, stream 0) MUST be declared after it, and TexCoord6 (Up, enum 10,
-        // stream 0) after THAT, and the halo stage's TexCoord7 (SdfWidenPx, enum 11, stream 0) after THAT —
-        // the new truly-LAST element — to keep 0,3,4,5,6,7,8,9,10,11 ascending. Putting TexCoord5/6/7 before
-        // TexCoord4 would read descending — the exact hazard this codebase's vertex-descriptor convention
-        // exists to prevent.
+        // Non-obvious why: descriptors must ascend in VertexAttribute enum order across all streams, or Unity
+        // silently reads the wrong bytes. So Opacity (TexCoord4, stream 1) sits mid-array.
         private static readonly VertexAttributeDescriptor[] VertexDescriptors =
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0), // AnchorLocal
@@ -58,9 +37,8 @@ namespace MapRenderer.Unity.Text.Placement
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // A MeshRenderer's CPU frustum cull is evaluated against Mesh.bounds — an anchor can sit off-object
-        // while a glyph/halo extends on-screen, so "never cull" is the only correct
-        // choice, mirroring SymbolPlacementSystem.HugeBounds (the screen-space path's identical reasoning).
+        // The CPU frustum cull tests Mesh.bounds, and an anchor can sit off-screen while its glyph or halo is
+        // on-screen, so the mesh is never culled.
         public static readonly Bounds HugeBounds = new Bounds(Vector3.zero, new Vector3(1e9f, 1e9f, 1e9f));
 
         /// <summary>

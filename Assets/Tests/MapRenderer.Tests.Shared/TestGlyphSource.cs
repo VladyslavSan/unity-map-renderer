@@ -1,10 +1,5 @@
-// The glyph-fetch counterpart to TestDataSource.cs: a single, streamlined IGlyphSource test double with
-// always-on, thread-safe fetch-count instrumentation.
-//
-// Engine-free by design: references only byte[]/string/UniTask/CancellationToken/MapRenderer.Core.Text —
-// NO `using UnityEngine`. GlyphManagerTests.cs (which uses this) is compiled by BOTH the Unity EditMode
-// runner AND the fast Tools/core-tests project, so anything it touches must compile engine-free. The
-// matching <Compile Include> for this file lives in Tools/core-tests/core-tests.csproj.
+// The IGlyphSource counterpart to TestDataSource, with a thread-safe fetch count. It stays engine-free
+// because Tools/core-tests compiles it for GlyphManagerTests (a <Compile Include> in core-tests.csproj).
 
 using System;
 using System.Collections.Generic;

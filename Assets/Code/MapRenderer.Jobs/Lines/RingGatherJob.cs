@@ -8,21 +8,11 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// The line graph's ring-gather node: two independent gates (selection, then LineString kind) plus
-    /// line's own length filter (<c>&gt;= 2</c>, never fill's <c>&gt;= 3</c>), over the BORROWED shared
-    /// tile-geometry buffer, appending each surviving ring's tile-space vertices into flat output columns.
-    /// It takes <see cref="RingSelectJob"/>'s NativeList-append shape, but unlike that job it is also the
-    /// filter: fill's ring gate lives in its caller's <c>RingVisitOrder</c>, and line has no equivalent
-    /// visit-order caller.
-    ///
-    /// <para><b>Ring order is source order</b>: the gate is a filter, never a sort — a selected ring keeps its
-    /// position relative to every other selected ring.</para>
-    ///
-    /// <para>Also resizes <see cref="OutSrcGeo"/>/<see cref="OutSrcWorld"/>/<see cref="OutSrcUp"/> to
-    /// <see cref="OutSrcTile"/>'s final length, so the two deferred nodes after it
-    /// (<c>TileToGeoJob</c>/<c>ProjectionDispatch</c>) have their write targets correctly sized before they
-    /// execute — the same "a length-authoritative node resizes ahead of its deferred consumers" contract
-    /// <c>AggregateJob</c> holds for its own <c>Geo</c> column.</para>
+    /// The line graph's ring-gather node: filters the borrowed tile-geometry rings by selection, LineString
+    /// kind and length <c>&gt;= 2</c>, and appends survivors' tile-space vertices in source order. Line has no
+    /// visit-order caller, so the filter lives here. Non-local invariant: it resizes
+    /// <see cref="OutSrcGeo"/>/<see cref="OutSrcWorld"/>/<see cref="OutSrcUp"/> to <see cref="OutSrcTile"/>'s
+    /// length, so the deferred nodes after it find their write targets sized.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct RingGatherJob : IJob

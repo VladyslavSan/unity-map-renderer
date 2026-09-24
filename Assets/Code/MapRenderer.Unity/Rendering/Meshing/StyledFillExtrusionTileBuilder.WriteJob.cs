@@ -10,24 +10,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static partial class StyledFillExtrusionTileBuilder
     {
         /// <summary>
-        /// The write graph's stream-write node for one fill-extrusion layer (job-scheduling-design.md):
-        /// one instance per layer, writing the roof at <c>[0, Vr)</c> then the walls at
-        /// <c>[Vr, Vr+Vw)</c> — <see cref="ScheduleStreamWrite"/> is its only caller (itself called from
-        /// both a test-assembly caller (via <c>InternalsVisibleTo</c>) and <see cref="ScheduleWrite"/>).
-        /// Nested here (not a top-level type) so it can read this class's private
-        /// vertex-stream layout (<see cref="PositionNormal"/>,
-        /// <see cref="ExtrudeAndBake"/>) directly, mirroring <see cref="StyledFillTileBuilder.FillStreamWriteJob"/>'s
-        /// shape.
-        ///
-        /// <para><b>Roof</b> is computed here, per vertex — the sec-φ bake. <b>Walls</b> are a straight
-        /// COPY: <see cref="FillExtrusionMeshGraph.Schedule"/> already computed every wall stream value
-        /// (position, extrude, tangent, colour) via <c>WallQuadJob</c>, so this job's wall half only relocates
-        /// those bytes into the mesh buffer at the roof-rebased offset — nothing about a wall vertex is
-        /// recomputed here.</para>
-        ///
-        /// <para>Holds the whole <see cref="Md"/>, not separate stream <c>NativeArray</c> fields — see
-        /// docs/lessons-learned.md for the MeshData-aliasing fault this shape avoids. The <c>.AsArray()</c>
-        /// rule is resolved inside <see cref="Execute"/>, never at schedule time.</para>
+        /// The stream-write node for one fill-extrusion layer: roof at <c>[0, Vr)</c>, walls at
+        /// <c>[Vr, Vr+Vw)</c>. It computes the roof's sec-φ bake per vertex and only copies the walls, which
+        /// <c>WallQuadJob</c> already computed. Nested so it reads the private vertex-stream layout. It holds
+        /// the whole <see cref="Md"/>, not per-stream arrays, to avoid the MeshData-aliasing fault in
+        /// docs/lessons-learned.md, and resolves <c>.AsArray()</c> inside <see cref="Execute"/>.
         /// </summary>
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         private struct FillExtrusionStreamWriteJob : IJob
@@ -125,9 +112,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         };
                     }
 
-                    // (VertexEast, 1) on both arms: the flat arm's east is the constant (1,0,0), written by
-                    // AggregateJob — the constant +X tangent; same argument as FillStreamWriteJob's
-                    // own doc, no arm branch needed here either.
+                    // (VertexEast, 1) on both arms: AggregateJob writes the flat arm's east as the constant
+                    // +X (1,0,0), so no arm branch is needed.
                     float3 east = (float3)vertexEast[i];
                     s2[i] = new Vector4(east.x, east.y, east.z, 1f);
 

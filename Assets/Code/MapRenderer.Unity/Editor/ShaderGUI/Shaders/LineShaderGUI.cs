@@ -7,26 +7,19 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Inspector for <c>Map/Line</c>. The final successor
-    /// (<see cref="BaseShaderGUI"/> → <see cref="LitShaderGUI"/> → this): inherits the full Lit layout
-    /// and adds a line-specific foldout (width / blur / gap / offset / dash).
-    ///
-    /// <para>The line declares keywords of its own — <c>_EDGE_ANTIALIASING_OFF</c> and the
-    /// <c>_HAIRLINE_HARD</c> / <c>_HAIRLINE_SOLID_CORE</c> strategy set (mutually exclusive; `_` is the
-    /// default) — so it extends <see cref="LitShaderGUI"/>'s keyword sync
-    /// rather than merely inheriting it; see <see cref="ValidateMaterial"/>. Its runtime render-state
-    /// contract is <see cref="LineTweaker"/>.</para>
+    /// Inspector for <c>Map/Line</c>. It inherits the full Lit layout of <see cref="LitShaderGUI"/> and
+    /// adds a line foldout (width / blur / gap / offset / dash). The line declares keywords of its own
+    /// (<c>_EDGE_ANTIALIASING_OFF</c>, <c>_HAIRLINE_HARD</c> / <c>_HAIRLINE_SOLID_CORE</c>), so
+    /// <see cref="ValidateMaterial"/> extends the Lit keyword sync. Its runtime render-state contract is
+    /// <see cref="LineTweaker"/>.
     /// </summary>
     public sealed class LineShaderGUI : LitShaderGUI
     {
         /// <summary>
         /// Keyword sync at the line level: the base + Lit sets first, then the line's own.
-        ///
-        /// <para><c>_EdgeAntialiasing</c> is declared <c>[ToggleUI]</c>, which is UI-only and attaches NO
-        /// keyword — this override is the only thing that turns the float into
-        /// <c>_EDGE_ANTIALIASING_OFF</c>. Without it the toggle is completely inert. Mirrors how
-        /// <c>_ReceiveShadows</c> drives <c>_RECEIVE_SHADOWS_OFF</c>; this codebase syncs keywords in code
-        /// rather than through drawer attributes.</para>
+        /// <c>_EdgeAntialiasing</c> is <c>[ToggleUI]</c>, which attaches no keyword, so only this override
+        /// turns the float into <c>_EDGE_ANTIALIASING_OFF</c>; without it the toggle is inert.
+        /// This codebase syncs keywords in code, not through drawer attributes.
         /// </summary>
         public override void ValidateMaterial(Material material)
         {
@@ -38,9 +31,8 @@ namespace MapRenderer.Unity.Editor
                 CoreUtils.SetKeyword(material, ShaderKeywords.EdgeAntialiasingOff,
                     material.GetFloat(ShaderProperties.Line.PropertyId.EdgeAntialiasing) == 0f);
 
-            // Hairline strategy. `_` (0, Default) is the shipping state and sets NO keyword, which is what
-            // keeps its variant un-strippable; each strategy takes its own independent == test, so exactly
-            // one keyword can ever be set.
+            // Hairline strategy 0 (Default) sets no keyword, so its variant is un-strippable. Each
+            // strategy has its own == test, so at most one keyword is set.
             if (material.HasProperty(ShaderProperties.Line.PropertyId.HairlineStrategy))
             {
                 float strategy = material.GetFloat(ShaderProperties.Line.PropertyId.HairlineStrategy);

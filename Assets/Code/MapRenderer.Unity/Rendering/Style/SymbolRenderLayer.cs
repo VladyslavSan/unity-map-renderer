@@ -9,33 +9,11 @@ using SymbolStyle = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Symbol <see cref="IRenderLayer"/>: a MapLibre <c>symbol</c> layer as a runtime render object (the
-    /// render-layer model). Axes: <see cref="RenderLayerBuild.FramePlaced"/> —
-    /// rebuilt every frame from per-symbol placement, NOT the Burst tile-mesh pipeline — /
-    /// <see cref="DrawPersistence.Persistent"/> — this layer's material is bound + presented
-    /// by <see cref="Placement.WorldSymbolRenderer"/> (the world-anchored draw path), redrawn by Unity every
-    /// camera render with no orchestrator.
-    ///
-    /// <para>Owns: the per-layer <see cref="WorldTextMaterial"/>/
-    /// <see cref="WorldIconMaterial"/> clones and the text/halo colour binds. <see cref="Material"/> IS
-    /// <see cref="WorldTextMaterial"/>; its <c>renderQueue</c> is written by
-    /// <see cref="RenderLayerSet.Build"/> like every other layer (replacing the shader's Overlay-4000
-    /// default) for free, since <c>Build</c> reads <see cref="IRenderLayer.Material"/>. The world icon's
-    /// queue has no such free ride (nothing else reads a symbol layer's icon material at Build time), so
-    /// <see cref="Create"/> writes it directly. Collision stays global — only the DRAW is per-layer,
-    /// via the material <see cref="Placement.WorldSymbolRenderer.EndFrame"/> resolves for this layer's
-    /// slot.</para>
-    ///
-    /// <para><b>Road shields:</b> the icon and text are coplanar at the same anchor
-    /// (the shield's number is centred on its sprite) and both shaders are <c>ZWrite Off</c> /
-    /// <c>ZTest Always</c> — there is no depth arbitration, only submission order via <c>renderQueue</c>.
-    /// So the icon owns this layer's <see cref="LayerSubSlot.Base"/> sub-slot and the text owns
-    /// <see cref="LayerSubSlot.Above"/> — the badge always draws under the number it frames, never over
-    /// it.</para>
-    ///
-    /// <para>NOT an <see cref="IFadeableRenderLayer"/>: the symbol shaders declare no
-    /// <c>_Opacity</c> for a LAYER fade to ride, symbols already carry their own per-symbol fade, and their
-    /// zoom/visibility gate is <c>SymbolPlacementSystem</c>'s existing <c>IsVisibleAtZoom</c> reads.</para>
+    /// Symbol <see cref="IRenderLayer"/>: <see cref="RenderLayerBuild.FramePlaced"/> (rebuilt every frame from
+    /// placement) / <see cref="DrawPersistence.Persistent"/>. It owns the per-layer text and icon material
+    /// clones and is drawn by <see cref="Placement.WorldSymbolRenderer"/>. Collision stays global; only the draw
+    /// is per layer. NOT an <see cref="IFadeableRenderLayer"/>: the symbol shaders have no <c>_Opacity</c>, and
+    /// symbols carry their own per-symbol fade and zoom gate (<c>SymbolPlacementSystem</c>).
     /// </summary>
     internal sealed class SymbolRenderLayer : IRenderLayer
     {
@@ -48,10 +26,10 @@ namespace MapRenderer.Unity.Rendering.Style
         public int                               DrawIndex    { get; }
         public int                               TransitioningCount => _applier?.TransitioningCount ?? 0;
 
-        /// <summary>The text sits at <see cref="LayerSubSlot.Above"/>: <see cref="Material"/> IS
-        /// <see cref="WorldTextMaterial"/>, and it must draw over this layer's own
-        /// <see cref="WorldIconMaterial"/> (at <see cref="LayerSubSlot.Base"/>) — otherwise the badge paints
-        /// out the number it frames.</summary>
+        /// <summary>The text sits at <see cref="LayerSubSlot.Above"/>, over this layer's own icon at
+        /// <see cref="LayerSubSlot.Base"/>. Non-obvious why: both shaders are <c>ZWrite Off</c> /
+        /// <c>ZTest Always</c> and a road shield's icon and text are coplanar, so only <c>renderQueue</c>
+        /// keeps the badge under the number it frames.</summary>
         public LayerSubSlot MaterialSubSlot => LayerSubSlot.Above;
 
         public ShadowCastingMode CastShadows => ShadowCastingMode.Off;
@@ -63,22 +41,15 @@ namespace MapRenderer.Unity.Rendering.Style
         /// this layer's <see cref="LayerSubSlot.Above"/> sub-slot.</summary>
         public Material Material => WorldTextMaterial;
 
-        /// <summary>The owned <c>Map/Symbol/TextWorld</c> clone of
-        /// <c>MapMaterialSet.SymbolTextWorld</c>, colour tints bound — the world-anchored point-text draw path's
-        /// per-layer material, and the layer's <see cref="Material"/>. <c>null</c> iff
-        /// <c>MapMaterialSet.SymbolTextWorld</c> is unassigned (REQUIRED — enforced by
-        /// <c>MapMaterialSet.Validate()</c>, so this is null only for a throwaway/test <c>MapMaterialSet</c>
-        /// that skipped Validate).</summary>
+        /// <summary>The owned <c>Map/Symbol/TextWorld</c> clone of <c>MapMaterialSet.SymbolTextWorld</c>, colour
+        /// tints bound; the layer's <see cref="Material"/>. <c>null</c> iff that base is unassigned, which
+        /// <c>MapMaterialSet.Validate()</c> rejects, so only a set that skipped Validate reaches it.</summary>
         public Material WorldTextMaterial { get; }
 
         /// <summary>The owned <c>Map/Symbol/IconWorld</c> clone of
-        /// <c>MapMaterialSet.SymbolIconWorld</c> (no text paint). <c>null</c> iff
-        /// <c>MapMaterialSet.SymbolIconWorld</c> is unassigned (optional-with-warn) — world icons stay
-        /// hidden, text is unaffected. Its <c>renderQueue</c> is written directly by <see cref="Create"/> —
-        /// unlike <see cref="WorldTextMaterial"/>, nothing reads a symbol layer's icon material at
-        /// <see cref="RenderLayerSet.Build"/> time, so it has no free ride. It owns this layer's
-        /// <see cref="LayerSubSlot.Base"/> sub-slot, strictly below <see cref="WorldTextMaterial"/>'s
-        /// <see cref="LayerSubSlot.Above"/>.</summary>
+        /// <c>MapMaterialSet.SymbolIconWorld</c>. <c>null</c> iff that base is unassigned (optional, warns);
+        /// then world icons stay hidden. <see cref="RenderLayerSet.Build"/> never reads it, so
+        /// <see cref="Create"/> writes its <c>renderQueue</c> at <see cref="LayerSubSlot.Base"/>.</summary>
         public Material WorldIconMaterial { get; }
 
         /// <summary>The typed parsed symbol layer — MapView's source-fetch derivation reads this
@@ -101,16 +72,12 @@ namespace MapRenderer.Unity.Rendering.Style
             _applier          = applier;
         }
 
-        /// <summary>Never returns null (unlike Fill/Line's <c>TryCreate</c>): the slot↔subsystem-ordinal 1:1
-        /// mapping and the source-fetch derivation both require every Source-bearing symbol layer to
-        /// take its slot even when <c>MapMaterialSet.SymbolTextWorld</c> is unassigned — in that case
-        /// <see cref="Material"/> stays <c>null</c> (warn once), <see cref="RenderLayerSet.Build"/> skips the
-        /// queue write, and this layer's slot never presents. <see cref="WorldIconMaterial"/> is resolved the
-        /// same way from <c>MapMaterialSet.SymbolIconWorld</c> — independently optional, its queue written
-        /// here directly rather than by <c>Build</c>.</summary>
-        /// <param name="initialZoom">Unused: the only paint this layer binds at construction is CONSTANT,
-        /// which no zoom can move. It stays in the signature because <see cref="RenderLayerSet.Build"/>
-        /// creates every layer kind through the same shape, and Fill/Line do seed from it.</param>
+        /// <summary>Never returns null (unlike Fill/Line's <c>TryCreate</c>): the 1:1 slot↔subsystem-ordinal
+        /// mapping and the source-fetch derivation need every Source-bearing symbol layer to take its slot.
+        /// With <c>SymbolTextWorld</c> unassigned, <see cref="Material"/> stays <c>null</c> (warns) and the
+        /// slot never presents. <see cref="WorldIconMaterial"/> is independently optional.</summary>
+        /// <param name="initialZoom">Unused: construction binds only CONSTANT paint. Kept so every layer
+        /// kind shares one creation shape.</param>
         public static SymbolRenderLayer Create(
             SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex,
             Transform parent = null)
@@ -136,9 +103,8 @@ namespace MapRenderer.Unity.Rendering.Style
             {
                 worldIconMat = baseWorldIconMat.CloneWithParent();
                 worldIconMat.name = $"MapSymbolIconWorld_{layer.Id}";
-                // No Build-time free ride like WorldTextMaterial/Material. Base explicitly (not the default
-                // arg) so the pairing with the text's Above sub-slot is visible at the call site: the icon
-                // must draw strictly below its own layer's text.
+                // Build never writes this queue. Base is explicit, so the call site shows that the icon draws
+                // strictly below its own layer's text (Above).
                 worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex, LayerSubSlot.Base);
             }
 
@@ -174,10 +140,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 return;
             }
 
-            // A Constant expression's Evaluate(zoom) cannot throw. Alpha is pinned to 1 — the uniform is
-            // RGB-only; the colour's own alpha rides the vertex opacity stream regardless of which carrier
-            // holds RGB (the shader declares both uniforms' .a unread, guarding against a future read
-            // applying opacity twice).
+            // A Constant's Evaluate cannot throw. Alpha is pinned to 1: the colour's alpha always rides the
+            // vertex stream, and the shader leaves both uniforms' .a unread.
             var c = color.Evaluate(0.0); // MapRenderer.Core.Expressions.Color (sRGB)
             applier.BindColor(
                 new StyleProperty<MapRenderer.Core.Expressions.Color>(

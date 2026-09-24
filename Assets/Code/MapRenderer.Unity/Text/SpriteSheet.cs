@@ -1,11 +1,5 @@
-// Namespace-collision guard (fcd7145 just fixed this exact trap in a Text test): this file lives in
-// MapRenderer.Unity.Text and uses Unity.Mathematics.int2 — a top-level `using Unity.Mathematics;` +
-// unqualified `int2` is required. NEVER write the inline-qualified `Unity.Mathematics.int2` here: inside
-// a `MapRenderer.Unity.*` namespace, the leading `Unity` segment binds to the CURRENT namespace
-// (`MapRenderer.Unity`), not the global `Unity` root, so `Unity.Mathematics.int2` resolves to
-// `MapRenderer.Unity.Mathematics.int2` (CS0234: no such namespace). `MapRenderer.Unity.Text` itself does
-// not collide with any bare UnityEngine type (UnityEngine.UI.Text is nested under UnityEngine.UI, not a
-// bare `Text` this assembly's code ever references unqualified).
+// Non-obvious why: write `int2` via `using Unity.Mathematics;`, never inline `Unity.Mathematics.int2` —
+// inside `MapRenderer.Unity.*` the leading `Unity` binds to `MapRenderer.Unity` (CS0234).
 
 using System;
 using Unity.Mathematics;
@@ -17,38 +11,11 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// The Unity-side sprite sheet: decodes a MapLibre sprite PNG into a single <see cref="Texture2D"/>
-    /// and pairs it with the already-parsed <see cref="SpriteIndex"/>. Immutable (a sheet is a single
-    /// pre-baked image, unlike <see cref="GlyphAtlasTexture"/>'s grow-and-reupload atlas) — built once from
-    /// a fetched <see cref="SpriteResponse"/> and disposed as a unit.
-    ///
-    /// <para>
-    /// <b>Orientation contract:</b> the glyph atlas uploads a top-left-origin CPU buffer via
-    /// <c>LoadRawTextureData</c>, so a top-left coord <c>(px,py)</c> samples at <c>GetPixel(px,py)</c> with
-    /// no flip (see <see cref="GlyphAtlasTexture"/>). <see cref="Texture2D.LoadImage"/> does the OPPOSITE —
-    /// it decodes a PNG's top row to <c>GetPixel</c> row <c>height-1</c> (Unity's bottom-left-origin
-    /// <c>GetPixel</c> convention). To make this sheet obey the SAME contract as the glyph atlas — so the
-    /// icon-quad-layout / SDF-glyph shader path can bind either texture unchanged — this constructor
-    /// reads the decode into a top-left-origin buffer and writes the repacked result back row-reversed, so
-    /// the sprite JSON's top-left-origin <c>(x,y)</c> rect also equals <c>GetPixel(x,y)</c> here. This
-    /// renders icons UPRIGHT (matching text on screen), pinned end-to-end by
-    /// <c>SymbolIconRenderSnapshotTests</c>.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Padded repack:</b> the decoded sheet is never bound as-is. Published sheets are full-bleed and
-    /// abutting (228 of 264 sprites in the shipped style's sheet have ink on the rect edge), so a sprite's
-    /// silhouette IS the drawn quad's polygon edge — and with MSAA off that edge gets one binary coverage
-    /// sample per pixel and flips whole pixels in and out as the quad slides sub-pixel. This constructor
-    /// therefore repacks every sprite into its own cell with a one-texel transparent border
-    /// (<c>SpriteSheetPadder</c> plans the rects, <c>SpriteSheetComposer</c> writes the pixels) and hands the
-    /// derived index on, so the silhouette becomes a texture ALPHA edge that bilinear filtering ramps across.
-    /// The sheet grows ~20 %, once, at style load.
-    /// </para>
-    ///
-    /// Main-thread-only (like every <c>Texture2D</c> mutation) — must be constructed and disposed from the
-    /// main thread, after any off-thread fetch work has resumed there (mirrors every other GPU-resource
-    /// boundary in this codebase — the mesh/backend disposal contract).
+    /// The Unity-side sprite sheet: an immutable <see cref="Texture2D"/> decoded once from the sprite PNG,
+    /// paired with its <see cref="SpriteIndex"/>. Main-thread only. Non-local invariant: a top-left coord
+    /// <c>(x,y)</c> reads <c>GetPixel(x,y)</c>, as in the glyph atlas, so one shader binds either texture.
+    /// The ctor repacks every sprite with a one-texel transparent border; see
+    /// docs/labels-and-symbols-design.md § "Sampling the sheet — bilinear + a one-texel padded repack".
     /// </summary>
     public sealed class SpriteSheet : VerifiedDisposable
     {
@@ -76,19 +43,16 @@ namespace MapRenderer.Unity.Text
             if (index == null) throw new ArgumentNullException(nameof(index));
 
             var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
-            // Held in a local the `finally` can see: between its creation and the `_texture` assignment
-            // below, the repacked texture has NO owner, so a throw in there would strand it (the ctor's
-            // caller never gets an instance to Dispose). Nulled on success — the field owns it from that
-            // point, and DestroySafely is null-tolerant, so the two paths cannot double-destroy.
+            // A local the `finally` can see: until `_texture` owns it, a throw would strand it. Nulled on
+            // success, so the `finally` and DoDispose never both destroy it.
             Texture2D repacked = null;
             try
             {
                 decoded.LoadImage(pngBytes);
                 var sourceSize = new int2(decoded.width, decoded.height);
 
-                // GetPixels32 — NOT GetRawTextureData. LoadImage picks its own format from the PNG and does
-                // not have to honour the ctor's RGBA32, so the raw bytes may not be RGBA32 at all;
-                // GetPixels32 is the normalising read path.
+                // GetPixels32, not GetRawTextureData: LoadImage picks its own format from the PNG, so the
+                // raw bytes may not be RGBA32.
                 byte[] source = PackTopLeftOrigin(decoded.GetPixels32(), sourceSize);
 
                 SpritePadPlan plan = SpriteSheetPadder.Plan(index, sourceSize, BorderTexels);
@@ -104,22 +68,7 @@ namespace MapRenderer.Unity.Text
                 repacked.SetPixels32(UnpackToUnityPixels(composed, plan.Size));
                 repacked.Apply(updateMipmaps: false);
 
-                // BILINEAR, not Point. An icon's magnification is `icon-size * dpr / pixelRatio`; the sheet is
-                // always fetched @1x and dpr is Screen.dpi/160, so it is essentially never an integer — and
-                // nearest-neighbour is exact ONLY at integer magnification. Off it, each texel covers N or N+1
-                // device pixels depending on the quad's sub-pixel phase, so panning re-quantises an icon's
-                // interior every frame: the icon's pixels visibly warp. Pinned by
-                // SymbolIconResamplingTests.IconInterior_TracksSubPixelPhaseSmoothly.
-                //
-                // What makes bilinear safe here is the ONE-TEXEL TRANSPARENT BORDER the repack above laid
-                // around every sprite — an edge tap reaches into that border rather than into the sprite
-                // packed next door, and the border is simultaneously what turns the silhouette into an alpha
-                // edge the filter can antialias (SymbolIconResamplingTests' bleed and silhouette teeth).
-                // There is no UV inset: IconQuadLayout draws the padded rect edge-to-edge and grows
-                // the quad by the border, so the icon's ink keeps its nominal size.
-                //
-                // Still no mip chain (see the ctor above): mips on a PACKED atlas average neighbouring sprites
-                // together at every level >= 1, which is a worse artifact than the minification aliasing they fix.
+                // Bilinear, no mips: the border above keeps edge taps off neighbours.
                 repacked.filterMode = FilterMode.Bilinear;
                 repacked.wrapMode = TextureWrapMode.Clamp;
 
@@ -160,12 +109,9 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>
-        /// Writes a top-left-origin RGBA32 buffer into the <c>Color32[]</c> <c>SetPixels32</c> expects.
-        /// NOT a row reversal: <c>SetPixels32</c> indexes <c>[y * width + x]</c> with <c>y</c>
-        /// being the <c>GetPixel</c> y, so a straight row-order copy is exactly what makes
-        /// <c>GetPixel(x,y)</c> read the top-left-origin <c>(x,y)</c> — the orientation contract. The single
-        /// flip of the whole path lives in <see cref="PackTopLeftOrigin"/>, which is where
-        /// <c>LoadImage</c>'s upside-down decode is undone; reversing here as well would flip the sheet back.
+        /// Writes a top-left-origin RGBA32 buffer into the <c>Color32[]</c> <c>SetPixels32</c> expects, in
+        /// straight row order. The single flip of the path is in <see cref="PackTopLeftOrigin"/>; a second
+        /// reversal here would flip the sheet back.
         /// </summary>
         private static Color32[] UnpackToUnityPixels(byte[] bytes, int2 size)
         {

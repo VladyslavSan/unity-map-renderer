@@ -2,11 +2,9 @@ namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
     /// The single source of the MapLibre <c>symbol</c> / <c>text-*</c>/<c>icon-*</c> style key strings —
-    /// layout AND paint. Every other class in <c>Style.Symbol</c> references these constants; no
-    /// <c>"text-…"</c>/<c>"icon-…"</c>/<c>"symbol-…"</c> string literal lives anywhere else (enforced by a
-    /// test, mirroring <c>Style.Line</c>). Clean-room: keys from the public MapLibre Style Spec §symbol
-    /// layer. The point <c>icon-*</c> layout/paint keys are included; <c>icon-color</c> and the
-    /// <c>icon-halo-*</c> trio are not modelled yet.
+    /// layout AND paint. No <c>"text-…"</c>/<c>"icon-…"</c>/<c>"symbol-…"</c> string literal lives
+    /// anywhere else, which a test enforces. <c>icon-color</c> and the <c>icon-halo-*</c> trio
+    /// are not modelled.
     /// </summary>
     public static class PropertyNames
     {

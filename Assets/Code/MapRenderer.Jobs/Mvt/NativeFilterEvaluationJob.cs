@@ -7,13 +7,10 @@ using MapRenderer.Jobs.Expressions;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
-    /// The native filter VM's error taxonomy. Burst forbids exceptions, so every erroring opcode threads
-    /// a code instead of throwing; a non-<c>None</c> code halts evaluation immediately (sticky —
-    /// later steps never run) and always maps the filter outcome to <c>matched = false</c> — the same
-    /// outcome <c>CompiledFilter.Matches</c> gives a caught <c>ExpressionEvaluationException</c>.
-    /// <c>StackOverflow</c> and <c>StepBudget</c> are defensive: compile-time-impossible for
-    /// a <see cref="NativeFilterCompiler"/>-accepted program (bounded stack depth / op count), reachable
-    /// only if that guarantee is ever broken — and even then map to exclude, never a silent include.
+    /// The native filter VM's error taxonomy. Burst forbids exceptions, so an erroring opcode returns a code;
+    /// a non-<c>None</c> code halts evaluation and maps to <c>matched = false</c>, as <c>CompiledFilter.Matches</c>
+    /// does for a caught <c>ExpressionEvaluationException</c>. <c>StackOverflow</c> and <c>StepBudget</c> are
+    /// defensive: a <see cref="NativeFilterCompiler"/>-accepted program cannot reach them, and they exclude.
     /// </summary>
     internal enum NativeFilterError : byte
     {
@@ -43,23 +40,11 @@ namespace MapRenderer.Jobs.Mvt
     }
 
     /// <summary>
-    /// The Burst-compiled opcode VM: evaluates one <see cref="NativeFilterProgram"/> against every feature
-    /// at ordinal <c>[0, FeatureCount)</c> of one tile-layer, in a single dispatch. A post-order stack
-    /// machine with real short-circuit jumps for <c>all</c>, over a bounded
-    /// <see cref="FixedList128Bytes{T}"/> operand stack — never throws; see <see cref="NativeFilterError"/>
-    /// for the threaded-error-code contract this job exists to prove compiles cleanly under Burst.
-    ///
-    /// <para><b>Batched, not scheduled.</b> This still runs via <c>RunByRef</c> on the calling thread — the
-    /// call site is inside an <c>IWorkScheduler</c> worker body, where <c>Schedule</c> is illegal. Batching
-    /// one job over the layer's whole feature range removes the per-feature struct-copy-and-dispatch cost that
-    /// scheduling a fresh job per feature would pay; it still produces no <c>JobHandle</c> and gains no
-    /// parallelism.</para>
-    ///
-    /// <para>Declared here rather than beside the rest of the VM in <c>MapRenderer.Jobs.Expressions</c>
-    /// because its columns (<c>Values</c>) are <see cref="MvtValueNative"/> — a format-named type a
-    /// non-decoder-folder production type may not name in a member signature (see
-    /// <c>NeutralGeometryPathTests</c>); <c>Mvt</c> is a decoder folder. <see cref="MvtNativeFeatureMatcher"/>
-    /// and <see cref="NativeFilterProgram"/>'s MVT rebind live here for the same reason.</para>
+    /// The Burst opcode VM: evaluates one <see cref="NativeFilterProgram"/> against every feature of one
+    /// tile-layer in one dispatch. It is a post-order stack machine with short-circuit jumps for <c>all</c>,
+    /// over a bounded operand stack, and it never throws (see <see cref="NativeFilterError"/>). It runs via
+    /// <c>RunByRef</c> because its caller is an <c>IWorkScheduler</c> worker, where <c>Schedule</c> is illegal.
+    /// It lives in <c>Mvt</c> because it names <see cref="MvtValueNative"/> (see <c>NeutralGeometryPathTests</c>).
     /// </summary>
     [BurstCompile]
     internal struct NativeFilterEvaluationJob : IJob
@@ -105,10 +90,8 @@ namespace MapRenderer.Jobs.Mvt
         {
             for (int featureIndex = 0; featureIndex < FeatureCount; featureIndex++)
             {
-                // Declared INSIDE the feature loop, not hoisted above it: a batched Execute must not let one
-                // feature's residual stack contents or error code bleed into the next feature's evaluation
-                // (NativeFilterVmTests.MatchAll_ErrorOnOneFeature_DoesNotExcludeTheNext and
-                // .MatchAll_StackResidue_DoesNotBleedIntoNextFeature pin exactly this).
+                // Declared inside the loop, so one feature's stack or error never reaches the next. Pinned by
+                // NativeFilterVmTests.MatchAll_ErrorOnOneFeature_DoesNotExcludeTheNext and siblings.
                 FixedList128Bytes<NativeValue> stack = default;
                 NativeFilterError error = NativeFilterError.None;
                 int programCounter = 0;
@@ -240,9 +223,8 @@ namespace MapRenderer.Jobs.Mvt
                         }
 
                         default:
-                            // Unreachable: every operation a NativeFilterCompiler-accepted program emits is one of
-                            // the cases above. Mapped to exclude, never a silent include, matching
-                            // NativeFilterError's no-fall-through-include contract.
+                            // Unreachable for a NativeFilterCompiler-accepted program; mapped to exclude, never a
+                            // silent include.
                             error = NativeFilterError.StepBudget;
                             break;
                     }
@@ -264,17 +246,11 @@ namespace MapRenderer.Jobs.Mvt
             }
         }
 
-        /// <summary>Mirrors <see cref="DensePropertyStore.TryGetByKeyIndex"/> verbatim: walks this
-        /// feature's tag pairs backward, returning the first (= last in tag order) whose key index matches
-        /// and whose value index is in range. Bounded by this feature's own tag-pair count.
-        ///
-        /// <para><paramref name="found"/> is the presence bit <c>TryGetByKeyIndex</c> returns — set iff such
-        /// a tag pair exists, <b>independent of the decoded value's type</b>. It is NOT
-        /// <c>result.Type != Null</c>: <see cref="MvtDecoder"/> stores a present-but-<see cref="MvtValueNative.Null"/>
-        /// value for a Value sub-message with no recognized field (empty / unknown-field — legal protobuf a
-        /// non-conformant tile can carry), and managed <c>has</c> reports that key as present. <c>get</c> may
-        /// ignore <paramref name="found"/> (a present-Null and an absent key both read as <c>Null</c>, which
-        /// is exactly what managed <c>get</c> yields for both); only <c>has</c> must key off it.</para></summary>
+        /// <summary>Mirrors <see cref="DensePropertyStore.TryGetByKeyIndex"/>: the backward tag-pair scan.
+        /// Non-obvious why: <paramref name="found"/> is set when the pair exists, whatever the value type,
+        /// because <see cref="MvtDecoder"/> stores a present Null for a Value with no recognized field and
+        /// managed <c>has</c> reports that key present. Only <c>has</c> reads it; <c>get</c> yields Null for
+        /// both cases.</summary>
         private NativeValue ReadTag(int tagOffset, int tagCount, int keyIndex, out bool found)
         {
             found = false;

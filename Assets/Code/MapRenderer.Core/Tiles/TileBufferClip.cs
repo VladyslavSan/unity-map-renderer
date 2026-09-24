@@ -3,24 +3,12 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Tiles
 {
     /// <summary>
-    /// How much of a tile's <b>buffer</b> — the geometry an MVT tile carries beyond <c>[0, extent)</c> so
-    /// neighbours can join seamlessly — the fill path keeps before triangulating.
-    ///
-    /// <para>An unclipped tile paints its whole buffer, so two neighbours double-paint the overlap strip.
-    /// Under the fill shader's <c>SrcAlpha</c>/<c>OneMinusSrcAlpha</c>, <c>ZWrite</c>-off contract a
-    /// translucent fill composites to <c>1 − (1 − α)²</c> there instead of <c>α</c> — a uniform brighter
-    /// band one buffer-width wide along every seam. Clipping fill rings to
-    /// <c>[−b, extent + b]</c> in tile space removes it (and the ~6 % overdraw with it).</para>
-    ///
-    /// <para><b>Units.</b> Authored in tile units <i>at the 4096-extent convention</i>
-    /// (<see cref="ReferenceExtent"/>) and converted to the layer's own extent inside
-    /// <see cref="TryWindow"/> — the single conversion site. Raw tile units would mean 8× the intended
-    /// margin on a 512-extent layer (extent is a per-layer property, not a constant); a bare
-    /// fraction-of-extent is correct but unreadable to author (<c>0.015625</c> for the standard buffer).
-    /// <c>64</c> is the OpenMapTiles standard buffer and reproduces the unclipped geometry exactly;
-    /// <c>0</c> cuts at the tile boundary.</para>
-    ///
-    /// <para><c>default</c> is <see cref="Disabled"/>, so an unset knob means "no clip".</para>
+    /// How much of a tile's <b>buffer</b> (geometry beyond <c>[0, extent)</c>) the fill path keeps before
+    /// triangulating. Non-obvious why: two neighbours that both paint the overlap strip composite a
+    /// translucent fill to <c>1 − (1 − α)²</c> there, a bright seam band; clipping to
+    /// <c>[−b, extent + b]</c> removes it. The margin is in tile units at <see cref="ReferenceExtent"/>,
+    /// converted per layer only in <see cref="TryWindow"/>; 64 (the OpenMapTiles buffer) keeps everything
+    /// and 0 cuts at the tile boundary. <c>default</c> is <see cref="Disabled"/>: "no clip".
     /// </summary>
     public readonly struct TileBufferClip
     {
@@ -32,14 +20,9 @@ namespace MapRenderer.Core.Tiles
         public static TileBufferClip Disabled => default;
 
         /// <summary>
-        /// Decodes an Inspector-authored margin, which carries one state this value type does not:
-        /// <b>negative means "do not run the clip stage at all"</b>, which is NOT the same as a zero margin
-        /// ("cut exactly at the tile boundary"). <see cref="KeepTileUnits"/>'s clamp is the invariant of an
-        /// already-enabled margin, so the two meanings never meet.
-        ///
-        /// <para>This lives here rather than at the Inspector boundary so that every consumer decodes the
-        /// same field identically — in particular the parity oracles, whose reference arm must build under the
-        /// SAME window as the arm it is compared against or it stops being a comparison.</para>
+        /// Decodes an Inspector-authored margin: negative means "do not run the clip stage", unlike 0,
+        /// which cuts at the tile boundary. It lives here so every consumer, including the parity oracles'
+        /// reference arm, decodes the field into the same window.
         /// </summary>
         public static TileBufferClip FromInspectorUnits(double unitsAtReferenceExtent)
             => unitsAtReferenceExtent < 0.0 ? Disabled : KeepTileUnits(unitsAtReferenceExtent);
@@ -49,11 +32,8 @@ namespace MapRenderer.Core.Tiles
         /// eroding into the tile.</summary>
         public static TileBufferClip KeepTileUnits(double unitsAtReferenceExtent)
             => new TileBufferClip(
-                // NaN is rejected explicitly, not clamped: math.max(0, NaN) IS NaN (the comparison is
-                // false, so the second operand wins), and a NaN margin makes a NaN clip window, against
-                // which every vertex tests outside — the whole map clips away to nothing. A silent blank
-                // screen is the worst failure this type can produce, so it degrades to "clip at the tile
-                // boundary" instead.
+                // NaN is rejected, not clamped: math.max(0, NaN) is NaN, and a NaN window clips the whole
+                // map away, so NaN degrades to "clip at the tile boundary".
                 double.IsNaN(unitsAtReferenceExtent) ? 0.0 : math.max(0.0, unitsAtReferenceExtent));
 
         private TileBufferClip(double keepAtReferenceExtent)

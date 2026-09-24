@@ -1,19 +1,11 @@
-// Unity EditMode only — real World/EntityManager. NOT registered in core-tests.csproj.
+// Unity EditMode only: test-assembly observability over the Entities backend's internal fields.
 //
-// Namespace is MapRenderer.Tests, not .Visual, matching GameObjectTileRendererTestExtensions: C# resolves
-// extension methods only through the call site's ENCLOSING namespaces, so the parent namespace is reachable
-// from both.
+// Non-obvious why: C# finds extension methods only through the call site's enclosing namespaces, so this file
+// uses the parent namespace MapRenderer.Tests, which both test namespaces can see.
 //
-// Observability for the Entities backend, living in the TEST assembly rather than on the production class.
-// These read the backend's `_items`/`_tileRoots`/`_em`, broadened private -> internal, which IS the
-// sanctioned footprint.
-//
-// Post-dispose access is strict here: `_em` then refers to a destroyed World, so these throw from inside
-// EntityManager rather than returning a -1 / false / NaN sentinel.
-//
-// No `#if UNITY_EDITOR` is needed on the Editor-only members: this assembly's .asmdef carries
-// defineConstraints:["UNITY_INCLUDE_TESTS"], so it never compiles into a release player. The guard still
-// matters on the production SIDE, where the names are written.
+// After dispose, `_em` refers to a destroyed World, so these members throw from inside EntityManager instead
+// of returning a sentinel. The .asmdef's UNITY_INCLUDE_TESTS constraint keeps this file out of a release
+// player, so the Editor-only members need no `#if UNITY_EDITOR` here.
 
 using Unity.Entities;
 using Unity.Entities.Graphics;

@@ -6,13 +6,10 @@ using System.Text;
 namespace MapRenderer.Core.Expressions
 {
     /// <summary>
-    /// A runtime value in the expression type system — the thing expressions produce and consume. This is
-    /// separate from <see cref="MapRenderer.Core.Json.JsonValue"/> (the parse-time DOM):
-    /// evaluation has its own union because <c>color</c> is a first-class runtime type (typeof→"color",
-    /// to-rgba round-trips it, interpolation operates on it), which a JSON DOM has no notion of.
-    ///
-    /// Number is stored as <see cref="double"/> (the spec's single numeric type). Array is an ordered list
-    /// of values; Object is a string-keyed map — both per the spec's "array"/"object" types.
+    /// A runtime value in the expression type system — the thing expressions produce and consume. It is
+    /// separate from the parse-time <see cref="MapRenderer.Core.Json.JsonValue"/> because <c>color</c> is
+    /// a first-class runtime type, which a JSON DOM has no notion of. Number is a <see cref="double"/>,
+    /// Array an ordered list, and Object a string-keyed map, per the spec's types.
     /// </summary>
     public readonly struct Value : IEquatable<Value>
     {
@@ -84,10 +81,8 @@ namespace MapRenderer.Core.Expressions
         /// <summary>
         /// Color accessor for color-typed contexts (paint colors, interpolate/match/step color outputs),
         /// applying the spec's <c>to-color</c> coercion: a Color passes through; a CSS color <b>string</b>
-        /// (hex / rgb(a) / hsl(a) / named) is parsed. Production styles (e.g. OpenFreeMap "liberty") emit
-        /// color expressions whose branch/stop literals are strings, so strict <see cref="AsColor"/> there
-        /// throws "Expected color but found string". Use this at color seams; keep <see cref="AsColor"/>
-        /// for strict type checks.
+        /// (hex / rgb(a) / hsl(a) / named) is parsed. Use it at color seams, where production styles write
+        /// string literals; keep <see cref="AsColor"/> for strict type checks.
         /// </summary>
         public Color AsColorCoerced()
         {

@@ -51,12 +51,10 @@ namespace MapRenderer.Unity.View.Camera
     }
 
     /// <summary>Curvature-correct far for the GLOBE: casts the four frustum-corner rays at the render-space
-    /// sphere (radius <c>Radius</c>, centred R below the look-at) and takes the farthest GROUND hit as a
-    /// distance along the view axis. Tight at high zoom (the corners hit local ground ≈ overhead altitude),
-    /// opening to the limb tangent at low zoom (the corners see past the horizon — no clipping the curved
-    /// globe), and clamped to <c>altitude · CapMultiplier</c> so a horizon-grazing tilt can't run to infinity.
-    /// Replaces the flat ×4 for the globe, which either wasted tiles (too far near overhead) or clipped the
-    /// horizon (too near at low zoom). Heading-invariant, so it needs only tilt/FOV/altitude.</summary>
+    /// sphere (radius <c>Radius</c>, centred R below the look-at) and takes the farthest ground hit along the
+    /// view axis. It is tight at high zoom and opens to the limb tangent at low zoom, clamped to
+    /// <c>altitude · CapMultiplier</c> so a horizon-grazing tilt stays finite. A flat multiple either wastes
+    /// tiles near overhead or clips the horizon at low zoom. Heading-invariant.</summary>
     public sealed class RaySphereFarPlane : IFarPlanePolicy
     {
         public double Radius { get; }

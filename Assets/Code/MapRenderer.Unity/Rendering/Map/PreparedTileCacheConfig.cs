@@ -4,12 +4,10 @@ using UnityEngine;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// The Inspector-tunable knobs for the <see cref="Tile.PreparedTileCache"/> — grouped under one
-    /// <see cref="MapViewConfig.PreparedCache"/> field instead of loose sibling fields on
-    /// <see cref="MapViewConfig"/>.
-    /// <c>[Serializable]</c> + plain public fields (NOT the init-only data-carrier convention) — this is an
-    /// Inspector-tunable knob, mirroring how <see cref="MapViewConfig"/> itself is written (the
-    /// Unity-serialization exception to the init-only-carriers rule).
+    /// The Inspector-tunable knobs for the <see cref="Tile.PreparedTileCache"/>, grouped under one
+    /// <see cref="MapViewConfig.PreparedCache"/> field. It uses <c>[Serializable]</c> + public fields,
+    /// not init-only properties, because Unity serialization needs them — the same exception
+    /// <see cref="MapViewConfig"/> takes.
     /// </summary>
     [Serializable]
     public struct PreparedTileCacheConfig

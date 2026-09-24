@@ -29,12 +29,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// handed over. A <c>null</c> slot means a layer with nothing to build.</summary>
         private ILayerMeshBuild[] _layers;
 
-        /// <summary>The ONE per-tile geometry buffer every layer's own request input
-        /// borrows (<c>FillMeshPipeline.LayerInput.Geometry</c>'s own documented contract) — owned here, not
-        /// per-layer, and disposed exactly once in <see cref="Dispose"/>. A background tile's every dense
-        /// layer draws the identical full-extent quad, so sharing one allocation across them (rather than
-        /// each layer minting and owning its own copy) is both cheaper and the only shape a build's own
-        /// per-layer BORROWED contract can support without double-freeing it once per layer.</summary>
+        /// <summary>The one per-tile geometry buffer every layer's request input borrows
+        /// (<c>FillMeshPipeline.LayerInput.Geometry</c>), owned here and disposed once in <see cref="Dispose"/>.
+        /// Every dense layer of a background tile draws the same full-extent quad, so the layers share one
+        /// allocation; a layer only borrows it, so no layer frees it.</summary>
         private TileGeometryBuffers _ownedGeometry;
 
         /// <summary>The consumer-kind sibling of <see cref="_ownedGeometry"/>: a SOURCE tile's every layer's
@@ -56,12 +54,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private bool _payloadsTaken;
         private bool _disposed;
 
-        /// <summary>The array <see cref="CompleteWriteAndTakePayloads"/> built on its first call — cached so
-        /// this graph, not the caller, owns it from here on. A repeat call returns this SAME instance
-        /// (idempotent, never throws): the caller may resume a budget-bound partial consume against it
-        /// without holding its own copy, and <see cref="Dispose"/> sweeps whatever is left in it (a released
-        /// mid-consume tile's not-yet-taken slots) through the same funnel a completed consume already nulled
-        /// slots through, so neither path can double-free the other's work.</summary>
+        /// <summary>The array <see cref="CompleteWriteAndTakePayloads"/> built on its first call; this graph owns
+        /// it. A repeat call returns this same instance, so the caller can resume a budget-bound partial consume
+        /// without its own copy. <see cref="Dispose"/> sweeps the slots left in it, and the consume loop nulls
+        /// each slot it disposes, so neither path double-frees the other's work.</summary>
         private MeshDataPayload[] _takenPayloads;
 
         private static long _liveCount;
@@ -86,16 +82,12 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// disposes every already-scheduled layer's build AND every not-yet-reached one — ownership
         /// transfers the moment the caller hands over <paramref name="layers"/>, not incrementally per element.
         /// </summary>
-        /// <param name="layers">One build per background layer, in SLOT order — this graph ALIASES the
-        /// array, it does not copy it. A <c>null</c> element is a layer with nothing to build. Every
-        /// non-null build's own input is expected to borrow <paramref name="ownedGeometry"/> itself (or
-        /// another buffer this graph does not own) — a build's own <c>Dispose</c> never disposes it.</param>
-        /// <param name="ownedGeometry">The ONE per-tile geometry buffer this graph takes ownership of,
-        /// disposed exactly once in <see cref="Dispose"/> — see that field's own doc for why a per-layer
-        /// buffer would be wrong here. <c>default</c> (uncreated) is a valid "nothing to own" value.</param>
-        /// <param name="deps">Upstream dependency every layer's graph must wait for — the seam a test uses
-        /// to hold this genuinely in flight (job-scheduling-design.md: a delay job's handle passed here,
-        /// not a test-only production hook), and in production simply <c>default</c>.</param>
+        /// <param name="layers">One build per background layer, in SLOT order; this graph aliases the array. A
+        /// <c>null</c> element has nothing to build. A build borrows its geometry and never disposes it.</param>
+        /// <param name="ownedGeometry">The one per-tile geometry buffer this graph owns and disposes once in
+        /// <see cref="Dispose"/>. <c>default</c> (uncreated) means nothing to own.</param>
+        /// <param name="deps">Upstream dependency of every layer's graph: <c>default</c> in production; a test
+        /// passes a delay job's handle to hold the graph in flight (job-scheduling-design.md).</param>
         internal static TileBuildGraph ScheduleMeasure(
             ILayerMeshBuild[] layers, TileGeometryBuffers ownedGeometry, JobHandle deps = default)
         {
@@ -212,12 +204,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         }
 
         /// <summary>Completes the write jobs and takes every layer's <see cref="MeshDataPayload"/>, in dense
-        /// SLOT order (one exact-sized array). Non-local invariant, idempotent: a repeat call returns the
-        /// SAME array instance rather than throwing — this graph, not the caller, owns it from the first
-        /// call on. A caller may resume a budget-bound partial consume across Ticks without holding its
-        /// own copy, and a caller whose earlier consume attempt threw before storing anything simply calls
-        /// again and gets back the one array with whatever slots that attempt already nulled — the tile
-        /// recovers instead of throwing forever.</summary>
+        /// SLOT order (one exact-sized array). Non-local invariant: a repeat call returns the SAME array instead
+        /// of throwing, because this graph owns it from the first call on. So a caller can resume a budget-bound
+        /// partial consume across Ticks without its own copy, and a caller whose consume threw gets back the
+        /// array with the slots that attempt already nulled, so the tile recovers.</summary>
         internal MeshDataPayload[] CompleteWriteAndTakePayloads()
         {
             if (!_writeScheduled)
@@ -225,18 +215,15 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     "CompleteWriteAndTakePayloads called before CompleteMeasureAndScheduleWrite — no layer " +
                     "has a write step to complete, so this would silently return an empty array and settle " +
                     "the tile with no mesh.");
-            // Idempotent by design, NOT a throw: a caller can lose its reference to the returned array (the
-            // pump takes it into a local LoadedTile copy and only writes that back AFTER ConsumeMeshBuild
-            // returns, so a throw from consume discards it). Returning the cached array lets the caller
-            // resume. A throw here would fail that tile on every later Tick and leak its MeshDataArrays.
+            // Idempotent, not a throw: the pump writes its LoadedTile copy back only after ConsumeMeshBuild returns,
+            // so a throw there loses the array. A throw here would fail the tile on every Tick and leak its meshes.
             if (_payloadsTaken) return _takenPayloads;
             _payloadsTaken = true;
 
             _handle.Complete();
 
-            // ONE SLOT PER LAYER, in request order — not one per produced mesh. A null slot means an
-            // empty or faulted layer, and the consume loop treats it as a free advance. Compacting instead
-            // would silently renumber the slots a caller joins against.
+            // One slot per layer, in request order; a null slot is an empty or faulted layer (a free advance).
+            // Compacting would renumber the slots a caller joins against.
             var payloads = new MeshDataPayload[_layers.Length];
             for (int i = 0; i < _layers.Length; i++)
             {
@@ -248,12 +235,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             return payloads;
         }
 
-        /// <summary><c>Handle.Complete()</c>, then free every owned container: each non-null layer's own
-        /// build (measure output, write output and request columns, all in one <see cref="Dispose"/> call)
-        /// and this graph's own owned input. Idempotent — a second call is a no-op, guarding the
-        /// <see cref="DebugLiveCount"/> invariant this type's pen callers rely on. The payload sweep never
-        /// re-disposes a consumed payload: the consume loop nulls each slot of the same array right after
-        /// its <c>Dispose</c>.</summary>
+        /// <summary><c>Handle.Complete()</c>, then frees every owned container: each non-null layer's build
+        /// and this graph's owned input. Idempotent, which keeps the <see cref="DebugLiveCount"/> invariant the
+        /// pen callers rely on. The payload sweep never re-disposes a consumed payload: the consume loop nulls
+        /// each slot of the same array right after its <c>Dispose</c>.</summary>
         internal void Dispose()
         {
             if (_disposed) return;
@@ -268,10 +253,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // once, after every layer, never per-layer (see _ownedGeometry's own doc).
             _ownedGeometry.Dispose();
 
-            // Whatever the caller never consumed — a tile released mid-consume, or never consumed at all.
-            // Null-slot-safe: the caller's own consume loop nulls a slot the instant it disposes that
-            // payload, through the SAME array (CompleteWriteAndTakePayloads never copies it), so an
-            // already-consumed slot is a no-op here rather than a double free.
+            // Whatever the caller never consumed. The consume loop nulls a slot of this same array when it
+            // disposes that payload, so an already-consumed slot is a no-op here, not a double free.
             if (_takenPayloads != null)
             {
                 for (int i = 0; i < _takenPayloads.Length; i++)

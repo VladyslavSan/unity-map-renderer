@@ -7,16 +7,11 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// Pure cover-dims + zoom-span derivation over a selected tile cover — the near-field grid
-    /// (<c>Columns</c>/<c>Rows</c>) and the zoom span (<c>MinZ</c>/<c>MaxZ</c>) that the mixed-zoom
-    /// <see cref="FrustumTileSelector"/> output doesn't surface directly. The seam stays unchanged; zoom is
-    /// derived from the cover's <see cref="TileId.Z"/> values here.
-    ///
-    /// <para><b>Columns/Rows count distinct X/Y at <c>MaxZ</c> only</b> — counting the whole cover mixes z
-    /// and z−1 index spaces under the default <c>ScreenSpaceLodStrategy</c> mixed-zoom cover, so it is
-    /// restricted to the finest level (the near-field rectangle); a single-zoom (<c>FlatLodStrategy</c>)
-    /// cover collapses to the same thing. A <c>max(X) − min(X) + 1</c> shortcut is also wrong on its own
-    /// terms — it breaks on an antimeridian-wrapped cover (X values <c>{0, 1, n-2, n-1}</c> read as huge).</para>
+    /// Pure derivation of the near-field grid (<c>Columns</c>/<c>Rows</c>) and zoom span (<c>MinZ</c>/<c>MaxZ</c>)
+    /// of a <see cref="FrustumTileSelector"/> cover, from its <see cref="TileId.Z"/> values.
+    /// Columns/Rows count distinct X/Y at <c>MaxZ</c> only, because a mixed-zoom cover mixes z and z−1 index
+    /// spaces. A <c>max(X) − min(X) + 1</c> shortcut breaks on an antimeridian-wrapped cover
+    /// (<c>{0, 1, n-2, n-1}</c>).
     /// </summary>
     public static class TileCoverStats
     {

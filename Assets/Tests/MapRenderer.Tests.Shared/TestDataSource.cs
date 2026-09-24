@@ -1,10 +1,5 @@
-// The single test double for IDataSource.
-//
-// Engine-free by design: it references only byte[]/TileId/UniTask/CancellationToken/TileEncoding — NO
-// `using UnityEngine`. TileSchedulerOrderingTests.cs (which uses this) is compiled by BOTH the Unity
-// EditMode runner AND the fast Tools/core-tests project, so anything it touches must compile engine-free.
-// The matching <Compile Include> for this file lives in Tools/core-tests/core-tests.csproj (that project
-// is not glob-based — the entry is required).
+// The single test double for IDataSource. It stays engine-free because Tools/core-tests compiles it for
+// TileSchedulerOrderingTests; core-tests.csproj is not glob-based, so it carries a <Compile Include> entry.
 
 using System;
 using System.Threading;
@@ -15,17 +10,10 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// A single, streamlined <see cref="IDataSource"/> test double: a thin wrapper over one fetch delegate
-    /// with always-on, thread-safe instrumentation.
-    /// <list type="bullet">
-    ///   <item><see cref="FromBytes"/> — constant bytes for every tile.</item>
-    ///   <item><see cref="Absent"/> — every tile reported absent (<c>HasData=false</c>).</item>
-    ///   <item><see cref="FromFetch"/> — a per-coord delegate.</item>
-    ///   <item>The <see cref="TestDataSource(Func{TileId, CancellationToken, UniTask{TileResponse}}, TileEncoding)"/>
-    ///     ctor — a per-coord delegate that also sees the <see cref="CancellationToken"/>.</item>
-    /// </list>
-    /// <see cref="FetchCount"/>, <see cref="WasDisposed"/>, and <see cref="DisposeCount"/> are always on and
-    /// thread-safe (the live loop increments fetches from the thread pool).
+    /// An <see cref="IDataSource"/> test double over one fetch delegate: <see cref="FromBytes"/>,
+    /// <see cref="Absent"/>, <see cref="FromFetch"/>, or the ctor, whose delegate also sees the
+    /// <see cref="CancellationToken"/>. <see cref="FetchCount"/>, <see cref="WasDisposed"/> and
+    /// <see cref="DisposeCount"/> are thread-safe, because the live loop fetches from the thread pool.
     /// </summary>
     public sealed class TestDataSource : IDataSource
     {

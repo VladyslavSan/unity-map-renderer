@@ -116,11 +116,8 @@ namespace MapRenderer.Tests.Text
         [Test]
         public void ResolvePitch_Liberty_TextLineLayers_ResolveMap()
         {
-            // highway-name-path/-minor/-major: text-rotation-alignment is EXPLICIT 'map' (not auto), and
-            // text-pitch-alignment is absent (auto). This grounds the explicit-rotation pass-through
-            // (Resolve(Map, *) = Map regardless of placement) on real shipped data — it is NOT the
-            // auto-auto-placement chain (that genuine witness is road_one_way_arrow* below, where BOTH
-            // keys are absent).
+            // highway-name-*: explicit rotation 'map', pitch absent (auto) — the explicit-rotation pass-through
+            // on shipped data. The auto-auto chain witness is road_one_way_arrow* below.
             foreach (string id in new[] { "highway-name-path", "highway-name-minor", "highway-name-major" })
             {
                 SymbolStyle.StyleLayer layer = SymbolTestFixtures.FindSymbolLayer(id);
@@ -141,9 +138,8 @@ namespace MapRenderer.Tests.Text
         [Test]
         public void ResolvePitch_Liberty_RoadOneWayArrow_IconResolvesMap()
         {
-            // road_one_way_arrow / road_one_way_arrow_opposite: symbol-placement:line, BOTH icon-rotation-alignment
-            // and icon-pitch-alignment absent (auto/auto) -- the full pitch-auto -> rotation-auto -> placement
-            // chain, the single highest-value row in the stage.
+            // road_one_way_arrow*: placement line, icon rotation and pitch alignment both absent (auto/auto) --
+            // the full pitch-auto -> rotation-auto -> placement chain.
             foreach (string id in new[] { "road_one_way_arrow", "road_one_way_arrow_opposite" })
             {
                 SymbolStyle.StyleLayer layer = SymbolTestFixtures.FindSymbolLayer(id);
@@ -164,11 +160,8 @@ namespace MapRenderer.Tests.Text
         [Test]
         public void ResolvePitch_Liberty_HighwayShieldNonUs_IconResolvesViewport()
         {
-            // Contrast row: highway-shield-non-us sets icon-rotation-alignment:viewport EXPLICITLY, so icon
-            // pitch resolves viewport regardless of placement -- without this row, T5 could pass on an
-            // implementation that returns Map unconditionally. symbol-placement is a step expression
-            // (point below z11, line at/above); zoom 12 (>= 11) picked so placement is 'line', proving the
-            // explicit rotation value still wins over the line-placement auto-auto default.
+            // Contrast row: explicit icon-rotation-alignment:viewport wins even at z12, where the step placement
+            // is 'line'. Without it, the Map rows above pass on an implementation that always returns Map.
             SymbolStyle.StyleLayer layer = SymbolTestFixtures.FindSymbolLayer("highway-shield-non-us");
             Assert.IsNotNull(layer, "liberty must ship a symbol layer 'highway-shield-non-us'");
 
@@ -189,17 +182,11 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A curved (along-line) text cell is centred VERTICALLY on the path, by the same optical
-    /// (cap-band) metric a centred point symbol uses (<c>docs/road-shields-design.md</c>). The
-    /// curved producer that instead left every cell baseline-relative would render a road symbol at a fixed
-    /// offset above/below the road it is drawn along — at every tilt, tilt 0 included.
-    ///
-    /// <para><b>Oracle hygiene.</b> No tooth here takes <c>TextQuadLayout.OpticalCentreBelowReferencePx</c>
-    /// as its expected value — that is the code under test, and an oracle derived from it is vacuous.
-    /// T1 measures the ink band the committed fixture's own glyph metrics predict, T2 measures a
-    /// per-glyph-vs-per-symbol distinction that needs no magnitude at all, and T3 uses the POINT path
-    /// (fixed separately, pinned by <c>TextVerticalCentringTests</c>) as an
-    /// independent reference.</para>
+    /// A curved (along-line) text cell is centred VERTICALLY on the path, by the same optical (cap-band)
+    /// metric a centred point symbol uses (<c>docs/road-shields-design.md</c>). A baseline-relative cell
+    /// draws a road symbol at a fixed offset above or below its road, at every tilt.
+    /// Non-obvious why: no tooth takes <c>TextQuadLayout.OpticalCentreBelowReferencePx</c> as its expected
+    /// value, because that constant is the code under test; the oracles are fixture metrics and the point path.
     /// </summary>
     [TestFixture]
     public class CurvedTextCentringTests
@@ -238,15 +225,10 @@ namespace MapRenderer.Tests.Text
         private static int BareHeight(in GlyphAtlasEntry entry) => entry.CellSize.y - 2 * GlyphSdf.Buffer;
 
         // =========================================================================================
-        // T1 — the headline invariant, in cell coordinates: a baseline-resting CAP glyph's ink band
-        // straddles the anchor. Cell y=0 is the point on the path (both consumers map the cell linearly
-        // and homogeneously about the anchor — BillboardMath.BuildWorldQuad, SymbolBox.BuildRotatedGlyph),
-        // so "on the road" is exactly "ink band symmetric about y=0".
-        //
-        // The preconditions come FIRST and from the fixture's own entry, the V9 pattern: this tooth's
-        // exactness rests on '5' being a baseline-resting glyph whose bare height IS the nominal cap
-        // height. A regenerated fixture baked against a different ascent must fail loudly here rather
-        // than drift silently through a still-green suite.
+        // A baseline-resting CAP glyph's ink band straddles the anchor. Non-local invariant: cell y=0 is the
+        // path point, because BillboardMath.BuildWorldQuad and SymbolBox.BuildRotatedGlyph map the cell
+        // linearly about the anchor. The fixture preconditions come first: a fixture baked against a
+        // different ascent must fail here, not drift through a green suite.
         // =========================================================================================
         [Test]
         public void CurvedCell_InkBand_IsSymmetricAboutTheAnchor_ForACapGlyph()
@@ -279,15 +261,9 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T2 — the shift is ONE CONSTANT PER LABEL, not per glyph. A run's internal typography must
-        // survive intact: 'A', 'g' and '5' keep their relative offsets, descenders still descend.
-        //
-        // What this tooth does and does NOT observe, stated honestly: the residual is constant under BOTH
-        // the old code (residual == Buffer) and the correct fix (residual == Buffer + the shift), so
-        // T2 cannot see MAGNITUDE — T1 does that. What T2 alone catches is the REJECTED per-glyph
-        // metric (centring each cell on its own box, the obvious "just centre it" fix), which makes the
-        // residual vary with each glyph's own Top/Height while leaving a symmetric cap glyph like '5'
-        // looking perfectly correct. T1 and T2 are a pair; neither alone is the tooth.
+        // The shift is ONE CONSTANT PER SYMBOL, not per glyph: 'A', 'g' and '5' keep their relative offsets.
+        // Limitation: a constant residual cannot show the shift's magnitude (the ink-band test does); this
+        // test catches per-glyph centring, which a symmetric cap glyph like '5' alone cannot reveal.
         // =========================================================================================
         [Test]
         public void CurvedCells_ShiftIsOnePerSymbolConstant_NotPerGlyph()
@@ -324,14 +300,10 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T3 — cross-check against the POINT path, which already centres correctly and is untouched by
-        // this stage (pinned by TextVerticalCentringTests). Same glyph, same atlas, two
-        // independent producers: their cells' VERTICAL band must agree. x legitimately differs — the point
-        // path centres the whole block, the curved path centres each glyph on its own arc centre.
-        //
-        // The equality holds because the point path's centre shift carries a (lineCount - 1) line-spacing
-        // term that vanishes for the single line a curved symbol always is; LineCount is asserted as a
-        // precondition so a future multi-line change cannot silently make this compare two different things.
+        // Cross-check against the POINT path (pinned by TextVerticalCentringTests): same glyph, same atlas,
+        // and the cells' VERTICAL band must agree; x differs, as each path centres on a different point.
+        // Non-obvious why: the point shift's (lineCount - 1) line-spacing term vanishes only for one line,
+        // so LineCount == 1 is a precondition.
         // =========================================================================================
         [Test]
         public void CurvedCell_VerticalBand_MatchesThePointPath_ForTheSameGlyph()
@@ -429,10 +401,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(centerA, glyphs[0].ArcCenter, 1e-4f);
             Assert.AreEqual(centerLowerA, glyphs[1].ArcCenter, 1e-4f);
 
-            // Glyph 0's cell: same TOP-referenced box as TextQuadLayout, shifted -arcCenter in x and lifted
-            // in y so the run's optical (cap-band) centre lands on the path. The shift is restated here as
-            // the derivation it is — baseline offset less half a cap height — NOT read
-            // off TextQuadLayout's own constant, which is the code under test.
+            // Glyph 0's cell: TextQuadLayout's box, shifted -arcCenter in x and lifted to the optical centre.
+            // The shift is derived (baseline offset less half a cap height), not read off the code under test.
             float opticalCentreShift = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * TextQuadLayout.OneEm;
             SymbolQuad cell0 = glyphs[0].Cell;
             Assert.AreEqual(entryA.Left - GlyphSdf.Buffer - centerA, cell0.TopLeft.x, 1e-4f, "cell x is centered on the arc-center");
@@ -440,12 +410,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(entryA.Left - GlyphSdf.Buffer + entryA.CellSize.x - centerA, cell0.BottomRight.x, 1e-4f);
             Assert.AreEqual(entryA.Top + GlyphSdf.Buffer + opticalCentreShift - entryA.CellSize.y, cell0.BottomRight.y, 1e-4f);
 
-            // Glyph 1's cell y, by the SAME derivation — and 'a' is the discriminating half of this pair.
-            // 'A' is a baseline-resting CAP glyph, for which centring the run on its optical centre and
-            // centring each glyph on its own box happen to give the identical answer (they coincide exactly
-            // when bare height == the nominal cap height), so cell0 alone cannot tell the correct per-LABEL
-            // rule from the rejected per-GLYPH one. 'a' is an x-height glyph and separates them by 2.0 baked
-            // px, which is 20 000x this tolerance.
+            // Glyph 1's cell y, by the SAME derivation. 'A' is a cap glyph, so per-symbol and per-glyph centring
+            // agree on it; the x-height 'a' separates them by 2.0 baked px, far above this tolerance.
             SymbolQuad cell1 = glyphs[1].Cell;
             Assert.AreEqual(entryLowerA.Top + GlyphSdf.Buffer + opticalCentreShift, cell1.TopLeft.y, 1e-4f,
                 "every glyph in the run shifts by the same per-label constant — an x-height glyph included");
@@ -528,9 +494,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Real-fixture fallback direction: a codepoint present ONLY in the second font's decoded
-        // range (the first font has no decoded range at all covering this codepoint's bucket) must
-        // resolve from the second font.
+        // Real fixture: a codepoint present ONLY in the second font's decoded range (the first font has
+        // no range for its bucket) resolves from the second font.
         // =========================================================================================
         [Test]
         public void Resolve_CodepointMissingFromFirstFont_ResolvesFromSecondFont()
@@ -555,9 +520,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Real-fixture: a codepoint present in the FIRST font resolves from the first font. (The
-        // second font's cache has no entry at all for this codepoint's range bucket, so a resolver
-        // that incorrectly skipped straight to fallback would return not-found here, not "LatinFont".)
+        // Real fixture: a codepoint present in the FIRST font resolves from it. The second font has no
+        // cache entry, so a resolver that skipped to fallback returns not-found here.
         // =========================================================================================
         [Test]
         public void Resolve_CodepointPresentInFirstFont_ResolvesFromFirstFont()
@@ -579,10 +543,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Priority discriminator (the case a disjoint-fixture test cannot exercise): the SAME
-        // codepoint exists in BOTH fonts at the same range, with distinguishable metrics. Only stack
-        // order — first-font-wins — can be correct; a resolver that iterated in reverse, or picked
-        // "any" match, would return Font2's advance here.
+        // Priority: the SAME codepoint is in BOTH fonts with distinct metrics, so only first-font-wins passes.
+        // A resolver that iterated in reverse, or took any match, returns Font2's advance.
         // =========================================================================================
         [Test]
         public void Resolve_CodepointPresentInBothFonts_FirstFontInStackWins()
@@ -704,9 +666,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // A glyph that does not fit the CURRENT page opens a NEW page instead of being
-        // dropped — this is the multi-page capacity behaviour M-T2 pins end-to-end (layout/vertex/render);
-        // this test is the atlas-level slice of it.
+        // A glyph that does not fit the CURRENT page opens a NEW page instead of being dropped.
+        // This is the atlas-level slice of the multi-page capacity behaviour.
         // =========================================================================================
         [Test]
         public void FixedAtlas_PageOverflow_OpensNewPage_InsteadOfDropping()
@@ -734,9 +695,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Genuine overflow: a cell that doesn't fit even a BRAND-NEW empty page
-        // (taller than the fixed page height) is still dropped and counted — paging only helps a cell that
-        // fits A page, just not the current one.
+        // Genuine overflow: a cell taller than the fixed page height fits no page, so it is dropped and
+        // counted. Paging only helps a cell that fits A page, just not the current one.
         // =========================================================================================
         [Test]
         public void FixedAtlas_CellTallerThanPage_StillOverflows_EvenOnAFreshPage()
@@ -769,9 +729,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Robustness: a cell WIDER than the fixed page must be surfaced as
-        // OverflowCount overflow, NOT throw. GlyphAtlasPacker.TryPack throws for an over-wide cell, so
-        // without the width preflight in TryPackFixed a single over-wide glyph aborts the whole build.
+        // A cell WIDER than the fixed page counts in OverflowCount and does NOT throw. GlyphAtlasPacker.TryPack
+        // throws for it, so the width preflight in TryPackFixed keeps one glyph from aborting the build.
         // =========================================================================================
         [Test]
         public void FixedAtlas_CellWiderThanPage_CountsAsOverflow_DoesNotThrow()
@@ -795,9 +754,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Robustness: page growth is capped at GlyphAtlas.MaxPages. Once the cap
-        // is reached, a glyph that would need a NEW page is surfaced as OverflowCount overflow instead of
-        // allocating unboundedly (OOM / Texture2DArray layer limit). The existing pages keep their content.
+        // Page growth is capped at GlyphAtlas.MaxPages: past it, a glyph that needs a NEW page counts in
+        // OverflowCount (no unbounded allocation), and the existing pages keep their content.
         // =========================================================================================
         [Test]
         public void FixedAtlas_HittingMaxPages_SurfacesOverflow_InsteadOfGrowingUnbounded()
@@ -868,12 +826,9 @@ namespace MapRenderer.Tests.Text
         // =========================================================================================
         /// <summary>
         /// <b>The atlas must key on the FONT as well as the codepoint.</b> One shared
-        /// <see cref="GlyphAtlas"/> serves every layer (<c>SymbolSubsystem</c> builds exactly one), and a
-        /// Liberty-style document mixes faces — <c>label_city</c> asks for Noto Sans Regular while
-        /// <c>water_name_*</c> and <c>poi_r1</c> ask for Noto Sans Italic. Keyed on the codepoint alone,
-        /// whichever face decodes first claims 'B' forever and <c>GlyphManager.AppendToAtlas</c>'s
-        /// "already present" skip silently discards every other face's 'B' — so the whole map renders in one
-        /// arbitrary face. That is a wrong-glyph bug, not a styling nicety: it rendered Berlin in italic.
+        /// <see cref="GlyphAtlas"/> serves every layer, and Liberty mixes Noto Sans Regular and Italic.
+        /// Keyed on the codepoint alone, the first face to decode claims 'B', and the "already present" skip
+        /// in <c>GlyphManager.AppendToAtlas</c> discards every other face's 'B' — a wrong-glyph bug.
         /// </summary>
         [Test]
         public void Append_SameCodepointFromTwoFonts_KeepsThemApart()
@@ -982,9 +937,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // (a) + whole-range invariant: appending every glyph in the 0-255 range packs each into a
-        //     non-overlapping cell fully inside Size, and every cell's blitted bytes (when it has a
-        //     bitmap) match its source glyph's bitmap.
+        // Every glyph in the 0-255 range packs into a non-overlapping cell inside Size, and each
+        // bitmap-bearing cell's blitted bytes match its source bitmap.
         // =========================================================================================
         [Test]
         public void Append_WholeRange_PacksNonOverlappingCellsWithinSizeAndBlitsCorrectly()
@@ -1079,9 +1033,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Single-range fetch/decode/cache/atlas wiring: EnsureFontRangeAsync populates BOTH the
-        // GlyphCache (decoded range, keyed by fontName+rangeStart) AND the shared GlyphAtlas (per-glyph
-        // entries), from the real decoded fixture bytes -- and does not re-fetch on a repeat call.
+        // EnsureFontRangeAsync fills BOTH the GlyphCache (keyed by fontName+rangeStart) AND the shared
+        // GlyphAtlas from the real fixture bytes, and does not re-fetch on a repeat call.
         // =========================================================================================
         [Test]
         public async Task EnsureFontRangeAsync_FetchesDecodesCachesAndAppendsGlyphs()
@@ -1132,10 +1085,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Font-stack fetch model: EnsureFontStackRangeAsync fetches PER
-        // INDIVIDUAL FONT NAME. A two-font stack where only the second font's fixture covers the
-        // requested codepoint's range still resolves correctly via FontStackResolver afterward (T5,
-        // exercised through the GlyphManager wiring rather than a hand-built GlyphCache).
+        // EnsureFontStackRangeAsync fetches PER FONT NAME. A codepoint only the second font covers still
+        // resolves via FontStackResolver, through the GlyphManager wiring rather than a hand-built cache.
         // =========================================================================================
         [Test]
         public async Task EnsureFontStackRangeAsync_TwoFontStack_FetchesEachNameAndResolvesWithFallback()
@@ -1305,20 +1256,10 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // 1b. SDF interior peak — DIAGNOSTIC for the "0.75 edge renders nearly transparent" finding.
-        // The fill shader treats distSample > _SdfEdge as inside; the fontnik convention puts the glyph
-        // OUTLINE at 191/255 ≈ 0.75 and the interior should climb well above it (toward 255) for any stroke
-        // more than a couple px thick. If a standard glyph's interior barely clears 0.75, either the glyph
-        // source encodes a shallow field OR our decode compresses the range. This measures the committed
-        // NotoSans fixture (a known-standard fontnik bake) to tell those apart.
-        //
-        // MEASURED, both sources, 0-255 range: byte-for-byte the same encoding — global max 255, MEDIAN
-        // per-glyph interior peak 224 (0.878), p10 219 (0.859). So openfreemap serves the same fontnik bake
-        // as the fixture and the "other source encodes a shallower field" arm is NOT what was happening.
-        // A lower _SdfEdge is therefore NOT per-source calibration here: at the 0.75 iso a median stroke
-        // still clears the threshold by ~1 atlas texel, and every 0.01 below it dilates each edge by
-        // 0.08 texels (_SdfRangeTexels 8). The material ran at 0.60 for a long time, which is ~1.2 texels of
-        // dilation PER EDGE — visibly bold text, mistaken for a font-weight problem.
+        // 1b. SDF interior peak. The fontnik convention puts the glyph OUTLINE at 191/255 ≈ 0.75, and a
+        // stroke interior climbs well above it; a low peak in this known-standard bake means our decode
+        // compresses the field. Non-obvious why: _SdfEdge is not per-source calibration, since every 0.01
+        // below 0.75 dilates each edge by 0.08 texels (_SdfRangeTexels 8) and reads as bold text.
         // =========================================================================================
         [Test]
         public void SdfInteriorPeak_StandardFontnikGlyphsClimbWellAbove075()
@@ -1380,11 +1321,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // 3. Zigzag-vs-plain-varint discriminator: 'J' (codepoint 74) has a NEGATIVE Left (-2).
-        //    The wire byte for this field is the zigzag encoding of -2 (raw varint value 3); reading
-        //    it as a plain (non-zigzag) varint would yield 3, not -2 — a different, wrong value.
-        //    'A'/'a' above (Left = 0 / 1) do not discriminate this bug since small non-negative zigzag
-        //    values coincide with small positive raw varints.
+        // 3. Zigzag discriminator: 'J' has Left -2, raw varint 3, so a plain-varint read yields 3.
+        //    'A'/'a' above (Left 0 / 1) cannot catch this, as small zigzag and raw values coincide.
         // =========================================================================================
         [Test]
         public void Decode_NegativeLeftAndTop_RequireZigzagDecode()
@@ -1442,22 +1380,11 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="IconQuadLayout.Layout"/> over the committed <c>sample-sprite.json</c> fixture's own
-    /// numbers (sheet 64×64 — <c>marker</c> 16×16@1x, <c>star</c> 24×24@2x, <c>dot</c> 8×8@1x at (0,32)),
-    /// hand-pinned rather than re-derived, so a formula regression (e.g. UV accidentally divided by
-    /// <see cref="SpriteEntry.PixelRatio"/>) is caught by a literal mismatch. Engine-free; runs in both
-    /// runners.
-    ///
-    /// <para>Every UV expectation below is the sprite's PADDED rect — its content rect grown by
-    /// <see cref="SpriteEntry.Padding"/> texels on each side — divided by the sheet size, with NO inset.
-    /// The half-texel inset the earlier expectations carried is retired: what keeps the sheet's bilinear
-    /// filtering off the neighbouring sprite is now the one-texel transparent border <c>SpriteSheet</c>'s
-    /// repack lays down, and DRAWING that border is what antialiases the icon's silhouette (see
-    /// <see cref="IconQuadLayout"/>). The fixture entries below carry <c>Padding = 0</c> — they mirror the
-    /// committed sprite JSON, which is a RAW parsed index — so their UVs are the plain rect; the padded
-    /// cases live in the teeth at the bottom of this file. Each expectation carries its own derivation in a
-    /// trailing comment, and they remain hand-written literals ON PURPOSE: re-deriving them from
-    /// <c>entry.X / sheetSize</c> would just restate the implementation and could not fail.</para>
+    /// <see cref="IconQuadLayout.Layout"/> over the <c>sample-sprite.json</c> fixture's own numbers, as
+    /// hand-written literals: a re-derived <c>entry.X / sheetSize</c> restates the code and cannot fail.
+    /// Each UV is the PADDED rect over the sheet size, with NO inset; <c>SpriteSheet</c>'s transparent border
+    /// keeps bilinear filtering off the neighbour. These entries carry <c>Padding = 0</c> (a raw parsed index),
+    /// so their UVs are the plain rect; the padded cases are at the bottom of this file.
     /// </summary>
     [TestFixture]
     public class IconQuadLayoutTests
@@ -1474,11 +1401,8 @@ namespace MapRenderer.Tests.Text
         [Test]
         public void Star_CenterAnchor_IconSize1_LogicalSizeAndUvBothCorrect()
         {
-            // The UV/pixelRatio RED tooth: star is @2x, so logical size (24/2=12) and the UV rect (spanning
-            // the raw 24px extent, NEVER divided by pixelRatio) must diverge from each other — asserting
-            // both in one test catches an implementation that mistakenly divides the UV rect too. The UV
-            // extent below is 24/64, the sprite's full 24 texels, nowhere near the 12px a pixelRatio
-            // division would produce.
+            // Star is @2x: logical size is 24/2 = 12, but the UV rect spans the raw 24 texels. Asserting both
+            // catches an implementation that also divides the UV rect by pixelRatio.
             SymbolQuad quad = IconQuadLayout.Layout(Star, SheetSize, 1f, TextAnchor.Center, float2.zero);
 
             Assert.AreEqual(-6f, quad.TopLeft.x, Eps);
@@ -1569,9 +1493,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(unshifted.BottomRight.y - 3f, shifted.BottomRight.y, Eps);
         }
 
-        // 16x16 marker at iconSize 1: minX=-hAlign*16, maxX=(1-hAlign)*16, maxY=vAlign*16, minY=-(1-vAlign)*16
-        // — the SAME hAlign/vAlign convention TextQuadLayout.ResolveAlignFactors uses (Left/Right/Top/Bottom
-        // 0 or 1, Center/unset 0.5), so icon and text anchors agree.
+        // 16x16 marker at iconSize 1: minX=-hAlign*16, maxX=(1-hAlign)*16, maxY=vAlign*16, minY=-(1-vAlign)*16,
+        // with TextQuadLayout.ResolveAlignFactors' hAlign/vAlign, so icon and text anchors agree.
         [TestCase(TextAnchor.Center, -8f, 8f, 8f, -8f)]
         [TestCase(TextAnchor.Left, 0f, 8f, 16f, -8f)]
         [TestCase(TextAnchor.Right, -16f, 8f, 0f, -8f)]
@@ -1591,9 +1514,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(expectedBottomRightY, quad.BottomRight.y, Eps, $"anchor {anchor}: BottomRight.y");
         }
 
-        // The inline bounds formula (min/max corner ± skirt) wraps a single laid-out icon quad into
-        // the same caller-owned quad list + TextLayoutBounds shape the point-text path produces, so
-        // StyledSymbolTileBuilder's Pass 2 can emit an icon down the SAME point-placement path.
+        // The bounds formula (min/max corner ± skirt) gives one icon quad the point-text path's shape, so
+        // StyledSymbolTileBuilder can emit an icon down the SAME point-placement path.
         [Test]
         public void IconBounds_WrapsSingleQuad_BoundsAreItsOwnMinMaxCorners()
         {
@@ -1614,11 +1536,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // The padded-repack teeth. SpriteSheet hands every drawable sprite a one-texel transparent border
-        // and reports it as SpriteEntry.Padding; IconQuadLayout draws that border (which is what gives the
-        // silhouette a ramp bilinear can antialias) and grows the quad by exactly its drawn size.
-        //
-        // Padded twins of the fixture sprites — SAME rect, Padding = 1.
+        // Padded twins (Padding = 1): SpriteSheet gives each sprite a one-texel transparent border, and
+        // IconQuadLayout draws it (the ramp bilinear antialiases) and grows the quad by its drawn size.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         private static readonly SpriteEntry PaddedMarker = new SpriteEntry { X = 5, Y = 5, Width = 16, Height = 16, PixelRatio = 1f, Padding = 1 };
@@ -1715,13 +1634,10 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// C3 — the identity the whole design hangs on: <b>texels-per-drawn-pixel is the same for the border
-        /// as for the content</b>, i.e. <c>uvWidth × sheetWidth / quadWidth == PixelRatio / iconSize</c>,
-        /// independent of the sprite and of the padding. It catches BOTH shallow implementations in one
-        /// assertion — a quad grown without widening the UV rect makes the ratio too small (fewer texels per
-        /// drawn pixel: the content is stretched across the padded quad, so the icon <b>grew</b>), a UV rect
-        /// widened without growing the quad makes it too large (more texels per drawn pixel: the padded rect
-        /// is squeezed into the nominal quad, so the icon <b>shrank</b>).
+        /// C3 — <b>texels-per-drawn-pixel is the same for the border as for the content</b>:
+        /// <c>uvWidth × sheetWidth / quadWidth == PixelRatio / iconSize</c>, for any sprite and padding.
+        /// A quad grown without widening the UV makes the ratio too small (the icon <b>grew</b>); a UV
+        /// widened without growing the quad makes it too large (the icon <b>shrank</b>).
         /// </summary>
         [TestCase(0.75f)]
         [TestCase(3f)]
@@ -1781,30 +1697,11 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The decoded glyph-PBF bitmap is a REAL signed distance field, not a coverage
-    /// bitmap masquerading as one, against the same committed fixture
-    /// (<c>Assets/Fixtures/glyphs/NotoSansRegular/0-255.pbf.bytes</c>) Slice 1's decode tests use.
-    ///
-    /// Convention confirmed: the MapLibre/Mapbox glyph-PBF SDF encodes the glyph OUTLINE at
-    /// <see cref="IsoLevel"/> ≈ 0.75 × 255 (≈191) — not the generic-SDF 0.5 — leaving more of the byte
-    /// range for outward distance (halo) than inward (fill); this is the (public, non-source) "Drawing
-    /// Text with Signed Distance Fields in Mapbox GL" convention, cross-checked directly against the
-    /// committed fixture's real 'A' bitmap below (deep-outside padding corners decode to flat 0, values
-    /// climb smoothly toward the interior — never the reverse — confirming the sign and rough placement
-    /// of the cutoff without needing to re-derive it from the pixels, which would be circular).
-    ///
-    /// Two checks, each run against BOTH the real fixture (must pass) and a synthetic coverage-style
-    /// (flat 0 / flat 255, single-pixel jump) array:
-    ///  1. Graded-edge structural guard — THE decisive tooth. A real SDF has many distinct mid-range
-    ///     byte values forming a multi-pixel transition band; a coverage bitmap has none (it is exactly
-    ///     {0, 255}), so it fails <c>distinctMidBandValues &gt; 10</c> outright (0 is never &gt; 10).
-    ///  2. Scale-invariance — a real SDF's iso-level crossing, reconstructed from a coarse (every-2nd-
-    ///     sample) set, agrees with the full-resolution reconstruction to a fraction of a pixel (positive
-    ///     property, checked on real data only). Separately (different, coarser step — a hard edge has
-    ///     no gradient for step=2 to expose, see the step-2-vs-step-4 note on the teeth test below), a
-    ///     coverage bitmap's reconstructed position visibly SHIFTS as the sampling grid coarsens — the
-    ///     scale-dependence a real SDF does not have. This second check demonstrates the failure mode
-    ///     qualitatively; it is not a like-for-like re-run of check 2's real-data assertion.
+    /// The decoded glyph-PBF bitmap is a REAL signed distance field, not a coverage bitmap. The glyph-PBF
+    /// SDF puts the OUTLINE at <see cref="IsoLevel"/> ≈ 0.75 × 255, the public "Drawing Text with Signed
+    /// Distance Fields in Mapbox GL" convention. The graded-edge guard is the decisive tooth; the
+    /// scale-invariance pair shows the coverage failure mode qualitatively, not as a like-for-like re-run.
+    /// Each check also runs against a synthetic flat 0 / flat 255 coverage array.
     /// </summary>
     [TestFixture]
     public class SdfDistanceFieldTests
@@ -1875,10 +1772,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // 2. Scale-invariance (real fixture): row 3 of 'A' (0-based; the apex, empirically verified
-        //    against the committed fixture to cross the iso-level cleanly) thresholded at IsoLevel from
-        //    a coarse (every-2nd-sample) reconstruction agrees with the full-resolution reconstruction,
-        //    within a fraction of a pixel -- the entire point of an SDF: crisp at any effective size.
+        // 2. Scale-invariance (real fixture): on row 3 of 'A' (the apex, which crosses IsoLevel cleanly), the
+        //    every-2nd-sample iso crossing agrees with the full-resolution one within a fraction of a pixel.
         // =========================================================================================
         [Test]
         public void ScaleInvariance_CoarseAndFineSamplingAgreeOnIsoCrossing()
@@ -1900,14 +1795,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // 2b. A coverage bitmap's reconstructed iso crossing SHIFTS as the sampling grid coarsens --
-        //     the scale-dependence a real SDF does not have. Uses a coarser step (4, vs 2 for the real
-        //     scanline above): a hard, zero-width transition carries no gradient at all
-        //     between its two flat plateaus, so a coarse-enough sample set slides the interpolated
-        //     crossing toward whichever bracket it lands in; step=2 on THIS array only drifts ~0.25px
-        //     (an alignment coincidence, not evidence the check is toothless -- the graded-value guard
-        //     above is the decisive tooth). This is a qualitative demonstration of the failure mode, not
-        //     a like-for-like re-run of the real-data assertion (which uses step=2 and passes it).
+        // 2b. A coverage bitmap's iso crossing SHIFTS as the sampling grid coarsens. Non-obvious why: it
+        //     uses step 4, not 2, because step 2 on THIS array drifts only ~0.25px by alignment coincidence.
         // =========================================================================================
         [Test]
         public void ScaleInvariance_Teeth_SyntheticCoverageBitmapDiverges()
@@ -2058,9 +1947,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T2a — single line: TopLeft/Center/BottomRight differ by exactly the anchor delta. BottomRight
-        // uses the block's bbox height (unchanged); Center uses the optical-centre shift --
-        // NOT the arithmetic midpoint of Top and BottomRight, which is the point of this stage.
+        // T2a — single line: TopLeft/Center/BottomRight differ by the anchor delta. BottomRight uses the
+        // block's bbox height; Center uses the optical-centre shift, NOT the midpoint of Top and Bottom.
         // =========================================================================================
         [Test]
         public void Anchor_SingleLine_BottomShiftsByBlockHeight_CentreByOpticalCentre()
@@ -2081,9 +1969,8 @@ namespace MapRenderer.Tests.Text
             TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center), centerQuads);
             TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight), bottomRightQuads);
 
-            // Optical-centre shift: GlyphSdf.BaselineBelowReferencePx (26) minus half a
-            // cap height (0.5 * (17/24)em * 24 = 8.5) = 17.5 -- a hand-derived literal, not read
-            // back from the production constants it exists to check.
+            // Optical-centre shift: BaselineBelowReferencePx (26) minus half a cap height (0.5 * 17 = 8.5)
+            // = 17.5, a hand-derived literal, not read back from the constants under test.
             AssertConstantDelta(topLeftQuads, centerQuads, new float2(-0.5f * lineWidth, 17.5f), "Center - TopLeft");
             AssertConstantDelta(topLeftQuads, bottomRightQuads, new float2(-lineWidth, lineHeightPx), "BottomRight - TopLeft");
 
@@ -2091,13 +1978,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T2b — a 2-line run: BottomRight's vertical delta uses lineCount * lineHeight*24 (unchanged);
-        // Center's uses the line-span midpoint -- the midpoint between the FIRST line's
-        // optical centre and the LAST line's, i.e. one line's span (0.5*lineHeightPx) above the
-        // single-line optical-centre shift, NOT half of lineCount*lineHeight. Justify held constant
-        // (Center) across variants so the pure anchor delta is isolated (see TextQuadLayout's class
-        // doc: the per-line justify term cancels in a delta between two Layout() calls that share
-        // options except Anchor).
+        // T2b — a 2-line run: BottomRight moves by lineCount * lineHeightPx; Center by the first-to-last line
+        // optical-centre midpoint, NOT half of that. Justify stays Center, so its per-line term cancels.
         // =========================================================================================
         [Test]
         public void Anchor_TwoLineRun_BottomUsesLineCountTimesLineHeight_CentreUsesLineSpanMidpoint()
@@ -2117,9 +1999,8 @@ namespace MapRenderer.Tests.Text
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
             float blockHeight = 2 * lineHeightPx;
 
-            // 17.5 is the single-line optical-centre shift derived in
-            // Anchor_SingleLine_BottomShiftsByBlockHeight_CentreByOpticalCentre above; a 2-line block's
-            // centre sits one line's span (0.5*lineHeightPx) above it.
+            // 17.5 is the single-line optical-centre shift derived above; a 2-line block's centre sits
+            // one line's span (0.5*lineHeightPx) above it.
             float deltaYCenterExpected = 17.5f + 0.5f * lineHeightPx;
 
             var topLeftQuads = new List<SymbolQuad>();
@@ -2137,9 +2018,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(deltaYCenterExpected, deltaYCenter, Tolerance, "Center's vertical delta must be the line-span midpoint, not half of lineCount*lineHeight");
             Assert.AreEqual(blockHeight, deltaYBottomRight, Tolerance, "BottomRight's vertical delta must use lineCount*lineHeight");
 
-            // Teeth: a per-line (not block-bbox) vertical anchor would use just ONE lineHeightPx for
-            // BottomRight, and the OLD (rejected) box-midpoint formula would give 0.5*blockHeight for
-            // Center -- both different, smaller/larger numbers that must NOT match.
+            // Teeth: a per-line vertical anchor gives ONE lineHeightPx for BottomRight, and a box-midpoint
+            // formula gives 0.5*blockHeight for Center; neither may match.
             Assert.AreNotEqual(0.5f * lineHeightPx, deltaYCenter, "a per-line vertical anchor would use a single line's height, not the line-span midpoint");
             Assert.AreNotEqual(0.5f * blockHeight, deltaYCenter, "the old box-midpoint formula (0.5*blockHeight) must not match the optical-centre formula");
             Assert.AreNotEqual(lineHeightPx, deltaYBottomRight, "a per-line vertical anchor would use a single line's height, not the block's");
@@ -2186,9 +2066,8 @@ namespace MapRenderer.Tests.Text
             TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft), baselineQuads);
             TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, radialOffset: 1f), radialQuads);
 
-            // TopLeft is a corner anchor (hAlign=0, vAlign=0): pushes away from the anchored edges,
-            // i.e. further +x (away from the left edge) and further -y (away from the top edge),
-            // split into a diagonal of magnitude RadialOffset/sqrt2 on each axis.
+            // TopLeft is a corner anchor: the push goes +x and -y, away from the anchored edges, as a
+            // diagonal of RadialOffset/sqrt2 on each axis.
             float diagPx = 24f / math.SQRT2;
             AssertConstantDelta(baselineQuads, radialQuads, new float2(diagPx, -diagPx), "RadialOffset=1 @ TopLeft (corner)");
 
@@ -2360,9 +2239,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T1 — THE decisive test: per-glyph quad (buffer + UV + pen-advance + anchor), golden
-        // hand-computed from entryA/entryLowerA (INPUT fields fetched from the atlas, not builder
-        // output) — non-tautological.
+        // T1 — per-glyph quad (buffer + UV + pen-advance + anchor) against a golden hand-computed from
+        // the atlas entries' INPUT fields, not from builder output.
         // =========================================================================================
         [Test]
         public void Layout_SingleLineCenterAnchor_MatchesHandComputedGolden()
@@ -2380,11 +2258,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(2, resultQuads.Count, "two visible glyphs, no whitespace -- exactly two quads");
             Assert.AreEqual(1, result.LineCount);
 
-            // ---- Hand-computed golden, per the corrected TOP-anchored layout math ----
-            // The glyph 'Top' metric is top-referenced, so the cell's TOP edge is at
-            // (baselineY + Top + Buffer) and the cell grows DOWNWARD by CellSize.y; left edge at
-            // (penX + Left - Buffer). (Convention correctness is a visual/Bucket-B check; this golden
-            // guards the mechanical formula — buffer, CellSize, pen-advance — against a shallow impl.)
+            // Hand-computed golden: the cell's TOP edge is at (baselineY + Top + Buffer), it grows DOWN by
+            // CellSize.y, and its left edge is at (penX + Left - Buffer).
             float leftXA = 0f + entryA.Left - GlyphSdf.Buffer;
             float cellTopYA = 0f + entryA.Top + GlyphSdf.Buffer;
             float penXAfterA = entryA.Advance; // letter-spacing = 0 (default options)
@@ -2393,11 +2268,8 @@ namespace MapRenderer.Tests.Text
             float cellTopYLowerA = 0f + entryLowerA.Top + GlyphSdf.Buffer;
             float lineWidth = penXAfterA + entryLowerA.Advance; // == blockWidth (single line)
 
-            // Center anchor: hAlign = .5; justify auto -> Center (factor .5), which cancels for a
-            // single line (lineWidth == blockWidth) -- see TextQuadLayout's class doc. The y term is
-            // the hand-derived optical-centre shift, NOT read back from the production
-            // constants it exists to check: GlyphSdf.BaselineBelowReferencePx (26) minus half a
-            // cap height (0.5 * (17/24)em * 24 = 8.5) = 17.5.
+            // Center anchor: hAlign .5; the justify term cancels for a single line. The y term is the
+            // hand-derived optical-centre shift: BaselineBelowReferencePx (26) minus 0.5 * 17 = 17.5.
             float2 anchorShift = new float2(-0.5f * lineWidth, 17.5f);
 
             // TopLeft = (leftX, cellTopY); BottomRight = (leftX + CellSize.x, cellTopY - CellSize.y).
@@ -2440,9 +2312,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T1 teeth: a quad sized to bare Width×Height (ignoring the 3px SDF buffer), positioned
-        // without the buffer offset, or a pen that does not accumulate glyph-to-glyph, would all
-        // yield DIFFERENT numbers than the golden above.
+        // T1 teeth: a quad sized or placed without the 3px SDF buffer, or a pen that does not
+        // accumulate glyph-to-glyph, yields numbers other than the golden above.
         // =========================================================================================
         [Test]
         public void Layout_Teeth_RequiresBufferedCellSizeAndAccumulatedPen()
@@ -2476,9 +2347,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreNotEqual(bareUvSize.x, actualUvSize.x, "a Width-only UV rect would not match the golden");
             Assert.AreNotEqual(bareUvSize.y, actualUvSize.y, "a Height-only UV rect would not match the golden");
 
-            // Tooth 3: pen accumulates glyph-to-glyph. The anchor shift is a single additive constant
-            // shared by both quads on the same line, so it cancels out of this relative delta --
-            // isolating pen accumulation from anchor math entirely.
+            // Tooth 3: pen accumulates glyph-to-glyph. The anchor shift is one constant for both quads,
+            // so it cancels out of this relative delta.
             float actualDeltaX = quadLowerA.TopLeft.x - quadA.TopLeft.x;
             float expectedDeltaXAccumulated = (entryA.Advance + entryLowerA.Left - GlyphSdf.Buffer) - (entryA.Left - GlyphSdf.Buffer);
             float wrongDeltaXNonAccumulated = entryLowerA.Left - entryA.Left; // if 'a' were placed at penX=0 too
@@ -2577,9 +2447,8 @@ namespace MapRenderer.Tests.Text
     {
         private const float Tolerance = 1e-3f;
 
-        // "marhaba" (Arabic for "hello") as explicit codepoint escapes -- avoids embedding a raw RTL
-        // string in this (LTR) source file (mirrors TextShapingTests). meem (U+0645), reh (U+0631),
-        // hah (U+062D), beh (U+0628), alef (U+0627), in that logical (typed) order.
+        // "marhaba" as codepoint escapes, so no raw RTL string sits in this LTR source file: meem, reh,
+        // hah, beh, alef, in logical (typed) order.
         private const string Marhaba = "\u0645\u0631\u062D\u0628\u0627";
 
         // ── Fixture loader (walk-up from cwd then AppContext — works in Unity batch mode AND dotnet) ─
@@ -2688,9 +2557,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Teeth: re-reversing the (already-visual-order) run would put MEEM (the LOGICALLY-first,
-        // visually-LAST glyph) at the left edge instead of ALEF -- a different quad width, since the
-        // two glyphs' cell sizes differ.
+        // Teeth: re-reversing the visual-order run puts MEEM (logically first, visually last) at the left
+        // edge instead of ALEF, which shows as a different quad width.
         // =========================================================================================
         [Test]
         public void Layout_Rtl_Teeth_DoesNotReReverseTheAlreadyVisualOrderRun()
@@ -2757,59 +2625,24 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// THE decisive Model-A/Option-Y shaping test. Shapes Arabic
-    /// <c>"&#x0645;&#x0631;&#x062D;&#x0628;&#x0627;"</c> ("marhaba" / hello — meem, reh, hah, beh, alef)
-    /// with <see cref="CodepointTextShaper"/> and asserts the exact ordered
-    /// <c>(AtlasCodepoint, Cluster)</c> sequence against a golden pinned by an INDEPENDENT hand
-    /// derivation from the public Unicode joining tables — NOT by calling
-    /// <see cref="ArabicJoining"/>/<see cref="CodepointTextShaper"/> and copying their output (that
-    /// would be tautological; see the "anti-tautology" note in the class body below).
-    ///
-    /// ── Golden derivation (letter-by-letter, from ArabicShaping.txt Joining_Type values) ──────────
-    /// Logical (reading) order: index 0 = meem (first-typed), index 4 = alef (last-typed).
-    ///   i=0 MEEM  (U+0645, Dual_Joining):   no previous char -> cannot receive a join.
-    ///                                       next = REH (Right_Joining, CAN receive a join) -> sends one.
-    ///                                       => INITIAL form -> U+FEE3.
-    ///   i=1 REH   (U+0631, Right_Joining):  prev = MEEM (Dual_Joining, CAN send) -> receives one.
-    ///                                       Right_Joining letters can NEVER send a join forward
-    ///                                       (that is the defining property of the 6 "non-connecting"
-    ///                                       Arabic letters: alef/dal/dhal/reh/zain/waw), regardless
-    ///                                       of what follows.
-    ///                                       => FINAL form -> U+FEAE. (The word visually breaks here —
-    ///                                          reh never connects to the following hah.)
-    ///   i=2 HAH   (U+062D, Dual_Joining):   prev = REH (Right_Joining -> CANNOT send) -> no join in.
-    ///                                       next = BEH (Dual_Joining, CAN receive) -> sends one.
-    ///                                       => INITIAL form -> U+FEA3. (Starts a new connected cluster.)
-    ///   i=3 BEH   (U+0628, Dual_Joining):   prev = HAH (Dual_Joining, CAN send) -> receives one.
-    ///                                       next = ALEF (Right_Joining, CAN receive) -> sends one.
-    ///                                       => MEDIAL form -> U+FE92.
-    ///   i=4 ALEF  (U+0627, Right_Joining):  prev = BEH (Dual_Joining, CAN send) -> receives one.
-    ///                                       no next char -> cannot send (moot: alef never sends anyway).
-    ///                                       => FINAL form -> U+FE8E.
-    /// So the LOGICAL-order shaped sequence is: [FEE3(c0), FEAE(c1), FEA3(c2), FE92(c3), FE8E(c4)].
-    /// Single-run RTL (decision 8) reverses this to VISUAL order:
-    ///                                        [FE8E(c4), FE92(c3), FEA3(c2), FEAE(c1), FEE3(c0)].
-    /// This matches the standard "Arabic Presentation Forms-B" block layout (each dual-joining letter's
-    /// 4 forms are consecutive codepoints in isolated/final/initial/medial order; right-joining-only
-    /// letters have only 2). Independently cross-checked: every one of these 5 codepoints was confirmed
-    /// present (with a real, positive PBF <c>advance</c>) by decoding the actual committed
-    /// <c>65024-65279.pbf.bytes</c> fixture before this test was written (not derived FROM the test).
-    ///
-    /// ── Anti-tautology ──────────────────────────────────────────────────────────────────────────────
-    /// The golden array below is a literal, hand-written from the derivation above — it is never
-    /// computed by calling any production shaping code. A codepoint-passthrough (no joining/bidi) run
-    /// is asserted to diverge from it (teeth, below). A separate assert (the de-risk tooth) confirms
-    /// every golden codepoint actually exists in the decoded presentation-form fixtures — a DIFFERENT
-    /// failure mode than shape correctness (a wrong mapping could coincidentally land on an existing
-    /// but WRONG codepoint, e.g. FEE1 "meem isolated" also exists in the fixture; only the hand
-    /// derivation above guards against that).
+    /// Shapes Arabic "marhaba" with <see cref="CodepointTextShaper"/> and asserts the ordered
+    /// <c>(AtlasCodepoint, Cluster)</c> sequence against a hand-written golden.
+    /// Non-obvious why: the golden comes from the public ArabicShaping.txt Joining_Type values, never from
+    /// <see cref="ArabicJoining"/> output, because a golden copied from the code under test cannot fail.
+    ///   i=0 MEEM (U+0645, Dual):  no prev; next REH can receive a join         => INITIAL U+FEE3
+    ///   i=1 REH  (U+0631, Right): MEEM sends a join in; Right never sends one  => FINAL   U+FEAE
+    ///   i=2 HAH  (U+062D, Dual):  REH cannot send; next BEH can receive        => INITIAL U+FEA3
+    ///   i=3 BEH  (U+0628, Dual):  HAH sends a join in; next ALEF can receive   => MEDIAL  U+FE92
+    ///   i=4 ALEF (U+0627, Right): BEH sends a join in; no next char            => FINAL   U+FE8E
+    /// Single-run RTL reverses this logical order to visual order. The fixture-existence tooth cannot
+    /// catch a wrong mapping to a codepoint that also exists (e.g. FEE1, meem isolated); only this
+    /// derivation does.
     /// </summary>
     [TestFixture]
     public class TextShapingTests
     {
-        // "marhaba" (Arabic for "hello") as explicit codepoint escapes -- avoids embedding a raw RTL
-        // string in this (LTR) source file. meem (U+0645), reh (U+0631), hah (U+062D), beh (U+0628),
-        // alef (U+0627), in that logical (typed) order.
+        // "marhaba" as codepoint escapes, so no raw RTL string sits in this LTR source file: meem, reh,
+        // hah, beh, alef, in logical (typed) order.
         private const string Marhaba = "\u0645\u0631\u062D\u0628\u0627";
 
         // lam (U+0644) + alef (U+0627) -- exercises the mandatory lam-alef ligature (U+FEFB/FEFC)
@@ -2968,10 +2801,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // De-risk tooth: every shaped presentation-form AtlasCodepoint must actually exist in
-        // the decoded committed presentation-form fixtures (64256-64511 UNION 65024-65279). Catches a
-        // wrong joining mapping landing on a non-existent atlas cell -- a DIFFERENT failure mode than
-        // T1's shape-correctness assert (see the class-doc anti-tautology note).
+        // De-risk tooth: every shaped AtlasCodepoint exists in the presentation-form fixtures (64256-64511
+        // UNION 65024-65279). It catches a joining mapping onto a non-existent atlas cell.
         // =========================================================================================
         [Test]
         public void Shape_Marhaba_AllAtlasCodepointsExistInPresentationFormFixtures()
@@ -2989,11 +2820,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Supplementary (non-T1): mandatory lam-alef ligature. "لا" (LAM+ALEF, no preceding letter)
-        // must collapse to the single isolated ligature glyph U+FEFB, cluster 0 (the LAM's offset).
-        // Independently confirmed present in the committed 65024-65279 fixture (see the class-doc
-        // note) -- NOT independently golden-pinned like T1 (no external tool cross-check), so this is
-        // a lower-confidence supplementary tooth, not a second decisive test.
+        // Mandatory lam-alef ligature: "لا" (LAM+ALEF, no preceding letter) collapses to the isolated
+        // ligature U+FEFB, cluster 0. Limitation: no hand-derived golden backs this, unlike marhaba.
         // =========================================================================================
         [Test]
         public void Shape_LamAlef_CollapsesToSingleIsolatedLigatureGlyph()
@@ -3164,11 +2992,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // V1 — the shield defect itself: a centred digit's ink must be centred on the anchor. RED
-        // today at -3.1. The ±0.5 window is the design's acceptance band, wider than the actual
-        // residual: with the cap height at 17/24 em the '5' lands at EXACTLY 0 (its ink spans
-        // [-8.5, +8.5] about the anchor), because its 17 px bare height is the very cap the constant
-        // measures. The band is there for glyphs whose ink is not exactly cap-high, not for slack here.
+        // V1 — a centred digit's ink is centred on the anchor. The '5' lands at 0, as its 17 px bare height
+        // is the cap height; the ±0.5 band is for glyphs whose ink is not exactly cap-high.
         // =========================================================================================
         [Test]
         public void CentreAnchor_SingleLineDigit_InkIsCentredOnTheAnchor()
@@ -3210,9 +3035,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(iconCentre, textCentre, 0.5f,
                 $"a centred digit's text ink centre must coincide with a centred icon's ink centre (icon={iconCentre}, text={textCentre})");
 
-            // …and the padded-repack border must not disturb that: SpriteSheet hands every drawable sprite a
-            // one-texel transparent border, IconQuadLayout draws it, and the growth must be SYMMETRIC — an
-            // asymmetric skirt would shift a shield's icon off the text it is centred behind.
+            // …and the drawn one-texel transparent border must grow the quad SYMMETRICALLY: an asymmetric
+            // skirt shifts a shield's icon off the text it is centred behind.
             var paddedEntry = new SpriteEntry { X = 1, Y = 1, Width = 20, Height = 20, PixelRatio = 1f, Padding = 1 };
             SymbolQuad paddedQuad = IconQuadLayout.Layout(in paddedEntry, new int2(64, 64), 1f, TextAnchor.Center, float2.zero);
             float paddedCentre = 0.5f * (paddedQuad.TopLeft.y + paddedQuad.BottomRight.y);
@@ -3225,9 +3049,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // V3 — line-height independence: a single line has nothing to stack, so a centred single-line
-        // block must not move when text-line-height changes. RED today (9.6 px) and RED against any
-        // "subtract a constant from the old formula" impl.
+        // V3 — a single line has nothing to stack, so a centred single-line block must not move when
+        // text-line-height changes; subtracting a constant from a line-height-based formula fails this.
         // =========================================================================================
         [Test]
         public void CentreAnchor_SingleLine_IsIndependentOfLineHeight()
@@ -3252,10 +3075,8 @@ namespace MapRenderer.Tests.Text
         [Test]
         public void CentreAnchor_TwoLines_AreSymmetricAboutTheAnchor()
         {
-            // The SAME glyph on both lines: symmetry is a property of the block's formula, not of
-            // each line's own ink shape -- putting a cap ('A') on one line and an x-height glyph ('a')
-            // on the other would compare two DIFFERENT ink profiles and mask the property under test
-            // (their real ink centres differ by ~2px even under a perfectly symmetric formula).
+            // The SAME glyph on both lines: a cap and an x-height glyph have ink centres ~2px apart even
+            // under a symmetric formula, which masks the block property under test.
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
@@ -3393,16 +3214,10 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // V9 — the constant is pinned to the FIXTURE, not just to itself. GlyphSdf.BaselineBelowReferencePx
-        // is an assumption about how the glyph PBF was baked (the PBF carries no font-level metrics), so
-        // nothing in the layout math can detect it going wrong: every other tooth here measures positions
-        // that are all derived from the same constant, and would stay green if the fixture were regenerated
-        // from a font baked against a different ascent. The other shipped ranges modally measure 27,
-        // so this is a live hazard, and its symptom is silent — every centred symbol would sit one baked px
-        // low with a fully green suite. This re-derives the constant from a baseline-resting reference
-        // glyph's OWN metrics: for such a glyph the ink bottom IS the baseline, so its distance below the
-        // line's reference origin is (bare height - Top). A digit is used because a descender ('g')
-        // or an above-baseline mark does not rest on the baseline and measures 30/32 or 19/23 instead.
+        // V9 — GlyphSdf.BaselineBelowReferencePx is pinned to the FIXTURE. Non-obvious why: the PBF carries
+        // no font-level metrics, so every other tooth derives from the same constant and stays green on a
+        // fixture baked against a different ascent (other shipped ranges modally measure 27). A digit rests
+        // on the baseline, so (bare height - Top) re-derives the constant; a descender or mark does not.
         // =========================================================================================
         [Test]
         public void BaselineBelowReferencePx_IsReproducedByTheFixturesOwnGlyphMetrics()
@@ -3468,11 +3283,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T5 — greedy word-wrap breaks at the correct WORD boundary (never mid-word), golden line
-        // assignment. Three 2-glyph words ("Aa" x3) separated by single spaces: the chosen max-width
-        // is derived generically (2.5*wordWidth + 1.5*spaceWidth) so it always lands strictly between
-        // "word1 space word2" (fits) and adding "space word3" (overflows) -- independent of the exact
-        // fixture metrics.
+        // T5 — greedy word-wrap breaks at a WORD boundary, never mid-word. The max-width 2.5*wordWidth +
+        // 1.5*spaceWidth fits "Aa Aa" but not "Aa Aa Aa", whatever the fixture metrics.
         // =========================================================================================
         [Test]
         public void Layout_GreedyWrap_BreaksAtCorrectWordBoundary()

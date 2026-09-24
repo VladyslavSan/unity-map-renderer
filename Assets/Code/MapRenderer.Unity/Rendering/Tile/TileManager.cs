@@ -156,16 +156,11 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Value-equality identity of a resolved source definition — the restyle diff key. Two
         /// sources are "the same" (keep the pipeline, reuse cached bytes) iff their resolved
-        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c> match.
-        /// <para><b>Why <c>data</c>:</b> an INLINE source has no <c>url</c>/<c>tiles[]</c>, so without this
-        /// field every inline source is value-equal to every other — a restyle to a different dataset keeps
-        /// the FIRST one's pipeline and renders the wrong geometry, silently.</para>
-        /// <para><b>Why <c>type</c>:</b> it selects which factory runs (byte fetcher vs local slicer), so
-        /// two definitions differing only in it are not the same source. Without it they compare equal and
-        /// <see cref="SetSources"/> keeps the first pipeline — fetching MVT for a style that now declares
-        /// inline GeoJSON, or vice versa. The repro is narrow, but the field's structural value does not
-        /// depend on the repro: <b>do not delete this field for being untriggerable.</b></para>
-        /// </summary>
+        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c>/<c>type</c> match.
+        /// Non-obvious why: an inline source has no <c>url</c>/<c>tiles[]</c>, so without <c>data</c> a restyle to
+        /// another dataset keeps the first pipeline. <c>type</c> selects the factory (byte fetcher or local slicer),
+        /// so without it a switch between MVT and inline GeoJSON also keeps the wrong pipeline. That repro is
+        /// narrow; do not delete the <c>type</c> field for being untriggerable.</summary>
         internal readonly struct SourceKey : System.IEquatable<SourceKey>
         {
             public readonly string Url;
@@ -1667,9 +1662,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                         break;
                     }
                 }
-                // A hit must be complete on BOTH sides. A hit marks the record Built+FetchCompleted, so it is
-                // never pumped and never kicks a symbol build — serving one whose warm symbol block is gone
-                // (a full-rebuild restyle Clears the store) loses its labels permanently.
+                // A hit is Built+FetchCompleted and never kicks a symbol build, so a hit whose symbol block is gone
+                // (a full-rebuild restyle Clears the store) would lose its labels for good. Require both sides.
                 if (allCached) allCached = SymbolsCachedFor(_sources.SourceIdOf(slot), id);
             }
 
@@ -1770,16 +1764,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             return lt;
         }
 
-        /// <summary>Tears down a record's RENDER state — destroys its Mesh assets, unregisters its backend
-        /// draw items, and stashes any in-flight fetch/mesh build in the holding pens. Does <b>NOT</b> touch
-        /// the scheduler/cache: <see cref="ReleaseTile"/> follows with <c>Scheduler.Release</c>; restyle
-        /// calls this ALONE for a kept source so its cached bytes survive.
-        /// <see cref="RemoveAndTeardownRecord"/> has already dropped the key from <see cref="_loaded"/>.
-        /// <see cref="DoDispose"/> has not — see the remark on its own <c>_loaded.Clear()</c>.
-        /// <para><b>THE single record-teardown funnel.</b> All abandonment paths — eviction
-        /// (<see cref="ReleaseTile"/>), restyle (<see cref="SetSources"/>), teardown
-        /// (<see cref="DoDispose"/>) — reach a record through here. A new per-record teardown obligation
-        /// belongs in this method and nowhere else.</para></summary>
+        /// <summary>Tears down a record's RENDER state: destroys its meshes, unregisters its draw items, and stashes
+        /// any in-flight fetch/mesh build in the holding pens. It does not touch the scheduler/cache:
+        /// <see cref="ReleaseTile"/> follows with <c>Scheduler.Release</c>, and restyle calls this alone for a kept
+        /// source so its cached bytes survive. <see cref="RemoveAndTeardownRecord"/> has already dropped the key
+        /// from <see cref="_loaded"/>; <see cref="DoDispose"/> has not. Non-local invariant: every abandonment path
+        /// (<see cref="ReleaseTile"/>, <see cref="SetSources"/>, <see cref="DoDispose"/>) reaches a record here, so a
+        /// new per-record teardown duty belongs here only.</summary>
         private void RenderTeardownRecord(ref LoadedTile lt)
         {
             // Only release site for the record's decode reference — null the field BEFORE Release(), since a thrown-through field would release twice.

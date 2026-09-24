@@ -4,48 +4,15 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Clips ONE open polyline against an axis-aligned window, emitting 0..N open pieces.
-    ///
-    /// <para><b>This is NOT Sutherland–Hodgman and must not be replaced by it.</b> A ring clipper closes its
-    /// output and therefore joins the two ends of a line that left the window and came back — drawing a
-    /// segment across a gap the input never had. Lines are not "the polygon case with the closure removed":
-    /// they need a genuinely different algorithm, and this one is per-segment Liang–Barsky parametric
-    /// clipping with the surviving sub-segments accumulated into runs.</para>
-    ///
-    /// <para><b>Coordinate space and winding (producer declaration).</b> Input and output are tile-local
-    /// <c>double2</c>, origin top-left, Y down. Output paths are <b>OPEN</b> — no closure, no winding, no
-    /// ring semantics; vertex order along each output path is the input's order. One input polyline emits as
-    /// many output paths as it has runs inside the window; a run is broken whenever a segment is rejected
-    /// outright or a surviving sub-segment does not begin exactly where the previous one ended. Paths with
-    /// fewer than two vertices are discarded.</para>
-    ///
-    /// <para><b>Boundary is inclusive</b>, matching <see cref="RingWindowClipper"/> and
-    /// <c>RingClipJob</c>: a vertex exactly on the window edge is inside. An endpoint that
-    /// was not clipped is passed through VERBATIM (rather than recomputed as <c>p0 + t·d</c>), so a run that
-    /// crosses several fully-inside segments is bit-identical to the input and the continuity test between
-    /// consecutive segments is exact; an endpoint that WAS clipped gets the boundary value assigned exactly
-    /// on EVERY axis that clipped it — one for an edge crossing, both for a corner crossing.</para>
-    ///
-    /// <para><b>Why the assignment, and not just <c>p0 + t·d</c>.</b> The interpolated value is not exact,
-    /// and the error is not a curiosity. Clip <c>(100, 1000) → (5600, 3000)</c> at <c>x = 4096</c>:
-    /// <c>t = (4096 − 100)/5500</c>, and <c>100 + t·5500</c> evaluates to <c>4095.9999999999995</c>, one ulp
-    /// inside the tile rather than on its edge. Clip the same world line from the neighbouring tile, whose
-    /// frame puts that crossing at <c>x = 0</c>, and the interpolation lands at <c>−4.547e−13</c> — outside
-    /// that tile's window altogether. Neither vertex is ON the seam, so neither tile's inclusive-boundary
-    /// test recognises it as a seam vertex, and (in the frames the slicer actually builds, which do not
-    /// round alike — see
-    /// <c>GeoJsonTileSlicerTests.AdjacentTilesPutTheirSharedSeamVertexOnTheirOwnBoundary</c>) the two tiles
-    /// need not even agree on the point.
-    /// The assignment removes all of that: the clipped axis is the boundary literal in each frame, so the
-    /// vertex is on the seam exactly and the two tiles name the same edge. This is the same
-    /// guarantee <see cref="RingWindowClipper"/>'s <c>Intersect</c> makes, stated the same way, so ring and
-    /// line geometry meeting at one tile edge cannot part company by a rounding step.
-    /// <c>WindowClipperTests</c>' seam and corner teeth are what observe it.</para>
-    ///
-    /// <para><i>Note on scope of the claim:</i> <c>GeoJsonTileSlicer</c> quantizes to integers AFTER
-    /// clipping, which currently masks a sub-ulp disagreement of this size. The guarantee is the clipper's
-    /// own, and it is what a consumer working at unquantized precision — seam-matched stroke and symbol
-    /// geometry — gets to rely on.</para>
+    /// Clips ONE open polyline against an axis-aligned window into 0..N open pieces: per-segment
+    /// Liang–Barsky clipping, surviving sub-segments joined into runs. Non-obvious why: not
+    /// Sutherland–Hodgman, because a ring clipper closes its output and joins a line that left and
+    /// re-entered across a gap. Input and output are tile-local <c>double2</c>, origin top-left, Y down; a
+    /// run keeps the input order, breaks where a segment is rejected or does not continue exactly, and is
+    /// dropped under two vertices. The boundary is inclusive, as in <see cref="RingWindowClipper"/>. An
+    /// unclipped endpoint passes verbatim; a clipped one gets the boundary literal on every axis that
+    /// clipped it, because <c>p0 + t·d</c> can land an ulp off the seam and neighbours would disagree
+    /// (<c>WindowClipperTests</c>).
     /// </summary>
     public static class PolylineWindowClipper
     {
@@ -108,17 +75,10 @@ namespace MapRenderer.Core.Geometry
         private static bool SameVertex(double2 a, double2 b) => a.x == b.x && a.y == b.y;
 
         /// <summary>
-        /// Where one end of the surviving sub-segment sits: the parameter along the input segment, plus
-        /// which window planes (if any) put it there. <see cref="Snap"/> then assigns each of those axes the
-        /// boundary EXACTLY rather than the interpolated value — the same guarantee
-        /// <see cref="RingWindowClipper"/> makes, so a later inclusive-boundary test cannot disagree by a
-        /// rounding step and a run that leaves and re-enters is not silently glued back together.
-        ///
-        /// <para><see cref="Axes"/> is a MASK rather than one axis because a segment entering or leaving
-        /// exactly at a window CORNER is put there by two planes at the same parameter, and both of its
-        /// coordinates then have to land on the boundary. Recording only the first plane would leave the
-        /// other coordinate interpolated — off the window by an ulp, on the outside, which is exactly the
-        /// case the assignment exists to prevent.</para>
+        /// Where one end of the surviving sub-segment sits: the parameter along the input segment and the
+        /// window planes that put it there, whose axes <see cref="Snap"/> sets to the boundary exactly.
+        /// <see cref="Axes"/> is a mask because a segment crossing exactly at a corner is placed by two
+        /// planes at once, and both coordinates must land on the boundary.
         /// </summary>
         private struct Crossing
         {

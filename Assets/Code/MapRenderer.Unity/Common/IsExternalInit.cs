@@ -1,7 +1,5 @@
-// C# 9 `init`-only setters require System.Runtime.CompilerServices.IsExternalInit, which Unity 6000.5's
-// netstandard reference assemblies do NOT ship (compile fails with CS0518). This internal polyfill supplies
-// it for this assembly (MapRenderer.Unity has none yet — mirrors MapRenderer.Core/IsExternalInit.cs). One
-// copy is needed per assembly that DEFINES init-only members.
+// C# 9 `init` setters need IsExternalInit, which Unity's netstandard references do not ship (CS0518).
+// Each assembly that defines init-only members needs its own copy of this internal polyfill.
 namespace System.Runtime.CompilerServices
 {
     internal static class IsExternalInit { }

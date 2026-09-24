@@ -1,6 +1,5 @@
-// Unity-side (holds SymbolTileBlock refs — Core stays engine-free). Not engine-free itself:
-// TileSlice.Block/OrderedBlocks are the concrete Unity.Collections-backed SymbolTileBlock, so this file is
-// outside the core-tests.csproj fast loop (still compiled + run by the Unity EditMode runner).
+// Holds Unity.Collections-backed SymbolTileBlock refs, so it is not engine-free: only the Unity EditMode
+// runner compiles and runs it, not the core-tests fast loop.
 
 using System;
 using System.Collections.Generic;
@@ -61,11 +60,8 @@ namespace MapRenderer.Unity.Text
         /// two sites that may touch it. <see cref="Block"/> is the borrowed value this reference guarantees.</summary>
         public SharedDisposable<IDisposable> Pin;
         /// <summary>The tile's baked native block (borrowed ref; kept alive by <see cref="Pin"/> across the
-        /// snapshot's life). The reconciler reads every per-symbol column straight off this — raw-order
-        /// <see cref="SymbolTileBlock.Kinds"/>/
-        /// <see cref="SymbolTileBlock.PairRoles"/>/<see cref="SymbolTileBlock.RepAnchor"/>/
-        /// <see cref="SymbolTileBlock.MaterialIndexes"/>/<see cref="SymbolTileBlock.TextIds"/>/
-        /// <see cref="SymbolTileBlock.IconImageIds"/> — instead of a parallel managed symbol list.</summary>
+        /// snapshot's life). The reconciler reads each per-symbol value straight off its raw-order columns,
+        /// not off a parallel managed symbol list.</summary>
         public SymbolTileBlock Block;
         /// <summary>True for a departing (left-cover, fading-out) tile — emitted after the active split.</summary>
         public bool IsDeparting;
@@ -79,12 +75,11 @@ namespace MapRenderer.Unity.Text
     }
 
     /// <summary>
-    /// The off-main reconcile OUTPUT — the deduped winner set the main thread consumes (coverage-classify
-    /// → <c>SymbolGatherPlan.Build</c>) once picked up. All lists are reused; the double-buffer swaps this
-    /// whole object front/back so a completed worker fills the BACK result while the main thread reads the
-    /// stable FRONT (`docs/labels-async-reconcile-design.md`). Byte-identical (order + membership + the
-    /// plan arrays) to the store's inline <c>CollectInto</c>. Winner identity is purely
-    /// <c>(BlockId[i], LocalIndex[i])</c> — there is no managed symbol list to hand back.
+    /// The off-main reconcile output: the deduped winner set the main thread feeds to
+    /// <c>SymbolGatherPlan.Build</c>. The double-buffer swaps this whole object, so a worker fills the back
+    /// result while the main thread reads the front (`docs/labels-async-reconcile-design.md`). It matches the
+    /// store's inline <c>CollectInto</c> in order and membership. Winner identity is
+    /// <c>(BlockId[i], LocalIndex[i])</c>.
     /// </summary>
     internal sealed class SymbolReconcileResult
     {

@@ -6,20 +6,13 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s for the world-anchored point/icon/curved-text
-    /// draw path. The quad's screen size is zoom-independent: <c>emScale</c> comes from the resolved
-    /// `text-size`. Layout already baked `text-offset`/`text-radial-offset` into the corners, so a second offset
-    /// here would double-apply. <c>rotationRadians</c> spins the quad about its anchor (0 upright, the map
-    /// bearing for <c>text-rotation-alignment:map</c>); along-line text rotates each glyph the same way.
-    /// <para><see cref="WorldBillboardVertex.Offset"/> has TWO units, selected by
-    /// <see cref="WorldBillboardVertex.AlignFlags"/> bit2; this is a non-local invariant. Clear: logical screen
-    /// px, added to <c>clip.xy</c> after projection. Set: WORLD METRES in the ground plane before projection,
-    /// so perspective foreshortens a map-pitched glyph. The caller (<c>WorldSymbolRenderer.Emit</c>) picks the
-    /// unit through <c>emScale</c>; the corners and the translate delta always share it.</para>
-    /// <para>A positive angle turns COUNTER-clockwise on screen: the corners rotate in a y-up local frame, then
-    /// Y is negated into the y-down <c>Offset</c>. This is measured through the GPU path; do not re-derive it
-    /// on paper. <see cref="SymbolBearing.IconRotationRadians"/> flips the clockwise-positive
-    /// <c>icon-rotate</c> into this frame.</para>
+    /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s for the world-anchored symbol path. Layout already
+    /// baked <c>text-offset</c> into the corners, so no offset is applied here; <c>rotationRadians</c> spins the
+    /// quad about its anchor. Non-local invariant: <see cref="WorldBillboardVertex.Offset"/>'s unit follows
+    /// <see cref="WorldBillboardVertex.AlignFlags"/> bit2 (screen px or ground metres), and the caller picks it
+    /// through <c>emScale</c> for corners and translate delta alike. A positive angle turns counter-clockwise
+    /// on screen, measured through the GPU path; <see cref="SymbolBearing.IconRotationRadians"/> converts
+    /// <c>icon-rotate</c> into it.
     /// </summary>
     public static class BillboardMath
     {
@@ -28,16 +21,11 @@ namespace MapRenderer.Core.Text.Placement
             => new float2(cos * p.x - sin * p.y, sin * p.x + cos * p.y);
 
         /// <summary>
-        /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s in TL, TR, BR, BL order: triangles (TL,TR,BR)
-        /// and (TL,BR,BL), the pattern <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>'s
-        /// index emit follows.
-        /// <para><c>Offset</c> is y-down on screen (see the class doc), so this negates each corner's (and the
-        /// translate delta's) Y; UV keeps its corner.</para>
-        /// <para><paramref name="colorRgb"/> is copied VERBATIM: the caller passes linear colour
-        /// (<c>SymbolPlacementSystem.LinearColor</c>), so there is no second gamma conversion.
-        /// <paramref name="anchorLocal"/> (anchor minus tile origin), <paramref name="alignFlags"/>,
-        /// <paramref name="tangentLocal"/> (zero for point/icon) and <paramref name="surfaceUp"/> (read by the
-        /// shader's map-pitch branch) go onto all four corners. The renderer appends opacity (stream 1).</para>
+        /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s in TL, TR, BR, BL order, triangles (TL,TR,BR)
+        /// and (TL,BR,BL), as <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>'s index emit expects.
+        /// <c>Offset</c> is y-down, so each corner's (and the translate delta's) Y is negated.
+        /// <paramref name="colorRgb"/> is already linear and copied verbatim; anchor, flags, tangent and
+        /// surface-up go onto all four corners, and the renderer appends opacity.
         /// </summary>
         /// <param name="emScale">What ONE em maps to in <see cref="WorldBillboardVertex.Offset"/>'s unit: logical
         /// px (<see cref="PlacedQuad.TextSizePx"/>) or METRES (<c>TextSizePx · CornerMetresPerLogicalPixel</c>).</param>

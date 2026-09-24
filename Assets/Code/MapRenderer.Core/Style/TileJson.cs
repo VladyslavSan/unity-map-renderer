@@ -3,16 +3,10 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// A parsed TileJSON document (the TileJSON spec — https://github.com/mapbox/tilejson-spec). In the
-    /// MapLibre model a source declares its tiles <b>either</b> inline (<c>"tiles": [...]</c>) <b>or</b>
-    /// indirectly via a TileJSON <c>url</c> pointing at one of these documents. This is the typed view
-    /// of the fields the tile pipeline needs (<c>tiles</c>, <c>minzoom</c>, <c>maxzoom</c>, <c>scheme</c>,
-    /// <c>bounds</c>); every other TileJSON field (attribution, vector_layers, center, …) is retained
-    /// verbatim on <see cref="Raw"/>.
-    ///
-    /// The <c>SourceDefinition</c> resolution that fills a source from this document is
-    /// <see cref="SourceResolver"/>. <b>Fetching</b> the document (file://, http) is out of
-    /// scope here — this is the engine-free parse step.
+    /// A parsed TileJSON document (the TileJSON spec — https://github.com/mapbox/tilejson-spec), which a source
+    /// references through its <c>url</c> instead of inline <c>tiles</c>. It types the fields the tile pipeline
+    /// needs (<c>tiles</c>, <c>minzoom</c>, <c>maxzoom</c>, <c>scheme</c>, <c>bounds</c>) and keeps every other
+    /// field on <see cref="Raw"/>. <see cref="SourceResolver"/> fills a source from it; fetching is elsewhere.
     /// </summary>
     public sealed class TileJson
     {
@@ -36,14 +30,10 @@ namespace MapRenderer.Core.Style
     }
 
     /// <summary>
-    /// Parses a TileJSON document into the typed <see cref="TileJson"/> model. Tolerant +
-    /// forward-compatible, exactly like <see cref="StyleParser"/>: unknown fields never throw, a field
-    /// with a surprising-but-valid type falls back to its spec default, and malformed JSON surfaces
-    /// <see cref="JsonParseException"/> from <see cref="JsonParser"/>.
-    ///
-    /// Spec defaults are shared with <see cref="StyleParser"/> (<c>DefaultScheme</c>,
-    /// <c>DefaultSourceMinZoom</c>/<c>MaxZoom</c>, <c>DefaultBounds</c>) so a TileJSON omitting a field
-    /// resolves to the same default the style-spec source would — single source of those constants.
+    /// Parses a TileJSON document into the typed <see cref="TileJson"/> model, tolerant like
+    /// <see cref="StyleParser"/>: unknown fields never throw, a surprising type falls back to the spec default,
+    /// and malformed JSON throws <see cref="JsonParseException"/>. It shares <see cref="StyleParser"/>'s source
+    /// defaults, so an omitted field resolves as it would on a style-spec source.
     /// </summary>
     public static class TileJsonParser
     {

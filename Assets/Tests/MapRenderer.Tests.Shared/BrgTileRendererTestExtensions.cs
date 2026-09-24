@@ -1,17 +1,10 @@
-// Unity EditMode only — real BatchRendererGroup state. NOT registered in core-tests.csproj.
+// Unity EditMode only: test-assembly observability over the BRG backend's internal fields.
 //
-// Namespace is MapRenderer.Tests, not .Visual, matching the GameObjects and Entities files: C# resolves
-// extension methods only through the call site's ENCLOSING namespaces, and callers live in both
-// MapRenderer.Tests and MapRenderer.Tests.Visual. The parent namespace is the one both can see.
+// Non-obvious why: C# finds extension methods only through the call site's enclosing namespaces, and callers
+// live in MapRenderer.Tests and MapRenderer.Tests.Visual, so this file uses the parent namespace.
 //
-// Observability for the BRG backend, living in the TEST assembly rather than on the production class.
-// These read the backend's _plan/_items/_cpuBuffer/_sortedItems/_instanceBuffer, broadened
-// private -> internal, which IS the sanctioned footprint.
-//
-// Two of them DECODE the production SoA packing rather than reading a value back
-// (GetInstanceTranslation, GetInstancePropValue). Holding a second copy of the layout rules is the point: a
-// readback test fails when the writer's layout drifts, which is the regression those teeth exist to catch.
-// Keep them in sync with Rebuild by hand, never by sharing code with it.
+// Non-obvious why: GetInstanceTranslation and GetInstancePropValue decode the SoA packing with a second copy
+// of the layout rules, so a readback test fails when Rebuild's layout drifts. Never share code with Rebuild.
 
 using System.Collections.Generic;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
@@ -55,13 +48,8 @@ namespace MapRenderer.Tests
             {
                 if (renderer._sortedItems[si].handle == handle)
                 {
-                    // SoA layout: O2W array starts at float 0.
-                    // Instance si's O2W occupies floats [si*12 .. si*12+11].
-                    // Unity BRG packed float3x4 format (see UnityDOTSInstancing.hlsl):
-                    //   p1=[m00,m10,m20,m01], p2=[m11,m21,m02,m12], p3=[m22,m03,m13,m23]
-                    // tx = m03 = float index si*12+9
-                    // ty = m13 = float index si*12+10
-                    // tz = m23 = float index si*12+11
+                    // The O2W array starts at float 0; instance si's packed float3x4 (UnityDOTSInstancing.hlsl) is
+                    // [m00,m10,m20,m01, m11,m21,m02,m12, m22,m03,m13,m23], so tx/ty/tz sit at si*12+9/+10/+11.
                     return (renderer._cpuBuffer[si * 12 + 9], renderer._cpuBuffer[si * 12 + 11]);
                 }
             }
@@ -70,15 +58,10 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// The packed value of the material property <paramref name="propId"/> for the instance
-        /// <paramref name="handle"/> from the last <c>Rebuild</c> call. GPU-independent — decodes the CPU
-        /// SoA buffer directly.
-        ///
-        /// <para><paramref name="component"/> selects the float within a multi-float property
-        /// (0=x/r, 1=y/g, 2=z/b, 3=w/a). For scalar properties component must be 0.</para>
-        ///
-        /// Returns <c>float.NaN</c> if the handle is not registered, the property is not in the plan, or no
-        /// <c>Rebuild</c> has run. NaN (not 0) makes the buggy-build case (no plan entry) fail explicitly
-        /// rather than silently reading 0.
+        /// <paramref name="handle"/> from the last <c>Rebuild</c> call, decoded from the CPU SoA buffer.
+        /// <paramref name="component"/> selects the float within a multi-float property (0=x/r … 3=w/a; 0 for
+        /// a scalar). Returns <c>float.NaN</c> for an unknown handle, a property missing from the plan, or no
+        /// <c>Rebuild</c> yet, so a missing plan entry fails instead of reading 0.
         /// </summary>
         internal static float GetInstancePropValue(
             this BrgTileRenderer renderer, int handle, int propId, int component = 0)

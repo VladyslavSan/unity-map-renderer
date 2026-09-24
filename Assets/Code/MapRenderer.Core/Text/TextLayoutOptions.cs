@@ -6,23 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Text layout parameters. Every length-valued property is in EMS (<c>TextQuadLayout.OneEm</c> = 24
-    /// baked px) and carries NO text-size: layout is size-independent, and placement applies the
-    /// zoom-dependent <c>text-size/24</c> screen scale.
-    ///
-    /// <para>
-    /// <b>Construction — read before writing <c>new TextLayoutOptions()</c>:</b> a struct's
-    /// compiler-synthesized parameterless constructor zero-fills every field. For
-    /// <see cref="MaxWidthEm"/>/<see cref="LineHeightEm"/> that is a BROKEN layout (a 0-px wrap width;
-    /// 0-px line stacking that collapses every line onto the same baseline), not merely an unstyled
-    /// one — so a bare <c>new TextLayoutOptions()</c> or <c>default(TextLayoutOptions)</c> is a
-    /// footgun. This project's C# LangVersion is 9 (see <c>MapRenderer.Core.csproj</c>), which cannot
-    /// override a struct's parameterless constructor (that needs C# 10), so the mitigation is
-    /// two-fold: prefer <see cref="Default"/> for
-    /// construction, and <c>TextQuadLayout</c> itself falls back to the documented defaults for a
-    /// non-positive <see cref="MaxWidthEm"/>/<see cref="LineHeightEm"/> so a zero-valued options value
-    /// degrades gracefully instead of breaking wrap/line-stacking.
-    /// </para>
+    /// Text layout parameters. Every length is in EMS (<c>TextQuadLayout.OneEm</c> = 24 baked px) and carries
+    /// no text-size; placement applies the <c>text-size/24</c> screen scale. Build from <see cref="Default"/>:
+    /// <c>new TextLayoutOptions()</c> zero-fills <see cref="MaxWidthEm"/>/<see cref="LineHeightEm"/>, and C# 9
+    /// cannot override a struct's parameterless constructor. <c>TextQuadLayout</c> falls back to the defaults
+    /// for non-positive values of those two, so a zeroed value still wraps and stacks lines.
     /// </summary>
     public readonly struct TextLayoutOptions
     {

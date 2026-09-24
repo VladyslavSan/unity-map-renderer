@@ -1,6 +1,5 @@
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine, MeshBuilder, NativeArray,
+// or MonoBehaviour reference.
 
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;

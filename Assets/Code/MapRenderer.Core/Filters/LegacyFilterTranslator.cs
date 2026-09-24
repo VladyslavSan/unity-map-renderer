@@ -5,30 +5,11 @@ using MapRenderer.Core.Expressions;
 namespace MapRenderer.Core.Filters
 {
     /// <summary>
-    /// Translates a MapLibre legacy filter (<see cref="JsonValue"/> array) into an equivalent
-    /// expression <see cref="JsonValue"/> tree that the <see cref="ExpressionParser"/> can parse.
-    ///
-    /// Translation table (from the public MapLibre Style Spec "Other filter" section):
-    /// <list type="bullet">
-    ///   <item><c>["has","key"]</c> → <c>["has","key"]</c> (same form; expression "has" takes a string key)</item>
-    ///   <item><c>["!has","key"]</c> → <c>["!",["has","key"]]</c></item>
-    ///   <item><c>["==","key",v]</c> → <c>["==",keyExpr(key),v]</c></item>
-    ///   <item><c>["!=","key",v]</c> → <c>["!=",keyExpr(key),v]</c></item>
-    ///   <item><c>["&lt;","key",v]</c> → <c>["&lt;",keyExpr(key),v]</c></item>
-    ///   <item><c>["&lt;=","key",v]</c> → <c>["&lt;=",keyExpr(key),v]</c></item>
-    ///   <item><c>["&gt;","key",v]</c> → <c>["&gt;",keyExpr(key),v]</c></item>
-    ///   <item><c>["&gt;=","key",v]</c> → <c>["&gt;=",keyExpr(key),v]</c></item>
-    ///   <item><c>["in","key",v1,…]</c> → <c>["in",keyExpr(key),["literal",[v1,…]]]</c></item>
-    ///   <item><c>["!in","key",v1,…]</c> → <c>["!",["in",keyExpr(key),["literal",[v1,…]]]]</c></item>
-    ///   <item><c>["all",f1,…]</c> → <c>["all",translate(f1),…]</c></item>
-    ///   <item><c>["any",f1,…]</c> → <c>["any",translate(f1),…]</c></item>
-    ///   <item><c>["none",f1,…]</c> → <c>["!",["any",translate(f1),…]]</c></item>
-    /// </list>
-    ///
-    /// Key mapping: <c>"$type"</c> → <c>["geometry-type"]</c>; <c>"$id"</c> → <c>["id"]</c>;
-    /// any other key → <c>["get","key"]</c>.
-    ///
-    /// Clean-room: operator semantics taken from the public MapLibre Style Spec, not MapLibre source.
+    /// Translates a legacy filter array into an expression tree (Style Spec "Other filter" section).
+    /// <c>has</c> passes through; <c>["op","key",v]</c> → <c>["op",keyExpr(key),v]</c>; <c>in</c> wraps
+    /// its values in <c>["literal",[…]]</c>; <c>!has</c>/<c>!in</c> wrap the positive form in <c>"!"</c>;
+    /// <c>all</c>/<c>any</c> translate each child; <c>none</c> → <c>["!",["any",…]]</c>. keyExpr: <c>"$type"</c>
+    /// → <c>["geometry-type"]</c>, <c>"$id"</c> → <c>["id"]</c>, any other key → <c>["get",key]</c>.
     /// </summary>
     public static class LegacyFilterTranslator
     {

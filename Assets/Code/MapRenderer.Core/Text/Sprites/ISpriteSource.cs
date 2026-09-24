@@ -7,14 +7,10 @@ using Cysharp.Threading.Tasks;
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
-    /// BYO sprite-sheet fetch abstraction, distinct from <see cref="IGlyphSource"/> (fontstack+range-keyed):
-    /// a sprite sheet is a single, keyless pair of resources (index JSON + PNG) per style, per the MapLibre
-    /// Style Spec's root <c>sprite</c> URL. The Unity-side <c>UnityWebRequestSpriteSource</c> implementation
-    /// mirrors <c>UnityWebRequestGlyphSource</c> — this interface is the seam it implements.
-    ///
-    /// Core implementations use only the PlayerLoop-independent UniTask subset
-    /// (<c>UniTask.RunOnThreadPool</c>/<c>SwitchToThreadPool</c>, <c>UniTaskCompletionSource</c>,
-    /// <c>UniTask.FromResult</c>) exactly as <see cref="IGlyphSource"/> does.
+    /// BYO sprite-sheet fetch abstraction. Unlike <see cref="IGlyphSource"/> (fontstack+range-keyed), a
+    /// sprite sheet is one keyless pair (index JSON + PNG) per style, from the root <c>sprite</c> URL.
+    /// <c>UnityWebRequestSpriteSource</c> implements it. Core implementations use only the
+    /// PlayerLoop-independent UniTask subset, as <see cref="IGlyphSource"/> does.
     /// </summary>
     public interface ISpriteSource : IDisposable
     {

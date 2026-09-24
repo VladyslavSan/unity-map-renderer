@@ -7,32 +7,11 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// A debug harness that automatically flies the camera to <b>stress the tile-load pipeline</b>: it
-    /// orbits the look-at around a fixed city centre (Berlin by default) while sweeping the zoom in and out,
-    /// driving a continuous select → fetch → build → consume → evict churn as the motion crosses
-    /// tile-zoom and tile-column boundaries — the worst case for frame time, made reproducible and
-    /// hands-free. It replaces the interactive input <see cref="Controller"/> in the stress scene (which
-    /// has no user to drive it).
-    ///
-    /// <para><b>Observability is the panel, not logging.</b> This driver does NO logging: this is a
-    /// frame-time stress test, and <c>Debug.Log</c> allocates and can micro-stall, perturbing the
-    /// measurement. Put a <see cref="MapTelemetryPanel"/> on the same object — the stress scene does — and
-    /// it surfaces the live snapshot (cover / pending / <c>ConsumeBacklog</c> / in-flight) in the Inspector
-    /// with no string alloc and no console.</para>
-    ///
-    /// <para><b>Thin shell</b> (mirrors <see cref="CameraControlPanel"/> / <see cref="MapTelemetryPanel"/>):
-    /// the motion is two pure, deterministic static functions — <see cref="ZoomAt"/> (triangle-wave zoom)
-    /// and <see cref="LookAtAt"/> (circular orbit of the look-at). <see cref="Update"/> reads <c>Time</c> and
-    /// delegates to <see cref="Tick(float)"/> (<c>internal</c> so an EditMode test drives it — the game loop
-    /// does not run under the EditMode runner). Every camera write goes through the same
-    /// <see cref="MapCamera.Apply"/> seam the interactive controller uses.</para>
-    ///
-    /// <para><b>Play-mode only, self-wiring.</b> <see cref="MapView.Camera"/> is built only on the runtime
-    /// runtime wiring/startup path, so <see cref="Tick(float)"/> null-guards
-    /// <see cref="Map"/>/<see cref="MapViewComponent.Camera"/> and no-ops cleanly when unwired. If
-    /// <see cref="Map"/> is left empty it is found via <see cref="Object.FindAnyObjectByType"/> on
-    /// <see cref="Start"/>, so the component works on any GameObject in a wired scene with no Inspector
-    /// dragging.</para>
+    /// A debug harness that flies the camera to <b>stress the tile-load pipeline</b>: it orbits the look-at
+    /// around a fixed city centre while sweeping the zoom (<see cref="ZoomAt"/>, <see cref="LookAtAt"/>), so
+    /// the tile select → fetch → build → consume → evict churn is reproducible. It replaces the input
+    /// <see cref="Controller"/> in the stress scene. It does no logging, because <c>Debug.Log</c> allocates
+    /// and perturbs the measurement; read the <see cref="MapTelemetryPanel"/> on the same object instead.
     /// </summary>
     public sealed class TileLoadStressDriver : MonoBehaviour
     {

@@ -1,14 +1,9 @@
 // Line-dasharray GPU/visual acceptance test.
 //
-// Split by TWO using collisions, not the line cap: `CameraProperties` (MapRenderer.Core.Geo
-// vs UnityEngine.Rendering) and bare `Object` (System.Object vs UnityEngine.Object) —
-// both CS0104. Within that constraint each file groups its dominant line sub-area.
-// This file: the bare-CameraProperties user, which also imports System — it
-// cannot join LinePaintTests.cs (UnityEngine.Rendering there would collide on
-// CameraProperties) or the bare-Object files (Object would collide).
-// Carries the folder's one [TearDown] (clears a process-wide shader global);
-// merging files never merges classes, so this affects only its own fixture's
-// own test run.
+// Non-obvious why: two CS0104 using collisions split this folder, not the line cap — `CameraProperties`
+// (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System vs UnityEngine). This file
+// uses bare CameraProperties and imports System, so it cannot join LinePaintTests.cs or the bare-Object files.
+// It carries the folder's one [TearDown], which clears a process-wide shader global for this fixture only.
 //
 // Contents:
 //   LineDashSnapshotTests  — Every arm drives the material through the PRODUCTION seam (style JSON with line-dasharray parsed into a RenderLayerSet, then set.ApplyZoom) rather than a hand-made material, so the wiring is measured, not just the shader.
@@ -32,35 +27,21 @@ namespace MapRenderer.Tests.Visual
     //
     // The RENDERED teeth for world-anchored line dashes.
     //
-    // THE DEFECT, IN ONE LINE: dashU divided by widthWorld, i.e. by MapPixelsToWorld's PER-VERTEX screen
-    // measurement. That measurement varies four ways, and dashU is the one consumer that INTEGRATES the
-    // variation along the road instead of being bounded by the styled width:
-    //   1. with DEPTH                     — the world period grew with distance; the pattern crawled under tilt.
-    //   2. with DIRECTION                 — measured along `across` while dashes run `along`.
-    //   3. with the SIGN of the direction — not reachable; the helper is direction-symmetric. The two ribbon
-    //                                       vertices of a station share one centreline point and carry opposite
-    //                                       extrudeN, so MapPixelsToWorld probed ONE-SIDED in opposite
-    //                                       directions and their rulers differed by (1+e)/(1−e); every dash
-    //                                       boundary tilted off perpendicular. The parallelograms.
-    //   4. with how it is SAMPLED         — a plain per-vertex varying, so the GPU rendered the chord of a
-    //                                       hyperbola and the period stepped at every road vertex.
-    // ONE TOOTH PER TERM, and each is blind to the others — which is why all of T1/T7/T8 are required. A fix
-    // that killed only the depth term would pass T1 and still ship the rotation the maintainer reported:
-    //   T1 measures term 1 and is algebraically ZERO for term 3 at its bearing (across ⊥ fwd on a N–S road).
-    //   T7 probed term 3, and measures term 2 via its arc-length clause, at CONSTANT depth, so term 1 cannot
-    //      help it. The sign term has no mechanism left in the tree, and its primary discriminator is
-    //      LineProbeSymmetrySnapshotTests, which measures the helper directly.
-    //   T8 measures term 4 as a purely RELATIVE statement — "the same road with more vertices renders the same
-    //      dashes" — which needs no derivation in this file to be believed.
-    //   T2 measures the dpr basis, is GREEN today, and must stay green: at tilt 0 the per-vertex divisor
-    //      equalled the frame constant identically, so T2 saw only the basis.
+    // Non-obvious why: a ruler that divides dashU by MapPixelsToWorld's PER-VERTEX screen measurement
+    // integrates that measurement's variation along the road. It varies four ways, and each tooth sees one:
+    //   1. DEPTH     — the world period grows with distance (T1; algebraically zero for term 3 on a N–S road).
+    //   2. DIRECTION — the ruler is measured along `across` while dashes run `along` (T7's arc-length clause).
+    //   3. SIGN      — a one-sided probe gives the two ribbon vertices of a station rulers (1+e)/(1−e) apart,
+    //                  so dash boundaries tilt off perpendicular (T7). The helper is direction-symmetric;
+    //                  LineProbeSymmetrySnapshotTests measures it directly.
+    //   4. SAMPLING  — a per-vertex varying renders the chord of a hyperbola, so the period steps at every
+    //                  road vertex (T8, a purely relative statement).
+    // T2 pins the dpr basis: at tilt 0 the per-vertex divisor equals the frame constant, so T2 sees only that.
     //
-    // FIXTURE SHAPE IS LOAD-BEARING. Every arm drives the material through the PRODUCTION seam — a style JSON
-    // with line-dasharray parsed into a RenderLayerSet, then set.ApplyZoom(zoom, dpr). Setting _DashArray on a
-    // hand-made material would test the shader while leaving the wiring unmeasured. The frame global itself is
-    // pushed by the real MapCamera, which BuildScene constructs; with both
-    // seams in the loop, a missing push renders a uniform HALF-COVERAGE line
-    // (dashU ≡ 0 ⇒ smoothstep(−dfw,+dfw,0) == 0.5 exactly) and every tooth here fails with "no dash edges".
+    // FIXTURE SHAPE IS LOAD-BEARING. Every arm drives the material through the PRODUCTION seam (style JSON with
+    // line-dasharray → RenderLayerSet → set.ApplyZoom(zoom, dpr)), and the real MapCamera pushes the frame
+    // global. A missing push renders a uniform half-coverage line (dashU ≡ 0) and every tooth fails with
+    // "no dash edges".
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // LineDashSnapshotTests — Every arm drives the material through the PRODUCTION seam (style JSON with line-dasharray…
@@ -324,20 +305,12 @@ namespace MapRenderer.Tests.Visual
         private const double T1StationM     =   2_000.0; // 56 stations — the divisor genuinely varies per vertex
         private const double T1SampleStepM  =     100.0; // 1101 samples
 
-        /// <summary>Arc-length window at the far end of the road inside which a detected ON→OFF crossing is
-        /// the terminating BUTT CAP rather than a dash boundary — see the exclusion in
-        /// <c>MeasureCentrelineFallingEdges</c>. 4 km is ≈2.7 screen px there, past the ≈2 px feather.
-        ///
-        /// <para>No dash boundary of EITHER hypothesis falls inside it. The window is arc
-        /// [106 000, 110 000] m, i.e. <c>dashU ∈ (21.67, 22.49)</c>; falling edges sit at <c>dashU ≡ 3 mod
-        /// 6</c>, so the nearest is <c>dashU</c> 21 (arc 102 731 m) — <b>3.27 km</b> before the window opens
-        /// — and the next, 27, is off the road entirely. Under the un-fixed ruler the road only reaches
-        /// <c>dashU</c> 13.5, so its boundaries (3, 9) are nowhere near.</para>
-        ///
-        /// <para>The clearance is quoted against the nearest BOUNDARY, not against the road's
-        /// far end (110 000 − 102 731 = 7 269 m): that is a different quantity and stating it here would
-        /// overstate the margin by 2.2×. The exclusion can only ever DISCARD a crossing, so a window that is
-        /// too wide costs a false RED and never a false GREEN — it cannot let a wrong ruler through.</para></summary>
+        /// <summary>Arc-length window at the far end of the road inside which an ON→OFF crossing is the
+        /// terminating BUTT CAP, not a dash boundary (see <c>MeasureCentrelineFallingEdges</c>). 4 km is ≈2.7
+        /// screen px there, past the ≈2 px feather. The window is arc [106 000, 110 000] m (dashU 21.67–22.49);
+        /// the nearest falling edge (dashU 21, arc 102 731 m) is 3.27 km before it, and a per-vertex ruler
+        /// reaches only dashU 13.5. Non-obvious why: the exclusion can only DISCARD a crossing, so a window
+        /// that is too wide costs a false RED, never a false GREEN.</summary>
         private const double CapExclusionM = 4_000.0;
 
         private static Mesh BuildNorthRoad(double stationSpacingM)
@@ -384,9 +357,8 @@ namespace MapRenderer.Tests.Visual
                 "with the horizon off-screen, or the edge count measures clipping instead of dashes.");
 
             float[] cov = coverage.ToArray();
-            // Vacuity guard. dashU over the first 2 km is at most 0.41 under every hypothesis weighed
-            // here, so those samples are inside the first ON run. Not asserted on sample 0 alone: at this
-            // depth 100 m is 0.19 screen px, so the first few samples all land on the butt cap's own pixel.
+            // Vacuity guard: dashU over the first 2 km is ≤ 0.41 under every hypothesis, so these samples are ON.
+            // Not sample 0 alone: 100 m is 0.19 px at this depth, so the first samples land on the cap's pixel.
             int onInPrefix = 0;
             for (int i = 0; i < 20 && i < cov.Length; i++) if (cov[i] >= 0.5f) onInPrefix++;
             Assert.That(onInPrefix, Is.GreaterThanOrEqualTo(15),
@@ -401,13 +373,8 @@ namespace MapRenderer.Tests.Visual
                 double t  = edge - lo;
                 double arc = math.lerp(arcs[lo], arcs[math.min(lo + 1, arcs.Count - 1)], t);
 
-                // THE ROAD'S OWN END IS NOT A DASH EDGE. The butt cap at the far end is an ON→OFF
-                // transition whenever the last run happens to be ON. With a per-vertex divisor dashU only
-                // reaches 13.51 over this road, phase 1.51, inside an ON run — 2 dash edges PLUS the cap.
-                // Counting the cap would let a shallow fix that merely got dashU_max past 15 reach a count
-                // of 4 without ever crossing 21.
-                // The window is ~2.7 screen px at this depth, well past the ≈2 px dash feather and far
-                // from any dash boundary either hypothesis puts near the end.
+                // The far butt cap is an ON→OFF transition, not a dash edge. Counting it would let a shallow
+                // fix that only pushed dashU_max past 15 reach 4 edges without crossing 21.
                 if (arc > T1RoadLengthM - CapExclusionM) continue;
 
                 arcList.Add(arc);
@@ -417,24 +384,16 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>T1 — the DEPTH term.</b> A north–south road 110 km long, viewed at 55° of tilt,
-        /// must carry FOUR ON→OFF dash edges, and the fourth must sit at the arc length the world-anchored
-        /// parameterisation puts it at (dashU = 21).
+        /// <b>T1 — the DEPTH term.</b> A north–south road 110 km long, viewed at 55° of tilt, must carry FOUR
+        /// ON→OFF dash edges, and the fourth must sit at the arc length of dashU = 21. A per-vertex divisor
+        /// grows with view depth, reaches only dashU 13.51, and gives 2 edges. Losing the fourth edge needs
+        /// dashU_max 6.61 % low; gaining a fifth needs it 20.07 % high.
         ///
-        /// <para>RED against a per-vertex divisor by arithmetic: that ruler grows
-        /// with view depth, so dashU only reaches 13.51 over the same road and crosses 3 and 9 alone —
-        /// <b>2</b> edges, and no fourth edge to locate. Non-knife-edge in both directions: losing the
-        /// fourth edge needs dashU_max 6.61 % low, gaining a fifth needs it 20.07 % high.</para>
-        ///
-        /// <para>The count is a TOPOLOGICAL invariant, which is why term 4 cannot confound it: a per-vertex
-        /// dashU sequence is strictly increasing, so its chord interpolant is monotone and exact at the
-        /// stations, hence a monotone rise from 0 to 13.51 crosses 3 and 9 once each and never reaches 15 —
-        /// 2 edges at ANY tessellation. Edge POSITIONS move with tessellation under that model, which is why
-        /// a position is asserted only where dashU is linear.</para>
-        ///
-        /// <para>Blind to terms 2 and 3, by design. On a north–south road <c>across ⊥ fwd</c>, so the
-        /// sign asymmetry <c>e = 0.02·tan(fov/2)·(across·fwd)</c> is ALGEBRAICALLY ZERO here, not merely
-        /// small. That is T7's job.</para>
+        /// <para>Non-obvious why: the count is topological, so term 4 cannot confound it. A strictly increasing
+        /// per-vertex dashU has a monotone chord interpolant, which gives 2 edges at any tessellation. Edge
+        /// positions move with tessellation, so a position is asserted only where dashU is linear. On a
+        /// north–south road <c>across ⊥ fwd</c>, so the sign term is algebraically zero here; T7 measures
+        /// it.</para>
         /// </summary>
         [Test]
         public void DashEdges_AreWorldAnchoredInDepth_UnderTilt()
@@ -528,32 +487,19 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>T7 — the SIGN term, i.e. the rotation the maintainer reported.</b> On an east–west
-        /// road under tilt, a dash boundary must be PERPENDICULAR to the road: sampled on two scanlines
-        /// 6 px either side of the centreline, each ON→OFF edge must land at the same screen x on both.
+        /// <b>T7 — the SIGN term, the rotation.</b> On an east–west road under tilt, a dash boundary must be
+        /// PERPENDICULAR to the road: on two scanlines either side of the centreline, each ON→OFF edge must
+        /// land at the same arc length.
         ///
-        /// <para>THE MECHANISM, and why no other tooth in this file can see it. The two ribbon vertices of
-        /// a station share ONE centreline position and carry OPPOSITE <c>extrudeN</c>
-        /// (<c>RibbonJob</c>'s <c>MakeVertex(p2, n1, …, +1)</c> / <c>MakeVertex(p2, -n1, …, −1)</c>), and
-        /// the shader handed that signed direction straight to <c>MapPixelsToWorld</c>, which probed
-        /// ONE-SIDED and so returned two different rulers for one physical axis. <b>The helper now divides
-        /// the probe's own foreshortening back out, so it is direction-symmetric and this mechanism no
-        /// longer exists at source; the sign term's primary discriminator is
-        /// <c>LineProbeSymmetrySnapshotTests</c>, which measures the helper itself.</b> The two rulers
-        /// differed by exactly <c>(1+e)/(1−e)</c> with
-        /// <c>e = 0.02·tan(fov/2)·(across·fwd)</c> — independent of depth, zoom, altitude, width and screen
-        /// position. Here <c>across·fwd = sin 55° = 0.8192</c>, so e = 0.0094588 and the two edges of the
-        /// ribbon carried dashU values 1.910 % apart. Since dashU interpolates perspective-correctly, the
-        /// iso-dashU contour stayed a straight line but stopped being perpendicular to the road, and the
-        /// tilt grew LINEARLY with accumulated dashU. Diagonal parallelograms.</para>
+        /// <para>Non-obvious why: the two ribbon vertices of a station share one centreline position and carry
+        /// opposite <c>extrudeN</c>. A one-sided <c>MapPixelsToWorld</c> probe gives them rulers
+        /// <c>(1+e)/(1−e)</c> apart, <c>e = 0.02·tan(fov/2)·(across·fwd)</c> (1.910 % here), so iso-dashU
+        /// contours stay straight but tilt linearly with dashU. The helper is direction-symmetric, and
+        /// <c>LineProbeSymmetrySnapshotTests</c> measures it directly.</para>
         ///
-        /// <para>Discriminates at 3.94 px of probe-to-probe skew on the dashU = 21 edge (≈18°), with two
-        /// more edges above 3.6 px — a 3.9× margin that did not hinge on locating one particular edge. The
-        /// assertion takes the MAX and not the mean: the innermost edge sits near the look-at where the
-        /// effect was genuinely small (1.13 px) and averaging it in would make the tooth knife-edge.</para>
-        ///
-        /// <para>Depth is CONSTANT along this road (an east–west line has zero <c>fwd</c> component in x),
-        /// so term 1 contributes nothing here and the fix cannot pass by accident through it.</para>
+        /// <para>That defect gives 3.94 px of skew on the dashU = 21 edge, a 3.9× margin. The assertion takes
+        /// the MAX, not the mean: the innermost edge sits near the look-at, where the effect is small
+        /// (1.13 px). Depth is constant along this road, so term 1 contributes nothing.</para>
         /// </summary>
         [Test]
         public void DashBoundaries_ArePerpendicularAcrossTheRibbon_UnderTilt()
@@ -586,11 +532,8 @@ namespace MapRenderer.Tests.Visual
                     int centreRow = (int)math.round(originSp.y);
                     ProbeMapping centre = MapProbeRow(scene.UnityCamera, originSp.y);
                     float thickness = MeasureBandThicknessPx(pixels, centreRow, 0, Size - 1, background, plateau);
-                    // NOT the styled width itself: "a px width holds its DEVICE width under tilt" is not the
-                    // model. A styled px width fixes a WORLD width at the look-at; this road runs ACROSS the
-                    // view azimuth, so its across-axis lies in the ground plane along the tilt direction and
-                    // picks up that plane's foreshortening: 16·cos 55° = 9.177 px (measured 9.173).
-                    // It is a PRECONDITION for the probe placement below, not the tooth.
+                    // A precondition for probe placement, not the tooth: a styled px width fixes a WORLD width at
+                    // the look-at, so this cross-view road foreshortens to 16·cos 55° = 9.177 px.
                     double expectedThickness = StyledLineWidthPx * math.cos(math.radians(TiltDeg));
                     TestContext.WriteLine($"T7: centre row {originSp.y:F2}, rendered band thickness " +
                                           $"{thickness:F2} px (want {expectedThickness:F3} = " +
@@ -603,28 +546,20 @@ namespace MapRenderer.Tests.Visual
                         $"{StyledLineWidthPx} would mean the band is holding a constant DEVICE width under " +
                         "tilt — the compensation this repo reverted.");
 
-                    // The probes are placed from the band that RENDERED, so this tooth encodes no
-                    // width premise at all. 2 px inside the styled edge, integer rows because the probe is a
-                    // scanline.
+                    // The probes sit 2 px inside the band that RENDERED, so this tooth encodes no width premise.
+                    // Rows are integers because the probe is a scanline.
                     int probeOffset = (int)math.floor(0.5 * thickness - T7ProbeInsetPx);
                     Assert.That(probeOffset, Is.GreaterThanOrEqualTo(2),
                         $"T7: a {thickness:F2} px band leaves a probe offset of {probeOffset} px, too close " +
                         "to the centreline to resolve a cross-ribbon skew. RAISE the styled width and " +
                         "re-derive; do not move the probes onto the AA straddle.");
 
-                    // THE MEASUREMENT SPACE IS ARC LENGTH, NOT SCREEN X — and that is not a detail.
-                    // The two ribbon edges are two world lines at DIFFERENT DEPTHS under tilt (the far edge
-                    // sits +halfWidth along `across`, the near edge −halfWidth), so the ribbon converges
-                    // toward the vanishing point and a world-PERPENDICULAR dash boundary projects as a
-                    // SLANTED screen segment. That slant is correct rendering, it is several px at the frame
-                    // edges, and it swamps the effect this tooth exists to catch. Each probe therefore gets
-                    // its own screen→world map, solved from the real camera, and the boundary is compared
-                    // where "perpendicular" is genuinely a null: the arc length the boundary sits at.
-                    // These pass a pixel INDEX where GroundRowSolver documents a screen-y (index j's centre
-                    // is at j + 0.5), so each probe is placed half a row off. That shifts probe PLACEMENT,
-                    // not a measured quantity, so it is second-order here — but it is fatal in a tooth where
-                    // 0.5 px IS the measurement. Fixing it moves T7's probes; if T7 ever flakes, symmetrise
-                    // the offsets and fix this together.
+                    // Non-obvious why: compare in ARC LENGTH, not screen x. The two ribbon edges sit at different
+                    // depths under tilt, so a world-perpendicular boundary projects SLANTED by several px, which
+                    // swamps the effect. Each probe therefore gets its own screen→world map from the real camera.
+                    // Limitation: these calls pass a pixel INDEX where GroundRowSolver takes a screen-y (centre at
+                    // j + 0.5), so each probe sits half a row off. That is second-order here; if T7 flakes,
+                    // symmetrise the offsets and fix this together.
                     ProbeMapping upperMap = MapProbeRow(scene.UnityCamera, centreRow + probeOffset);
                     ProbeMapping lowerMap = MapProbeRow(scene.UnityCamera, centreRow - probeOffset);
                     TestContext.WriteLine($"T7: probe world-z {upperMap.Z:F0} / {lowerMap.Z:F0} m, " +
@@ -654,9 +589,8 @@ namespace MapRenderer.Tests.Visual
                     Assert.That(lowerEdges.Count, Is.GreaterThanOrEqualTo(4),
                         $"T7: only {lowerEdges.Count} falling edges on the lower probe.");
 
-                    // Paired by ARC PROXIMITY, not by index: the two probes clip the frame at different
-                    // world x (again the convergence), so one can carry an outermost edge the other does
-                    // not, and index pairing would silently compare edge n against edge n+1.
+                    // Pair by ARC PROXIMITY, not index: the probes clip the frame at different world x, so index
+                    // pairing could compare edge n against edge n+1.
                     double maxSkew = 0.0, worstArc = 0.0;
                     int    pairs   = 0;
                     for (int i = 0; i < upperArc.Count; i++)
@@ -676,10 +610,8 @@ namespace MapRenderer.Tests.Visual
                         $"T7: only {pairs} dash boundaries appear on BOTH probes; fewer than 4 makes the " +
                         "max below rest on too little.");
 
-                    // The ANGLE, not the absolute displacement: the probes are placed from the band that
-                    // rendered, and a cos θ-thinner band brings them closer together, which would silently
-                    // relax an absolute bound. Threshold = 1.0 px over a 12 px separation, so the 3.94 px
-                    // over 12 px this tooth discriminates at keeps a 3.9× margin.
+                    // Assert the ANGLE: a thinner rendered band brings the probes closer together, which would
+                    // relax an absolute bound. T7MaxSkewPerSeparationPx holds the threshold and its margin.
                     double skewPerSeparation = maxSkewPx / (2.0 * probeOffset);
                     TestContext.WriteLine(
                         $"T7: probe separation {2 * probeOffset} px, skew {maxSkewPx:F4} px ⇒ " +
@@ -698,9 +630,8 @@ namespace MapRenderer.Tests.Visual
                         "divisor additionally has no direction and no sign — so a reading here is NOT " +
                         "explained by the historical cause. Investigate what it is rather than assuming.");
 
-                    // Term 2, for one line: the same WORLD period T1 measures on a perpendicular road.
-                    // Under a per-vertex divisor the east-west edges sit elsewhere entirely, so this clause
-                    // discriminates too.
+                    // Term 2: the same WORLD period T1 measures on a perpendicular road. A per-vertex divisor puts
+                    // the east–west edges elsewhere, so this clause discriminates too.
                     for (int i = 0; i < lowerArc.Count; i++)
                     {
                         double want = FallingEdgeArc(i);
@@ -720,30 +651,19 @@ namespace MapRenderer.Tests.Visual
         // ── T8: the SAMPLING term — vertex-density independence ──────────────────────────────────
 
         /// <summary>
-        /// <b>T8 — the SAMPLING term.</b> The SAME road, meshed two ways, must render its dashes
-        /// in the same places: a 56-station mesh at 2 km spacing and a bare two-point mesh must put every
-        /// dash edge within 1 screen px of each other.
+        /// <b>T8 — the SAMPLING term.</b> The SAME road, meshed as 56 stations at 2 km and as two bare points,
+        /// must put every dash edge within 1 screen px across the two meshes. It is the one purely relative
+        /// measurement here.
         ///
-        /// <para>MECHANISM: dashU is a plain interpolated varying (no <c>nointerpolation</c> anywhere in
-        /// <c>Map/Line/</c>), so the GPU renders the perspective-correct CHORD of the per-vertex value.
-        /// With the per-vertex divisor that value is a hyperbola in arc length, and a chord of a hyperbola
-        /// depends on where its endpoints are — so the period steps at every road vertex and a road's dash
-        /// pattern depends on how many vertices its source geometry shipped with.
-        /// <c>LineCurvatureSubdivision</c> documents that a flat/Mercator projection "always yields 1 step
-        /// per segment", so the two-point case is the NORMAL Mercator case, not a contrived one. After the
-        /// fix dashU is exactly linear in arc length, and a chord of a linear function IS the function, so
-        /// the dependence vanishes rather than shrinking.</para>
+        /// <para>Non-obvious why: dashU is a plain interpolated varying (no <c>nointerpolation</c> in
+        /// <c>Map/Line/</c>), so the GPU renders the perspective-correct chord of the per-vertex value. Under a
+        /// per-vertex divisor that value is a hyperbola in arc length, so the period steps at every vertex
+        /// (≈12.4 and ≈12.7 px of displacement). A linear dashU makes the chord exact. The two-point mesh is
+        /// the normal Mercator case, because <c>LineCurvatureSubdivision</c> yields 1 step per flat segment.</para>
         ///
-        /// <para>Discriminates at ≈12.4 and ≈12.7 px of displacement — the largest margin of any tooth here.
-        /// It is also the only purely RELATIVE measurement here: it needs no derivation in this
-        /// file to be believed.</para>
-        ///
-        /// <para>TWO GUARDS, both non-obvious. (1) The sparse mesh is TWO POINTS, not 30 km stations: with
-        /// 30 km stations the second edge lands within 0.00 px because the 60 km station sits almost exactly
-        /// where dashU = 9 falls, so the chord passes through the true value and the tooth is inert on that
-        /// edge. (2) The count is asserted equal and ≥ 2 before pairing — under the broken model BOTH
-        /// MESHES PRODUCE 2 EDGES, so a count assertion discriminates nothing. T8's whole signal is
-        /// positional, which is exactly what makes it independent of T1 rather than a copy of it.</para>
+        /// <para>Two guards. The sparse mesh has two points, not 30 km stations: a 60 km station sits almost on
+        /// dashU = 9, which makes the tooth inert on that edge. The equal-count assertion only enables pairing;
+        /// under a per-vertex divisor both meshes give 2 edges, so the signal is purely positional.</para>
         /// </summary>
         [Test]
         public void DashEdges_AreIndependentOfRoadVertexDensity()
@@ -809,25 +729,15 @@ namespace MapRenderer.Tests.Visual
         private const double T2RoadLengthM = 76_000.0;
 
         /// <summary>
-        /// <b>T2 — the basis pin.</b> At tilt 0, an east-running road's first dash transition must sit at
-        /// the screen offset the DEVICE-pixel basis puts it at, at dpr 1 AND at dpr 2 — 48 px and 96 px,
-        /// a ratio of exactly 2.
+        /// <b>T2 — the basis pin.</b> At tilt 0, an east-running road's first dash transition must sit at the
+        /// screen offset of the DEVICE-pixel basis at dpr 1 AND dpr 2 — 48 px and 96 px, a ratio of 2.
         ///
-        /// <para>WHY BOTH ARMS. The dash period in world metres is
-        /// <c>(w_logical·dpr) × (mpp_logical/dpr) × Σ</c>: the dpr CANCELS. So a Core-only round trip is
-        /// vacuous, and any helper written as "width × MetersPerPixel × Σ" is right while mentioning no
-        /// ratio at all. The error only exists where the two halves are owned by different files —
-        /// <c>_Width</c> is multiplied by dpr at the style seam, so the ruler must be divided by it here.
-        /// <b>The dpr-1 arm reads 48 px under BOTH hypotheses</b>: it is the control, not the
-        /// discriminator. That is the whole shape of the DPR trap, and it is why the rest of the suite —
-        /// which runs only at dpr 1 — cannot see this.</para>
-        ///
-        /// <para>The logical-basis error puts the dpr-2 transition at 192 px, 96 px away from a ±3 px
-        /// assertion, and leaves only ONE transition inside the frame instead of two.</para>
-        ///
-        /// <para>GREEN on today's tree, and it must be: at tilt 0 the ground is perpendicular to the view
-        /// axis, so depth ≡ altitude everywhere and the per-vertex divisor EQUALS the frame constant
-        /// identically. T2 measures the basis exactly, not approximately — and nothing else.</para>
+        /// <para>Non-obvious why: the world dash period <c>(w_logical·dpr) × (mpp_logical/dpr) × Σ</c> cancels
+        /// dpr, so the error exists only where two files own the halves: the style seam multiplies
+        /// <c>_Width</c> by dpr, so the ruler must divide by it. The dpr-1 arm reads 48 px under both bases and
+        /// is the control. The logical-basis error puts the dpr-2 transition at 192 px and leaves one
+        /// transition in frame. At tilt 0 the per-vertex divisor equals the frame constant, so T2 measures only
+        /// the basis.</para>
         /// </summary>
         [Test]
         public void DashPeriod_UsesTheDevicePixelBasis_AcrossDpr()

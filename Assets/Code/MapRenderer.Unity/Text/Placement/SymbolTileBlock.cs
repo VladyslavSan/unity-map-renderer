@@ -1,6 +1,5 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header): this file is in MapRenderer.Unity.Text.Placement
-// and uses Unity.Mathematics types — TOP-LEVEL `using Unity.Mathematics;` + unqualified types, never an inline
-// `Unity.Mathematics.X`. Unity-side (needs Unity.Collections' NativeArray — Core stays engine-free).
+// Namespace-collision guard (see GlyphAtlasTexture.cs's header): TOP-LEVEL `using Unity.Mathematics;` and
+// unqualified types, never an inline `Unity.Mathematics.X`.
 
 using Unity.Collections;
 using Unity.Mathematics;
@@ -11,34 +10,16 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// One tile's baked, NATIVE mirror of the
-    /// per-tile slice of <see cref="SymbolBatch"/>'s SoA — built ONCE at tile-build commit
-    /// (<see cref="SymbolTileBlockBaker.Bake"/>) instead of every frame, and held on the tile's
-    /// <c>SymbolTileStore</c> entry with the SAME lifecycle as its <c>SymbolPlacementSystem</c> (kept warm across a
-    /// release→cache→restore round trip, dropped only when the symbols themselves drop).
-    ///
-    /// <para><b>Dense per-symbol mirror.</b> Indexed one slot per <see cref="SymbolTileBuffer.Symbols"/> entry
-    /// in the order the baker walked. The source list is itself dense — <c>StyledSymbolTileBuilder</c> skips a
-    /// per-symbol build failure outright rather than recording a gap — so <c>localIndex == i</c> is the source
-    /// symbol position, and the <c>(blockId, localIndex)</c> winner plan indexes straight into these
-    /// columns.</para>
-    ///
-    /// <para><b>Lifetime.</b> Every array is <see cref="Allocator.Persistent"/>, freed exactly once
-    /// (<see cref="DoDispose"/>, idempotent via <see cref="VerifiedDisposable"/> — the codebase's shared
-    /// dispose-once + leak-finalizer base, reused here rather than hand-rolling a fresh guard). Single owner:
-    /// the store's entry holds it as a bare <c>System.IDisposable</c> (engine-free store, see
-    /// <c>SymbolTileStore</c>'s header) and disposes it at each drop site (commit-overwrite / FIFO-evict /
-    /// true-release / Clear) — never on a stale-survives (<c>BeginBuild</c> pull) or a cache-hit move
-    /// (<c>Restore</c>). <see cref="SymbolTileBlockBaker.Bake"/> allocates into a fresh instance of this
-    /// type and disposes it on ANY exception mid-bake (its own field doc) — no partial-allocation leak.</para>
+    /// One tile's native mirror of its slice of <see cref="SymbolBatch"/>, baked once at tile-build commit
+    /// (<see cref="SymbolTileBlockBaker.Bake"/>). One dense slot per <see cref="SymbolTileBuffer.Symbols"/>
+    /// entry, so the <c>(blockId, localIndex)</c> winner plan indexes these columns directly.
+    /// Non-local invariant: the <c>SymbolTileStore</c> entry is the single owner and disposes it at each
+    /// drop site, never on a stale-survives pull (<c>BeginBuild</c>) or a cache-hit move (<c>Restore</c>).
     /// </summary>
     internal sealed class SymbolTileBlock : VerifiedDisposable
     {
-        // Every array below is allocated at its EXACT final size: SymbolTileBlockBaker counts each pool
-        // in a first pass (CountSizes) with the same per-symbol arithmetic the fill pass then uses, so each
-        // array's own Length IS its element count. There are no `XXXCount` companion fields: BlockView
-        // omits pool counts, because the gather indexes only by a winner's LocalIndex/Detail/*Start. A
-        // count that can disagree with Length is a bug waiting to happen; Length cannot disagree with itself.
+        // Every array is allocated at its final size (SymbolTileBlockBaker.CountSizes), so its Length is its
+        // element count. No companion count field exists, because a count can disagree with Length.
 
         // ── per-symbol columns, RAW list order (dense — one slot per source symbol) ──
         // Length == the symbols list length.
@@ -50,13 +31,11 @@ namespace MapRenderer.Unity.Text.Placement
         // Per-symbol column in RAW order, mirroring the symbol's MaterialIndex — baked so the off-main
         // reconciler can read it from the block instead of dereferencing the managed source symbol.
         internal NativeArray<int>     MaterialIndexes;
-        // The RESOLVED pair role per raw slot (None/Owner/Rider), baked from SymbolPairing over the tile list,
-        // so the reconciler reads the baked role instead of re-resolving. None for every curved symbol — a
-        // curved symbol is never paired.
+        // The resolved pair role per raw slot (None/Owner/Rider), baked from SymbolPairing over the tile list.
+        // A curved symbol is never paired, so its role is None.
         internal NativeArray<SymbolPairRole> PairRoles;
-        // The interned text/icon ids in RAW order (SymbolStringTable), so TextIds[i] == Intern(symbol.Text)
-        // (0 for null Text; likewise IconImageIds[i] == Intern(symbol.IconImage)). Baked so the off-main
-        // dedup keys on the block's int columns.
+        // Interned ids in raw order (SymbolStringTable): TextIds[i] == Intern(symbol.Text), 0 for null Text,
+        // and likewise for IconImageIds. The off-main dedup keys on these int columns.
         internal NativeArray<int>     TextIds;
         internal NativeArray<int>     IconImageIds;
 
@@ -91,12 +70,9 @@ namespace MapRenderer.Unity.Text.Placement
         /// one (source, tile) build's output, so a single key serves the whole block.</summary>
         internal long TileKey;
 
-        /// <summary>Live (constructed, not yet Disposed) block count — mirrors
-        /// <c>MeshDataPayload.DebugLiveAllocCount</c>'s leak-guard idiom for the same
-        /// assertion shape: an intentionally-undisposed block shows a non-zero delta (positive control), and a
-        /// throwing bake (which disposes its own partial block before rethrowing — see
-        /// <see cref="SymbolTileBlockBaker.Bake"/>'s (G)) must return this to baseline. Debug/test
-        /// instrumentation only — no production logic reads it.</summary>
+        /// <summary>Live (constructed, not yet disposed) block count, the same leak-guard idiom as
+        /// <c>MeshDataPayload.DebugLiveAllocCount</c>. A throwing <see cref="SymbolTileBlockBaker.Bake"/>
+        /// disposes its partial block, so this returns to baseline. Debug/test instrumentation only.</summary>
         internal static long DebugLiveAllocCount;
 
         internal SymbolTileBlock() => System.Threading.Interlocked.Increment(ref DebugLiveAllocCount);

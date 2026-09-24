@@ -1,34 +1,16 @@
-// Engine-free. Pure blittable data carrier. TOP-LEVEL `using Unity.Mathematics;` + unqualified
-// float4x4/double3 — this file lives in MapRenderer.Core.Text.Placement, where an inline
-// `Unity.Mathematics.float4x4` would bind to a (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics`
-// namespace (CS0234). See SymbolScreenProjection.cs's header for the same trap.
+// TOP-LEVEL `using Unity.Mathematics;`: inside this namespace an inline `Unity.Mathematics.float4x4` binds
+// to a nonexistent nested namespace (CS0234; see SymbolScreenProjection).
 
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The four per-frame values <see cref="SymbolScreenProjection.TryProjectPoint"/> needs, carried as
-    /// ONE parameter so the staging math can project an arbitrary render-space point (not just the anchors
-    /// the projection job already resolved).
-    ///
-    /// <para><b>Why the MATRIX and not clip <c>w</c>.</b> <see cref="SymbolStagingMath.StageCurved"/>'s doc
-    /// records that the exact world→screen parameter needs the endpoint clip <c>w</c>s, which the staging
-    /// inputs do not carry. The projected collision box needs something strictly stronger — the exact
-    /// projection of a point that is OFF the polyline (a glyph's corner) — and a <c>w</c> per path vertex
-    /// cannot produce that at all, while the view transform produces both it and <c>w</c> at any point. All
-    /// four values are already local at the one call site (<c>SymbolPlacementSystem.TickCore</c>) and already
-    /// flow into the projection pass beside it, so this carries no new frame state.</para>
-    ///
-    /// <para><b>The default value is a REACHABLE state and it means "no camera was supplied".</b> A
-    /// default-constructed transform has a zero viewport, which <see cref="IsUsable"/> reports as false and
-    /// every consumer must degrade on — see its doc. This mirrors the
-    /// <c>CurvedStageInput.MetresPerLogicalPixel &gt; 0</c> degradation guard and <see cref="AlignmentMode"/>'s
-    /// zero value being <c>Auto</c>: a hand-built staging fixture that never heard of this type gets the
-    /// screen-space box without anyone remembering to update it.</para>
-    ///
-    /// <para><c>readonly struct</c> so it is passed <c>in</c> without a defensive copy (the convention's
-    /// <c>in ⟺ readonly struct</c> gate), and blittable throughout so it is legal as a Burst job field.</para>
+    /// The four per-frame values <see cref="SymbolScreenProjection.TryProjectPoint"/> needs, as ONE blittable
+    /// <c>readonly struct</c>, so the staging math can project any render-space point. Non-obvious why: the
+    /// projected collision box needs points off the polyline (glyph corners), which a per-vertex clip <c>w</c>
+    /// cannot give. The default value means "no camera": <see cref="IsUsable"/> is false and consumers fall back
+    /// to the screen-space box, so a hand-built staging fixture needs no update.
     /// </summary>
     public readonly struct SymbolViewTransform
     {
@@ -49,13 +31,9 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Whether this transform came from a real frame. A camera always has a positive viewport, so a
-        /// non-positive one identifies the default-constructed value — the state every hand-built staging
-        /// fixture carries, which must get the screen-space box (<see cref="SymbolBox.BuildRotatedGlyph"/>)
-        /// EXACTLY rather than project through a zero matrix.
-        /// <para>Defence in depth, not the sole guard: a zero <see cref="ViewProj"/> also makes every
-        /// projected <c>clip.w</c> zero, which <see cref="SymbolScreenProjection.TryProjectPoint"/> rejects on
-        /// its own. Checked first anyway, because "no camera" is a statement about the INPUT and reading it
-        /// off a downstream numerical accident is how a guard rots.</para>
+        /// non-positive one is the default value, which must get the screen-space box
+        /// (<see cref="SymbolBox.BuildRotatedGlyph"/>) rather than project through a zero matrix. A zero
+        /// <c>clip.w</c> is also rejected downstream, but this checks the input itself.
         /// </summary>
         public bool IsUsable => ViewportLogicalPx.x > 0.0 && ViewportLogicalPx.y > 0.0;
     }

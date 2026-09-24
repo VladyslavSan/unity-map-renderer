@@ -6,50 +6,19 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Geometry
 {
     /// <summary>
-    /// Burst job: clips decoded MVT rings, in tile space, to the axis-aligned window
-    /// <c>[ClipMin, ClipMax]</c> — the tile plus however much of its buffer the caller chose to keep
-    /// (<c>MapRenderer.Core.Tiles.TileBufferClip</c>). Runs between <see cref="MvtDecodeJob"/> and
-    /// <see cref="RingAssemblyJob"/>: rings are still just rings here, with no polygon/hole structure yet,
-    /// which is exactly what makes clipping simple.
-    ///
-    /// <para><b>Coordinate space and winding (producer declaration).</b> Input and output are both raw
-    /// <b>tile space</b> — no projection, no rescaling. Sutherland–Hodgman is orientation-preserving, so a
-    /// ring's output winding EQUALS its input winding (the canonical CCW-in-tile-space convention,
-    /// <c>docs/coordinates-and-projections.md</c>). The Unity-front reversal for stock Cull Back stays
-    /// where it is, at the mesh-write boundary in <c>StyledFillTileBuilder</c>.</para>
-    ///
-    /// <para><b>Boundary is inclusive</b> (<c>&gt;= min</c>, <c>&lt;= max</c>): a vertex exactly on the
-    /// window edge is INSIDE. Combined with the bbox fast path this means the synthetic full-extent
-    /// background ring passes through untouched at any margin ≥ 0 — the free falsifiers
-    /// (<c>NonMvtDecoderFanOutTests</c>, <c>TileBackgroundQuadProjectionTests</c>) assert exactly 4 vertices for
-    /// it, and would red on an exclusive test or a duplicated on-boundary point.</para>
-    ///
-    /// <para><b>Fast path (structural, not an optimisation).</b> A ring whose bbox already lies inside the
-    /// window is copied verbatim, so "geometry that was already inside is bit-identical" is a property of
-    /// the control flow rather than of the clipping arithmetic.</para>
-    ///
-    /// <para><b>Degenerate output is expected and fine.</b> A concave ring crossing the boundary several
-    /// times emits one ring with zero-width channels running along the clip edge; a ring wholly outside
-    /// emits nothing and is dropped here. <see cref="RingAssemblyJob"/>'s two filters (<c>rLen &lt; 3</c>,
-    /// <c>|area2| &lt; 1</c>) clear the fully-degenerate cases, and <see cref="EarcutJob"/>'s cure → split →
-    /// clean-drop cascade already handles collinear/zero-area input.</para>
-    ///
-    /// <para>Does NOT reference <c>MapRenderer.Core</c> — the window arrives as plain <c>double2</c>s, so
-    /// Core's <c>System.Math</c> stays off the Burst path (same rule as <see cref="RingAssemblyJob"/>).</para>
+    /// Burst job: Sutherland–Hodgman clip of rings, in tile space, to the inclusive window
+    /// <c>[ClipMin, ClipMax]</c>, before <see cref="RingAssemblyJob"/>. Output keeps the input winding (CCW).
+    /// A ring whose bbox lies inside is copied verbatim, so inside geometry stays bit-identical and the
+    /// full-extent background ring keeps 4 vertices. A ring wholly outside is dropped; zero-width channels
+    /// from concave rings are left to ring assembly's filters and earcut.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct RingClipJob : IJob
     {
         /// <summary>Working-buffer sizing, as a multiple of the LONGEST input ring — <c>BufferA</c>/<c>BufferB</c>
-        /// must each be at least this. Deliberately an OVER-estimate: in Burst an overrun corrupts memory
-        /// silently instead of throwing, so the safe direction is the only direction.
-        ///
-        /// <para>16 comes from the loose per-plane bound (2 vertices per input edge ⇒ 2⁴). The <b>tight</b>
-        /// bound is 1.5⁴ ≈ 5.06×: the alternating in/out case that maximises output also forces
-        /// <c>#entering == #exiting</c>, which caps the entering-edge share at 50% and yields 1.5·len per
-        /// plane, not 2·len. Left at 16 because the cost is transient scratch and the risk of being wrong in
-        /// the other direction is silent corruption — but the headroom is ~3×, which is where to look first
-        /// if the allocation ever matters (it is ~26 MB for a 50 k-vertex coastline ring).</para></summary>
+        /// must each be at least this. Non-obvious why: it over-estimates, because a Burst overrun corrupts
+        /// memory silently. 16 is the loose bound 2⁴ (2 vertices per edge per plane); the tight bound is
+        /// 1.5⁴ ≈ 5.06, so the ~3× headroom is the first place to look if this allocation ever matters.</summary>
         public const int BufferLengthMultiplier = 16;
 
         // ── Input ──────────────────────────────────────────────────────────────────────────────
@@ -73,8 +42,7 @@ namespace MapRenderer.Jobs.Geometry
         public NativeArray<double2> BufferB;
 
         // ── Output ─────────────────────────────────────────────────────────────────────────────
-        // Length-authoritative lists: OutRingOffsets holds the same start+sentinel layout the decode stage
-        // produces (so RingAssemblyJob consumes them unchanged), with OutRingOffsets.Length - 1 rings.
+        // Length-authoritative lists in the decode stage's start+sentinel layout: Length - 1 rings.
         public NativeList<double2> OutVertices;
         public NativeList<int>     OutRingOffsets;
         public NativeList<int>     OutRingFeatureIdx;
@@ -185,9 +153,8 @@ namespace MapRenderer.Jobs.Geometry
                 prevInside = curInside;
             }
 
-            // Close the ring: an exit crossing whose entry vertex sat exactly ON the plane emits that vertex
-            // a second time, and the wrap-around can leave the first and last equal. Both are zero-length
-            // edges, and both are what turn an on-boundary quad into a 5-vertex ring.
+            // Close the ring: Emit drops a repeated on-plane vertex, but the wrap-around can still leave
+            // first == last. Dropping that zero-length edge keeps an on-boundary quad at 4 vertices.
             if (outLen > 1 && BufferB[outLen - 1].Equals(BufferB[0]))
                 outLen--;
 

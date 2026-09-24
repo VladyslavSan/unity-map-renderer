@@ -7,20 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The blittable, order-preserving Structure-of-Arrays for one collected symbol set — the per-frame placement
-    /// source of truth. Built ONCE per collected-set change (keyed on
-    /// <c>SymbolTileStore.Version</c>) by converting the collected per-symbol records at the
-    /// aggregation seam; every per-frame pass (gather → project → stage) then reads these arrays with no managed
-    /// iteration and no per-frame conversion. All fields are blittable so a later step can mirror them into
-    /// <c>NativeArray</c>s for a Burst staging job.
-    ///
-    /// <para><b>Ordering.</b> Records are in the exact collected order the old per-frame loop processed symbols in,
-    /// so the collision ordinal assignment (and thus the built mesh) is byte-identical. Point and curved symbols
-    /// interleave; <see cref="Kinds"/> (a <see cref="SymbolPlacementKind"/>) discriminates and <see cref="Detail"/> indexes the per-kind arrays.</para>
-    ///
-    /// <para><b>Reuse.</b> Arrays grow geometrically and never shrink; <see cref="Reset"/> rewinds the counts so a
-    /// rebuild reuses the buffers (no per-rebuild GC once warm). Only the STABLE per-symbol values live here — the
-    /// per-frame dynamic ones (projected screen/depth/valid, last-frame incumbency) are filled by the consumer.</para>
+    /// The blittable Structure-of-Arrays for one collected symbol set, the per-frame placement source of truth.
+    /// It is rebuilt only when <c>SymbolTileStore.Version</c> changes, and every per-frame pass reads it with no
+    /// managed iteration. Non-local invariant: records keep the collected order, so collision ordinals and the
+    /// built mesh are deterministic; <see cref="Kinds"/> and <see cref="Detail"/> index the per-kind arrays.
+    /// Arrays grow and never shrink (<see cref="Reset"/> rewinds counts); per-frame values live with the consumer.
     /// </summary>
     public sealed class SymbolBatch
     {
@@ -31,9 +22,8 @@ namespace MapRenderer.Core.Text.Placement
         public int[]     WorldCount = Array.Empty<int>();   // 1 (point anchor) or path length (curved)
         public double3[] RepAnchor  = Array.Empty<double3>(); // the distance-cull point (RepresentativeAnchor)
         public bool[]    SymbolDeparting = Array.Empty<bool>(); // per record → its tile is leaving cover (fade OUT, don't pop)
-        // A SEPARATE flag from SymbolDeparting: a coverage-fading tile is still ACTIVE (loaded, in cover) — only
-        // its on-screen coverage crossed below threshold. Conflating it with SymbolDeparting (bound to "tile
-        // unloaded→cached") would assert a lifecycle lie — see SymbolTileCoverageFilter's fade-vs-drop classifier.
+        // Separate from SymbolDeparting: a coverage-fading tile is still active (loaded, in cover); only its
+        // on-screen coverage crossed below threshold (SymbolTileCoverageFilter).
         public bool[]    SymbolCoverageFading = Array.Empty<bool>(); // per record → its tile's coverage crossed below threshold (fade OUT, don't pop)
         public int       Count;                             // number of records (symbols)
 
@@ -61,20 +51,15 @@ namespace MapRenderer.Core.Text.Placement
         public int           AnchorCount;
         public double3[]     WorldPoints  = Array.Empty<double3>();          // anchor (point) / path verts (curved) — for projection
         public int           WorldPointCount;
-        // The unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount
-        // pair (no second index pair). float3 (a direction; narrowed at the same site WorldPoints would be if
-        // it were narrowed): a unit vector at float precision carries ~1e-7 rad of angular error, well below
-        // what any consumer needs, so narrowing at the source (the baker) rather than carrying double3 all
-        // the way through this pool is safe.
+        // The unit surface normal at each WorldPoints entry, index-parallel (same WorldStart/WorldCount).
+        // float3 is enough: a unit vector at float precision has ~1e-7 rad of angular error.
         public float3[]      WorldUps     = Array.Empty<float3>();
         public int           WorldUpCount;
         public long[]        AnchorFadeIds = Array.Empty<long>();            // per curved anchor + a trailing fallback slot
         public int           AnchorFadeCount;
 
         // ── staging output upper bounds (from this batch's shape — independent of the camera) ──
-        // The worst-case staged box/quad/candidate counts, so a consumer can pre-size its output buffers ONCE per
-        // rebuild and the staging math can write via fixed spans (no per-append growth — Burst-safe). Point: 1 box,
-        // Q quads, 1 candidate. Curved: up to (anchors + 1 centred fallback) placements, each glyphCount boxes/quads.
+        // Pre-size once per rebuild. Point: 1 box, Q quads, 1 candidate; curved: (anchors + 1) × glyphCount.
         public int MaxBoxes;
         public int MaxQuads;
         public int MaxCandidates;

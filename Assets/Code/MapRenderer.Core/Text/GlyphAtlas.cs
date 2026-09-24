@@ -8,54 +8,27 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// CPU-side SDF glyph atlas: owns a <see cref="GlyphAtlasPacker"/> (per page) plus a single-channel
-    /// (R8), row-major pixel buffer per page and a codepoint-keyed <see cref="GlyphAtlasEntry"/> lookup.
-    /// The Unity side (<c>GlyphAtlasTexture</c>) uploads it as a <c>Texture2DArray</c>; this type stays
-    /// engine-free.
-    ///
-    /// <see cref="Pixels"/> is always exactly <c>Size.x * Size.y</c> bytes — page 0's buffer (kept for
-    /// back-compat with single-page callers; see <see cref="PagePixels"/> for the rest). Growth is
-    /// height-only (see <see cref="GlyphAtlasPacker"/>'s growth policy) in classic grow mode (never
-    /// multi-page — only a FIXED atlas pages), so growing page 0's buffer is a row-preserving resize: the
-    /// atlas width — and therefore every already-blitted row's byte offsets — never changes, so no reflow
-    /// of previously appended glyphs is ever needed.
-    ///
-    /// <para><b>Multi-page (fixed mode only).</b> A classic grow-mode atlas (<c>fixedHeight ==
-    /// 0</c>) never pages — it just keeps growing taller. In a FIXED atlas (<c>fixedHeight &gt; 0</c>),
-    /// when the CURRENT page's packer can't fit a cell, a NEW fixed page
-    /// (own pixel buffer + fresh packer) opens and becomes current — older pages are never revisited (this
-    /// mirrors the packer's own append-only shelf policy: once a page's packer fails a cell, it never
-    /// "un-fails" for a same-or-larger cell later). <see cref="OverflowCount"/> means genuine overflow:
-    /// a cell that doesn't fit even a brand-new empty page (wider than a full fixed-height column of
-    /// shelves — GlyphAtlasPacker.TryPack itself throws for a cell wider than the atlas; this is the
-    /// height-exceeds-a-fresh-page case). Every page shares the SAME fixed <c>(width, fixedHeight)</c>
-    /// <see cref="Size"/>, so a layout site's <c>uv = AtlasOrigin / Size</c> math is unchanged — only the
-    /// <see cref="GlyphAtlasEntry.Page"/> the UV samples from differs.</para>
+    /// CPU-side SDF glyph atlas: a <see cref="GlyphAtlasPacker"/> and a row-major R8 pixel buffer per page, plus
+    /// a <see cref="GlyphAtlasEntry"/> lookup; <c>GlyphAtlasTexture</c> uploads it as a <c>Texture2DArray</c>.
+    /// Non-local invariant: a grow-mode atlas (<c>fixedHeight == 0</c>) is one page that grows in height only,
+    /// so resizing <see cref="Pixels"/> keeps every row's offsets. A fixed atlas opens a new page of the same
+    /// <see cref="Size"/> when the current one cannot fit a cell, so <c>uv = AtlasOrigin / Size</c> holds on
+    /// every page; <see cref="OverflowCount"/> counts a cell that fits no fresh page.
     /// </summary>
     public sealed class GlyphAtlas : IGlyphAtlasView
     {
         /// <summary>
-        /// Hard ceiling on the number of fixed-mode pages (Texture2DArray layers) before a glyph that
-        /// would need a NEW page is surfaced as <see cref="OverflowCount"/> overflow instead of allocating
-        /// (no unbounded page growth → OOM / exceeding the platform's Texture2DArray layer limit).
-        ///
-        /// <para><b>16, justified.</b> At the production 4096² R8 atlas (16 MB/page — <c>SymbolSubsystem
-        /// .AtlasDimension</c>), one page holds ~17k typical ~30px SDF glyph cells, so 16 pages ≈ 270k glyph
-        /// cells — comfortably more than the largest realistic multi-script set (a full Noto CJK ≈ 65k glyphs
-        /// plus every other Unicode script's common set is well under ~100k, ~6 pages), leaving ≥2.5×
-        /// headroom. It is also safe on EVERY platform: the most conservative Texture2DArray layer limit
-        /// (GLES3.0's guaranteed 256) is 16× this, and worst-case memory is bounded at 16 × 16 MB = 256 MB —
-        /// a ceiling a real font set never reaches. Hitting it means the atlas is genuinely too small; the
-        /// subsystem logs it via <see cref="OverflowCount"/> (no silent cap).</para>
+        /// Hard ceiling on fixed-mode pages (Texture2DArray layers): a glyph that needs one more page counts
+        /// as <see cref="OverflowCount"/> overflow instead of allocating. Sixteen 4096² R8 pages (16 MB each)
+        /// hold more glyph cells than a full multi-script font set, stay far under GLES3.0's guaranteed 256
+        /// layers, and cap memory at 256 MB.
         /// </summary>
         public const int MaxPages = 16;
 
         private readonly List<GlyphAtlasPacker> _packers = new List<GlyphAtlasPacker>();
         private readonly List<byte[]> _pixelPages = new List<byte[]>();
-        // Keyed by (font, codepoint), NOT codepoint alone. One atlas is shared by every layer
-        // (SymbolSubsystem builds exactly one), and a style mixes faces — Liberty asks for Noto Sans Regular,
-        // Italic and Bold in different layers. On a codepoint-only key the first face to decode claims 'B'
-        // and every other face's 'B' is silently discarded, so the whole map renders in one arbitrary face.
+        // Keyed by (font, codepoint): every layer shares one atlas and a style mixes faces, so on a
+        // codepoint-only key the first face to decode 'B' would claim it for every face.
         private readonly Dictionary<long, GlyphAtlasEntry> _entries = new Dictionary<long, GlyphAtlasEntry>();
 
         // Font name -> dense id. Interned here because the atlas is the thing keyed by it; GlyphManager
@@ -69,12 +42,8 @@ namespace MapRenderer.Core.Text
         public GlyphAtlas(int width = GlyphAtlasPacker.DefaultWidth) : this(width, 0) { }
 
         /// <param name="width">Atlas width in pixels.</param>
-        /// <param name="fixedHeight">0 = classic height-grows atlas (single page, never pages); a positive
-        /// value = a FIXED-capacity <c>width x fixedHeight</c> PAGE whose <see cref="Size"/> never changes
-        /// (its pixel buffer is pre-allocated in full) — a big fixed atlas keeps incremental per-tile
-        /// layout from invalidating earlier tiles' UVs. A glyph that no longer fits the current page opens
-        /// a NEW page (own buffer + packer) instead of dropping — see the class doc's multi-page section.
-        /// <see cref="OverflowCount"/> only counts a cell that doesn't fit even a fresh empty page.</param>
+        /// <param name="fixedHeight">0 = one page that grows in height; a positive value = pre-allocated
+        /// <c>width x fixedHeight</c> pages, so earlier tiles' UVs stay valid (see the class doc).</param>
         public GlyphAtlas(int width, int fixedHeight)
         {
             _fixedHeight = fixedHeight;
@@ -189,17 +158,11 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Fixed-mode packing: try the CURRENT page first; if its packer can't fit the cell, open a NEW
-        /// page (own buffer + fresh packer) and try there. Older pages are never revisited — once a page's
-        /// packer fails a cell it never un-fails for a same-or-larger one later (the packer's own
-        /// append-only shelf policy), so searching them would only waste cycles.
-        ///
-        /// <para>Returns <c>false</c> (genuine overflow — the caller counts it, no throw) in three cases:
-        /// the cell is too WIDE or too TALL for even a fresh empty page, or a new page would exceed
-        /// <see cref="MaxPages"/>. The width/height PREFLIGHT is load-bearing: <see cref="GlyphAtlasPacker.TryPack"/>
-        /// itself THROWS for a cell wider than the page width, so probing a packer with an over-wide cell
-        /// would abort the whole build instead of surfacing as overflow — the preflight returns false before
-        /// ever touching a packer.</para>
+        /// Fixed-mode packing: try the current page, else open a new page. Older pages are never revisited,
+        /// because a packer that failed a cell fails any same-or-larger one. Returns <c>false</c> (overflow,
+        /// no throw) when the cell is too wide or tall for a fresh page or a new page would exceed
+        /// <see cref="MaxPages"/>. The size preflight is required: <see cref="GlyphAtlasPacker.TryPack"/>
+        /// throws for a cell wider than the page.
         /// </summary>
         private bool TryPackFixed(int2 cellSize, out int2 origin, out int page)
         {
@@ -218,9 +181,8 @@ namespace MapRenderer.Core.Text
                 return true;
             }
 
-            // Current page full — a NEW page is needed. Cap page growth: at MaxPages, report the glyph as
-            // overflow instead of allocating unboundedly (OOM / Texture2DArray layer limit). The preflight
-            // above guarantees the cell fits a fresh page, so the TryPack below always succeeds.
+            // Current page full: at MaxPages, report overflow instead of allocating. The preflight above
+            // guarantees the cell fits a fresh page, so the TryPack below always succeeds.
             if (_packers.Count >= MaxPages)
             {
                 origin = default;

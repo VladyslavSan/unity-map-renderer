@@ -1,6 +1,5 @@
-// The shared delay-job test instrument. A `deps`-parameter job is the production-legitimate seam for
-// holding a graph genuinely in-flight — never JobsUtility.JobWorkerCount, which does not hold a scheduled
-// job incomplete (see JobGraphInstrumentTests).
+// The shared delay-job test instrument: a `deps`-parameter job holds a graph in-flight. JobWorkerCount does
+// not hold a scheduled job incomplete (see JobGraphInstrumentTests).
 
 using NUnit.Framework;
 using Unity.Burst;
@@ -10,16 +9,11 @@ using Unity.Jobs;
 
 namespace MapRenderer.Tests
 {
-    /// <summary>A job that spins until released, for holding a downstream <c>deps</c> chain genuinely
-    /// in-flight under the DEFAULT worker count.
-    ///
-    /// <para>Guards against two failure modes: a spin Burst folds to a closed form (a silently-instant
-    /// "delay", so a caller's in-flight assertions pass while proving nothing), and a loop-invariant hoist
-    /// of the gate read (spins forever, or never spins at all). <see cref="Gate"/> is NOT <c>[ReadOnly]</c>
-    /// and carries <see cref="NativeDisableContainerSafetyRestrictionAttribute"/> — the releasing thread
-    /// writes it while this job is still scheduled, which container safety otherwise rejects as a race. The
-    /// accumulator mixes the gate value into a running product every iteration, so the loop cannot reduce to
-    /// a closed-form iteration count.</para></summary>
+    /// <summary>A job that spins until released, to hold a downstream <c>deps</c> chain in-flight under the
+    /// DEFAULT worker count. Non-obvious why: the accumulator mixes the gate value in every iteration, so
+    /// Burst cannot fold the spin to a closed form (an instant "delay"). The releasing thread writes
+    /// <see cref="Gate"/> while the job is scheduled, so it is not <c>[ReadOnly]</c> (no hoisted read) and
+    /// carries <see cref="NativeDisableContainerSafetyRestrictionAttribute"/>.</summary>
     [BurstCompile(CompileSynchronously = true)]
     internal struct SpinUntilGateJob : IJob
     {

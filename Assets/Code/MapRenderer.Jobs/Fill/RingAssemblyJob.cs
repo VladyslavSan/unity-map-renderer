@@ -7,29 +7,11 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// Burst job: classifies decoded MVT rings into polygons (outer + holes) using signed-area
-    /// classification, then stores polygon descriptors for the earcut stage.
-    ///
-    ///   - Rings with |shoelace area| &lt; DegenerateThreshold are skipped.
-    ///   - The first valid ring of each feature sets the "exterior sign."
-    ///   - Subsequent rings with the SAME sign start a new polygon (multipolygon / island).
-    ///   - Rings with the OPPOSITE sign are candidate holes — accepted only if the ring's
-    ///     centroid (or first vertex) falls INSIDE the current outer ring (containment check),
-    ///     preventing disjoint artefact rings from corrupting the triangulation.
-    ///
-    /// <b>Kind gate.</b> A ring whose feature is not a Polygon is skipped outright. This job classifies
-    /// purely by signed area, and a LineString ring is the same shape of data as a polygon ring, so without
-    /// the gate it would read one as a spurious exterior or hole. The caller's own selection is the second,
-    /// independent guard.
-    ///
-    /// Does NOT reference MapRenderer.Core <b>code</b> — no Core call, and no <c>System.Math</c>, on the
-    /// Burst path. Blittable Core <i>value types</i> are fine: <see cref="TileGeometryType"/> is an enum
-    /// with no code.
-    ///
-    /// Input: flat vertex array + per-ring offsets from <see cref="MvtDecodeJob"/>.
-    /// Output: polygon descriptors (outer start/length + hole start/count) in flat arrays.
-    ///
-    /// Polygon descriptor arrays are pre-sized conservatively (worst case = one polygon per ring).
+    /// Burst job: classifies decoded rings into polygon descriptors (outer + holes) by signed area. Each
+    /// feature's first non-degenerate ring sets the exterior sign; a same-sign ring starts a new polygon; an
+    /// opposite-sign ring is a hole only if it lies inside the current outer ring. Rings of non-Polygon
+    /// features are skipped, because a LineString ring looks like a polygon ring by area alone. Descriptor
+    /// arrays are sized for one polygon per ring. The Burst path calls no Core code.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct RingAssemblyJob : IJob
@@ -44,16 +26,10 @@ namespace MapRenderer.Jobs.Fill
         [ReadOnly] public int                  RingCount;
 
         /// <summary>Selects which of two ways to read the ring count — a plain <c>bool</c>, not a container,
-        /// because a <see cref="NativeArray{T}"/> field left at its literal <c>default</c> fails Unity's
-        /// job-schedule-time container validation even when <c>[ReadOnly]</c> and even when never read.
-        /// <para><c>false</c>, the default, ⇒ use <see cref="RingCount"/>, the producer-reported count for
-        /// an array-backed, CAPACITY-sized <see cref="RingOffsets"/>, where deriving from length is
-        /// wrong.</para>
-        /// <para><c>true</c>, the scheduled path only, ⇒ use <c>RingOffsets.Length - 1</c>: there
-        /// <see cref="RingOffsets"/> is a deferred view over a LIST-backed buffer, which is
-        /// length-authoritative, so
-        /// the length resolved at EXECUTE time, after <c>RingClipJob</c> has dropped rings, already IS the
-        /// surviving ring count with no separate count container needed.</para></summary>
+        /// because a default <see cref="NativeArray{T}"/> field fails schedule-time validation even unread.
+        /// <c>false</c> uses <see cref="RingCount"/>, for a capacity-sized <see cref="RingOffsets"/>.
+        /// <c>true</c> (the scheduled path) uses <c>RingOffsets.Length - 1</c> of a deferred list view, which
+        /// at execute time is the ring count left after <c>RingClipJob</c>.</summary>
         public bool RingCountFromOffsetsLength;
 
         /// <summary>Per-FEATURE geometry kind (see <c>TileGeometryBuffers.FeatureGeometryType</c>) — ring
@@ -63,13 +39,7 @@ namespace MapRenderer.Jobs.Fill
         [ReadOnly] public NativeArray<TileGeometryType> FeatureGeometryType;
 
         // ── Output ─────────────────────────────────────────────────────────────────────────────
-        // Each polygon: one outer ring + zero or more holes.
-        // OutPolyOuterStart[p]  = index into RingOffsets of the outer ring for polygon p.
-        // OutPolyOuterRingIdx[p] = which ring-index (into Vertices via RingOffsets) is the outer.
-        // Holes are stored in a flat list; OutPolyHoleStart[p]/OutPolyHoleCount[p] reference it.
-        //
-        // OutPolyOuterRingIdx and OutPolyHoleCount are NOT [WriteOnly]: Execute reads both, and the
-        // safety system throws on a read through [WriteOnly].
+        // Not [WriteOnly] where Execute reads the field back: the safety system throws on that read.
         public            NativeArray<int>    OutPolyOuterRingIdx;    // ring index for outer
         [WriteOnly] public NativeArray<int>   OutPolyHoleListStart;   // start in OutHoleRingIdxs
         public            NativeArray<int>    OutPolyHoleCount;       // hole count for polygon p
@@ -98,9 +68,8 @@ namespace MapRenderer.Jobs.Fill
 
                 int featureIdx = RingFeatureIdx[ri];
 
-                // Kind gate: only a Polygon feature's rings are polygon rings. Placed BEFORE the
-                // exterior-sign reset so a non-polygon feature leaves no trace in the classifier state at
-                // all, and before the area work so a LineString can never establish or flip a sign.
+                // Kind gate, before the sign reset and the area work, so a non-polygon feature can never
+                // establish or flip the exterior sign.
                 if (FeatureGeometryType[featureIdx] != TileGeometryType.Polygon) continue;
 
                 // New feature resets exterior sign.

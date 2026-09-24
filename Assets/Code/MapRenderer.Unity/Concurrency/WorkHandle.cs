@@ -3,11 +3,9 @@ using Cysharp.Threading.Tasks;
 namespace MapRenderer.Unity.Concurrency
 {
     /// <summary>Pollable handle to scheduled work, backed by a <see cref="UniTaskCompletionSource{T}"/> the
-    /// scheduler completes. Struct-over-source (mirrors UniTask's own shape). <see cref="ToUniTask"/> is the
-    /// bridge into the I/O-composed await chains that stay UniTask.
-    /// <para>A <see langword="default"/> handle carries no source: every member throws. Validity is the
-    /// owner's own flag, never the handle's — unlike <c>default(UniTask{T})</c>, which silently reports
-    /// succeeded.</para></summary>
+    /// scheduler completes. <see cref="ToUniTask"/> bridges into the I/O await chains that stay UniTask.
+    /// A <see langword="default"/> handle has no source, and every member throws. Validity is the owner's
+    /// flag, never the handle's; <c>default(UniTask{T})</c>, in contrast, silently reports success.</summary>
     internal readonly struct WorkHandle<T>
     {
         private readonly UniTaskCompletionSource<T> _source;

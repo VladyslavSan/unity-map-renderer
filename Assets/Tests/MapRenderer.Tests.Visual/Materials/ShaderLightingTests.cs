@@ -1,8 +1,5 @@
-// Unlit-shading lighting-independence GPU/visual acceptance test.
-//
-// Standalone, not merged with ShaderColorTests.cs: the two collide on bare `Object`
-// (System.Object vs UnityEngine.Object, CS0104) — this file imports System,
-// ShaderColorTests.cs uses the bare UnityEngine.Object.DestroyImmediate.
+// Unlit-shading lighting-independence GPU/visual acceptance test. Not merged with ShaderColorTests.cs: the
+// two collide on bare `Object` (CS0104), because this file imports System.
 //
 // Contents:
 //   UnlitLightingIndependenceTests  — Proves the unlit shading family is lighting-independent: the same fill scene rendered under two different lighting environments produces byte-identical frames through Map/FillUnlit, and does NOT through Map/Fill.
@@ -17,34 +14,19 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual
 {
-    // Unity EditMode only — off-screen GPU render (SnapshotRenderer). NOT registered in core-tests.csproj.
-    //
-    // The unlit epic's stated "why", made falsifiable: unlit output is deterministic — independent of light
-    // direction, intensity and the ambient environment. No committed golden PNG is involved; the oracle is
-    // the SAME scene rendered under two different lighting environments, which for unlit must come back
-    // byte-identical. The Lit arm in the same test is the instrument's control.
+    // Unlit output is independent of light direction, intensity and ambient. No golden PNG: the oracle is the
+    // SAME scene under two lighting environments, byte-identical for unlit, with the Lit arm as control.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // UnlitLightingIndependenceTests — Proves the unlit shading family is lighting-independent
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Proves the unlit shading family is <b>lighting-independent</b>: the same fill scene rendered under
-    /// two different lighting environments produces byte-identical frames through <c>Map/FillUnlit</c>, and
-    /// does NOT through <c>Map/Fill</c>.
-    ///
-    /// <para><b>Why the Lit arm is in the same test, not a separate one.</b> "The two frames are identical"
-    /// passes trivially when the fixture renders nothing, renders a flat frame, or when the lighting
-    /// perturbation never reached the render at all. The Lit arm is the control that closes that: it runs
-    /// the same geometry, camera and environments, and must come back <i>different</i>. If it does not, the
-    /// perturbation is not reaching the GPU and the unlit half proves nothing — a failing instrument, not a
-    /// pass. Keeping both arms in one test method is what makes the unlit claim unreadable on its own.</para>
-    ///
-    /// <para>Two further preconditions run before either claim: the frames must be non-blank and
-    /// non-uniform (something actually rendered), and each arm must reproduce its own first environment
-    /// byte-for-byte on a repeat render (an off-screen camera render is deterministic here, so a mismatch
-    /// means the renderer — not the shading family — is the source of any difference below).</para>
-    ///
+    /// Proves the unlit shading family is <b>lighting-independent</b>: the same fill scene under two
+    /// lighting environments gives byte-identical frames through <c>Map/FillUnlit</c>, and NOT through
+    /// <c>Map/Fill</c>. Non-obvious why: "identical" passes trivially when nothing renders or the lighting
+    /// change never reaches the GPU, so the Lit arm in the same test must come back <i>different</i>. The
+    /// frames must also be map-like, and each arm must reproduce its first render byte-for-byte.
     /// </summary>
     [TestFixture]
     public class UnlitLightingIndependenceTests : BaseTestFixture
@@ -158,8 +140,7 @@ namespace MapRenderer.Tests.Visual
                 AssertFrameIsMapLike(litA,   "Map/Fill under envA");
 
                 // ── Precondition 2: the renderer itself is repeatable ──────────────────────────────
-                // Without this, a difference measured below could be renderer noise rather than the
-                // shading family reading the environment.
+                // Otherwise a difference below could be renderer noise, not the shading reading the environment.
                 Assert.AreEqual(-1, FirstDifference(unlitA, unlitARepeat),
                     "precondition: re-rendering Map/FillUnlit under the SAME environment must reproduce " +
                     "the frame pixel-for-pixel. It did not, so this fixture cannot attribute any difference " +

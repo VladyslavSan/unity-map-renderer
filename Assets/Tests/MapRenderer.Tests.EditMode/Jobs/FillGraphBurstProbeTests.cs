@@ -1,16 +1,8 @@
-// Unity EditMode only — NativeArray, Burst jobs, UnityEngine.Application. NOT registered in core-tests.csproj.
-//
-// The compile checkpoint (job-scheduling-design.md): three Burst behaviours the fill graph's
-// shape depends on:
-//   (i)   GetSubArray + a nested `new EarcutJob{...}.Execute()` call, inside another job's Execute — EarcutBatchJob.
-//   (ii)  NativeSortExtension.Sort<int, TComparer> over a generic comparer holding two NativeArray fields,
-//         inside a job — FillGatherJob<TComparer>.
-//   (iii) One struct implementing BOTH IJobParallelFor and IJobParallelForDefer (two JobProducerTypes over one
-//         Execute(int index)) — TileToGeoJob / ProjectPointsJob<TProj>.
-// A green numeric assertion here is NOT the verdict: CompileSynchronously=true falls back to managed IL on a
-// Burst compile failure, so these tests can pass while Burst never compiled the job. The verdict is the log
-// grep job-scheduling-design.md's Safety section mandates (run-tests.sh's own log, greped for Burst errors) — this
-// file only supplies the numeric correctness half.
+// Unity EditMode only. Probes three Burst behaviours the fill graph depends on: a nested EarcutJob.Execute()
+// over GetSubArray views (EarcutBatchJob); a Sort over a generic comparer holding NativeArrays
+// (FillGatherJob<TComparer>); one struct that is both IJobParallelFor and IJobParallelForDefer (TileToGeoJob).
+// Limitation: a Burst compile failure falls back to managed IL, so green here is only the numeric half; the
+// verdict is a log grep for Burst compile errors (docs/lessons-learned.md).
 
 using System.IO;
 using NUnit.Framework;
@@ -124,15 +116,9 @@ namespace MapRenderer.Tests.Jobs
                 var batchRemoved = new NativeList<bool>(Allocator.Persistent); batchRemoved.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
                 var batchIsEar = new NativeList<bool>(Allocator.Persistent); batchIsEar.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
 
-                // The read side (VertexOffsets/HoleCountOffsets/WorkOffsets/IndexOffsets/FlatPolyVerts/
-                // FlatSortedHoleCounts/PerPolyOuterCount) comes from s.Buffers (gather already populated it);
-                // the write side is this test's own fresh "batch*" set, so the batch arm never shares
-                // buffers with the per-polygon reference arm above.
-                // Every TriangulationBuffers field must be a VALID container when the job schedules — Unity's
-                // safety system rejects an uncreated NativeList<T> field even when Execute() never reads it
-                // (confirmed empirically here: PerPolyFeatureIndex, unused by EarcutBatchJob, still had to be
-                // set or scheduling threw). So PerPolyFeatureIndex is carried over too, even though this job
-                // never touches it.
+                // Reads come from the gathered s.Buffers; writes go to a fresh "batch*" set shared with no other arm.
+                // Non-obvious why: PerPolyFeatureIndex is set though unused, because scheduling rejects an
+                // uncreated NativeList field even when Execute() never reads it.
                 var batchBuffers = new TriangulationBuffers
                 {
                     VertexOffsets = s.Buffers.VertexOffsets, HoleCountOffsets = s.Buffers.HoleCountOffsets,

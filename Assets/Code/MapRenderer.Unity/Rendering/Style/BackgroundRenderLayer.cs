@@ -7,23 +7,11 @@ using Background = MapRenderer.Core.Style.Background;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Background <see cref="IRenderLayer"/>: a style's <c>background</c> layer as a runtime render object
-    /// (the render-layer model). Background is a source-less per-covered-tile
-    /// <see cref="RenderLayerBuild.TileMesh"/> layer — <see cref="Tile.Processing.BackgroundQuad"/>
-    /// synthesizes one full-tile-extent quad per tile in the camera cover, projected through the same
-    /// <see cref="MapRenderer.Core.Geo.IProjection"/> fill/line use, and registered with the active
-    /// <see cref="Backend.ITileRenderBackend"/> at this layer's <see cref="DrawIndex"/>. This layer owns no
-    /// geometry and no scene object — it owns ONLY the material. The backend owns every per-tile mesh, so
-    /// the globe renders a correctly curved background across the covered tile pyramid.
-    ///
-    /// <para>Owns: a material clone (a FILL-base clone at its global queue — the fill shader's flat lit path
-    /// IS the ground look, <see cref="Materials.MaterialFactory.CreateBackgroundMaterial"/>). <see cref="Persistence"/>
-    /// stays <see cref="DrawPersistence.Persistent"/> (the backend redraws each tile's quad every camera
-    /// render with no orchestrator, same as fill/line).</para>
-    ///
-    /// <para>Coplanar y=0 with fills/lines BY DESIGN: every flat layer is ZWrite-off
-    /// (<see cref="Materials.BaseTweaker.ApplyBaseContract"/>), so painter order via <c>renderQueue</c> alone
-    /// decides the composite.</para>
+    /// Background <see cref="IRenderLayer"/>: a source-less per-covered-tile <see cref="RenderLayerBuild.TileMesh"/>
+    /// layer. <see cref="Tile.Processing.BackgroundQuad"/> makes one full-tile quad per covered tile, and the
+    /// backend owns every quad mesh. It is coplanar with fills and lines; every flat layer is ZWrite-off
+    /// (<see cref="Materials.BaseTweaker.ApplyBaseContract"/>), so <c>renderQueue</c> alone decides the composite.
+    /// See docs/meshing-design.md § "Background: a real layer, not a camera hack".
     /// </summary>
     internal sealed class BackgroundRenderLayer : IRenderLayer, IFadeableRenderLayer
     {
@@ -47,12 +35,10 @@ namespace MapRenderer.Unity.Rendering.Style
             DrawIndex  = drawIndex;
         }
 
-        /// <summary>Never returns null (the Symbol Create pattern, <see cref="SymbolRenderLayer.Create"/>):
-        /// background always takes its declared slot so the layers above it keep their queues regardless of
-        /// material config; unconfigured ⇒ <see cref="Material"/> null (<see cref="Materials.MaterialFactory"/>
-        /// warns), no geometry, never shows. Takes no Hierarchy <c>parent</c> — background owns no scene
-        /// GameObject any more (the backend owns every per-tile quad), so only the GameObject-bearing symbol
-        /// arm of <see cref="RenderLayerFactory"/> forwards one.</summary>
+        /// <summary>Never returns null (the pattern of <see cref="SymbolRenderLayer.Create"/>): background
+        /// always takes its declared slot, so the layers above it keep their queues. Unconfigured ⇒
+        /// <see cref="Material"/> null (<see cref="Materials.MaterialFactory"/> warns) and it never shows. It
+        /// takes no <c>parent</c>, because it owns no scene GameObject.</summary>
         public static BackgroundRenderLayer Create(
             Background.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
         {
@@ -66,9 +52,8 @@ namespace MapRenderer.Unity.Rendering.Style
             // forever, so an unscaled bind-time push would make a seeded fade of 0 invisible.
             applier.SeedFade(layer.IsVisibleAtZoom(initialZoom) ? 1f : 0f);
             Materials.MaterialFactory.BindBackgroundPaintToApplier(paint, applier, mat);
-            // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
-            // (RenderLayerSet.ApplyZoom's contract). Background has no px-valued paint, so the ratio is
-            // inert here; it is threaded for interface uniformity.
+            // Seeded at dpr 1; the live ratio arrives with the first ApplyZoom, before any frame draws
+            // (RenderLayerSet.ApplyZoom). Background has no px-valued paint, so the ratio is inert here.
             applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
 
             return new BackgroundRenderLayer(layer, mat, applier, drawIndex);

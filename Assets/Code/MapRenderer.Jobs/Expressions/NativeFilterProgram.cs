@@ -3,16 +3,11 @@ using Unity.Collections;
 namespace MapRenderer.Jobs.Expressions
 {
     /// <summary>
-    /// A compiled, tile-independent native filter — <see cref="NativeFilterCompiler.TryCompile"/>'s
-    /// output. Immutable and reusable; a tile-layer-specific <c>Rebind</c> extension (see
-    /// <c>MapRenderer.Jobs.Mvt.NativeFilterRebind</c> — kept out of this format-neutral folder because it
-    /// names MVT-specific types) resolves it against one tile-layer's key/value tables.
-    ///
-    /// <para>The two have different lifetimes, which is why only one of them is cached: this program is
-    /// compiled once per filter node and memoized for the life of the style document (the
-    /// <c>NativeProgramFor</c> memo on <c>MapRenderer.Jobs.Tiles.FeatureSelector</c>), whereas a rebind is
-    /// constructed fresh every time — the key/value tables it resolves against are a property of the tile
-    /// layer, so a rebind is not reusable across tiles.</para>
+    /// A compiled, tile-independent native filter, <see cref="NativeFilterCompiler.TryCompile"/>'s output. It
+    /// is immutable and memoized per filter node for the style's life
+    /// (<c>FeatureSelector.NativeProgramFor</c>).
+    /// The MVT-specific <c>Mvt.NativeFilterRebind</c> resolves it against one tile layer's key/value tables,
+    /// fresh per tile, because those tables belong to the tile layer.
     /// </summary>
     internal sealed class NativeFilterProgram
     {

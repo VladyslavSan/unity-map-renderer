@@ -72,20 +72,16 @@ namespace MapRenderer.Tests.TestSupport
 
         /// <summary>
         /// Independent O(n²) verifier of the greedy collision contract over a JOB OUTPUT — never a second
-        /// greedy pass. Checks, over the SORTED <paramref name="sortedCands"/> and per-position
-        /// <paramref name="survivor"/> flags produced by <see cref="RunCollision"/>: distinct
-        /// <see cref="SymbolCandidate.FeatureIndex"/> (also the permutation check), the total placement
-        /// order, and — per candidate, in index order — suppressed / soundness / completeness / the exact
-        /// <see cref="SymbolCandidate.DroppedBoxMask"/> characterisation.
+        /// greedy pass. Over the sorted candidates and survivor flags from <see cref="RunCollision"/>, it
+        /// checks distinct <see cref="SymbolCandidate.FeatureIndex"/> (the permutation check), the order,
+        /// and per candidate: suppressed, soundness, completeness and
+        /// <see cref="SymbolCandidate.DroppedBoxMask"/>.
         /// </summary>
         public static void AssertGreedyContract(SymbolCandidate[] sortedCands, int candCount, SymbolBox[] boxes,
             bool[] survivor, string what)
         {
-            // Pass 1 — distinct FeatureIndex across the SORTED OUTPUT. Under a strict total order (every
-            // generator gives each candidate a distinct FeatureIndex), a non-decreasing adjacent-pair
-            // sequence is the UNIQUE sorted permutation — so this also closes the permutation check: a
-            // swap-based heapsort can only lose an element by duplicating another, and a duplicate collides
-            // on FeatureIndex here.
+            // Pass 1 — distinct FeatureIndex, which is also the permutation check: a swap-based heapsort
+            // loses an element only by duplicating another, and generators give each candidate its own index.
             var seen = new HashSet<int>();
             for (int i = 0; i < candCount; i++)
                 Assert.IsTrue(seen.Add(sortedCands[i].FeatureIndex),
@@ -181,9 +177,8 @@ namespace MapRenderer.Tests.TestSupport
             return false;
         }
 
-        // 1-box candidates (point-like) — fully exercises the grid, which is the risk. Box size range is
-        // a parameter so a case can force wide boxes (many cells) or a giant span (cell enlargement). Shared
-        // by CollisionGridContractTests and CollisionJobPlacementTests — the one definition both call.
+        // 1-box (point-like) candidates exercise the grid. The box size range lets a case force wide boxes
+        // (many cells) or a giant span (cell enlargement).
         internal static (SymbolCandidate[], SymbolBox[]) RandomScene(int count, int seed, float worldW, float worldH,
             float wMin, float wMax, float hMin, float hMax)
         {

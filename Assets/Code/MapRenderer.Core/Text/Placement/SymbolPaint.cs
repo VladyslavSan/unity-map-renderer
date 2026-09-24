@@ -6,15 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The resolved text fill PAINT properties for one symbol (as opposed to layout, which
-    /// <c>TextQuadLayout.Layout</c> already baked into <see cref="SymbolQuad"/>s). Every color is straight
-    /// RGBA (0..1); the linear conversion happens later, at bake (<c>SymbolPlacementSystem.LinearColor</c>).
-    ///
-    /// <para>All five are evaluated PER FEATURE by <c>SymbolFeatureExtractor</c> and feed the billboard
-    /// vertex streams — the halo trio on a second copy of the symbol's glyphs, so the shader has no halo term
-    /// of its own. <see cref="TextColor"/> and <see cref="HaloColor"/> carry white RGB when their expression
-    /// is CONSTANT: that kind rides a per-layer uniform instead (<c>SymbolRenderLayer.BindTextPaint</c>) so a
-    /// restyle can ease it. Their ALPHA and <see cref="Opacity"/> always ride the stream.</para>
+    /// The resolved text PAINT properties for one symbol, straight RGBA (0..1), linearized at bake. All five
+    /// are evaluated per feature and feed the billboard vertex streams, the halo trio on a second copy of the
+    /// glyphs. A CONSTANT <see cref="TextColor"/> or <see cref="HaloColor"/> carries white RGB, because a
+    /// per-layer uniform (<c>SymbolRenderLayer.BindTextPaint</c>) carries it so a restyle can ease it; alpha
+    /// and <see cref="Opacity"/> always ride the stream.
     /// </summary>
     public readonly struct SymbolPaint
     {

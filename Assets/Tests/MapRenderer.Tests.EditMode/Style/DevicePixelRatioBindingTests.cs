@@ -2,21 +2,10 @@
 // Unity EditMode only — real Materials via MaterialFactory / MapMaterialSet.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// Table-driven over the px-valued style surface, split by HOW each property is observed.
-//
-// The universally-true invariant, and the reason this file's title is not "every px property is multiplied":
-//
-//     For each px-valued property, the quantity it controls, MEASURED IN DEVICE PIXELS, is linear in dpr.
-//
-// For the material-bound family (line-width/-gap-width/-offset/-blur, the halo pair, the two translates)
-// that lands as "the uniform doubles at dpr 2", because their shader consumers measure the physical
-// framebuffer. For text-size / text-padding / icon-padding it does NOT: their consumers already divide by
-// the LOGICAL viewport, so the value must stay untouched and the device footprint doubles anyway. A row
-// asserting "padding is scaled" would be WRONG, so there is no such row.
-//
-// These uniform readbacks pin the REGRESSION (a property silently dropping out of the conversion); they
-// cannot judge whether "device" was the right space for it — only the rendered ratios in
-// DevicePixelRatioSnapshotTests can, which is why that fixture is the load-bearing one.
+// Table-driven over the px-valued style surface. Material-bound properties double their uniform at dpr 2;
+// text-size / text-padding / icon-padding stay logical. See docs/device-pixel-ratio-design.md § "Invariants".
+// Limitation: these readbacks catch a property dropping out of the conversion, but cannot judge whether
+// "device" is the right space; only DevicePixelRatioSnapshotTests' rendered ratios can.
 
 using System.IO;
 using NUnit.Framework;
@@ -126,13 +115,10 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// <b>The data-driven row.</b> When <c>line-width</c> depends on the feature, the evaluated width
-        /// is baked into the per-vertex <c>WidthScale</c> stream and the uniform carries the base, so
-        /// <c>widthWorld = _Width × widthScale × pxToWorld</c>. The base is 1 at dpr 1 and must be <b>2</b> at
-        /// dpr 2 — scaling the mesh bake instead would put the ratio inside the geometry, where a live ratio
-        /// change could not reach it and <c>PreparedTileCache</c> would serve it stale.
-        ///
-        /// <para>This is the row that catches an implementation which converted only the non-data-driven
-        /// branch: every other line row would still be green.</para>
+        /// is baked into the per-vertex <c>WidthScale</c> stream and the uniform carries the base, which
+        /// must be <b>2</b> at dpr 2. It is the only row that catches a conversion of just the
+        /// non-data-driven branch. See docs/device-pixel-ratio-design.md § "The px-valued surface" for why
+        /// the bake is not scaled.
         /// </summary>
         [Test]
         public void DataDrivenLineWidth_BaseUniform_IsTheRatioNotOne()
@@ -210,17 +196,12 @@ namespace MapRenderer.Tests.Style
 
         // ── The halo pair: not a material uniform ─────────────────────────────────────────────────
 
-        // text-halo-width/-blur are evaluated PER FEATURE onto the vertex stream and converted at emit
-        // against the LIVE ratio, so the tooth reads the emitted mesh:
-        // SymbolHaloEmitTests.HaloWidthAndBlur_ScaleTogetherWithDevicePixelRatio.
-        //
-        // Do NOT rewrite it as a RENDERED softness ratio: the halo's rendered transition is
-        // (_SdfAaDevicePx + blur) — an AA constant in device px plus the style's blur — so that ratio is
-        // not 2 even on a correct build.
+        // text-halo-width/-blur convert at emit against the LIVE ratio, so the tooth reads the emitted mesh:
+        // SymbolHaloEmitTests.HaloWidthAndBlur_ScaleTogetherWithDevicePixelRatio. Non-obvious why: it is not a
+        // RENDERED softness ratio, because (_SdfAaDevicePx + blur) does not double at dpr 2.
 
-        // A zoom-expression text-halo-width does not track the live zoom either: like every other text-*
-        // paint term it is evaluated PER FEATURE at tile build (SymbolFeatureExtractor), so it moves when
-        // the tile is rebuilt, not every frame.
+        // A zoom-expression text-halo-width is evaluated PER FEATURE at tile build (SymbolFeatureExtractor),
+        // so it moves when the tile is rebuilt, not every frame.
 
         // ── The BRG arm ──────────────────────────────────────────────────────────────────────────
 
@@ -266,16 +247,11 @@ namespace MapRenderer.Tests.Style
         // ── The LOGICAL family: padding must NOT be scaled ───────────────────────────────────────
 
         /// <summary>
-        /// <b>Logical rows.</b> <c>text-padding</c> and <c>icon-padding</c> are collided in
-        /// <c>SymbolStagingMath</c> against anchors that <c>SymbolProjectionJob</c> projects with
-        /// <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.ViewportLogicalPx"/> — the SAME space
-        /// <c>text-size</c> and the glyph bounds live in. One space, logical, factor 1: the value reaching the
-        /// collision grid must be the styled number, and the staging path must contain no device conversion
-        /// at all.
-        ///
-        /// <para>Their device footprint still doubles at dpr 2 — via the logical viewport halving, exactly
-        /// like <c>text-size</c> (measured in <c>DevicePixelRatioSnapshotTests</c>). That is the invariant
-        /// holding, not an exception to it. A row asserting "padding is scaled" would be wrong.</para>
+        /// <b>Logical rows.</b> <c>text-padding</c> and <c>icon-padding</c> collide in
+        /// <c>SymbolStagingMath</c> against anchors projected with
+        /// <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.ViewportLogicalPx"/>, the space of
+        /// <c>text-size</c> and the glyph bounds. So the collision grid gets the styled number, with no
+        /// device conversion; the device footprint still doubles because the logical viewport halves.
         /// </summary>
         [Test]
         public void TextAndIconPadding_StayLogical_NoDeviceConversionInTheStagingPath()

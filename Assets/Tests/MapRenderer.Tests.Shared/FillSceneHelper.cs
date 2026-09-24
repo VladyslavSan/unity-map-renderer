@@ -17,12 +17,9 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Builds a fill <see cref="Mesh"/> from the committed fixture tile via
-    /// <see cref="StyledFillTileBuilder.BuildMesh"/>, attaches it to a new <see cref="GameObject"/> with a
-    /// <c>MeshFilter</c> + <c>MeshRenderer</c>, and scales/centres the transform so the mesh fits in
-    /// <c>viewSize</c> world units. The returned material carries every shader property
-    /// (<c>_BaseColor</c>, <c>_Opacity</c>, …).
-    ///
-    /// Callers must <c>Object.DestroyImmediate</c> the returned GameObject when done.
+    /// <see cref="StyledFillTileBuilder.BuildMesh"/> on a new <see cref="GameObject"/>, scaled and centred to
+    /// fit <c>viewSize</c> world units. The returned material carries every shader property
+    /// (<c>_BaseColor</c>, <c>_Opacity</c>, …). Callers must <c>Object.DestroyImmediate</c> the GameObject.
     /// </summary>
     internal static class FillSceneHelper
     {
@@ -44,8 +41,7 @@ namespace MapRenderer.Tests
             float viewSize = DefaultViewSize,
             string layerName = "countries",
             IProjection projection = null, // null ⇒ WebMercator; pass a SphericalProjection for a globe
-            bool fitToView = true,         // false ⇒ leave the transform at identity so the caller can place
-                                           //          the GO itself (e.g. a real camera-relative ENU rebase)
+            bool fitToView = true,         // false ⇒ identity transform; the caller places the GO itself
             // Test-only oracle knob — see SyncMeshWrite.Fill. Production never sets it; a fixture that
             // measures the boundary band's own contribution renders the same scene with and without it.
             bool suppressBoundaryBand = false)
@@ -71,9 +67,8 @@ namespace MapRenderer.Tests
 
             var selected = TestTileMeshBuilder.Select(fillStyleLayer, mvtLayer, styleZoom);
 
-            // Origin is derived from (id, projection) inside the builder — a globe projection bakes relative
-            // to the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side
-            // origin. The LAYER's own buffer is borrowed; the decode above used the same id.
+            // The builder derives the origin from (id, projection); the decode above used the same id.
+            // The LAYER's own buffer is borrowed.
             Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(
                 mvtLayer, selected, paint, styleZoom, new TileId { Z = 0, X = 0, Y = 0 }, projection,
                 suppressBoundaryBand: suppressBoundaryBand);
@@ -83,10 +78,8 @@ namespace MapRenderer.Tests
             var mr = mapGo.AddComponent<MeshRenderer>();
             mf.sharedMesh = mesh;
 
-            // Material — a PLAIN material on the Fill shader (NOT a Material Variant): this snapshot helper
-            // toggles local shader keywords at runtime (e.g. _NORMALMAP), which does not take effect on a
-            // runtime variant clone. Apply the painter contract via the tweaker to reproduce the per-layer
-            // material state (white identity, ZWrite off) without the variant linkage.
+            // A PLAIN material, not a Material Variant: a runtime keyword toggle (e.g. _NORMALMAP) has no
+            // effect on a variant clone. The painter contract restores the per-layer state (white, ZWrite off).
             var fillShader = MapMaterialSetTestUtil.Load().FillMaterial.shader;
             var mat = new Material(fillShader) { name = "FillSceneHelper_Fill" };
             FillMaterialTweaker.ApplyPainterContract(mat);

@@ -75,9 +75,8 @@ namespace MapRenderer.Tests.Tiles
 
         private sealed class SpySymbolTileWorkerPass : ISymbolTileWorkerPass
         {
-            // Tooth (e): a bool can't tell one run from two — the exact
-            // defect this tooth exists to catch (the symbol pass moved earlier relative to the Burst chain,
-            // so the risk is now running it TWICE per tile, not zero times). A count can.
+            // A count, not a bool: the symbol pass runs before the Burst chain, so the risk is running it
+            // TWICE per tile, not zero times. A bool cannot tell one run from two.
             public int RunCount;
             public bool Ran => RunCount > 0;
             public int RunThreadId = -1;
@@ -117,13 +116,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── the byte-fetching kick (KickMeshBuild) ────────────────────────────────────────────────────
 
-        /// <summary>The headline tooth: under an injected <see cref="InlineWorkScheduler"/>,
-        /// <c>KickMeshBuild</c> runs its body on the CALLING thread with zero dispatch — the WebGL-correct
-        /// behaviour, impossible under <see cref="ThreadPoolWorkScheduler"/>.
-        ///
-        /// <para><b>RED injection:</b> revert <c>KickMeshBuild</c>'s dispatch to
-        /// <c>UniTask.RunOnThreadPool(…, configureAwait:false).Preserve()</c> — the kick never reaches the
-        /// injected scheduler, so <c>ScheduleCount</c> stays 0 and clause 1 fails.</para></summary>
+        /// <summary>Under an injected <see cref="InlineWorkScheduler"/>, <c>KickMeshBuild</c> runs its body
+        /// on the CALLING thread with zero dispatch — the WebGL-correct behaviour, impossible under
+        /// <see cref="ThreadPoolWorkScheduler"/>. A kick that bypasses the injected scheduler (a direct
+        /// <c>UniTask.RunOnThreadPool</c>) leaves <c>ScheduleCount</c> at 0 and fails here.</summary>
         [Test]
         public void InjectedScheduler_RunsTheMeshBuildKick_OnTheCallingThread()
         {
@@ -142,11 +138,8 @@ namespace MapRenderer.Tests.Tiles
                 var spy    = new RecordingWorkScheduler(new InlineWorkScheduler());
                 view.TileManager.WorkScheduler = spy;
 
-                // The fetch is still real UniTask I/O and needs its wall-clock; under Inline the build
-                // handles are already terminal by the time AwaitInFlightMeshBuilds reaches them, so that
-                // park is a no-op short-circuit. Checked AFTER the pump (not as a loop guard): before the
-                // first LateUpdate the cover hasn't been requested yet, so LoadedTileCount() == 0 and
-                // AllTilesSettled() is vacuously true — a guard-first loop would never run the pump at all.
+                // Checked AFTER the pump, not as a loop guard: before the first LateUpdate the cover is not
+                // requested, so AllTilesSettled() is vacuously true and a guard-first loop never pumps.
                 for (int f = 0; f < 3000; f++)
                 {
                     view.AwaitInFlightMeshBuilds();
@@ -175,19 +168,15 @@ namespace MapRenderer.Tests.Tiles
 
         // ── the source-less kick (KickSourcelessBackground) ───────────────────────────────────────────
 
-        // The background kick schedules the FillMeshGraph directly and reaches no IWorkScheduler.Schedule<T>
-        // call on EITHER projection — the graph serves both arms. A tooth that only drove Mercator would
-        // leave the shipped globe scene's client untested.
+        // The background kick schedules the FillMeshGraph directly on BOTH projections. Driving only
+        // Mercator would leave the shipped globe scene's client untested.
         private static readonly IProjection[] BackgroundProjectionCases = { null, new SphericalProjection() };
 
         /// <summary>The sourceless-background sibling of
         /// <c>InjectedScheduler_RunsTheMeshBuildKick_OnTheCallingThread</c>. The background kick does not
-        /// go through the work-scheduler seam, so <c>spy.ScheduleCount</c> stays 0. Asserts BOTH ends — the
-        /// suite's own rule: <c>ScheduleCount == 0</c> alone cannot tell "absent" from "never kicked", so
-        /// the settle + registered-mesh check must accompany it.
-        ///
-        /// <para><b>RED injection:</b> add a seam call in <c>KickSourcelessBackground</c> (schedule the
-        /// graph inside <c>WorkScheduler.Schedule</c>) — <c>ScheduleCount</c> becomes 1.</para></summary>
+        /// go through the work-scheduler seam, so <c>spy.ScheduleCount</c> stays 0. <c>ScheduleCount == 0</c>
+        /// alone cannot tell "absent" from "never kicked", so the settle + registered-mesh check accompanies
+        /// it.</summary>
         [Test]
         public void SourcelessBackgroundKick_ReachesNoWorkScheduler_AndStillRegistersItsMesh(
             [ValueSource(nameof(BackgroundProjectionCases))] IProjection projection)
@@ -231,18 +220,10 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>Arming <see cref="TileManager.MeshBuildGateForTest"/> while
         /// <see cref="TileManager.WorkScheduler"/> is an <see cref="InlineWorkScheduler"/> (or the symmetric
-        /// order) must throw at the SETTER, before any tile work exists — under Inline the kick body (and
-        /// its gate park) runs on the calling/main thread, and the only release
-        /// (<c>_lifetimeCts.Cancel()</c> in teardown) is itself main-thread work that could never run, so an
-        /// un-guarded combination is a guaranteed hang inside the batch gate.
-        ///
-        /// <para>No pump runs here at all, and the gate is constructed <c>initialState: true</c> — belt and
-        /// braces, so even a mis-scoped RED injection cannot park the main thread (the plan's mandatory
-        /// RED-verify safety note).</para>
-        ///
-        /// <para><b>RED injection:</b> remove either guard clause from the
-        /// <see cref="TileManager.WorkScheduler"/>/<see cref="TileManager.MeshBuildGateForTest"/> setters —
-        /// the corresponding <c>Assert.Throws</c> fails.</para></summary>
+        /// order) must throw at the SETTER. Non-obvious why: under Inline the gate park runs on the main
+        /// thread, and its only release (teardown's <c>_lifetimeCts.Cancel()</c>) is main-thread work too, so
+        /// the combination hangs. No pump runs, and the gate starts <c>initialState: true</c>, so a broken
+        /// guard cannot park the main thread.</summary>
         [Test]
         public void MeshBuildGateForTest_AndTheInlineScheduler_AreMutuallyExclusive()
         {
@@ -264,10 +245,8 @@ namespace MapRenderer.Tests.Tiles
                     () => tm.WorkScheduler = new InlineWorkScheduler(),
                     "selecting Inline while the gate is armed must throw at the setter (the symmetric order).");
 
-                // The guard must read IWorkScheduler.RunsInline, not `is InlineWorkScheduler` — a
-                // decorator (RecordingWorkScheduler, the kick tests' own spy) wrapping an
-                // Inline scheduler is just as deadlock-prone, and a concrete-type check would silently miss
-                // it. The gate is still armed from the clause above.
+                // The guard reads IWorkScheduler.RunsInline: a decorator wrapping Inline deadlocks just the same,
+                // and a concrete-type check misses it. The gate is still armed from the clause above.
                 Assert.Throws<InvalidOperationException>(
                     () => tm.WorkScheduler = new RecordingWorkScheduler(new InlineWorkScheduler()),
                     "selecting a WRAPPED Inline scheduler (RunsInline == true via forwarding) while the gate " +
@@ -279,16 +258,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── a POPULATED symbol pass under Inline — the tests above only drive symbolPass == null ──────
 
-        /// <summary>The kick and gate tests above all drive a style/view with no
-        /// <c>TileManager.SymbolWorkerFactory</c> set, so <c>symbolPass</c> inside <c>KickMeshBuild</c>'s
-        /// body is always <c>null</c> and <c>symbolPass?.RunWorkerAndHandoff(decode)</c> never actually
-        /// executes anything. This wires a spy factory so <c>TryBeginBuild</c>
-        /// returns a real (non-null) pass and asserts its <c>RunWorkerAndHandoff</c> actually ran, on the
-        /// CALLING thread, inside the SAME Inline-dispatched kick as the mesh pass.
-        ///
-        /// <para><b>RED injection:</b> revert <c>KickMeshBuild</c>'s dispatch to
-        /// <c>UniTask.RunOnThreadPool(…).Preserve()</c> — the symbol pass never reaches the injected
-        /// scheduler at all (dead on WebGL), so <c>Ran</c> stays false.</para></summary>
+        /// <summary>The tests above set no <c>TileManager.SymbolWorkerFactory</c>, so <c>symbolPass</c> in
+        /// <c>KickMeshBuild</c> is always <c>null</c>. This wires a spy factory so <c>TryBeginBuild</c>
+        /// returns a real pass, and asserts its <c>RunWorkerAndHandoff</c> ran once, on the CALLING thread,
+        /// inside the SAME Inline-dispatched kick as the mesh pass.</summary>
         [Test]
         public void InjectedScheduler_RunsAPopulatedSymbolPass_OnTheCallingThread()
         {
@@ -331,9 +304,8 @@ namespace MapRenderer.Tests.Tiles
                         "a populated symbol pass's RunWorkerAndHandoff must run on the CALLING thread under " +
                         "Inline — it rides inside the SAME dispatched body as the mesh pass " +
                         "(symbolPass?.RunWorkerAndHandoff(decode), called from KickMeshBuild).");
-                    // Tooth (e): the symbol pass moved earlier relative
-                    // to the Burst chain — it must still run EXACTLY ONCE per issued pass, not merely "at
-                    // least once" (RED: a second invocation from the prologue-complete arm).
+                    // EXACTLY ONCE per issued pass, not "at least once": a second invocation from the
+                    // prologue-complete arm would double-run it.
                     Assert.AreEqual(1, pass.RunCount,
                         "a populated symbol pass's RunWorkerAndHandoff must run EXACTLY ONCE — it rides " +
                         "inside KickMeshBuild's one-shot worker pass, and a second call anywhere on the mesh " +
@@ -624,9 +596,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
                 PumpUntilSettled(view);
 
-                // POSITIVE CONTROL: the cache holds the mesh — it must be STILL ALIVE, not destroyed by
-                // release. (Bounded/forced-LRU eviction destroying a mesh is covered deterministically at the
-                // cache-unit level — PreparedTileCacheTests.Bounded_EvictsLru_FreesMesh.)
+                // POSITIVE CONTROL: the cached mesh is STILL ALIVE. LRU eviction destroying a mesh is
+                // covered in PreparedTileCacheTests.Bounded_EvictsLru_FreesMesh.
                 Assert.IsTrue(trackedMesh != null,
                     "POSITIVE CONTROL: an evicted-but-cached mesh must remain ALIVE (the cache holds it — " +
                     "proving retention, not that release already destroyed it).");
@@ -645,9 +616,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // ── Backend reuse on a hit, across all three backends ──────────────────────────────────
-        // Stays in EditMode: the BRG/GameObject backends do not settle a first-visit tile under the
-        // manual-drive PlayMode loop (verified — "TrackedTile must be built on first visit" fails alone in
-        // PlayMode for Brg), and this asserts on mesh aliveness. Kept as a parametrized [TestCase].
+        // EditMode only: BRG/GameObject do not settle a first visit under the manual PlayMode drive.
 
         [TestCase(RenderBackend.Entities)]
         [TestCase(RenderBackend.Brg)]
@@ -673,10 +642,8 @@ namespace MapRenderer.Tests.Tiles
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must be built on first visit.");
 
-                // Captured BEFORE eviction so the revisit can be proven to be the SAME instance, not a
-                // structurally-similar re-build — the counter-based checks below read 0 for a hit AND a miss
-                // whose kick is deferred a tick (see PreparedCacheHits assertion), so identity is the only
-                // discriminator that can't be satisfied by a disguised full re-fetch/re-decode/re-mesh.
+                // Captured BEFORE eviction: mesh identity is the only check a disguised re-fetch/re-mesh
+                // cannot satisfy (see the DECISIVE clause below).
                 Mesh[] originalMeshes = view.GetTileMeshes(TrackedTile);
                 Assert.IsNotNull(originalMeshes);
                 Assert.GreaterOrEqual(originalMeshes.Length, 1);
@@ -703,10 +670,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.GreaterOrEqual(meshes.Length, 1);
                 Assert.IsTrue(meshes[0] != null, $"[{backend}] the re-added mesh must be alive.");
 
-                // DECISIVE: the counter above (kicks == 0) reads 0 for a genuine hit AND for a miss whose
-                // kick is structurally deferred to the NEXT tick — it cannot alone distinguish "reused the
-                // prepared mesh" from "quietly re-fetched/re-decoded/re-meshed and only the kick counter
-                // missed it". Mesh IDENTITY across the revisit, plus the cache's own hit counter, can.
+                // DECISIVE: kicks == 0 also holds for a miss whose kick is deferred to the NEXT tick. Mesh
+                // IDENTITY across the revisit, plus the cache's own hit counter, tells a real hit apart.
                 Assert.AreSame(originalMesh, meshes[0],
                     $"[{backend}] the revisit mesh must be the SAME instance as before eviction — a genuine " +
                     "prepared-cache hit reuses the held Mesh, it never rebuilds an equivalent one.");
@@ -763,9 +728,8 @@ namespace MapRenderer.Tests.Tiles
                 view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
 
-                // DECISIVE (no transfer): disabled must destroy the released mesh immediately, exactly like
-                // DestroyTrackedMeshes — NOT keep it alive in the cache. (Immediate Object.Destroy is
-                // why this tooth is EditMode-only.)
+                // DECISIVE (no transfer): disabled destroys the released mesh immediately, like
+                // DestroyTrackedMeshes. Immediate Object.Destroy is why this test is EditMode-only.
                 Assert.IsTrue(originalMesh == null,
                     "DECISIVE: with the cache disabled, a released tile's mesh must be destroyed immediately " +
                     "(no transfer-to-cache) — a live mesh here would mean Enabled=false failed to gate the " +
@@ -797,13 +761,10 @@ namespace MapRenderer.Tests.Tiles
         // ── (g)'s revisit clause: a two-mesh tile, cache hit, no re-kick ────────────────────────
 
         /// <summary>
-        /// Tooth (f)/(g): a two-mesh (fill + line) tile — both produced
-        /// by the graph arm — evicted to the cache and revisited must be a PURE cache
-        /// hit: <see cref="TileManager.BuildTileFromCache"/> is synchronous admission-time work (no fetch,
-        /// no kick, no async pipeline), so <c>TileBuildsStartedLastTick()</c> must read 0 on the tick the
-        /// tile becomes built again — the falsifier that catches a shallow cache which silently RE-BUILT
-        /// instead of transferring (which the mesh-count/hit-count assertions alone would not catch, since
-        /// a re-build produces the same counts).
+        /// A two-mesh (fill + line) tile evicted to the cache and revisited is a PURE cache hit:
+        /// <see cref="TileManager.BuildTileFromCache"/> is synchronous admission-time work, so
+        /// <c>TileBuildsStartedLastTick()</c> reads 0 on the tick the tile is built again. That catches a
+        /// cache that silently RE-BUILT, which produces the same mesh and hit counts.
         /// </summary>
         [Test]
         public void TwoMeshTile_RevisitAfterEviction_IsACacheHit_WithNoReKick()
@@ -857,10 +818,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
                     "no re-kick on a hit — the falsifier: a shallow cache that silently RE-BUILT instead of " +
                     "transferring would start a build on this exact tick.");
-                // Greater-than, not exactly +1: at this zoom the whole cover (not just TrackedTile) re-enters
-                // on one pan, so every previously-evicted tile in it registers its own hit on the same tick.
-                // TrackedTile's OWN hit is what the assertions above/below (built synchronously, 2 meshes)
-                // already pin; this just confirms the cache's hit counter moved at all.
+                // Greater-than, not +1: the whole cover re-enters on one pan, and every evicted tile in it
+                // registers a hit on this tick. TrackedTile's own hit is pinned by the other clauses.
                 Assert.Greater(view.PreparedCacheHits(), hitsBefore,
                     "the revisit must register at least one cache hit — including TrackedTile's own.");
                 Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0,
@@ -874,8 +833,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // ── The prepared cache survives a restyle ──────────────────────────────────────────────
-        // These drive the REAL production entry point, MapView.SetStyle — LoadTestStyle never sets
-        // CurrentStyle, so the purge it fires is unconditionally unreachable from that helper.
+        // These drive MapView.SetStyle: LoadTestStyle never sets CurrentStyle, so it cannot reach the purge.
 
         private static StyleDocument TwoLayerStyleA() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -1156,9 +1114,8 @@ namespace MapRenderer.Tests.Tiles
                     "drive precondition: the pan-out must have transferred BOTH dense ids' meshes " +
                     "(extrusion=0, fill=1) into the cache.");
 
-                // Same reference, a field mutated IN PLACE — the pin does not fire, but the extrusion layer
-                // now drops out, shifting the fill layer from dense index 1 DOWN to dense index 0 — a PREFIX
-                // of the still-cached ids.
+                // Same reference, field mutated IN PLACE: the pin does not fire, the extrusion layer drops out,
+                // and the fill layer shifts from dense index 1 DOWN to 0 — a PREFIX of the cached ids.
                 matSet.FillExtrusionMaterial = null;
                 SpinToCompleted(view.SetStyle(ExtrusionThenFillStyle(), "A")); // SAME content, SAME id
                 Assert.AreEqual(1, view.Layers.Count,
@@ -1224,11 +1181,8 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Style transitions: teeth 1 and 19 — the MapView-level teeth ──────────────────────────
-        // The only teeth of the 22 that need real loaded tiles and a real backend: everything else in
-        // the stage's plan is exercised at the RenderLayerSet level in Style/StyleTransitionBindingTests.cs
-        // and Style/RestyleSurvivorGateTests.cs, which is cheaper and does not need this fixture's tile
-        // pipeline. This is the harness the plan names for the two that genuinely do.
+        // ── Style transitions that need real tiles and a backend (the rest are RenderLayerSet-level) ──
+        // The RenderLayerSet-level tests are StyleTransitionBindingTests and RestyleSurvivorGateTests.
 
         private static StyleDocument TwoLayerStyleARecolored() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -1242,7 +1196,7 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        /// <summary>Tooth 1: a paint-only restyle keeps every layer's material, the drawn
+        /// <summary>A paint-only restyle keeps every layer's material, the drawn
         /// tile meshes, and the backend instance — the in-place path never calls Layers.Build/SetSources.
         /// Anti-vacuity: the drawn set is non-empty (both layers' meshes are present before AND after).</summary>
         [Test]
@@ -1526,12 +1480,9 @@ namespace MapRenderer.Tests.Tiles
         /// the slot the restyle retired. Tombstoning preserves slot WIDTH, so the consume guard's count check
         /// cannot see the retirement. Drives the build to "complete but unconsumed" (MaxConsumesPerTick=0 +
         /// AwaitInFlightMeshBuilds, never PumpUntilSettled), restyles, and only then consumes.</summary>
-        /// <remarks>Runs on the DEFAULT (Entities) backend on purpose. BRG dereferences the retired slot's
-        /// null material and throws inside <c>AddTileLayer</c>, which would abort this test BEFORE its own
-        /// assertion — a crash detector, not a detector of the property named. Entities registers silently
-        /// from a <c>default</c> material id (its <c>_layerNames</c> is not refreshed by
-        /// <c>SetLayerMaterials</c>, so the <c>mat.name</c> fallback that would NRE is unreachable), so the
-        /// bad state is observable and the assertion below is what fires.</remarks>
+        /// <remarks>Runs on the DEFAULT (Entities) backend. BRG throws on the retired slot's null material
+        /// inside <c>AddTileLayer</c>, which aborts the test BEFORE its assertion. Entities registers silently
+        /// from a <c>default</c> material id, so the bad state stays observable to the assertion.</remarks>
         [Test]
         public void MidFlightBuild_ConsumedAfterARemovalRestyle_NeverRegistersTheRetiredSlot()
         {
@@ -1595,11 +1546,9 @@ namespace MapRenderer.Tests.Tiles
                 new GeoCoordinate3D { Longitude = 13.405, Latitude = 52.52, Altitude = 0.0 }, 13.0, 0.0, 60.0);
 
         /// <summary>
-        /// T-AGGR-WIRED. Config selects <see cref="TileLodMode.ProjectedArea"/> at aggressiveness 2.0; the
-        /// selector <see cref="MapView"/> built must read back the 2.0 cover (22), not the ctor default's 39.
-        /// RED recipe: drop the aggressiveness argument at the <c>MapView</c> call site so the ctor default
-        /// applies — the cover reads 39 instead. Also covers the <c>_selectorInputs</c> rebuild key: if the
-        /// knob is missing from it, a second selection at a changed value returns the stale cover.
+        /// Config selects <see cref="TileLodMode.ProjectedArea"/> at aggressiveness 2.0; the selector
+        /// <see cref="MapView"/> built reads back the 2.0 cover (22), not the ctor default's 39. A second
+        /// selection at a changed value pins the knob's place in the <c>_selectorInputs</c> rebuild key.
         /// </summary>
         [Test]
         public void ProjectedAreaAggressiveness_ReachesTheSelector_ThroughMapView()
@@ -1697,20 +1646,14 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        // ── Tooth (a): three-step progression through Prologue → Measure → Write ─────────────────
+        // ── Three-step progression through Prologue → Measure → Write ────────────────────────────
 
         /// <summary>
-        /// A source tile's kicked build is now a THREE-STEP polled progression — Prologue (a managed
-        /// <c>IWorkScheduler</c> body) → Measure → Write (both graph jobs) — not two. Holds the PROLOGUE
-        /// deterministically on <see cref="TileManager.MeshBuildGateForTest"/> (armed BEFORE the kick, so
-        /// the worker parks before doing any work) and the MEASURE step on
-        /// <see cref="TileManager.GraphDepsForTest"/> (a <see cref="SpinUntilGateJob"/> — the
-        /// production-legitimate deps-parameter seam, job-scheduling-design.md). Releasing
-        /// them in sequence proves each step is genuinely observable in isolation before the tile settles.
-        ///
-        /// <para><b>RED:</b> fold <c>CompleteMeasureAndScheduleWrite</c> into the prologue-complete arm —
-        /// <c>GraphMeasureInFlight</c> never reads &gt;= 1 (the write is scheduled the same tick the
-        /// prologue completes) and the settle-tick floor drops from 3 to 2.</para>
+        /// A source tile's kicked build is a THREE-STEP polled progression: Prologue (a managed
+        /// <c>IWorkScheduler</c> body) → Measure → Write (both graph jobs). The test holds the PROLOGUE on
+        /// <see cref="TileManager.MeshBuildGateForTest"/> and the MEASURE step on
+        /// <see cref="TileManager.GraphDepsForTest"/>, then releases them in sequence, so each step is
+        /// observable alone. A pump that folds Measure into the prologue-complete arm settles one tick early.
         /// </summary>
         [Test]
         public void SourceTile_ProgressesThroughPrologueThenMeasureThenWrite_BeforeSettling()
@@ -1736,9 +1679,8 @@ namespace MapRenderer.Tests.Tiles
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
-                // Armed BEFORE the kick: the worker parks on it (jointly with the lifetime token) as its
-                // very first statement, so the tile's prologue is held genuinely in-flight from the moment
-                // it is kicked.
+                // Armed BEFORE the kick: the worker parks on it as its first statement, so the prologue is
+                // held in flight from the moment it is kicked.
                 view.TileManager.MeshBuildGateForTest = meshGate;
 
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle());
@@ -1760,14 +1702,12 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(0, snap.GraphMeasureInFlight,
                     "no graph may exist yet — the prologue has not handed off to ScheduleMeasureFromDecode.");
 
-                // Release the prologue. AwaitInFlightMeshBuilds parks on the WorkHandle only while Step is
-                // still Prologue (it has not yet handed off), so this cannot race the hand-off or block on
-                // the still-gated measure delay (NIT 3).
+                // AwaitInFlightMeshBuilds parks on the WorkHandle only while Step is Prologue, so it cannot
+                // race the hand-off or block on the still-gated measure delay.
                 meshGate.Set();
                 view.AwaitInFlightMeshBuilds();
                 view.LateUpdate();
-                tick++; // this LateUpdate() is the prologue-complete tick — count it, or settleTick-kickTick
-                        // under-reports by one (this WAS a real bug, caught by RED-verification below).
+                tick++; // the prologue-complete tick — without it settleTick-kickTick under-reports by one
 
                 snap = view.CaptureTelemetry();
                 Assert.AreEqual(0, snap.PrologueInFlight,
@@ -1778,10 +1718,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.IsFalse(view.AllTilesSettled(),
                     "the tile must not read settled while its measure step is genuinely held incomplete.");
 
-                // Release the measure delay — Measure, then Write, proceed normally from here on. No
-                // further Await here: the design's own RED claim (job-scheduling-design.md
-                // tooth (a)) is a STRUCTURAL fact about the dispatch (each pump arm `continue`s at most once
-                // per tile per Tick), so it survives any completion latency, not a timing bet.
+                // The tick floor is structural, not a timing bet: each pump arm `continue`s at most once
+                // per tile per Tick, so it holds at any completion latency.
                 gate[0] = 1;
 
                 int settleTick = -1;
@@ -1804,8 +1742,7 @@ namespace MapRenderer.Tests.Tiles
             }
             finally
             {
-                // Unconditional, before any dispose — an early failure (before either gate is ever reached)
-                // must still be able to release/complete both holds before disposing gate/started/outVals.
+                // Unconditional, before any dispose: an early failure still releases both holds first.
                 meshGate.Set();
                 gate[0] = 1;
                 delayHandle.Complete();
@@ -1817,25 +1754,14 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Tooth (b): the Burst work is not inside the prologue body, and fills allocate nothing at kick ──
+        // ── The Burst work is not inside the prologue body, and fills allocate nothing at kick ──────
 
         /// <summary>
-        /// The prologue body itself (dispatched through <see cref="TileManager.WorkScheduler"/>) does
-        /// selection + the paint bake + <c>BuildGraphRequest</c> — genuinely managed work — and returns
-        /// WITHOUT touching Burst: no <see cref="Mesh.MeshDataArray"/> is allocated at kick for a fill-only
-        /// style. The Burst measure graph is scheduled only once the PUMP (not the
-        /// body) hands the prologue's output to <c>TileBuildGraph.ScheduleMeasureFromDecode</c>, on the
-        /// NEXT tick — proven here by watching <see cref="FillGraphOutput.DebugLiveCount"/> move only
-        /// after that tick, held open by <see cref="TileManager.GraphDepsForTest"/> so "the geometry left
-        /// the body" is deterministic rather than a race against however fast the graph completes.
-        ///
-        /// <para><b>RED:</b> the original two-step
-        /// recipe named <c>_graphArm</c>/<c>WriteInto</c> — both deleted by this stage, so neither step can
-        /// fire any more (there is no seam arm left to fall back to). Working recipe over what actually
-        /// remains: inject a bare <c>MeshDataPayload.AllocateTracked(1);</c> call at the top of
-        /// <c>TileMeshLayerProcessor.AllocateForKick</c> — reds this test's own
-        /// <c>Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount, …)</c> ("no MeshDataArray
-        /// may be allocated at kick") with <c>Expected: 0, But was: 1</c>. Executed and reverted.</para>
+        /// The prologue body does managed work only (selection, paint bake, <c>BuildGraphRequest</c>): no
+        /// <see cref="Mesh.MeshDataArray"/> is allocated at kick for a fill-only style. The PUMP hands the
+        /// prologue's output to <c>TileBuildGraph.ScheduleMeasureFromDecode</c> on the NEXT tick, so
+        /// <see cref="FillGraphOutput.DebugLiveCount"/> moves only then. <see cref="TileManager.GraphDepsForTest"/>
+        /// holds the graph open, so the check does not race the graph's completion.
         /// </summary>
         [Test]
         public void SourceTile_BurstWorkNotInsideThePrologueBody_AndFillsAllocateNothingAtKick()
@@ -1889,9 +1815,8 @@ namespace MapRenderer.Tests.Tiles
                     "no MeshDataArray may be allocated at kick for a fill-only style — the graph arm " +
                     "allocates in its write step, not at kick.");
 
-                // Next tick: the prologue-complete arm hands off to ScheduleMeasureFromDecode — the
-                // geometry LEAVES the body onto a real Burst measure graph, held open by the still-gated
-                // delay job.
+                // Next tick: the prologue-complete arm hands the geometry to a real Burst measure graph,
+                // held open by the still-gated delay job.
                 view.LateUpdate();
                 Assert.Greater(FillGraphOutput.DebugLiveCount, graphOutputBaseline,
                     "a real measure graph must have been scheduled by now — the geometry left the prologue body.");
@@ -1933,19 +1858,14 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Tooth (d): the pen at every step, and teardown ────────────────────────────────────────
+        // ── The pen at every step, and teardown ──────────────────────────────────────────────────
 
         /// <summary>
-        /// Case 1 (Prologue): a tile released mid-flight while genuinely in its PROLOGUE step — held on
-        /// <see cref="TileManager.MeshBuildGateForTest"/>, armed before any kick. At this instant NOTHING
-        /// graph-arm exists yet (the worker has not even started); the pen is
-        /// <c>TilePrologueOutput.Dispose()</c> via <c>PendingDisposalQueue.DrainCompleted</c>'s <c>WorkHandle</c> sweep,
-        /// which only runs once the released worker actually produces a result — <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/>
-        /// is the non-vacuity witness: it can only advance AFTER the gate opens, because the columns
-        /// it counts do not exist until the worker's <c>BuildGraphRequest</c> call runs.
-        ///
-        /// <para><b>RED:</b> <c>PendingDisposalQueue.DrainCompleted</c> skips <c>GetResult().Dispose()</c> for a succeeded
-        /// prologue task — <c>LayerMeshBuildCounters.DebugLiveBuilds</c> stays elevated above baseline forever.</para>
+        /// Case 1 (Prologue): a tile released while held in its PROLOGUE step on
+        /// <see cref="TileManager.MeshBuildGateForTest"/>. No graph exists yet; the pen is
+        /// <c>TilePrologueOutput.Dispose()</c> via <c>PendingDisposalQueue.DrainCompleted</c>'s <c>WorkHandle</c>
+        /// sweep once the worker produces a result. <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/>
+        /// is the non-vacuity witness: it advances only after the gate opens and <c>BuildGraphRequest</c> runs.
         /// </summary>
         [Test]
         public void ReleasedMidFlight_Prologue_StashesInThePen_ThenDrainsOnceTheWorkerCompletes()
@@ -1955,8 +1875,7 @@ namespace MapRenderer.Tests.Tiles
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5; // NOT z0 — a z0 cover does not change under this pan, so
-                                                    // nothing would ever be evicted (matches every other
-                                                    // pan-to-evict tooth in this codebase: z2/z5, never z0).
+                                                    // nothing would ever be evicted.
             view.Config.Backend               = RenderBackend.GameObject;
             view.Config.MaxReleasesPerTick     = 64; // evict the whole condemned cover on the pan tick
             view.WithTestCamera();
@@ -1981,10 +1900,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.GreaterOrEqual(view.CaptureTelemetry().PrologueInFlight, 1,
                     "drive precondition: the tile must be genuinely held in its PROLOGUE step before the pan.");
 
-                // Pan far east — evict the tile while its prologue is still gated shut. Bounded pump, not a
-                // single tick: eviction is not guaranteed to land in the very first LateUpdate() after the
-                // pan (observed flaky at one tick), and the gate stays held throughout either way — nothing
-                // here lets the prologue itself proceed.
+                // Evict while the prologue is gated shut. Bounded pump, not one tick: eviction can miss the
+                // first LateUpdate() after the pan, and the gate stays held throughout.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 for (int f = 0; f < 3000 && view.ReleasedMidFlightCount() == 0; f++)
                     view.LateUpdate();
@@ -1992,9 +1909,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
                     "positive control: the tile must have been released while its prologue task was still " +
                     "genuinely in-flight (gate held), or the pen assertions below are vacuous.");
-                // This precondition is what makes the witness below non-vacuous, and it is the one thing
-                // distinguishing this case from the Measure case, where the SAME witness was dropped as
-                // vacuous — guard it explicitly so a future edit can't silently reopen that gap here.
+                // This precondition makes the witness below non-vacuous. The Measure case cannot hold it,
+                // so it drops the witness.
                 Assert.AreEqual(totalCreatedBefore, LayerMeshBuildCounters.DebugTotalBuildsCreated,
                     "the counter must NOT have advanced while the gate is shut — this case's witness below " +
                     "depends on the shared gate blocking every cover worker. Under InlineWorkScheduler the " +
@@ -2006,12 +1922,8 @@ namespace MapRenderer.Tests.Tiles
                     "this counter regardless of the gate; FillStyle() never declares one, so that path never " +
                     "runs here.");
 
-                // Release the gate — the worker now runs (the record is already gone from _loaded, but the
-                // WorkHandle keeps running independently) and PendingDisposalQueue.DrainCompleted will dispose its result.
-                // Bounded but generous: this poll cannot Await (the record is gone from _loaded), so it
-                // needs enough real wall-clock for a ThreadPool worker to actually run and be observed by a
-                // later Tick's PendingDisposalQueue.DrainCompleted — a plain LateUpdate() call is cheap enough that even
-                // 100k iterations finish in well under a second.
+                // The WorkHandle runs on after its record left _loaded; DrainCompleted disposes its result.
+                // The poll cannot Await (no record), so a generous bound gives the worker real wall-clock.
                 meshGate.Set();
 
                 for (int f = 0; f < 100_000 && LayerMeshBuildCounters.DebugTotalBuildsCreated <= totalCreatedBefore; f++)
@@ -2046,28 +1958,15 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// Case 2 (Measure): a tile released mid-flight while genuinely in its MEASURE step — the prologue
-        /// runs INLINE (no async parking needed there; the measure step is what this test holds), gated on
-        /// <see cref="TileManager.GraphDepsForTest"/>. <c>RenderTeardownRecord</c> stashes the still-live
-        /// <see cref="TileBuildGraph"/> via <c>_pending.StashGraph</c> rather than disposing it inline
-        /// (which would <c>Complete()</c> — and block on — the gated job).
-        ///
-        /// <para><b>RED:</b> the pen skips <c>graph.Dispose()</c> — <c>TileBuildGraph.DebugLiveCount</c>
-        /// stays elevated above baseline forever.</para>
-        ///
-        /// <para><b>Recorded limitation: no non-vacuity witness for "a real request was created" survives
-        /// this case's multi-tile cover.</b> <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/> is a
-        /// process-wide monotonic counter; under <c>InlineWorkScheduler</c> every OTHER cover tile's
-        /// prologue also runs synchronously (on whichever Tick first kicks it), so the counter advances from
-        /// unrelated cover traffic during the very drive loop this test uses to reach MEASURE — independent
-        /// of whether the released tile's own request or pen-drain ever ran correctly. Moving the baseline
-        /// capture past <c>LoadTestStyle</c> closed the WORST form (guaranteed-true from load alone) but not
-        /// this one; confirmed by instrumenting the counter right before the pan, which read 3 requests
-        /// created with the gate still shut. Isolating to a single-tile cover, or witnessing a quantity
-        /// scoped to the released tile's own <see cref="TileBuildGraph"/> instance rather than a process-wide
-        /// static, would close it properly — deferred rather than attempted under this test's existing
-        /// shared-gate, multi-tile shape.</para>
+        /// Case 2 (Measure): a tile released while held in its MEASURE step on
+        /// <see cref="TileManager.GraphDepsForTest"/>; the prologue runs INLINE. <c>RenderTeardownRecord</c>
+        /// stashes the live <see cref="TileBuildGraph"/> via <c>_pending.StashGraph</c>, because disposing it
+        /// inline would <c>Complete()</c> — and block on — the gated job.
         /// </summary>
+        /// <remarks>Limitation: no "a real request was created" witness survives this multi-tile cover.
+        /// <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/> is process-wide, and under
+        /// <c>InlineWorkScheduler</c> every other cover tile's prologue advances it during the drive. A
+        /// single-tile cover, or a count scoped to the released tile's own graph, would close this.</remarks>
         [Test]
         public void ReleasedMidFlight_Measure_StashesInThePen_ThenDrainsOnceTheDelayJobCompletes()
         {
@@ -2146,21 +2045,11 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// Case 3 (Write): a tile released once its WRITE step is COMPLETE but UNCONSUMED (<c>MaxConsumesPerTick
-        /// = 0</c>) — the "complete but unconsumed" case <c>RenderTeardownRecord</c> also pens, distinct from
-        /// the two genuinely-in-flight cases above: the write handle IS complete at release time, so
-        /// <see cref="MapViewTestExtensions.ReleasedMidFlightCount"/> does NOT count it (it is guarded on
-        /// <c>!lt.Graph.IsStepComplete</c>) — this case asserts only the pen/drain shape, not that guard.
-        ///
-        /// <para><b>RED:</b> <c>RenderTeardownRecord</c> skips <c>_pending.StashGraph</c> for
-        /// <c>Step == Write</c> — the released graph is never disposed, <c>TileBuildGraph.DebugLiveCount</c>
-        /// stays elevated above baseline forever.</para>
-        ///
-        /// <para><b>No <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/> witness.</b> Same recorded
-        /// limitation as the Measure case's own doc: a process-wide monotonic counter can't attest to this
-        /// specific tile's activity in a multi-tile cover, and this case already has a sound non-vacuity
-        /// pair on <see cref="TileBuildGraph.DebugLiveCount"/> (the <c>Greater</c> right after eviction, the
-        /// <c>AreEqual</c> after drain — see the comment above the first) that does not depend on it.</para>
+        /// Case 3 (Write): a tile released once its WRITE step is COMPLETE but UNCONSUMED
+        /// (<c>MaxConsumesPerTick = 0</c>), which <c>RenderTeardownRecord</c> also pens. The write handle is
+        /// complete at release, so <see cref="MapViewTestExtensions.ReleasedMidFlightCount"/> does not count
+        /// it; this case asserts only the pen/drain shape. Its non-vacuity pair is on
+        /// <see cref="TileBuildGraph.DebugLiveCount"/>, not the process-wide build counter.
         /// </summary>
         [Test]
         public void ReleasedCompleteButUnconsumed_Write_StashesInThePen_ThenDrains()
@@ -2199,10 +2088,8 @@ namespace MapRenderer.Tests.Tiles
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.LateUpdate();
 
-                // On its own this is true whether or not eviction landed (the graph is alive from load,
-                // MaxConsumesPerTick=0 keeps it that way). It is a sound positive control only paired with
-                // the AreEqual below: with consume blocked, a tile that was never evicted has no path to
-                // disposal, so an un-evicted run would exhaust that bound and fail there instead.
+                // Alone this holds even without eviction. Paired with the AreEqual below it is sound: with
+                // consume blocked, an un-evicted graph has no path to disposal and fails there.
                 Assert.Greater(TileBuildGraph.DebugLiveCount, graphBaseline,
                     "the evicted graph must still be LIVE right after eviction — this case's pen defers " +
                     "disposal to the drain, exactly like the genuinely-in-flight cases.");
@@ -2228,19 +2115,10 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// The SAME hold as the Write case above, but the graph is parked by calling
-        /// <see cref="TileManager.SetSources"/> with an EMPTY source list rather than a pan — zero sources
-        /// ⇒ zero cover ⇒ nothing is ever fetched, measured, or written again for the rest of this test, so
-        /// no other job can incidentally flush the batch queue.
-        ///
-        /// <para>This proves the drain works when the parked graph's
-        /// <see cref="TileBuildGraph.IsStepComplete"/> is <b>already true</b> at parking time (the common
-        /// case — <c>PendingDisposalQueue.DrainCompleted</c> disposes it on the very next call, no other
-        /// scheduling needed). It does <b>not</b> reproduce the rare leak: a ~1-in-1000 pan-eviction
-        /// run leaves a handful of <see cref="TileBuildGraph"/> instances live even though the pen ends up
-        /// empty and every parked graph's handle completed — i.e. those instances never entered
-        /// <c>PendingDisposalQueue</c>'s graph pen at all. That leak was characterised with a throwaway repeated-trial
-        /// harness (not landed — see the ticket) and is still open.</para>
+        /// The Write case's hold, but parked by <see cref="TileManager.SetSources"/> with an EMPTY source
+        /// list: zero cover, so no other job can flush the batch queue. The drain works when the parked
+        /// graph's <see cref="TileBuildGraph.IsStepComplete"/> is already true at parking time.
+        /// Limitation: a rare pan-eviction leak, where graphs never enter the pen, is not reproduced here.
         /// </summary>
         [Test]
         public void ParkedGraph_AlreadyComplete_DrainsWithoutAnyOtherJobScheduled()
@@ -2272,9 +2150,8 @@ namespace MapRenderer.Tests.Tiles
                     "drive precondition: the tile's write step must be complete but unconsumed " +
                     "before eviction.");
 
-                // Evict via the SAME RenderTeardownRecord funnel every abandonment path uses — but with
-                // ZERO replacement sources, so no cover is ever recomputed and nothing is ever scheduled
-                // again for the rest of this test.
+                // Evict via the RenderTeardownRecord funnel with ZERO replacement sources, so nothing is
+                // scheduled again for the rest of this test.
                 view.TileManager.SetSources(Array.Empty<TileManager.SourceSpec>(), view.Config.Backend);
 
                 Assert.Greater(TileBuildGraph.DebugLiveCount, graphBaseline,
@@ -2297,14 +2174,10 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// Case 4 (Teardown): the SAME hold as the Measure case, but the tile is torn down through
-        /// <see cref="MapView.Teardown"/> directly — without settling, and without ever panning it out of
-        /// cover — proving <see cref="TileManager.DoDispose"/>'s own graph pen (fed by the SAME
-        /// <c>RenderTeardownRecord</c> funnel every other abandonment path uses) disposes a genuinely
-        /// in-flight graph rather than leaking it.
-        ///
-        /// <para><b>RED:</b> <c>DoDispose</c> skips the graph pen's <c>Dispose()</c> sweep —
-        /// <c>TileBuildGraph.DebugLiveCount</c> stays elevated above baseline forever.</para>
+        /// Case 4 (Teardown): the Measure case's hold, but the tile is torn down through
+        /// <see cref="MapView.Teardown"/> without settling or leaving cover.
+        /// <see cref="TileManager.DoDispose"/>'s graph pen, fed by the same <c>RenderTeardownRecord</c>
+        /// funnel, disposes the in-flight graph rather than leaking it.
         /// </summary>
         [Test]
         public void Teardown_WhileGenuinelyInMeasure_DrainsThePen_WithoutSettling()
@@ -2342,10 +2215,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
                     "drive precondition: the tile must be genuinely held in its MEASURE step before teardown.");
 
-                // Release the gate before tearing down (NIT 3 — Complete()ing a still-gated job on main
-                // would burn the whole spin bound; the claim under test is "teardown routes through the
-                // SAME pen funnel", not "teardown blocks on a held job") — but the tile is torn down
-                // WITHOUT ever settling or being consumed, which is the actual claim.
+                // Release first: Complete()ing a gated job on main burns the whole spin bound. The tile is
+                // still torn down WITHOUT settling or being consumed, which is the claim.
                 gate[0] = 1;
                 view.Teardown();
                 UnityEngine.Object.DestroyImmediate(go);
@@ -2380,28 +2251,14 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Tooth (g): a mixed tile — fill AND line, both graph-arm — one mesh per produced ──────
-        // layer, joined by slot ─────────────────────────────────────────────────────────────
-        //
-        // Line runs on the SAME job graph as fill — there
-        // is no longer a seam arm for either kind, so "fill via graph, line via prologue" no longer
-        // describes anything real. What both teeth below still pin — CompleteWriteAndTakePayloads joining
-        // each request's payload at ITS OWN slot, not a shared/overwritten one — is unaffected by which
-        // kind sits in which slot, and still worth pinning per-layer.
+        // ── A mixed fill + line tile: CompleteWriteAndTakePayloads joins each payload at ITS OWN slot ──
 
         /// <summary>
-        /// Empty-line case: fill AND line both declared on <c>countries</c> — polygon rings drop at the
-        /// line builder's <c>LineString</c> gate, so the line layer settles as an EMPTY (zero-vertex)
-        /// request (no write step runs for it). Pins "an empty layer still takes a slot": <c>CompleteWriteAndTakePayloads</c> hands
-        /// back one slot per REQUEST, but <c>ConsumeMeshBuild</c> only tracks a slot whose
-        /// <c>Upload()</c> returned a real <see cref="Mesh"/> — so only the fill layer's mesh reaches
-        /// <c>GetTileMeshes</c>/<c>GetTileMaterialIndices</c>, and no NativeArray leaks (there is nothing
-        /// for the empty line request to leak — it never reaches the write step at all).
-        ///
-        /// <para><b>RED:</b> in <c>CompleteWriteAndTakePayloads</c>'s write branch, write <c>payloads[0]</c>
-        /// instead of <c>payloads[i]</c> — see the real-join tooth below for the shape this defect takes;
-        /// with only one non-empty layer here it happens to be inert (index 0 IS the fill's own slot), so
-        /// this case alone cannot catch it — that is why the real-join case exists.</para>
+        /// Fill AND line both on <c>countries</c>: polygon rings drop at the line builder's
+        /// <c>LineString</c> gate, so the line layer settles as an EMPTY request with no write step.
+        /// <c>CompleteWriteAndTakePayloads</c> hands back one slot per REQUEST, but <c>ConsumeMeshBuild</c>
+        /// tracks only a slot whose <c>Upload()</c> returned a real <see cref="Mesh"/>. A wrong-slot join is
+        /// inert with one non-empty layer; the real-join case below catches it.
         /// </summary>
         [Test]
         public void MixedTile_FillAndEmptyLine_EmptyLineLayer_StillTakesASlot()
@@ -2445,10 +2302,8 @@ namespace MapRenderer.Tests.Tiles
                     "returns null, and ConsumeMeshBuild never calls AddTileLayer for a null mesh.");
                 CollectionAssert.AreEqual(new[] { 0 }, view.GetTileMaterialIndices(tileId),
                     "the one tracked mesh must be the FILL layer's — material index 0, its declared position.");
-                // What this actually pins post-migration: the fill layer's own consume-disposal, the same
-                // assertion this file's own tooth (b) makes at its own consume point — no other test in this
-                // file separately guards the empty line's non-existent write-step allocation, since the
-                // empty line never reaches the write step to allocate anything in the first place.
+                // Pins the fill layer's consume-disposal. The empty line never reaches the write step, so it
+                // has no allocation to leak.
                 Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
                     "no leak: the fill layer's write-step array must be disposed at consume, and the empty " +
                     "line layer's request (settled with no write step at all — no array to leak) must not " +
@@ -2461,21 +2316,12 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>Fill on <c>countries</c> + line on <c>geolines</c> (the fixture's 6-feature line
-        /// layer — <c>ThrottleTests</c>' own style) — both LAYERS produce a real, non-empty mesh, so each
-        /// layer's own dense request lands at ITS OWN material index (both are graph-arm, so there is no
-        /// second arm's slot to join against, only
-        /// this one dense array, joined by request index). Run for BOTH declaration orderings —
-        /// <paramref name="lineFirst"/> — so a bug that only shows for one physical arrangement of "which
-        /// kind sits at slot 0" cannot hide.</summary>
+        /// layer): both layers produce a real mesh, and each dense request lands at ITS OWN material index.
+        /// Runs for both declaration orderings, so a bug that shows for one arrangement cannot hide.</summary>
         /// <param name="lineFirst"><see langword="false"/>: fill declared first (material index 0), line
         /// second (index 1). <see langword="true"/>: the reverse.</param>
-        /// <remarks><b>RED:</b> in <c>CompleteWriteAndTakePayloads</c>'s write branch, write
-        /// <c>payloads[0]</c> instead of <c>payloads[i]</c> — in the fill@0/line@1 ordering
-        /// (<paramref name="lineFirst"/> == <see langword="false"/>) the line's payload OVERWRITES the
-        /// fill's at slot 0 (mesh count drops to 1, <c>MaterialIndices</c> reads <c>[1]</c> instead of
-        /// <c>[0, 1]</c>); the line@0 ordering is UNAFFECTED (writing to index 0 there is a no-op — it
-        /// already was line's own slot). The tooth reds through the FIRST ordering only, and that is the
-        /// one to read.</remarks>
+        /// <remarks>A join that writes every payload at index 0 shows only in the fill@0/line@1 ordering:
+        /// the line's payload overwrites the fill's, so the mesh count drops to 1.</remarks>
         [Test]
         public void MixedTile_FillAndLine_RealJoin_BothOrderings(
             [Values(false, true)] bool lineFirst)
@@ -2517,9 +2363,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(2, view.GetTileMeshes(tileId)?.Length ?? 0,
                     $"both layers must produce a non-empty mesh (lineFirst={lineFirst}) — fill on countries, " +
                     "line on geolines (a real 6-feature line layer, unlike the empty-line case above).");
-                // Material index == declared position regardless of WHICH kind (fill/line) sits there —
-                // always [0, 1] for two declared layers. The permutation this tooth exists to catch is a
-                // wrong VALUE at a slot (or a missing slot), not a different set of index numbers.
+                // Material index == declared position whatever kind sits there, so always [0, 1]. The bug
+                // caught is a wrong VALUE at a slot, or a missing slot.
                 CollectionAssert.AreEqual(new[] { 0, 1 }, view.GetTileMaterialIndices(tileId),
                     $"MaterialIndices must join in DECLARED order (lineFirst={lineFirst}) — a permutation " +
                     "bug (writing every payload slot at index 0 instead of the request's own index) would " +
@@ -2536,18 +2381,9 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// With <c>MaxMeshBuildsPerTick = 1</c> and a multi-tile cover, some Tick both completes a
-        /// write-step transition for an already-admitted tile AND admits a fresh one. Under the deleted
-        /// two-units-per-tile rule that conjunction was arithmetically impossible: one budget unit, two
-        /// claimants (the write kick and the fresh admission), mutually exclusive in either iteration
-        /// order. Inline decode (<see cref="InlineWorkScheduler"/> on the fetch's decode hop) guarantees
+        /// write-step transition for an admitted tile AND admits a fresh one. A budget that charged the
+        /// transition would make that impossible: one unit, two claimants. Inline decode guarantees
         /// same-tick eligibility, so the scan measures budget behaviour, not decode-completion order.
-        ///
-        /// <para><b>RED:</b> reconstruct the deleted charge as a local, shared across all three admission
-        /// guards — <c>if (TileBuildsStartedLastTick + transitionCharge >= buildCap) …</c> in the
-        /// write-transition arm (incrementing the local after) AND in both kick arms. Under it the
-        /// conjunction can never occur: the local re-forms the same single shared budget the deleted
-        /// two-counter world had. The cap-binding assertion (below) stays green; the conjunction assertion
-        /// goes RED.</para>
         /// </summary>
         [Test]
         public void WriteTransitionTick_CanAlsoAdmitAFreshTile_UnderCapOne()
@@ -2557,8 +2393,7 @@ namespace MapRenderer.Tests.Tiles
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5; // known >= 9-tile cover
             view.Config.Backend               = RenderBackend.GameObject;
-            view.Config.MaxMeshBuildsPerTick  = 1;             // the cap that makes the conjunction impossible
-                                                                // under the deleted rule
+            view.Config.MaxMeshBuildsPerTick  = 1;             // a charged transition could not share this cap
             view.Config.MaxConsumesPerTick    = 0;             // consume blocked — candidates never run dry
             view.Config.MaxVerticesPerTick    = int.MaxValue;
             view.WithTestCamera();
@@ -2568,14 +2403,11 @@ namespace MapRenderer.Tests.Tiles
                 long payloadBaseline     = MeshDataPayload.DebugLiveAllocCount;
                 long graphOutputBaseline = FillGraphOutput.DebugLiveCount;
 
-                // Inline decode — the same-tick-eligibility guarantee (TileManagerLoadPriorityTests' own
-                // idiom): without it the scan can measure decode-completion order instead of budget
-                // behaviour.
+                // Inline decode gives same-tick eligibility; without it the scan measures decode order.
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                // Bounded scan (never iterate a runtime-derived count without a ceiling). No
-                // DrainMeshBuilds/PumpUntilSettled here — drain ignores every per-tick cap by design and
+                // Bounded scan. No DrainMeshBuilds/PumpUntilSettled: drain ignores every per-tick cap and
                 // would destroy the observation.
                 bool anyStarted = false, anyAllocated = false, conjunctionSeen = false;
                 for (int t = 0; t < 200; t++)
@@ -2616,22 +2448,11 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// With <c>MaxMeshBuildsPerTick = 1</c>, a single Tick can complete write-step transitions for
-        /// TWO OR MORE already-admitted tiles at once. Under the deleted rule this was impossible for a
-        /// plain counting reason: one unit per Tick buys one charged kick. Unlike the sibling tooth above,
-        /// this one reads <see cref="MapViewTestExtensions.MeshDataArraysAllocatedLastKick"/> — not the
-        /// admission counter — so no reconstruction of the deleted charge can pollute it.
-        ///
-        /// <para>Holds three tiles in MEASURE simultaneously (the delay-job idiom this file already uses
-        /// for the Measure/Teardown pen cases above), then opens the gate and completes them all in one
+        /// With <c>MaxMeshBuildsPerTick = 1</c>, one Tick can complete write-step transitions for TWO OR
+        /// MORE admitted tiles. It holds three tiles in MEASURE, then completes them in one
         /// <see cref="MapViewTestExtensions.AwaitInFlightMeshBuilds"/> call, so one <c>LateUpdate</c>
-        /// write-kicks every one of them at once. The per-tile ceiling is structural, not borrowed: the
-        /// write step allocates one <see cref="Mesh.MeshDataArray"/> per non-empty layer, and
-        /// <see cref="FillStyle"/> declares exactly one fill layer.</para>
-        ///
-        /// <para><b>RED:</b> the same reconstructed <c>transitionCharge</c> local as the sibling tooth
-        /// above (one injected run serves both) — under it the single Tick charges one write kick and
-        /// defers the rest, so <c>MeshDataArraysAllocatedLastKick() == 1</c>.</para>
+        /// write-kicks them all. It reads <see cref="MapViewTestExtensions.MeshDataArraysAllocatedLastKick"/>,
+        /// one per tile because <see cref="FillStyle"/> declares one fill layer.
         /// </summary>
         [Test]
         public void OneTick_CanCompleteTwoWriteTransitions_UnderCapOne()
@@ -2660,10 +2481,8 @@ namespace MapRenderer.Tests.Tiles
                     { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
-                // Load-bearing, not decoration: `decodeScheduler` inlines only the decode hop — the
-                // prologue still dispatches to the ThreadPool, and this drive forbids Await while the gate
-                // holds a graph step (this file's own rule), with no yield to give workers wall-clock. A
-                // tight bounded loop can exhaust before three prologues land without this.
+                // Non-obvious why: no Await is allowed while the gate holds a graph step, so a ThreadPool
+                // prologue gets no wall-clock and the bounded loop can exhaust before three land.
                 view.TileManager.WorkScheduler = new InlineWorkScheduler();
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
@@ -2743,27 +2562,11 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         /// <summary>
-        /// (b) The extrusion layer takes the graph arm in production: NO kick-time <c>MeshDataArray</c> at
-        /// all — fill, fill-extrusion AND line are all graph-arm,
-        /// so nothing allocates until a write step runs. The measure step genuinely builds
-        /// wall geometry (<see cref="StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated"/>
-        /// advances — the wall-job graph moved this out of the
-        /// prologue into <c>FillExtrusionMeshGraph.Schedule</c>), the measure graph is genuinely scheduled,
-        /// and the write step allocates exactly TWO arrays (fill + extrusion) — settling to two real meshes;
-        /// the empty line layer's graph produces zero vertices and gets no write step, counted nowhere.
-        ///
-        /// <para><b>RED 1 (retired):</b> used to remove
-        /// <c>IGraphInputRenderLayer</c> from <c>FillExtrusionRenderLayer</c> to fall the layer back to the
-        /// seam arm, reading a kick-time allocation delta of 1 instead of 0. Both the
-        /// interface (merged into <c>ITileMeshRenderLayer</c>) and the seam arm itself — there is no
-        /// longer a second arm to fall back to, so this injection point no longer exists. The property it
-        /// guarded — no kick-time allocation for ANY layer — is what tooth (f)'s sibling in
-        /// <c>LineGraphKickTests</c> and this test's own assertion below still pin.</para>
-        /// <para><b>RED 2 (review):</b> in <c>FillExtrusionLayerBuild.TryScheduleWrite</c> route the
-        /// extrusion build through <c>StyledFillTileBuilder.ScheduleWrite</c> instead of its own — the
-        /// mesh/material-slot counts above do NOT move (fill's write is not self-guarding, so it still
-        /// allocates, still draws), so only the TexCoord4 assertion below reds: fill's descriptor set never
-        /// declares TexCoord3/4, so a mis-routed extrusion mesh ends up with neither.</para>
+        /// No kick-time <c>MeshDataArray</c> for fill, fill-extrusion or line. The measure step builds wall
+        /// geometry in <c>FillExtrusionMeshGraph.Schedule</c>
+        /// (<see cref="StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated"/> advances). The write
+        /// step allocates exactly TWO arrays (fill + extrusion); the empty line layer gets no write step.
+        /// A TexCoord4 check pins the extrusion writer, which the mesh counts cannot tell from fill's.
         /// </summary>
         [Test]
         public void ExtrusionLayer_OneMeshPerLayer_WriteAllocatesExactlyTwo()
@@ -2805,18 +2608,12 @@ namespace MapRenderer.Tests.Tiles
                     "NO MeshDataArray at kick — fill, fill-extrusion and line are all graph-arm now " +
                     "(job-scheduling-design.md); nothing allocates until a write step runs.");
 
-                // "Kicked" only means the prologue task was DISPATCHED, not that it ran — no WorkScheduler
-                // override here (unlike SourceTileGraphBuildTests' tooth (b), which forces InlineWorkScheduler
-                // to make the body synchronous), so the prologue genuinely runs off-thread. Await it before
-                // the next tick schedules the measure graph.
+                // "Kicked" means DISPATCHED: with no scheduler override the prologue runs off-thread, so
+                // await it before the next tick schedules the measure graph.
                 view.AwaitInFlightMeshBuilds();
 
-                // Next tick: prologue-complete hands off to the measure graph, held open by the still-gated
-                // delay. WallColumns.Allocate()
-                // moved from BuildLayerInput (the prologue, awaited above) into FillExtrusionMeshGraph.Schedule
-                // (the measure step, scheduled by THIS LateUpdate) — so the wall-columns witness reads after
-                // this call now, not after the prologue await; it no longer observes anything BuildLayerInput
-                // itself does.
+                // This tick schedules the measure step, where FillExtrusionMeshGraph.Schedule allocates
+                // WallColumns, so the wall-columns witness reads after it.
                 view.LateUpdate();
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
                     "a real measure graph must be scheduled and held in flight by the delay job.");
@@ -2849,12 +2646,8 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(2, meshes?.Length ?? 0,
                     "two real meshes settle: fill's roof and the extrusion's roof+walls — the empty line " +
                     "layer contributes none.");
-                // Pins that the graph selected the EXTRUSION writer, not just that two meshes exist (review
-                // review): only StyledFillExtrusionTileBuilder's descriptor set declares TexCoord3/4
-                // (ExtrudeAndBake); fill's does not. A count-only check cannot see a mis-route — routing
-                // FillExtrusion through StyledFillTileBuilder.ScheduleWrite still allocates two arrays, two
-                // material slots, and draws something, so this is the only assertion here that a mis-route
-                // actually moves.
+                // Only StyledFillExtrusionTileBuilder's descriptor set declares TexCoord4. A mis-route
+                // through fill's writer keeps every count above, so only this assertion moves.
                 Assert.IsTrue(meshes.Any(m => m.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord4)),
                     "one of the two meshes must carry the extrusion-only TexCoord4 stream (BakedBaseHeight) " +
                     "— proves the write dispatch actually reached StyledFillExtrusionTileBuilder.ScheduleWrite, " +
@@ -2879,25 +2672,11 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// (c) The extrusion columns are freed on a normal build-then-teardown cycle — every
-        /// <see cref="StyledFillExtrusionTileBuilder.WallColumns"/> the measure step allocated
-        /// (<see cref="StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated"/> advancing is the
-        /// non-vacuity witness: a "back to zero" live count on a counter that never moved proves nothing) is
-        /// disposed by teardown, alongside the request and graph counters fill already pins.
-        ///
-        /// <para><b>RED (re-pointed again, the per-layer build-object stage — <c>Walls</c> is now owned
-        /// whole, as part of <c>FillExtrusionGraphOutput</c>, by <c>FillExtrusionLayerBuild</c>, so the
-        /// previous recipe's target, <c>TileBuildGraph.Dispose()</c>'s own teardown loop, no longer touches
-        /// any kind's fields at all):</b> drop <c>_ext.Dispose();</c> from
-        /// <c>FillExtrusionLayerBuild.Dispose()</c> → <c>WallColumns.DebugLiveCount</c> stays elevated above
-        /// baseline after teardown.</para>
-        ///
-        /// <para><b>Arm-agnostic (historical — the seam arm is retired):</b> this test used to pass under
-        /// EITHER arm — the seam-arm
-        /// <c>WriteInto</c>/<c>WriteMeshData</c> path reached <c>WallColumns.Allocate()</c> through the same
-        /// shared <c>BuildLayerInput</c> the graph arm uses, so both built and freed columns identically.
-        /// There is only the graph arm left now, so this tooth pins DISPOSAL on the sole remaining path —
-        /// tooth (b) is what pins that it is the graph arm reached in production.</para>
+        /// Every <see cref="StyledFillExtrusionTileBuilder.WallColumns"/> the measure step allocated is
+        /// disposed by teardown, alongside the request and graph counters. <c>FillExtrusionLayerBuild</c>
+        /// owns the walls and releases them in its <c>Dispose()</c>.
+        /// <see cref="StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated"/> advancing is the
+        /// non-vacuity witness.
         /// </summary>
         [Test]
         public void ExtrusionColumns_AreFreed_OnNormalBuildThenTeardown()
@@ -2920,10 +2699,8 @@ namespace MapRenderer.Tests.Tiles
 
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: MixedStyle());
 
-                // LoadedTileCount() > 0 is load-bearing, not decoration (ThrottleTests.cs:613's own idiom):
-                // the bare !AllTilesSettled() predicate is evaluated BEFORE the first LateUpdate(), and with
-                // an empty cover "all tiles settled" is vacuously true — the loop would run zero iterations
-                // and never actually pump a build. Caught by this tooth's own witness reading a flat 0.
+                // LoadedTileCount() > 0 is load-bearing: before the first LateUpdate() the cover is empty,
+                // so AllTilesSettled() is vacuously true and the loop would never pump.
                 for (int f = 0; f < 3000 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.AwaitInFlightMeshBuilds();
@@ -2967,29 +2744,22 @@ namespace MapRenderer.Tests.Tiles
     [TestFixture]
     public class TileBackgroundQuadProjectionTests : BaseTestFixture
     {
-        // z3/4/3: a COARSE tile (45° span — well above the 3° subdivision threshold, so the globe path must
-        // subdivide) that stays comfortably within GlobeFillSubdivideDispatch's DefaultMaxDepth (5) — UNLIKE
-        // z0 (~170° span: the WHOLE tile-extent quad, not a small clipped feature), whose worst-case edges
-        // hit the recursion-depth cap before reaching the 3° angular threshold (verified: measured ~7.4° at
-        // z0, not <=3°). A real MVT feature can be z0-sized because it's usually much smaller than the full
-        // tile; this quad IS the full tile, so it needs a less extreme zoom to fit the depth budget.
+        // Non-obvious why: z3 gives a 45° span, which forces globe subdivision yet fits DefaultMaxDepth (5).
+        // This quad IS the full tile, and at z0 its edges hit the depth cap before reaching the 3° threshold.
         private static readonly TileId CoarseTile = new TileId { Z = 3, X = 4, Y = 3 };
 
         /// <summary>Drives the real graph-arm path — <see cref="BackgroundQuad"/> +
-        /// <see cref="TileBuildGraph"/>, exactly as <c>TileManager.KickSourcelessBackground</c> does since
-        /// and returns the uploaded mesh (caller destroys it) plus the
-        /// origin used to bake it (positions are ORIGIN-RELATIVE — MED 5 — so a caller reconstructing
-        /// absolute positions must add this back).</summary>
+        /// <see cref="TileBuildGraph"/>, as <c>TileManager.KickSourcelessBackground</c> does — and returns
+        /// the uploaded mesh (caller destroys it) plus its bake origin. Positions are
+        /// ORIGIN-RELATIVE, so a caller reconstructing absolute positions must add the origin back.</summary>
         private static (Mesh mesh, double3 origin) BuildViaProcessor(IProjection projection)
         {
             double3 origin = TileRenderOrigin.Project(CoarseTile, projection);
             var context = new TileLayerProcessContext
             {
                 Tile = CoarseTile, Zoom = CoarseTile.Z, TileOriginRender = origin, Projection = projection,
-                // NIT 7: mirrors production's actual default (MapView.cs sets BufferClip from
-                // MapViewConfig.FillTileBufferClip, whose default 0.0 decodes to KeepTileUnits(0.0) — an
-                // ENABLED clip with zero margin) rather than bare `default` (Disabled), which would drive
-                // RingSelectJob instead of the RingClipJob production actually takes.
+                // Production's default FillTileBufferClip (0.0) is an ENABLED zero-margin clip; bare
+                // `default` (Disabled) would drive RingSelectJob instead of production's RingClipJob.
                 BufferClip = TileBufferClip.KeepTileUnits(0.0),
             };
 
@@ -3011,16 +2781,11 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// The background quad built from the processor's corners is the SAME geometry as the full-extent
-        /// ring encoded as an MVT command stream. A <b>differential against that encoding</b>: materialize
-        /// <see cref="FullExtentRingCommandStream"/> (a frozen record of the full-extent ring)
-        /// through the MVT producer, materialize the live processor's corners through the path producer, and
-        /// compare the two <c>TileGeometryBuffers</c> element-wise.
-        ///
-        /// <para>Why this shape and not "assert four corners": a corner-value assertion cannot see ring
-        /// COUNT, ring OFFSETS, the trailing SENTINEL or the kind COLUMN — the four things a hand-written
-        /// flatten gets wrong. And an oracle written from the new implementation could only restate it; this
-        /// one is the thing being retired, so it cannot be satisfied by transcribing the replacement.</para>
+        /// The background quad built from the processor's corners is the SAME geometry as
+        /// <see cref="FullExtentRingCommandStream"/>, a frozen MVT encoding of the full-extent ring. Both
+        /// are materialized and compared element-wise. Non-obvious why: a corner-value check cannot see ring
+        /// COUNT, ring OFFSETS, the trailing SENTINEL or the kind COLUMN, and an independent oracle cannot be
+        /// satisfied by transcribing the implementation.
         /// </summary>
         [Test]
         public void SyntheticRing_MaterializesIdenticallyToTheRetiredCommandStream()
@@ -3036,9 +2801,8 @@ namespace MapRenderer.Tests.Tiles
                 new[] { legacyFeature.GeometryType },
                 new[] { legacyFeature.Geometry });
 
-            // The live arm: PRODUCTION's own corner data and kind column, through production's own path
-            // producer — the same relationship the retired version of this test had to the command stream
-            // it decoded. A test-owned copy of the corners would compare the fixture with itself.
+            // The live arm: PRODUCTION's corner data and kind column, through production's path producer.
+            // A test-owned copy of the corners would compare the fixture with itself.
             TileGeometryBuffers current = new PathGeometryMaterializer(
                 CoarseTile, extent,
                 BackgroundQuad.FullExtentRingKinds,
@@ -3103,9 +2867,8 @@ namespace MapRenderer.Tests.Tiles
                 foreach (var v in verts)
                     Assert.AreEqual(0f, v.y, 1e-3f, "Mercator stored positions must be coplanar y≈0 (origin-relative).");
 
-                // Colour clause: every background vertex is exactly opaque white — the literal a constant
-                // {"fill-color":"#ffffff"} paint evaluates to. Nothing else watches that value, so a wrong
-                // literal (or a stray alpha) would render a tinted/translucent background silently.
+                // Every background vertex is opaque white, the value a constant "#ffffff" fill-color gives.
+                // Nothing else watches it, so a wrong literal or stray alpha would tint the background silently.
                 var colors = new List<Color>();
                 mesh.GetColors(colors);
                 Assert.AreEqual(verts.Count, colors.Count,
@@ -3116,10 +2879,8 @@ namespace MapRenderer.Tests.Tiles
                         "the material uniform supplies the actual background colour.");
 
                 AssertBoundsMatchesVertexEnvelope(mesh, verts);
-                // RTC contract: stored (origin-relative) positions stay bounded to roughly the TILE's own
-                // extent — never require ≈ R (the globe radius) or ≈ the world's total circumference. A tile
-                // at low zoom is itself physically large (this z3 tile spans ~5000 km), so the bound is
-                // relative to the tile's own size, not an absolute small constant.
+                // RTC contract: origin-relative positions stay within about the TILE's own extent. A z3
+                // tile is physically large, so the bound scales with the tile, not a small constant.
                 double tileSizeWorld = WebMercator.WorldExtent * 2.0 / math.pow(2.0, CoarseTile.Z);
                 foreach (var v in verts)
                     Assert.Less(((Vector3)v).magnitude, (float)(tileSizeWorld * 2.0),
@@ -3128,12 +2889,10 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        /// <summary>DECISION 3 (round-3 fix for HIGH d): reads the uploaded INDEX buffer and proves rendered
-        /// subdivision TOPOLOGY, not just vertex existence — (a) every emitted vertex is triangle-referenced
-        /// (no dangling verts from an "append midpoints without reindexing" bug), (b) all 4 projected tile
-        /// corners are present (defeats a wrong TileId), (c) every indexed triangle edge subtends ≤ the
-        /// subdivision angular threshold on the sphere (defeats a hardcoded-flat/unsplit-quad impl whose
-        /// chord edges exceed it) — plus the <see cref="Mesh.bounds"/> envelope check.</summary>
+        /// <summary>Reads the uploaded INDEX buffer to prove subdivision TOPOLOGY: (a) every vertex is
+        /// triangle-referenced, (b) all 4 projected tile corners are present (catches a wrong TileId), and
+        /// (c) every triangle edge subtends ≤ the angular threshold on the sphere (catches an unsplit quad).
+        /// Also checks the <see cref="Mesh.bounds"/> envelope.</summary>
         [Test]
         public void BackgroundQuad_CurvesOnSphere_SubdividedTopology()
         {
@@ -3161,7 +2920,7 @@ namespace MapRenderer.Tests.Tiles
                     "every uploaded vertex must be referenced by the index buffer — a dangling (unreferenced) " +
                     "vertex means it was appended without rewiring triangle indices.");
 
-                // Absolute (world/ECEF) positions — MED 5: stored positions are ORIGIN-RELATIVE, so
+                // Absolute (world/ECEF) positions: stored positions are ORIGIN-RELATIVE, so
                 // reconstruct absolute BEFORE any sphere-space (radius/angle) test.
                 var absolute = verts.Select(v => new double3(v.x, v.y, v.z) + origin).ToArray();
                 foreach (var a in absolute)
@@ -3184,9 +2943,8 @@ namespace MapRenderer.Tests.Tiles
                                           "uploaded vertices — a wrong TileId would project different corners.");
                 }
 
-                // (c) every indexed triangle edge subtends ≤ the subdivision angular threshold on the sphere
-                // (the real proof of subdivision — a mere vertex-count>4 doesn't prove split FACES; a
-                // hardcoded-flat or unsplit-quad impl's chord edges would exceed this).
+                // (c) every triangle edge subtends ≤ the angular threshold. A vertex count > 4 does not
+                // prove split FACES; an unsplit quad's chord edges exceed this.
                 double maxAllowedRad = GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad * 1.10; // 10% float slack
                 int edgesChecked = 0;
                 for (int t = 0; t + 2 < tris.Count; t += 3)
@@ -3236,15 +2994,10 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// The kind column and the path list are two independent lists joined BY POSITION, so a length
-        /// mismatch would mis-classify every ring rather than fail. <c>PathGeometryMaterializer</c> validates
-        /// that <b>before</b> it allocates — which is what makes the throw safe: after <c>Allocate</c> four
-        /// <c>Allocator.Persistent</c> arrays exist and a throw would strand them on the one exit path no
-        /// caller can dispose.
-        /// <para>Structural rather than behavioural on purpose: production always passes matched lists, so
-        /// this path is unreachable in production and no behavioural test can reach it. That is precisely why
-        /// it needs a tooth — the sibling <c>MvtGeometryMaterializer</c> holds its own unreachable throw path
-        /// to the same standard, "by reading the code, not by arguing reachability".</para>
+        /// The kind column and the path list are joined BY POSITION, so a length mismatch would mis-classify
+        /// every ring rather than fail. <c>PathGeometryMaterializer</c> validates that <b>before</b> it
+        /// allocates: after <c>Allocate</c>, four <c>Allocator.Persistent</c> arrays exist and a throw would
+        /// strand them. Production always passes matched lists, so only this direct test reaches the path.
         /// </summary>
         [Test]
         public void PathMaterializer_KindColumnShorterThanPaths_ThrowsBeforeAllocating()

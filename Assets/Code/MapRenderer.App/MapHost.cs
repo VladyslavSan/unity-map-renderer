@@ -106,10 +106,9 @@ namespace MapRenderer.App
             // 4. SetStyle is async (style doc + any TileJSON) and fire-and-forget; tiles stream in as it completes.
             if (mapView != null)
             {
-                // dpr = Screen.dpi / 160 (the Android mdpi baseline), so a selection tile keeps one physical size.
-                // In Play Mode, Screen.dpi reports the Editor monitor's density (observed, not documented), and
-                // whether mdpi is the right baseline is open: docs/device-pixel-ratio-design.md. Tests drive Wire
-                // and keep the serialized ratio.
+                // dpr = Screen.dpi / 160 (the Android mdpi baseline, an open choice: docs/device-pixel-ratio-design.md).
+                // Limitation: in Play Mode, Screen.dpi reports the Editor monitor's density (observed, not documented).
+                // Tests drive Wire and keep the serialized ratio.
                 mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi);
             }
             string styleUri = ResolveStyleUri(StyleUri);
@@ -217,8 +216,7 @@ namespace MapRenderer.App
             var ctrl = root.GetComponent<Controller>();
 
             // ── Wire the MapCamera onto MapView (the essential graph, controller-independent) ────────────
-            // MapView owns the single MapCamera; SetCamera builds the MapView (empty until SetStyle loads data).
-            // MapCamera wraps a real Unity camera, so a null camera builds no MapView.
+            // MapView owns the one MapCamera. SetCamera builds the MapView, empty until SetStyle loads data.
             if (camera != null)
             {
                 // Seed the DPR at construction so the ctor's frame-0 SyncToCamera frames the logical viewport;
@@ -236,9 +234,8 @@ namespace MapRenderer.App
                 ctrl.Camera = camera; // may be null — guarded in Controller.Update
                 ctrl.Map    = mapView;
 
-                // Wire the touch source alongside the desktop controller, over the same write seam.
-                // GetComponent-or-AddComponent, so the scene needs no committed edit; the scene validator flags
-                // only missing scripts, not runtime-added ones.
+                // Touch shares the desktop controller's write seam. Adding it at runtime needs no scene edit, and
+                // the scene validator flags only missing scripts, not runtime-added ones.
                 var touch = root.GetComponent<TouchController>() ?? root.AddComponent<TouchController>();
                 touch.camera = camera;
                 touch.Map    = mapView;

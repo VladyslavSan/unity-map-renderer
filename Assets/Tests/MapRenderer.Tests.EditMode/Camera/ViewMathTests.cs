@@ -1,6 +1,4 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
-// (Tools/core-tests). Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
-//
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine or NativeArray reference.
 // View-state, tile cover, and floating-origin (jitter) math.
 
 using System;
@@ -58,10 +56,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── IVisibleTileSelector / FrustumTileSelector ───────────────────────────────────
-        //
-        // All behavioural teeth exercise the default impl THROUGH the seam: build a ViewContext
-        // { Camera, ViewportPx, Projection } and call SelectVisibleTiles(in view, buf). The white-border
-        // guarantee is T-FRAME (covers the framing ground quad, derived independently of ScreenToGround).
+        // Tests drive the default impl THROUGH the seam: a ViewContext, then SelectVisibleTiles(in view, buf).
 
         private static readonly IProjection Proj = new WebMercatorProjection();
         private const double RefH = 1080.0; // the framing reference height (matches CameraSystem default)
@@ -99,7 +94,7 @@ namespace MapRenderer.Tests.Cameras
         /// <summary>
         /// A ground point of the FRAMING quad: camera-center Mercator + (a,b) rotated by the camera heading,
         /// where a ∈ [-halfH, halfH], b ∈ [-halfV, halfV] are ground offsets derived from the framing math
-        /// — NOT from ScreenToGround (that would make T-FRAME circular). The rotation matches the
+        /// — NOT from ScreenToGround (that would make the framing test circular). The rotation matches the
         /// projection's pixel→ground bearing rotation: east = a·cosH + b·sinH; north = −a·sinH + b·cosH.
         /// </summary>
         private static double2 FramingGround(in CameraProperties cam, double a, double b)
@@ -110,7 +105,7 @@ namespace MapRenderer.Tests.Cameras
             return c + new double2(a * cH + b * sH, -a * sH + b * cH);
         }
 
-        // The T-FRAME / T-CONSIST / T-CEIL matrix.
+        // The case matrix shared by the framing, consistency and ceiling tests.
         private struct FrameCase { public double Lon, Lat, Zoom, HeadingDeg, Aspect; public string Name; }
 
         private static IEnumerable<FrameCase> FrameCases()
@@ -138,7 +133,7 @@ namespace MapRenderer.Tests.Cameras
                 };
         }
 
-        // ── THE decisive tooth — T-FRAME: cover the framing ground quad (non-circular) ──────────
+        // ── Cover the framing ground quad (non-circular) ──────────
 
         [Test]
         public void Selector_TFrame_CoversFramingGroundQuad()
@@ -180,14 +175,13 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── T-CONSIST — internal consistency (supporting; circular w.r.t. framing) ──────────────
+        // ── Internal consistency (supporting; circular w.r.t. framing) ──────────────
 
         [Test]
         public void Selector_TConsist_CoversUnprojectedScreenGrid()
         {
-            // Sample a dense SCREEN grid, unproject with the SAME projection/viewportPx the selector got,
-            // and assert each maps into the set. Proves the bbox contains the quad interior (off-by-one
-            // guard). This CANNOT catch a wrong viewportPx — that is T-FRAME's job.
+            // Every point of a dense screen grid, unprojected with the selector's own inputs, maps into the set
+            // (an off-by-one guard). It cannot catch a wrong viewportPx.
             var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
 
@@ -219,7 +213,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── T-CEIL — over-load ceiling: the impl cannot explode the request set ─────────────────
+        // ── Over-load ceiling: the impl cannot explode the request set ─────────────────
 
         [Test]
         public void Selector_TCeil_CountBoundedByFramingSpan()
@@ -248,10 +242,8 @@ namespace MapRenderer.Tests.Cameras
                 }
                 double spanX = math.min(xMax - xMin, n);
                 double spanY = math.min(yMax - yMin, n);
-                // Slack term +3 (was +1): the frustum cover follows the true footprint and its Chebyshev
-                // prefetch ring protrudes diagonally on a rotated viewport, so the padded count exceeds the
-                // rectangular-bbox model by a few tiles. Still an order-of-magnitude runaway guard (a NaN/wrap
-                // glitch emits far more), not a tight count spec.
+                // Slack +3: the prefetch ring protrudes diagonally on a rotated viewport. This is a runaway
+                // guard against a NaN/wrap glitch, not a tight count.
                 long bound = (long)((math.ceil(spanX) + 2 * pad + 3) * (math.ceil(spanY) + 2 * pad + 3));
 
                 sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
@@ -261,7 +253,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── T-MONOTONE — count tracks span (the old code's count was span-invariant) ────────────
+        // ── The count tracks the span ────────────
 
         [Test]
         public void Selector_TMonotone_XCountGrowsWithAspect()
@@ -285,12 +277,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void Selector_TMonotone_CountChangesWithFractionalZoom()
         {
-            // The old TileCover count was INVARIANT to fractional zoom (it read only integer zoom) — that
-            // invariance is the bug. A span-correct selector's count must CHANGE across a fractional sweep
-            // within one integer level. Direction note: in our flat framing, higher fractional zoom shows
-            // LESS ground (smaller mpp), so FEWER integer-z tiles fit — count DECREASES toward the next
-            // level (the spec's prose said "grow"; the physics is the opposite — what matters is the
-            // dependence, i.e. NOT invariant).
+            // The count must CHANGE across a fractional sweep within one level; a cover that reads only the
+            // integer zoom does not. It DECREASES: a higher fractional zoom shows less ground.
             var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
 
@@ -314,9 +302,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void Selector_ContiguousBlockContainingCameraTile()
         {
-            // At a 1:1 framing viewport, center (0,0), z2: the set must be a contiguous (hole-free) block
-            // that contains the camera's own tile. The exact size is now a function of refH/pad (real span),
-            // so we assert structure, not a hard-coded 3×3 (the old, under-covering oracle).
+            // At 1:1, center (0,0), z2 the set is a hole-free block holding the camera's tile. Its size
+            // depends on refH/pad, so the test asserts structure, not a fixed count.
             var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(View(Cam(0, 0, 2.0), 1.0), buf);
@@ -396,9 +383,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ImplausibleDpr_FallsBackToExactlyOne_InBOTHDirections()
         {
-            // Both directions in ONE test for the same reason as above: the fallback has a single home, so
-            // one direction cannot grow a behaviour the other lacks. Tolerance is 0 — that exactness is what
-            // separates a fallback from a clamp, which returns a plausible 0.25 or 8.0 and rebases the map.
+            // Both directions in ONE test, because the fallback has one home. Tolerance 0 separates a fallback
+            // from a clamp, which would return 0.25 or 8.0 and rescale the map.
             foreach (double dpr in new[]
                      {
                          0.1, 1e-9,                                     // below any plausible floor
@@ -419,9 +405,8 @@ namespace MapRenderer.Tests.Cameras
                 Assert.AreEqual(1080.0, vp.y, 0.0, $"y falls back to 1 component-wise at {dpr}.");
             }
 
-            // The composition MapHost.Start actually performs — SafeRatio(DevicePixelRatioFromDpi(dpi)) —
-            // which nothing else pins. An absurd reported panel density cannot escape the band. Only the large
-            // end is testable: a dpi of 0 trips DevicePixelRatioFromDpi's own positive-density precondition.
+            // MapHost.Start's SafeRatio(DevicePixelRatioFromDpi(dpi)): an absurd density cannot escape the band.
+            // Only the large end is testable, because dpi 0 trips DevicePixelRatioFromDpi's precondition.
             Assert.AreEqual(1080.0,
                 DeviceScaling.DeviceToLogicalPx(1080.0, DeviceScaling.DevicePixelRatioFromDpi(1e9)), 0.0,
                 "an absurd panel density must land outside the band and degrade to 1, not divide the " +
@@ -431,9 +416,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void PlausibleDpr_PassesThroughUnchanged_AndTheBandIsInclusiveAtBothBounds()
         {
-            // Kept apart from the fallback tooth: this test pins a policy CONSTANT, so moving the band stays
-            // a one-test edit. The discriminating rows are the straddles — 0.24/0.26 and 7.99/8.01 trap each
-            // bound between them; the exact-bound rows (0.25, 8.0) only distinguish >= from >.
+            // Pins a policy CONSTANT, so moving the band is a one-test edit. The straddle rows trap each bound;
+            // the exact-bound rows (0.25, 8.0) only tell >= from >.
             foreach (double dpr in new[] { 0.25, 0.26, 0.5, 0.625, 1.0, 1.56, 2.0, 3.0, 4.0, 7.99, 8.0 })
             {
                 Assert.AreEqual(7.0 * dpr, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, dpr), 0.0,
@@ -508,7 +492,7 @@ namespace MapRenderer.Tests.Cameras
                 }
         }
 
-        // ── T-DENSITY — 512 selects exactly one level coarser than 256, over the SAME span ───────
+        // ── 512 selects exactly one level coarser than 256, over the SAME span ───────
 
         [Test]
         public void Selector_TDensity_512IsOneLevelCoarserThan256()
@@ -538,7 +522,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── T-DEFAULT — a fresh selector is the 512 convention (no inspector change needed) ───────
+        // ── A fresh selector is the 512 convention (no inspector change needed) ───────
 
         [Test]
         public void Selector_TDefault_IsThe512Convention()
@@ -557,7 +541,7 @@ namespace MapRenderer.Tests.Cameras
                 $"The 512 default must select fewer tiles than 256 (got {bDef.Count} vs {b256.Count}).");
         }
 
-        // ── T-LOD — the ScreenSpaceLod strategy: mixed-zoom, fewer tiles than flat, still gap-free ──
+        // ── The ScreenSpaceLod strategy: mixed-zoom, fewer tiles than flat, still gap-free ──
 
         [Test]
         public void Selector_LodScreenSpace_MixedZoom_FewerThanFlat_StillCovers()
@@ -608,14 +592,11 @@ namespace MapRenderer.Tests.Cameras
             return WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = ll.x, Latitude = ll.y });
         }
 
-        // ── T-LOD-SPURIOUS — screen-space LOD must not emit far-coarse tiles off to the side ─────────
-        // Regression for the reported bug: keyed on the tile CENTRE distance, a huge coarse tile that merely
-        // grazes the frustum edge (far centre, NEAR edge) was emitted coarse instead of subdivided-and-culled
-        // — a z13 camera loaded a z4 globe tile / z8–z9 Mercator tile off to the side, outside the view.
-        // Keyed on the NEAREST point (the fix) it subdivides and the off-view part is culled. These poses have
-        // TEETH: pre-fix each emitted a tile ≥4 levels too coarse (below the target-3 bound); the bound still
-        // admits legit far-field coarsening (z10-z11 toward the horizon at deep tilt). Globe kept to shallow
-        // tilt — its conservative bounding-sphere descent makes LOD near-inert at steep tilt (separate issue).
+        // ── Screen-space LOD must not emit far-coarse tiles off to the side ─────────────────────────
+        // Non-obvious why: LOD keyed on the tile CENTRE emits a huge tile that grazes the frustum edge coarse
+        // instead of subdividing it. LOD keys on the NEAREST point, so the off-view part is culled. The
+        // target-3 bound still admits far-field coarsening toward the horizon. Limitation: globe LOD is
+        // near-inert at steep tilt (conservative bounding-sphere descent), so globe poses stay shallow.
         [TestCase("mercator", 60.0, 30.0)]
         [TestCase("mercator", 75.0, 30.0)]
         [TestCase("globe",     0.0, 135.0)]
@@ -640,12 +621,10 @@ namespace MapRenderer.Tests.Cameras
                 $"instead of subdivided-and-culled).");
         }
 
-        // ── T-LOD-FRUSTUM — no selected tile's quad lies wholly OUTSIDE the frustum ──────────────────
-        // The reported bug's core: the conservative 6-plane AABB test kept tiles diagonally past a frustum
-        // corner (a big AABB isn't fully behind any single plane), so the cover held tiles the camera can't
-        // see. The frustum's reverse AABB pre-cull rejects them. Invariant, checked with the EXACT reported
-        // pose (z13 tilt60 Berlin): every selected tile's ground quad, clipped against the 6 planes, survives.
-        // Pre-fix this failed on 11/1102/670, 11/1098/670, 12/2203/1341 (user-confirmed invisible in-editor).
+        // ── No selected tile's quad lies wholly OUTSIDE the frustum ─────────────────────────────────
+        // Non-obvious why: a 6-plane AABB test keeps a big tile diagonally past a frustum corner, because no
+        // single plane rejects it; the reverse AABB pre-cull does. At the z13 tilt-60 Berlin pose, every
+        // selected tile's ground quad must survive clipping against the 6 planes.
         [Test]
         public void Selector_TiltedMercator_NoSelectedTileQuadOutsideFrustum()
         {
@@ -703,7 +682,7 @@ namespace MapRenderer.Tests.Cameras
                 string.Join(" ", outside.Select(t => $"{t.Z}/{t.X}/{t.Y}")));
         }
 
-        // ── T-ROBUST — nasty camera points never crash and never boom the tile count ────────────
+        // ── Nasty camera points never crash and never boom the tile count ────────────
 
         [Test]
         public void Selector_TRobust_BadCameraPoints_NoCrash_NoCountBoom()
@@ -720,10 +699,8 @@ namespace MapRenderer.Tests.Cameras
             double[] aspects  = { 1.0, 16.0 / 9.0, 21.0 / 9.0 };
             double[] headings = { 0.0, 45.0, 200.0, -30.0 };
 
-            // Position-INDEPENDENT ceiling: the framing span (viewportPx · metresPerPixel at the TRUE zoom)
-            // in tiles at the emitted zoom, made rotation-safe (w·|cos|+h·|sin| ≤ w+h), plus the pad ring and a
-            // phase-slop term. Poles only CLAMP the count below this; a wrap/NaN/pole bug that emits far more
-            // (the "100-tile glitch") blows past it. Capped at the whole world (n·n).
+            // Position-independent ceiling: the rotation-safe framing span in emitted-zoom tiles, plus pad and
+            // slop, capped at n·n. A wrap/NaN/pole bug that emits far more tiles exceeds it.
             long Ceiling(in CameraProperties cam, double aspect, int emittedZ)
             {
                 long   n       = 1L << emittedZ;
@@ -767,7 +744,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── T-SEAM — the interface stays algorithm-agnostic + the impl is swappable (structural) ─
+        // ── The interface stays algorithm-agnostic + the impl is swappable (structural) ─
 
         [Test]
         public void Selector_TSeam_InterfaceCarriesNoAlgorithmKnob()
@@ -818,8 +795,8 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── T-POLE / T-ALLOC (preserved guarantees, now through the seam) ────────────────────────
-        // (T-WRAP deleted: Web-Mercator is a finite atlas sheet in this renderer — it does not wrap.)
+        // ── Poles and allocation, through the seam ───────────────────────────────────────────────
+        // No wrap test: Web-Mercator is a finite atlas sheet in this renderer and does not wrap.
 
         [Test]
         public void Selector_TPole_ClampsLatitudeRange()
@@ -877,33 +854,19 @@ namespace MapRenderer.Tests.Cameras
         // ── FloatingOrigin: the JITTER gate (headline acceptance teeth) ────────────────────────
 
         /// <summary>
-        /// THE no-jitter gate. Sweeps the camera across the whole Web-Mercator extent (±20,037,508 m). For
-        /// each position it rebases the scene origin to the camera and — for the worst-case vertex —
-        /// reproduces the GPU's TWO float casts (mesh vertex baked tile-origin-relative + tile transform
-        /// baked scene-origin-relative). It asserts the rendered position matches the double truth
-        /// (merc − sceneOrigin) to sub-millimetre, pinning "NO float jitter" in Core math, not by eyeball.
-        ///
-        /// <para><b>Measures the WHOLE cover, not just the camera's tile.</b> The live loop
-        /// (<see cref="MapView"/>) renders a padded rectangle of tiles, so the farthest visible vertex is at
-        /// the EDGE of the cover. This test enumerates the SAME <see cref="TileCover.Cover"/> the live loop
-        /// uses and takes the worst corner; the camera's own tile alone is best-case and understates the
-        /// jitter. Latitude is clamped to the Mercator limit as <see cref="CameraProperties"/> clamps it, so
-        /// the camera never reaches the polar singularity where a Mercator tile's span is unbounded.</para>
-        ///
-        /// <para><b>Antimeridian seam.</b> The sweep stays in lon ∈ [-160°, 160°] so it never straddles
-        /// ±180°. At the seam a wrapped tile is geographically adjacent but ~40 M m away in ABSOLUTE
-        /// Mercator x; origin-relative placement would need a ±worldWidth offset, and without it the render
-        /// coord reaches world scale and float32 precision degrades to metres. That seam handling is
-        /// deferred.</para>
+        /// The no-jitter gate. Across the whole Web-Mercator extent it rebases the origin to the camera and
+        /// reproduces the GPU's TWO float casts for the worst vertex at the EDGE of the live
+        /// <see cref="TileCover.Cover"/>. The render position must match the double truth to sub-millimetre.
+        /// Limitation: the sweep stays in lon ∈ [-160°, 160°], because a tile wrapped across ±180° is ~40 M m
+        /// away in absolute Mercator x and seam placement is not implemented.
         /// </summary>
         [Test]
         public void FloatingOrigin_ExtremeMercator_CoverEdgeRenderCoordsBounded_SubMillimetre()
         {
             const int    LiveZoom                = 14;
             const double ModeledCameraDriftMeters = 2000.0; // conservative; real drift is ~0 (origin ≡ look-at)
-            // The worst MEASURED corner is an off-screen +1-pad-ring tile corner ≈ 18 km from the origin; at
-            // that distance float32's 24-bit mantissa resolves ≈ 1.1 mm — the precision FLOOR, not a regression.
-            // The 2 mm budget is still ~250× tighter than the metre-scale error the NoRebase companion proves.
+            // The worst corner is a pad-ring tile ≈ 18 km out, where float32 resolves ≈ 1.1 mm. The 2 mm budget
+            // is still far tighter than the metre-scale error without a rebase.
             const double SubMmBudgetMeters       = 2e-3;
             // MapView live defaults — the cover the LIVE loop actually selects (framing viewport
             // (RefH·LiveAspect, RefH), pad = 1 tile).
@@ -968,9 +931,8 @@ namespace MapRenderer.Tests.Cameras
                 }
             }
 
-            // The render coords stay small (float32 keeps precision) AND the round-trip error is sub-mm.
-            // The worst cover-edge magnitude is ≈ 18 km; 30 km is a comfortable bound, still far under the
-            // float32 precision cliff.
+            // Render coords stay small AND the round-trip error is sub-mm. 30 km bounds the ≈ 18 km worst edge
+            // and stays far under the float32 precision cliff.
             Assert.Less(worstCoordMag, 3e4,
                 $"Worst cover-edge render-coord magnitude {worstCoordMag:F1} m must stay well under the " +
                 "float32 precision cliff (rebasing failed to keep coords near the origin).");
@@ -1012,10 +974,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void AltitudeForZoom_DprNormalization_HalvesAt2x_IdenticalAt1x()
         {
-            // T-DPI-CAMERA (arithmetic half): the camera frames the LOGICAL viewport (vp ÷ DPR), and
-            // AltitudeForZoom is linear in viewport height, so ÷DPR divides the altitude by DPR:
-            //   DPR=2 ⇒ half the altitude (camera 2× closer ⇒ map 2× bigger),
-            //   DPR=1 ⇒ bit-identical to the physical-viewport altitude (every camera test runs at DPR=1).
+            // The camera frames the LOGICAL viewport and AltitudeForZoom is linear in height: DPR=2 halves the
+            // altitude, and DPR=1 is bit-identical to the physical altitude.
             const double zoom = 6.0, fov = 60.0, vpH = 1080.0;
             double altPhysical = CameraPoseMath.AltitudeForZoom(zoom, vpH,       fov);
             double alt1        = CameraPoseMath.AltitudeForZoom(zoom, vpH / 1.0, fov);
@@ -1027,9 +987,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void GroundResolution_BaseIs512AndHalvesPerZoom()
         {
-            // T-PAINT-UNCHANGED + T-RELABEL base pin: the paint scale is not DPI-normalized, and
-            // under the 512 convention GroundResolution(0) == equatorial circumference / 512. Literal 512 (not
-            // WebMercator.TilePixelSize) so this guards the constant's VALUE, not a tautology.
+            // The paint scale is not DPI-normalized: GroundResolution(0) == circumference / 512. The literal 512
+            // pins the constant's VALUE; WebMercator.TilePixelSize here would be a tautology.
             Assert.AreEqual(EarthConstants.EquatorialCircumferenceMetres / 512.0,
                             WebMercator.GroundResolution(0.0), 1e-6, "GroundResolution(0) == circumference / 512");
             for (int z = 0; z < 20; z++)
@@ -1042,9 +1001,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MinZoomToFit_FramesWholeWorld_ScalesWithViewportAndDpr()
         {
-            // T-MINZOOM: floor = log2(min(vp_logical) / tilePx) − margin. At the floor the world square
-            // (tilePx · 2^floor) is SMALLER than the shorter viewport side by exactly 2^margin (whole world
-            // visible, with breathing room) — never larger (grape), never cropped.
+            // floor = log2(min(vp_logical) / tilePx) − margin: the world square is SMALLER than the shorter
+            // viewport side by exactly 2^margin, so the whole world shows and nothing is cropped.
             const double tile = WebMercator.TilePixelSize, margin = 0.5;
             double2 vp    = new double2(1600, 1200); // logical px
             double  floor = CameraPoseMath.MinZoomToFit(vp.x, vp.y, tile, margin);
@@ -1071,9 +1029,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MinZoomToFill_FillsTheLargerSide_NoGap()
         {
-            // FILL: the finite-sheet floor fits the world square to the LARGER viewport side (not the
-            // shorter side MinZoomToFit uses), so on a landscape viewport there's no off-world margin.
-            // Falsifiable: MinZoomToFit (min side) gives world-px == 1080 < 1920 on this viewport.
+            // FILL: the finite-sheet floor fits the world to the LARGER viewport side, so a landscape view has no
+            // off-world margin. MinZoomToFit's shorter side would give world-px 1080 < 1920 here.
             const double tile = WebMercator.TilePixelSize;
             double2 vp = new double2(1920.0, 1080.0);
 
@@ -1090,9 +1047,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MinZoomFloor_SelectsByProjection_FiniteFillsCyclicFits()
         {
-            // SELECTOR: the projection-keyed floor branches once on IsFinitePlanarWorld — Mercator fills
-            // (margin 0), the globe fits (with margin) — and the two diverge on a non-square viewport,
-            // proving the branch is load-bearing (not dead code that happens to agree).
+            // SELECTOR: the floor branches on IsFinitePlanarWorld (Mercator fills, the globe fits with margin);
+            // the two diverge on a non-square viewport, so the branch is load-bearing.
             var mercator = new WebMercatorProjection();
             var globe    = new SphericalProjection();
             Assert.IsTrue(mercator.IsFinitePlanarWorld, "Mercator is the finite planar sheet");
@@ -1117,9 +1073,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void T_ALIGN_SelectionZoom_EqualsCameraZoom_At512Convention()
         {
-            // T-ALIGN (decisive): with TilePixelSize == OnScreenTilePx == 512 the selection offset is 0, so the
-            // PRODUCTION-default selector emits tiles at Z == camera integer zoom (MapLibre-aligned). Falsifiable:
-            // the old 256 convention (offset −1) emitted Z == cameraZoom − 1.
+            // With TilePixelSize == OnScreenTilePx == 512 the offset is 0, so the default selector emits
+            // Z == camera integer zoom; a 256 convention would emit cameraZoom − 1.
             var buf = new List<TileId>();
             var merc = (IVisibleTileSelector)new FrustumTileSelector(0, 22); // default onScreenTilePx = 512
             foreach (int z in new[] { 3, 5, 8, 11 })
@@ -1144,10 +1099,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void T_RELABEL_GroundResolutionAndAltitude_AreOld256ValuesShiftedOneZoom()
         {
-            // T-RELABEL: the flip is a pure RELABEL — the physical scale at zoom z now equals the OLD 256 value
-            // at z+1 (GroundResolution_512(z) == GroundResolution_256(z+1)), so the same view is just numbered
-            // one lower. Assert GroundResolution against the explicit 256 formula (falsifiable — a rescale, not a
-            // relabel, breaks it); altitude inherits the shift (it is linear in GroundResolution).
+            // 512 vs 256 is a pure RELABEL: GroundResolution_512(z) == GroundResolution_256(z+1). A rescale
+            // breaks it; altitude inherits the shift, being linear in GroundResolution.
             const double circ = 40075016.686;
             foreach (double z in new[] { 0.0, 3.0, 7.5, 14.0 })
             {
@@ -1163,10 +1116,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void T_DENSITY_REBASED_DefaultSelectorKeepsThe512Density_AndIsAligned()
         {
-            // T-DENSITY-REBASED: the 512 density win survives the flip. The production-default selector is
-            // one level COARSER than an explicit onScreenTilePx=256 selector over the same viewport — same span,
-            // ~4× fewer tiles — AND is now MapLibre-aligned (Z == cameraZoom, vs 256's cameraZoom+1). A
-            // count-only check could pass while Z silently misaligns, so assert Z on both.
+            // The default selector is one level COARSER than onScreenTilePx=256 over the same span (~4× fewer
+            // tiles), at Z == cameraZoom. Z is asserted on both, because a count alone misses a misaligned Z.
             var def  = (IVisibleTileSelector)new FrustumTileSelector(0, 22);                    // default 512
             var e256 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 256);
             var bDef = new List<TileId>();
@@ -1192,7 +1143,7 @@ namespace MapRenderer.Tests.Cameras
             double lat = Math.Max(-CameraProperties.MaxMercatorLat, Math.Min(CameraProperties.MaxMercatorLat, ll.y));
             long n = 1L << z;
             int x = (int)Math.Floor((lon + 180.0) / 360.0 * n);
-            // Delegate to WebMercator.FromLonLat — the single source of the Mercator formula (T2).
+            // Delegate to WebMercator.FromLonLat — the single source of the Mercator formula.
             // ln(tan(lat)+sec(lat)) == mercY/R (algebraically identical; same numeric ops order).
             double mercY = WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = lon, Latitude = lat }).y;
             int y = (int)Math.Floor((1.0 - mercY / WebMercator.R / Math.PI) / 2.0 * n);

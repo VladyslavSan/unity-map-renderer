@@ -163,9 +163,8 @@ namespace MapRenderer.Tests
 
             var (defaultGo, defaultCamera) = BuildCamera(settings);
             Track(defaultGo);
-            // NOT scaffolding: a lit shader reads the camera's WORLD POSITION
-            // (_WorldSpaceCameraPos) even under an orthographic projection, so a wrong default
-            // here silently changes shading rather than failing to compile — see the member doc.
+            // A lit shader reads _WorldSpaceCameraPos even under an orthographic projection, so a wrong
+            // default distance silently changes shading.
             Assert.That(defaultCamera.transform.position.y, Is.EqualTo(VisualTestFixture.StandardDistance),
                 "an omitted Distance must fall back to the standard 200 units 15 of 16 measured rigs use.");
 

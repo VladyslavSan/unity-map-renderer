@@ -93,9 +93,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (_disposed) return;
             _disposed = true;
 
-            // _write completes and frees FIRST: its job reads _measure's buffers (ScheduleWrite is called
-            // with _measure as an input), so disposing _measure first would free those buffers while the
-            // write job could still be in flight — ILayerMeshBuild.Dispose's own documented order.
+            // _write completes and frees FIRST, because its in-flight job reads _measure's buffers
+            // (ILayerMeshBuild.Dispose's order).
             _write.Dispose();
             _measure.Dispose();
             _input.FeatureSelected.Dispose();

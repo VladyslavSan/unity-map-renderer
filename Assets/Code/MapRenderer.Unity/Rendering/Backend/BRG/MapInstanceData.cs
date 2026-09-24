@@ -1,7 +1,5 @@
-// Single source of truth for the BRG per-instance SoA layout.
-// Add a property here = add a field; nothing is hand-copied.
-// InstancePropPlan.BuildFromStruct<MapInstanceData>() reflects this struct ONCE at construction
-// to build the cached packing plan used by BrgTileRenderer every Rebuild.
+// Single source of truth for the BRG per-instance SoA layout: to add a property, add a field here.
+// InstancePropPlan.BuildFromStruct<MapInstanceData>() reflects it once into the plan every Rebuild uses.
 
 using System;
 using System.Runtime.InteropServices;
@@ -51,19 +49,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
     // ── Staging struct ────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Single source of truth for the BRG per-instance SoA layout.
-    ///
-    /// <para>Field order = physical SoA order: transforms first, then the 31 material props (19 pre-existing
-    /// fill/common-Lit props in their original order for byte-identical fill wire, then the 12 new line props
-    /// appended). This is an AoS descriptor only — <see cref="TileRenderer"/> transposes to SoA on write.
-    /// Do NOT memcpy to the GPU buffer.</para>
-    ///
-    /// <para>Field names must literally match the shader property names (leading underscore) so the
-    /// bidirectional parity guard in <c>InstanceStructShaderParityTests</c> compares by name without
-    /// indirection.</para>
-    ///
-    /// <para>Fields prefixed <c>unity_</c> are transform metadata (not UNITY_DOTS_INSTANCED_PROPs);
-    /// they are excluded from the material-property plan and from the parity comparison.</para>
+    /// AoS descriptor of the BRG per-instance layout; field order is the physical SoA order.
+    /// <see cref="TileRenderer"/> transposes it to SoA on write, so never memcpy it to the GPU buffer.
+    /// Field names equal the shader property names, which <c>InstanceStructShaderParityTests</c> compares.
+    /// The <c>unity_</c> transform fields are not DOTS-instanced props and are excluded from the material
+    /// plan and from that parity check.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct MapInstanceData
@@ -97,10 +87,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         [InstancedProp(PropKind.Float,  1f)]              public float  _FillAntialias;
         [InstancedProp(PropKind.Float,  0f)]              public float  _FillTranslateAnchor;
         [InstancedProp(PropKind.Float,  0f)]              public float  _FillPattern;
-        // fill-pattern sampling. BOTH must be packed: the shader declares them as DOTS-instanced
-        // props, so on this backend an unlisted property is read from instance metadata that nothing wrote
-        // rather than from the material. _PatternRect defaulting to a zero-area rect would then clip every
-        // pattern fill on the BRG path while the MeshRenderer-based snapshot tests stayed green.
+        // Fill-pattern sampling. Both are DOTS-instanced, so an unlisted one reads unwritten instance metadata:
+        // a zero-area _PatternRect clips every BRG pattern fill, and MeshRenderer snapshot tests do not see it.
         [InstancedProp(PropKind.Vector)]                  public float4 _PatternRect;
         [InstancedProp(PropKind.Vector, 1f, 1f, 0f, 0f)]  public float4 _PatternScale;
 

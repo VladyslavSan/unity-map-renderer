@@ -1,9 +1,5 @@
-// Unity EditMode — pure managed math (Unity.Mathematics only), no engine dependency, but lives alongside its
-// callers rather than in core-tests.csproj (test-only, not exercised by the fast loop).
-//
-// AnchorLocal for TileKey=0 (tile 0/0/0) is ~2e7 m from a mid-latitude anchor, which is float32-unsafe
-// (ULP ~2 m — glyphs jitter or vanish on-screen). A point/icon render test must therefore anchor into a
-// REALISTIC tile that contains its anchor, which is what this helper computes.
+// Non-obvious why: AnchorLocal for TileKey=0 is ~2e7 m from a mid-latitude anchor, where float32 ULP is ~2 m
+// and glyphs jitter or vanish, so a point/icon render test anchors into the real tile this helper computes.
 
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;

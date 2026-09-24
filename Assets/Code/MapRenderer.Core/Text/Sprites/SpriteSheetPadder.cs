@@ -7,30 +7,13 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
-    /// Plans a <b>padded repack</b> of a sprite sheet: every sprite gets its own cell with a border of
-    /// <c>padding</c> texels on each side, so its silhouette becomes a texture ALPHA edge (which bilinear
-    /// filtering antialiases) instead of the drawn quad's polygon edge (which, with MSAA off, gets one binary
-    /// coverage sample per pixel and therefore wobbles a whole pixel as the quad slides sub-pixel).
-    ///
-    /// <para>Published sheets are full-bleed and abutting — the shipped style's sheet measures 228 of 264
-    /// sprites with ink on the rect edge and 371 abutting pairs — so the border cannot come from the sheet;
-    /// it has to be manufactured at decode time. This type does the <b>rect maths only</b>: which content
-    /// rect lands where, and what the derived index says. <c>SpriteSheetComposer</c> moves the pixels.</para>
-    ///
-    /// <para><b>The content rect stays the content rect.</b> A derived <see cref="SpriteEntry"/> keeps its
-    /// <c>Width/Height/PixelRatio/Sdf</c> and only relocates <c>X/Y</c> — the border is reported separately as
-    /// <see cref="SpriteEntry.Padding"/>. That is what keeps <c>IconQuadLayout</c>'s logical-size maths and
-    /// <c>FillPattern</c>'s tiling period untouched by the repack.</para>
-    ///
-    /// <para><b>Fallback, and what it actually costs.</b> If the cells cannot fit inside
-    /// <see cref="MaxSheetDimension"/>, or the sheet has no packable sprite at all, <see cref="Plan"/> returns
-    /// the SOURCE sheet unchanged: source size, the source index (every <c>Padding == 0</c>), and one identity
-    /// blit. Icons still draw — <c>SpriteSheet</c> logs a warning rather than throwing — but neighbour-sprite
-    /// isolation is not guaranteed. There is only ONE sampling path (no half-texel UV inset), so a
-    /// <c>Padding == 0</c> sprite is drawn edge-to-edge; on an unpadded, abutting, full-bleed sheet a bilinear
-    /// edge tap then reaches into the sprite packed next door and <b>neighbour bleed appears</b>. That is the
-    /// accepted price of one sampling path (a second path is how this bug class reopens); the fallback is a
-    /// degraded mode, not a free one.</para>
+    /// Plans the rects of a <b>padded repack</b> of a sprite sheet (<c>SpriteSheetComposer</c> moves the pixels):
+    /// each sprite gets a cell with a <c>padding</c>-texel border, so its silhouette is a texture alpha edge
+    /// that bilinear filtering antialiases, not a quad edge that wobbles with MSAA off. Published sheets are
+    /// full-bleed and abutting, so the border is made at decode time. A derived <see cref="SpriteEntry"/>
+    /// only relocates <c>X/Y</c> and reports the border as <see cref="SpriteEntry.Padding"/>.
+    /// Limitation: if the cells do not fit <see cref="MaxSheetDimension"/>, <see cref="Plan"/> returns the source
+    /// sheet unchanged, and with one sampling path an unpadded abutting sprite bleeds into its neighbour.
     /// </summary>
     public static class SpriteSheetPadder
     {
@@ -143,13 +126,10 @@ namespace MapRenderer.Core.Text.Sprites
         }
 
         /// <summary>
-        /// Whether <paramref name="entry"/>'s rect is a real, in-bounds block of the source sheet. The
-        /// reach tests widen to <c>long</c>: <c>X + Width</c> in 32-bit signed arithmetic WRAPS
-        /// for a malformed index (<c>x: 2147483647, width: 1</c> lands on <c>int.MinValue</c>, which passes
-        /// <c>&lt;= sourceSize.x</c>), and such an entry would then be packed, blitted from a negative byte
-        /// offset, and throw out of the <c>SpriteSheet</c> constructor — taking the whole texture and
-        /// index with it, so EVERY icon disappears. <see cref="SpriteIndex.Parse(string)"/> tolerates malformed JSON
-        /// rather than throwing, so this is reachable from a bad sheet.
+        /// Whether <paramref name="entry"/>'s rect is a real, in-bounds block of the source sheet. The reach
+        /// tests widen to <c>long</c>, because <c>X + Width</c> wraps in 32-bit arithmetic for a malformed
+        /// index, which <see cref="SpriteIndex.Parse(string)"/> tolerates; the wrapped entry would throw out of
+        /// the <c>SpriteSheet</c> constructor and every icon would disappear.
         /// </summary>
         private static bool IsPackable(in SpriteEntry entry, int2 sourceSize)
             => entry.Width > 0 && entry.Height > 0

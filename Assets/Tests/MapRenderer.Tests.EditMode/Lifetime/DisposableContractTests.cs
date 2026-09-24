@@ -149,10 +149,8 @@ namespace MapRenderer.Tests.Lifetime
             shared.Release();
         }
 
-        // The contract-violation checks (acquire-after-zero, release-past-zero) are System.Diagnostics.Debug
-        // assertions — they notify trace listeners rather than throwing a catchable exception, so they are not
-        // asserted here, the same way the leak finalizer is left untested. The value-lifecycle teeth below are
-        // what pin the behaviour that matters.
+        // Limitation: acquire-after-zero and release-past-zero are Debug assertions that throw nothing
+        // catchable, so like the leak finalizer they are not tested here.
 
         [Test]
         public void Ctor_NullValue_ThrowsArgumentNullException()

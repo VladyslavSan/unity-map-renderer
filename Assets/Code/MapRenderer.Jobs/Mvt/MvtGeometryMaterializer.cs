@@ -11,28 +11,10 @@ namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
     /// The MVT implementation of Waist 1's producer seam: runs <see cref="MvtDecodeJob"/> over one layer's
-    /// already-flat geometry command buffer and returns the decoded rings.
-    ///
-    /// <para>The payload — the command buffer plus the tile address and extent they are quantized against —
-    /// is captured at construction, because the formats behind <see cref="ITileGeometryMaterializer"/> do not
-    /// share an input shape. This object is therefore the sole authority for the buffer's
-    /// <c>Tile</c>/<c>Extent</c>; see the interface doc.</para>
-    ///
-    /// <para><b>2a — the input is a native-flat buffer, not per-feature arrays.</b> Until 2a this took an
-    /// <c>IReadOnlyList&lt;uint[]&gt;</c> — one managed command array per feature — and copied/flattened it
-    /// into a native buffer here on every call. <c>MvtDecoder</c> now flattens directly off the wire into the
-    /// exact same native shape <see cref="MvtDecodeJob"/> consumes, so this constructor takes it as-is: no
-    /// managed per-feature array and no copy exist anywhere in the decode path. A test that still authors
-    /// fixtures as <c>uint[]</c> per feature flattens them via
-    /// <c>MvtGeometryMaterializerTestFactory</c> (test assembly) before constructing this type.</para>
-    ///
-    /// <para><b>The three command buffers are BORROWED, never disposed here.</b> The caller (production:
-    /// <c>MvtDecoder.DecodeLayer</c>; tests: whatever flattened them) owns them and is responsible for
-    /// disposal — this mirrors <see cref="MvtDecodeJob"/>'s own <c>[ReadOnly]</c> attribute on the same
-    /// arrays. This is why <b>ownership transfers on return</b> still holds for the OUTPUT buffer only
-    /// (interface contract): nothing here is cached, each call mints a fresh output buffer by re-running the
-    /// job over the same borrowed input, so one materializer may legitimately be materialized more than once
-    /// (<c>Materialize_TransfersOwnership_AndMintsAFreshBufferPerCall</c> does exactly that).</para>
+    /// flat native command buffer, captured at construction with the tile address and extent it is sole
+    /// authority for. Non-local invariant: the three command buffers are borrowed and the caller disposes
+    /// them; only the output buffer transfers on return, and each call mints a fresh one, so one instance
+    /// may be materialized more than once.
     /// </summary>
     public sealed class MvtGeometryMaterializer : ITileGeometryMaterializer
     {
@@ -47,15 +29,12 @@ namespace MapRenderer.Jobs.Mvt
         /// <param name="extent">The quantization range of those coordinates (MVT extent, typically 4096).</param>
         /// <param name="featureGeometryTypes">Each feature's declared geometry kind, read from the source's own
         /// declaration and never inferred from the coordinates (interface contract, "Kind, not shape").</param>
-        /// <param name="commands">Every feature's MVT geometry command words, concatenated in feature order —
-        /// the same flat buffer <see cref="MvtDecodeJob"/> reads. BORROWED: the caller disposes it, before or
-        /// after this instance is materialized (never touched outside a <see cref="Materialize"/> call).</param>
-        /// <param name="featureOffsets">Per-feature start offset into <paramref name="commands"/>, index-aligned
-        /// with <paramref name="featureGeometryTypes"/>. Its length is this materializer's feature count.
-        /// BORROWED, same lifetime contract as <paramref name="commands"/>.</param>
-        /// <param name="featureLengths">Per-feature command-word count. A zero length is legal — zero
-        /// commands, so the feature emits no rings. BORROWED, same lifetime contract as
-        /// <paramref name="commands"/>.</param>
+        /// <param name="commands">Every feature's MVT command words, in feature order. Borrowed: read only inside
+        /// <see cref="Materialize"/>; the caller disposes it.</param>
+        /// <param name="featureOffsets">Per-feature start offset into <paramref name="commands"/>, aligned with
+        /// <paramref name="featureGeometryTypes"/>; its length is the feature count. Borrowed.</param>
+        /// <param name="featureLengths">Per-feature command-word count; zero is legal and emits no rings.
+        /// Borrowed.</param>
         public MvtGeometryMaterializer(
             TileId tile, double extent,
             IReadOnlyList<TileGeometryType> featureGeometryTypes,
@@ -76,11 +55,8 @@ namespace MapRenderer.Jobs.Mvt
             if (featureCount == 0)
                 return default;
 
-            // The kind column is a SECOND list joined to the offsets/lengths columns by position. Validated
-            // BEFORE anything is allocated, exactly as PathGeometryMaterializer does: a mismatch would
-            // mis-classify every ring rather than fail loudly, and a throw after Allocate would strand the
-            // output buffer no caller can reach (the INPUT buffers are borrowed, so they are never at risk
-            // here — the caller's own finally frees them regardless of how this call exits).
+            // Validate the kind column before any allocation: a count mismatch mis-classifies every ring, and a
+            // throw after Allocate strands the output buffer.
             if (_featureGeometryTypes == null || _featureGeometryTypes.Count != featureCount)
                 throw new ArgumentException(
                     $"featureGeometryTypes must have one entry per feature ({featureCount}); got " +
@@ -88,9 +64,8 @@ namespace MapRenderer.Jobs.Mvt
                     "position, so a mismatch mis-classifies every ring rather than failing loudly.",
                     nameof(_featureGeometryTypes));
 
-            // Exact sizing: walk every command exactly as MvtDecodeJob does to pre-count the rings and
-            // vertices it will emit. This makes under-allocation — and so the in-job out-of-range write —
-            // impossible for ANY input, including a malformed multi-point MoveTo.
+            // Pre-count rings and vertices with the same command walk as MvtDecodeJob, so no input, even a
+            // malformed multi-point MoveTo, causes an out-of-range write in the job.
             FillMeshPipeline.PrecountRingsAndVertices(
                 _commands, _featureOffsets, _featureLengths, out int exactRings, out int exactVertices);
 
@@ -122,14 +97,9 @@ namespace MapRenderer.Jobs.Mvt
             ringCountArr.Dispose();
             vertCountArr.Dispose();
 
-            // Never-fired backstop: with exact PrecountRingsAndVertices sizing the decode job's reported
-            // ring/vertex counts equal the buffer capacities, so these cannot trip. Kept as defense-in-depth
-            // against a future sizing-vs-decode desync. Compared against the local capacities, never
-            // against the buffer lengths — see TileGeometryBuffers.RingCount.
-            //
-            // The buffer is already minted when these run, so the throw would strand it. The path is
-            // structurally unreachable, hence no behavioural test can force it — the catch is there so the
-            // "owner on every exit path" contract holds by reading the code, not by arguing reachability.
+            // Backstop against a sizing-vs-decode desync; compare with the local capacities, not the buffer
+            // lengths (see TileGeometryBuffers.RingCount). Limitation: no test reaches this path; the catch
+            // frees the allocated buffer, so the owner-on-every-exit-path contract holds by reading the code.
             try
             {
                 FillMeshPipeline.EnsureCapacity(geometry.RingCount, exactRings, "ring");

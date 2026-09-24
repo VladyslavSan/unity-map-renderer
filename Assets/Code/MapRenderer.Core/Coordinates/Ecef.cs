@@ -6,15 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// Earth-Centered, Earth-Fixed (ECEF) coordinate system — WGS-84 ellipsoid.
-    /// Backs the Globe projection mode. Math only — no globe rendering here.
-    ///
-    /// <para><b>Render-space axis convention</b> (<c>docs/coordinates-and-projections.md</c>):
-    /// ECEF (X,Y,Z) is axis-swapped to render space as (X_ecef, Z_ecef, Y_ecef),
-    /// i.e. render = <c>double3(X_ecef, Z_ecef, Y_ecef)</c>.</para>
-    ///
-    /// <para><b>Honesty boundary:</b> planar-only constants (<c>WorldExtent</c>, <c>MaxLatitude</c>)
-    /// live ONLY on <see cref="WebMercator"/>, never here.</para>
+    /// Earth-Centered, Earth-Fixed (ECEF) coordinate system — WGS-84 ellipsoid. Backs the Globe projection mode.
+    /// <para>Render space swaps the ECEF axes: render = <c>double3(X_ecef, Z_ecef, Y_ecef)</c>
+    /// (<c>docs/coordinates-and-projections.md</c>).</para>
+    /// <para>Planar-only constants (<c>WorldExtent</c>, <c>MaxLatitude</c>) live only on
+    /// <see cref="WebMercator"/>, never here.</para>
     /// </summary>
     public static class Ecef
     {
@@ -38,9 +34,6 @@ namespace MapRenderer.Core.Geo
         /// <para>ECEF forward formula:
         /// <c>N = A / sqrt(1 − E2·sin²φ)</c><br/>
         /// <c>X = (N+h)·cosφ·cosλ ; Y = (N+h)·cosφ·sinλ ; Z = (N(1−E2)+h)·sinφ</c></para>
-        ///
-        /// <para>Render-space axis-swap:
-        /// <c>render = double3(X_ecef, Z_ecef, Y_ecef)</c></para>
         /// </summary>
         public static double3 Forward(GeoCoordinate3D geo)
         {
@@ -78,17 +71,11 @@ namespace MapRenderer.Core.Geo
         // ── Tangent basis (ENU frame) ─────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Returns the ENU (East-North-Up) tangent basis at the given surface position,
-        /// axis-swapped to render space.
-        ///
-        /// <para>ECEF ENU unit vectors before axis-swap:<br/>
-        /// <c>up   = (cosφ·cosλ, cosφ·sinλ, sinφ)</c><br/>
-        /// <c>east = (−sinλ, cosλ, 0)</c><br/>
+        /// Returns the ENU (East-North-Up) tangent basis at the given surface position, axis-swapped to render
+        /// space. Columns: c0=East, c1=Up, c2=North.
+        /// <para>ECEF ENU unit vectors before the axis swap:<br/>
+        /// <c>up = (cosφ·cosλ, cosφ·sinλ, sinφ)</c>, <c>east = (−sinλ, cosλ, 0)</c>,
         /// <c>north = cross(up, east)</c></para>
-        ///
-        /// <para>Render-space axis-swap applied to each: (X_ecef, Z_ecef, Y_ecef).</para>
-        ///
-        /// <para>Column convention: c0=East, c1=Up, c2=North.</para>
         /// </summary>
         public static float3x3 TangentBasis(GeoCoordinate geo)
         {

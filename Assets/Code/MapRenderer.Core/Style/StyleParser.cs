@@ -4,25 +4,13 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// Parses a MapLibre Style document into the typed <see cref="StyleDocument"/> model. Clean-room:
-    /// the schema, field names, and defaults come from the PUBLIC MapLibre Style Spec docs only — not
-    /// from MapLibre's source.
-    ///
-    /// Forward-compat: unknown root, source, layer, and paint/layout keys never throw — they are
-    /// preserved on the corresponding <c>Raw</c> JSON. Malformed JSON throws
-    /// <see cref="JsonParseException"/> from <see cref="JsonParser"/>; a structurally surprising but
-    /// valid-JSON document (e.g. an unexpected type for a field) is tolerated by falling back to a
-    /// default rather than throwing.
-    ///
-    /// <para><b>Exception:</b> a paint/layout key that parses eagerly through the expression engine (every
-    /// typed <c>Paint</c>/<c>Layout</c> view parses at construction, not lazily on first access) can
-    /// throw <see cref="MapRenderer.Core.Expressions.ExpressionParseException"/> when its VALUE is a malformed
-    /// expression (bad interpolate/step stops, wrong arity, unknown operator) — that is not the "unexpected
-    /// type for a field" case above, and THIS method does not catch it. <c>MapView.SetStyle(string,
-    /// CancellationToken)</c> is the one in-repo call site and guards its own call. A caller that invokes
-    /// <see cref="Parse(string, bool)"/>/<see cref="Parse(JsonValue, bool)"/> directly — including
-    /// <c>MapView.SetStyle(StyleDocument, string, CancellationToken)</c>, which takes an ALREADY-parsed
-    /// document and never reaches that guard — must handle this exception itself.</para>
+    /// Parses a MapLibre Style document into the typed <see cref="StyleDocument"/> model; the schema and
+    /// defaults come from the public Style Spec docs. Unknown keys survive on the matching <c>Raw</c> JSON,
+    /// and an unexpected field type falls back to a default. Malformed JSON throws
+    /// <see cref="JsonParseException"/>. Non-local invariant: a malformed expression value throws
+    /// <see cref="MapRenderer.Core.Expressions.ExpressionParseException"/> at eager paint/layout parse,
+    /// uncaught here; <c>MapView.SetStyle(string, CancellationToken)</c> guards its own call, and any other
+    /// caller of <see cref="Parse(string, bool)"/> must handle it itself.
     /// </summary>
     public static class StyleParser
     {
@@ -114,9 +102,8 @@ namespace MapRenderer.Core.Style
             JsonValue layoutJson = json.Get("layout");
             JsonValue paintJson  = json.Get("paint");
 
-            // Factory: line/fill/symbol/background/fill-extrusion get their typed subclass, with its typed
-            // Paint/Layout parsed here, eagerly; every other type uses the generic base. Raw retains the
-            // original object for forward-compat.
+            // Factory: line/fill/symbol/background/fill-extrusion get their typed subclass with Paint/Layout
+            // parsed eagerly; every other type uses the generic base.
             StyleLayer layer;
             switch (layerType)
             {

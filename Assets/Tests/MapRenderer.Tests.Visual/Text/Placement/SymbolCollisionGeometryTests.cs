@@ -26,32 +26,19 @@ namespace MapRenderer.Tests.Visual
     //
     // THE RENDERED ARM of the projected-world-corner collision box (T1, T2, T3).
     //
-    // THE DEFECT. A map-pitched glyph is DRAWN as a world-metre quad lying in the ground plane at its
-    // anchor, so its screen size foreshortens with depth. Its collision box was still a SCREEN box sized from
-    // `TextSizePx` with no depth term anywhere, so it OVER-reserved — always, and only. At the shipped
-    // OffLookAtSymbolScene pose the receding glyph advance is 29.07 px at the look-at and 0.19 px at 8× that
-    // depth, so the box reserved roughly 150× the screen area the ink covers. Over-reservation can only ever
-    // SUPPRESS a symbol; it can never make letters overlap and it can never misplace one. An eyeball symptom of
-    // overlap or misplacement is therefore NOT what these teeth are about.
+    // Non-obvious why: a map-pitched glyph is DRAWN as a world-metre quad in the ground plane, so its screen
+    // size foreshortens with depth. A SCREEN box sized from `TextSizePx` with no depth term over-reserves
+    // (~150× the ink area at 8× the look-at depth). Over-reservation can only SUPPRESS a symbol; it never
+    // overlaps or misplaces one. The teeth:
+    //   • T1 — the box IS the drawn quad's screen AABB at ten depths, against an oracle from the emitted vertex
+    //     stream and the live camera. Limitation: its ŷ-sense leg re-derives production's sense.
+    //   • T2 — the box CONTAINS the rendered ink, so it is not too SMALL. A larger box also passes, so T2 is
+    //     not the depth discriminator.
+    //   • T3 — absolute scale and DPR at tilt 0, against the viewport arm, which shares no code with the map
+    //     branch. Limitation: an AABB of a y-symmetric cell cannot see a ŷ flip;
+    //     MapPitched_ProjectedBox_PutsAPositiveCellYAboveTheAnchor is the sign's sole observer.
     //
-    // THE THREE TEETH HERE, AND WHAT EACH CAN AND CANNOT SEE:
-    //   • T1 (headline) — the box IS the drawn quad's screen AABB, at ten view depths spanning >2×. Its
-    //     oracle is built from the EMITTED VERTEX STREAM and the LIVE Unity camera, calling no SymbolStagingMath,
-    //     no SymbolBox and no SymbolScreenProjection. Its PROJECTION leg is genuinely independent; its ŷ-SENSE leg
-    //     is NOT — it re-derives the same sense production uses, so T1 alone cannot catch a shared sign error.
-    //   • T2 — the box CONTAINS the rendered ink. Containment also holds under the (strictly larger) earlier
-    //     box, so T2 is NOT the depth discriminator; its job is the other direction — that the projected box
-    //     is not too SMALL, and that the mesh-derived oracle T1 leans on lands where the GPU put ink.
-    //   • T3 — the ABSOLUTE SCALE and the DPR factor, at tilt 0, against the VIEWPORT arm, which shares no
-    //     code with the map branch (`SymbolWorldIsMapPitched` sends them down mutually exclusive paths and the
-    //     two staging branches are selected by one predicate). It also observes the ruler conjunct (measured by
-    //     injection I6). It does NOT pin the ŷ SIGN: this box is an AABB, and a ŷ flip only permutes the corners
-    //     of a y-symmetric cell — injection I2 flipped the sign in production and left the whole suite green.
-    //     T10 (in MapPitchedWorldArcStagingTests, on an off-centre cell) is the sign's sole
-    //     observer.
-    //
-    // NO METRE LITERALS in the tilt-0 harness: every world length is a multiple of `scene.MetresPerDevicePixel`,
-    // the same rule TiltFixtureSelfTests, OffLookAtSymbolScene and MapPitchedGlyphSizeTiltZeroTests enforce.
+    // NO METRE LITERALS in the tilt-0 harness: every world length is a multiple of `scene.MetresPerDevicePixel`.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapPitchedCollisionBoxTests — Unity EditMode only
@@ -60,12 +47,10 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapPitchedCollisionBoxTests
     {
-        /// <summary>Agreement bound between the staged box and the quad's own screen AABB, in px. Residual
-        /// sources: production projects the <c>double3</c> render-space world point while the mesh carries the
-        /// float-narrowed Level-1 RTC <c>AnchorLocal</c> (~1 ulp of ~10⁶ m ≈ 0.06 m, and at this pose one
-        /// device px is ~306 m, so ≈ 2·10⁻⁴ px); and <c>float4x4</c> arithmetic against Unity's own
-        /// <c>WorldToScreenPoint</c> (~10⁻³ px). The bound is ~500× the expected residual and ~60× below the
-        /// signal — at <c>RecedingFar</c> the earlier box is ~30 px tall against a true quad of ~1.4 px.</summary>
+        /// <summary>Agreement bound between the staged box and the quad's own screen AABB, in px. The residual
+        /// is the float-narrowed <c>AnchorLocal</c> (≈ 2·10⁻⁴ px here) plus <c>float4x4</c> against
+        /// <c>WorldToScreenPoint</c> (~10⁻³ px). The bound is ~500× that residual and ~60× below the signal:
+        /// at <c>RecedingFar</c> a screen-sized box is ~30 px tall against a true quad of ~1.4 px.</summary>
         private const double BoxAgreementPx = 0.5;
 
         /// <summary>Rasterisation slack, per edge, for the ink-containment reading.</summary>
@@ -77,27 +62,15 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T1 — the headline tooth.</b> For every glyph of both receding symbols, the staged
-        /// <see cref="SymbolBox"/> equals the axis-aligned screen bound of the FOUR WORLD CORNERS the renderer
-        /// actually emitted, to <see cref="BoxAgreementPx"/>.
+        /// <see cref="SymbolBox"/> equals the screen AABB of the FOUR WORLD CORNERS the renderer emitted, to
+        /// <see cref="BoxAgreementPx"/>.
         ///
-        /// <para><b>The oracle calls no production placement code.</b> It reads each glyph's four
-        /// <c>WorldBillboardVertex</c>es off the built mesh, rebuilds the ground frame from that vertex's OWN
-        /// <c>Up</c>/<c>Tangent</c> through the slot transform, displaces by <c>Offset</c> (y-DOWN, per the
-        /// y-DOWN negation, so the y-UP amount is <c>−Offset.y</c>), and projects through the LIVE Unity
-        /// camera with <c>GroundRuler.ProjectPx</c> — a different code path and a different matrix from
-        /// <c>SymbolScreenProjection</c>'s.</para>
-        ///
-        /// <para><b>Honest reach.</b> The oracle's PROJECTION leg is genuinely independent. Its <b>ŷ-sense leg
-        /// is not</b>: it re-derives <c>ŷ = cross(x̂, up)</c>, the same sense production uses, so a shared sign
-        /// error would move both sides together and this tooth would stay GREEN. <b>T10 is what closes
-        /// that</b> — not T3, whose AABB cannot see the sign at all on a y-symmetric cell (measured by
-        /// injection I2).</para>
-        ///
-        /// <para><b>The anti-per-symbol-constant precondition.</b> Within <c>RecedingNear</c> alone the
-        /// reconstructed quad's screen height must vary by ≥ 4 px between its first and last glyph. A box
-        /// scaled by ONE constant per symbol — the model <c>CrossNear</c>/<c>CrossFar</c> cannot
-        /// refute because they are iso-depth inherently — is then provably unable to clear the 0.5 px
-        /// bound.</para>
+        /// <para>Non-obvious why: the oracle calls no placement code. It rebuilds each corner from the mesh's
+        /// <c>WorldBillboardVertex</c> (<c>Offset</c> is y-DOWN) and projects it with
+        /// <c>GroundRuler.ProjectPx</c> through the live camera. Limitation: it re-derives
+        /// <c>ŷ = cross(x̂, up)</c>, so a shared sign error stays GREEN here;
+        /// <c>MapPitched_ProjectedBox_PutsAPositiveCellYAboveTheAnchor</c> covers it. Within
+        /// <c>RecedingNear</c> the quad height must vary ≥ 4 px, so one constant per symbol cannot pass.</para>
         /// </summary>
         [Test]
         public void MapPitchedBox_IsTheDrawnQuadsScreenAabb_AtEveryDepth()
@@ -228,15 +201,10 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T2 — corroboration, in the other direction.</b> Every per-glyph ink run of both receding
-        /// symbols lies INSIDE that glyph's staged box (mapped into ink-buffer coordinates,
-        /// <c>row = SizePx − 1 − y</c>), with <see cref="InkSlackPx"/> of rasterisation slack per edge.
-        ///
-        /// <para><b>What this does and does not prove.</b> Containment ALSO holds under the earlier box, which
-        /// is strictly larger — so <b>T2 is not the depth discriminator; T1 is</b>. T2's job is that the
-        /// projected box is not too SMALL, and that the mesh-derived oracle T1 leans on lands where the
-        /// GPU put ink. It reaches both receding depths because containment, unlike a ratio, does not need a
-        /// resolvable run width — which is the limit T1b measured and recorded
-        /// (<c>RecedingFar</c>'s runs are 1–2 px).</para>
+        /// symbols lies INSIDE that glyph's staged box (<c>row = SizePx − 1 − y</c>), with
+        /// <see cref="InkSlackPx"/> of slack per edge. A larger box also passes, so T1 is the depth
+        /// discriminator; T2 shows the box is not too SMALL and T1's oracle lands on the GPU's ink.
+        /// Containment needs no resolvable run width, so it reaches <c>RecedingFar</c> (1–2 px runs).
         /// </summary>
         [Test]
         public void MapPitchedBox_ContainsTheRenderedInk_AtBothRecedingDepths()
@@ -260,10 +228,8 @@ namespace MapRenderer.Tests.Visual
                     $"W3-T2 precondition ({id}): expected {f.Config.GlyphCount} ink runs inside the column " +
                     $"band, got {runs.Length}. Merged or missing runs make the run↔glyph pairing below wrong.");
 
-                // The runs come out ordered by increasing ink-buffer ROW; the boxes are in glyph order along
-                // the road, which for an up-screen symbol is the reverse. Pair them by sorting the BOXES by
-                // their own centre row — the box-side analogue of MapPitchedGlyphSizeTests' OrderedByScreenRow,
-                // and NOT a search for "whichever box contains this run" (which could not fail).
+                // Runs come out by ink ROW and boxes in glyph order, so sort the BOXES by centre row to pair them.
+                // A search for "whichever box contains this run" could not fail.
                 int[] order = BoxesByCentreRow(boxes, size);
 
                 for (int i = 0; i < runs.Length; i++)
@@ -336,42 +302,20 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>T3 — the absolute scale and the DPR factor, calibrated against an arm that shares no code
-        /// with the one under test.</b> At tilt 0 a map-pitched curved
-        /// symbol's collision box must equal its viewport-pitched twin's, edge for edge, at both device-pixel
-        /// ratios and three road angles.
+        /// <b>T3 — absolute scale and DPR factor, against an arm that shares no code with the one under
+        /// test.</b> At tilt 0 a map-pitched curved symbol's collision box must equal its viewport-pitched
+        /// twin's, edge for edge, at both device-pixel ratios and three road angles.
         ///
-        /// <para><b>Why this is exact and not a tolerance argument.</b> At tilt 0 the ground plane is
-        /// perpendicular to the view axis, so every ground point shares ONE view depth — the look-at depth,
-        /// where <c>MetresPerLogicalPixel</c> is BY DEFINITION the ruler. A corner displaced
-        /// <c>c · MetresPerLogicalPixel</c> metres in that plane therefore projects to exactly <c>c</c> logical
-        /// px, which is what the viewport arm adds directly to the anchor. The two arc walks agree too: at
-        /// tilt 0 the projection restricted to the ground plane is affine, so world arc length and screen arc
-        /// length are proportional and both walks place a glyph at the same point. The two boxes must be
-        /// EQUAL.</para>
+        /// <para>Non-obvious why: the boxes are EQUAL because at tilt 0 every ground point is at the look-at
+        /// depth, where <c>MetresPerLogicalPixel</c> is the ruler, so <c>c · MetresPerLogicalPixel</c> metres
+        /// project to <c>c</c> px, and the affine projection makes both arc walks agree. The twins differ only in
+        /// <c>ShapedSymbol.PitchAlignment</c>. A wrong <c>emScale</c> or a dropped DPR factor shows only at
+        /// DPR 2, so both ratios run.</para>
         ///
-        /// <para><b>The reference shares no code with the arm under test.</b> The two symbols differ in exactly
-        /// one field, <c>ShapedSymbol.PitchAlignment</c>; that one predicate selects
-        /// <c>SymbolStagingMath</c>'s world-arc walk, the metre corner unit, and the projected box. A
-        /// reference drawn from the arm under test cancels the very defect it is meant to catch.</para>
-        ///
-        /// <para><b>What each failure mode looks like.</b> A wrong
-        /// <c>emScale</c> (an <c>arcScale</c> substitution, or a dropped DPR factor) shows as
-        /// a proportional SIZE error at DPR 2 while staying invisible at DPR 1 — which is why both ratios run.
-        /// A total failure to project reads as the earlier screen box — <b>which at tilt 0 IS the same box</b>,
-        /// so this tooth cannot by itself tell "correctly projected" from "never projected at all". That is the
-        /// price of the pose that makes the comparison exact, and it is stated rather than papered over: the
-        /// MECHANISM's presence is pinned at tilt by T1/T2 and by T4, which all go RED if the projected
-        /// branch stops being taken. What T3 adds, and only T3 has, is the absolute-scale and DPR calibration
-        /// against an arm that shares no code with the one under test.</para>
-        ///
-        /// <para><b>⚠ This tooth does NOT pin the ŷ sign — measured, not assumed.</b> The box is an AABB of
-        /// the cell's corners, so a ŷ flip merely PERMUTES that set whenever the cell is symmetric about its
-        /// anchor in y, and an AABB is invariant under permutation — and curved glyph cells are centred on
-        /// the path. Injection I2 flipped the sign in production and left the ENTIRE suite green, this tooth
-        /// included. <b>T10</b> (<c>MapPitchedWorldArcStagingTests</c>, on an off-centre cell)
-        /// is the sign's sole observer; the 22.56 px flipped-ŷ separation the size teeth report is an
-        /// ink-CENTROID reading and does not carry over to an AABB.</para>
+        /// <para>Limitation: at tilt 0 an unprojected screen box IS the same box, so T1, T2 and
+        /// <c>MapPitched_ProjectedBox_PlacesBothSymbols_WhereTheScreenBoxSuppressesOne</c> pin that the
+        /// projected branch runs. An AABB of a y-symmetric cell cannot see a ŷ flip either;
+        /// <c>MapPitched_ProjectedBox_PutsAPositiveCellYAboveTheAnchor</c> is the sign's sole observer.</para>
         /// </summary>
         [Test]
         public void MapPitchedBox_AtTiltZero_EqualsTheViewportBox(
@@ -425,10 +369,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Stages the SAME one-glyph curved symbol twice through ONE scene and ONE camera at tilt 0 — once with
         /// <c>PitchAlignment = Map</c>, once with <c>Viewport</c> — and returns both arms' staged collision
-        /// boxes. No render: the measurand is the staged box, not ink, so this needs no
-        /// <c>SnapshotRenderer</c> (which is what keeps it from being a second copy of
-        /// <c>MapPitchedGlyphSizeTiltZeroTests.RenderArm</c> — it shares that file's twin CONSTRUCTION, not
-        /// its ink machinery).
+        /// boxes. No render: the measurand is the staged box, not ink.
         /// </summary>
         private static void StageTiltZeroTwin(double devicePixelRatio, float roadAngleDeg,
             out SymbolBox[] map, out SymbolBox[] viewport, out bool rulerIsLive)
@@ -560,15 +501,9 @@ namespace MapRenderer.Tests.Visual
     //
     // The CORNER-UNIT teeth that need the RENDERER (T7, T8).
     //
-    // PLACEMENT NOTE. `BillboardMathTests` and `MapPitchedWorldArcStagingTests` are engine-free files that
-    // reach only `MapRenderer.Core`, and both of these teeth are claims about `WorldSymbolRenderer.Emit` —
-    // "the four WorldBillboardVertexs produced by the RENDERER", and "the renderer scales the translate delta
-    // by the corner unit". Asserting either one without the renderer in the loop asserts the test's own
-    // arithmetic. So they live here, on the real emit path.
-    //
-    // WHY tilt 0. Neither tooth reads a projected quantity — both read the emitted VERTEX STREAM off the built
-    // mesh — so the pose only has to be one where the symbols stage reliably. Tilt 0 is the simplest such pose and
-    // it is the one MapPitchedGlyphSizeTiltZeroTests already uses, so the two files share a shape.
+    // Non-obvious why: both teeth are claims about `WorldSymbolRenderer.Emit`, so without the renderer in the
+    // loop they assert the test's own arithmetic. Both read the emitted VERTEX STREAM, not a projection, so
+    // tilt 0 is enough.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapPitchedCornerUnitTests — Unity EditMode only
@@ -593,22 +528,11 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>T7, clause 1 — the non-map path is BITWISE unchanged.</b>
-        /// Proves: for a curved symbol whose <c>CornerMetresPerLogicalPixel</c> is 0 (every viewport- and
-        /// auto-pitched symbol, and every point symbol), the four <see cref="WorldBillboardVertex"/>s the
-        /// renderer emitted are bit-for-bit equal to a <see cref="BillboardMath.BuildWorldQuad"/> call made
-        /// with the UNSCALED arguments — <c>q.TextSizePx</c> unscaled, <c>emit.TranslateDeltaPx</c> unscaled,
-        /// <c>alignFlags = AlongLineAlignFlag</c>.
-        ///
-        /// <para><b>Compared as raw float BITS, not with a tolerance.</b> The claim is not "close enough" —
-        /// it is that <c>cornerScale</c> is the literal <c>1f</c> on every
-        /// non-map path and <c>x * 1f</c> is bitwise identity for every finite float and for ±0/±Inf/NaN
-        /// payloads alike, so the non-map vertex stream is EXACTLY unchanged. A tolerance would
-        /// let a real unit slip through as rounding.</para>
-        ///
-        /// <para><b>The reference does not come from the arm under test.</b> The expected quad is built from
-        /// the symbol's own baked cell plus the mesh's own <c>AnchorLocal</c>/<c>Tangent</c>/<c>Up</c> — i.e.
-        /// from the geometry, not from the corner offsets being checked.</para>
+        /// <b>T7, clause 1 — the non-map path is BITWISE unchanged.</b> When
+        /// <c>CornerMetresPerLogicalPixel</c> is 0, the four emitted <see cref="WorldBillboardVertex"/>s equal a
+        /// <see cref="BillboardMath.BuildWorldQuad"/> call with UNSCALED arguments, bit for bit. The reference
+        /// comes from the baked cell and the mesh's own frame. Non-obvious why: <c>cornerScale</c> is the
+        /// literal <c>1f</c> there, so bits must match, and a tolerance would let a real unit pass as rounding.
         /// </summary>
         [Test]
         public void NonMapPitchedCorners_AreBitwiseThePreW2Quad()
@@ -638,17 +562,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>T7, clause 2 — the flag tracks the unit, and the scope FENCE is asserted.</b> Proves: when
-        /// the corner unit is metres, every corner's <c>AlignFlags</c> has bit2 set — and bit1 as well,
-        /// because map-pitch never occurs without along-line.
-        ///
-        /// <para>Bit1 is not decoration here. The <c>emit.AlongLine</c> conjunct is the scope fence: point
-        /// and icon map-pitch are not implemented. Asserting that bit2 never appears without bit1 is what
-        /// makes that fence observable instead of merely commented — if a later change lifts it, this tooth
-        /// says so.</para>
-        ///
-        /// <para>A separate <c>[Test]</c> from clause 1 on purpose: NUnit throws on the first failure, so two
-        /// clauses in one method means the second never runs.</para>
+        /// <b>T7, clause 2 — the flag tracks the unit, and the scope FENCE is asserted.</b> When the corner
+        /// unit is metres, every corner's <c>AlignFlags</c> has bit2 AND bit1 set. Bit1 makes the
+        /// <c>emit.AlongLine</c> fence observable: point and icon map-pitch are not implemented. It is a
+        /// separate <c>[Test]</c> because NUnit stops at the first failure.
         /// </summary>
         [Test]
         public void MapPitchedCorners_CarryBit2_AndNeverWithoutBit1()
@@ -677,40 +594,13 @@ namespace MapRenderer.Tests.Visual
         /// delta rides the corner offsets in the SAME unit they do — i.e. it is scaled by
         /// <c>CornerMetresPerLogicalPixel</c> and becomes a WORLD translate.
         ///
-        /// <para><b>Why this is a recorded limitation and not a design position.</b> The shader has ONE
-        /// displacement path, so the corners and the translate must share whichever unit is in force; keeping
-        /// the translate in screen px would mean a second, clip-space displacement path, which re-creates the
-        /// two-rulers-in-one-shader shape. The Style Spec's proper control for
-        /// whether a translate is a screen or a map offset is <c>text-translate-anchor</c>, not
-        /// <c>text-pitch-alignment</c>, so the behaviour is recorded rather than defended.</para>
-        ///
-        /// <para><b>It is inert on every shipped style.</b> All seven line-placed symbol layers in
-        /// <c>liberty.json</c> (<c>road_one_way_arrow</c>, <c>road_one_way_arrow_opposite</c>,
-        /// <c>waterway_line_label</c>, <c>water_name_line_label</c>, <c>highway-name-path</c>,
-        /// <c>highway-name-minor</c>, <c>highway-name-major</c>) set no <c>text-translate</c> /
-        /// <c>icon-translate</c> / <c>text-translate-anchor</c>, so the delta is exactly <c>float2.zero</c> and
-        /// <c>0 · k == 0</c>.</para>
-        ///
-        /// <para><b>This tooth is the answer to "which test goes RED if this stops being deliberate?"</b>
-        /// A recorded limitation needs a tooth that observes it. Without one the scaling is an unobserved
-        /// path.</para>
-        ///
-        /// <para><b>Method: a DIFFERENCE, so the corner geometry cancels.</b> The same map-pitched symbol is
-        /// emitted twice, once with a translate and once without, and the per-corner offset difference must
-        /// have the MAGNITUDE of the delta times the corner unit, component by component.</para>
-        ///
-        /// <para><b>Component MAGNITUDES, not signed values — and that is a scope statement, not a
-        /// weakening.</b> The Y sense of a translate is set by <c>SymbolTranslate.ApplyTranslate</c>'s own
-        /// convention composed with <c>BuildWorldQuad</c>'s own negation, neither of which this tooth owns;
-        /// measured, the two compose to a POSITIVE Y here. The claim is
-        /// exclusively about the UNIT, and the unit is what the magnitude states. Re-pinning the sign would
-        /// duplicate a convention that already has its own owners, and would make this tooth go RED for a
-        /// reason that has nothing to do with the corner unit. The discrimination is unaffected: injection I6
-        /// leaves a delta of 7 and 11 raw PIXELS where this expects 2140 and 3363 METRES — a factor of ~306,
-        /// against a 1 % bound.</para>
-        ///
-        /// <para>RED recipe: injection I6 — pass <c>emit.TranslateDeltaPx</c> unscaled (mixed units in one
-        /// <c>off</c>). Everything else stays GREEN.</para>
+        /// <para>Limitation: the shader has ONE displacement path, so the translate shares the corners' unit; a
+        /// screen-px translate would need a second, clip-space path. The Style Spec controls this with
+        /// <c>text-translate-anchor</c>, not <c>text-pitch-alignment</c>. No line-placed layer in
+        /// <c>liberty.json</c> sets a translate, so the delta is <c>float2.zero</c> there. This tooth observes
+        /// the limitation with a DIFFERENCE of two emits, so the corner geometry cancels. It compares MAGNITUDES:
+        /// the Y sign belongs to <c>SymbolTranslate.ApplyTranslate</c> and <c>BuildWorldQuad</c>. An unscaled
+        /// delta reads 7 and 11 PIXELS against 2140 and 3363 METRES, ~306× apart.</para>
         /// </summary>
         [Test]
         public void MapPitchedTranslate_MovesInMetres_NotPixels()

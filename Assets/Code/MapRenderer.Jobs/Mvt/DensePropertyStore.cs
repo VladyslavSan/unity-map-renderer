@@ -5,20 +5,11 @@ using MapRenderer.Core.Expressions;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
-    /// <see cref="IMvtPropertyStore"/> that keeps MVT's dense representation instead of expanding it: a
-    /// VIEW — <c>(offset, count)</c> — into the owning layer's shared tag-word buffer
-    /// (<see cref="MvtLayerPropertyResolver.TagWords"/>), resolved against the layer's shared
-    /// <see cref="MvtLayerPropertyResolver"/> only on demand. <see cref="TryGet"/> — the hot single-key
-    /// path — allocates nothing: it maps the queried name to a key index via the layer's shared map, then
-    /// scans its (typically few) tag pairs within that view.
-    /// <see cref="AsDictionary"/> is the cold path (the rare <c>properties</c> expression / test code),
-    /// materializing a fresh dictionary on every call.
-    ///
-    /// <para><b>Lifetime.</b> Because this is a view rather than an owner, a store's (and therefore its
-    /// <see cref="MvtFeature"/>'s) readable lifetime is bounded by its owning <see cref="MvtLayer"/>'s: once
-    /// <see cref="MvtLayer.Dispose"/> frees <see cref="MvtLayer.FeatureTagWords"/>, reading through this
-    /// store is a use-after-free on the underlying native buffer, not merely a double-free risk. No store,
-    /// feature or resolver may be read once its owning layer has been disposed.</para>
+    /// <see cref="IMvtPropertyStore"/> that keeps MVT's dense representation: a view into the owning layer's
+    /// shared tag-word buffer, resolved through <see cref="MvtLayerPropertyResolver"/> on demand.
+    /// <see cref="TryGet"/> is the hot path and allocates nothing; <see cref="AsDictionary"/> is cold.
+    /// Non-local invariant: the store is a view, so a read after <see cref="MvtLayer.Dispose"/> is a
+    /// use-after-free; no store, feature or resolver is read after its layer is disposed.
     /// </summary>
     internal sealed class DensePropertyStore : IMvtPropertyStore
     {
@@ -27,9 +18,8 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <param name="resolver">The owning layer's shared Keys/Values/key-index/tag-word tables AND the
         /// per-feature (offset,count) columns this store's slice is read from.</param>
-        /// <param name="ordinal">This feature's layer ordinal — the store holds only this, resolving its
-        /// (offset,count) slice through <see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/> on demand
-        /// so the slice lives in exactly one place (the layer's columns), never copied per feature.</param>
+        /// <param name="ordinal">This feature's layer ordinal. The store resolves its slice through
+        /// <see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/> on demand and never copies it.</param>
         public DensePropertyStore(MvtLayerPropertyResolver resolver, int ordinal)
         {
             _resolver = resolver;
@@ -37,12 +27,9 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// Skip-tolerant like the eager resolve it replaces: walks this feature's pairs BACKWARD from the
-        /// end, returning the value of the first pair found (i.e. the LAST in tag order) whose key index
-        /// matches AND whose value index is in range. That mirrors the forward walk's last-write-wins
-        /// overwrite of a dictionary keyed by string — a pair with a matching key index but an
-        /// out-of-range value index is skipped rather than adopted, exactly as the forward build would
-        /// leave an earlier valid value for that key in place instead of clobbering it with an invalid one.
+        /// Walks this feature's pairs backward and returns the last pair in tag order whose key index
+        /// matches and whose value index is in range. Non-obvious why: this matches the forward,
+        /// last-write-wins dictionary build, which skips a pair with an out-of-range value index.
         /// </summary>
         public bool TryGet(string name, out Value value)
         {
@@ -53,12 +40,9 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// The int-keyed twin of <see cref="TryGet"/>, extracted so a caller that already resolved
-        /// <paramref name="keyIndex"/> (the string→id key hoist — the filter-selection bind step in
-        /// <c>FeatureSelector</c>) skips the name→index <see cref="MvtLayerPropertyResolver.TryGetKeyIndex"/>
-        /// lookup. Holds the same backward tag-pair scan as <see cref="TryGet"/> verbatim — one copy of the
-        /// scan, so both callers, and the differential oracle covering <see cref="TryGet"/>, exercise
-        /// identical logic.
+        /// The int-keyed twin of <see cref="TryGet"/>, for a caller that already resolved
+        /// <paramref name="keyIndex"/> (the key hoist in <c>FeatureSelector</c>). It holds the one copy of
+        /// the backward tag-pair scan, so <see cref="TryGet"/> and its differential oracle share the logic.
         /// </summary>
         public bool TryGetByKeyIndex(int keyIndex, out Value value)
         {

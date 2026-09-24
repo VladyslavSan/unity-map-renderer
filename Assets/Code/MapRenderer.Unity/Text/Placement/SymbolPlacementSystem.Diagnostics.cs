@@ -1,14 +1,8 @@
-// Namespace-collision guard (see SymbolPlacementSystem.cs's header): this partial lives in
-// MapRenderer.Unity.Text.Placement and uses Unity.Mathematics types — TOP-LEVEL `using Unity.Mathematics;` +
-// unqualified float2/double2/math.*, NEVER an inline `Unity.Mathematics.X`.
-//
-// DIAGNOSTIC (opt-in, not part of the render path). A one-shot, button-armed capture that answers two
-// questions about a heavy per-frame symbol load ("input symbol count 82791, 40 ms SymbolTick"): WHAT are all
-// those symbols (per style layer), and WHERE are they on screen (10 vertical bands, top→bottom — the
-// tilted-view horizon pile-up shows as top-band-heavy). It reads the SAME per-frame buffers the placement
-// pass just filled (the native mirror + the projected screen positions), buckets them, and logs a table.
-// Cold path: managed allocation is fine here (runs once per click, never per frame). The whole feature is
-// gated behind one `_breakdownRequested` bool checked in TickCore, so an un-armed frame pays a single branch.
+// Namespace-collision guard (see SymbolPlacementSystem.cs's header): keep TOP-LEVEL `using Unity.Mathematics;`
+// and unqualified float2/double2/math.*, never an inline `Unity.Mathematics.X`.
+
+// Opt-in, one-shot diagnostic: it buckets this frame's placement buffers by style layer and by vertical screen
+// band, then logs a table. Cold path: it allocates once per click; an un-armed frame pays one branch.
 
 using System.Collections.Generic;
 using System.Text;
@@ -140,9 +134,8 @@ namespace MapRenderer.Unity.Text.Placement
             sb.AppendLine($"  │    ├─ on screen:           {onScreen}");
             sb.AppendLine($"  │    └─ behind / off-view:   {behind}");
             sb.AppendLine($"  └─ hard-skipped by cull:     {culled}");
-            // Per-trigger split of the hard-skips (each counts only fade-DEAD records that fired that trigger,
-            // so the five sum to `culled`). Which trigger dominates decides where the gather-scan cost is:
-            // a zoom-gated pile means the cheap gate should run before the horizon/distance rebase-muls.
+            // Per-trigger split of the hard-skips. Each counts only fade-dead records that fired that trigger,
+            // so the five sum to `culled`.
             sb.AppendLine($"       ├─ zoom-gated:      {LastZoomCulledCount}");
             sb.AppendLine($"       ├─ distance (far):  {LastDistanceCulledCount}");
             sb.AppendLine($"       ├─ horizon:         {LastHorizonCulledCount}");

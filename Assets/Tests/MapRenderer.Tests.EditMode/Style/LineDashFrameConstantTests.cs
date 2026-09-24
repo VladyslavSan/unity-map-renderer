@@ -1,28 +1,11 @@
 // Unity EditMode only — reads a shader GLOBAL back with Shader.GetGlobalFloat, which has no engine-free
 // equivalent, and builds a real UnityEngine.Camera. NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// The VALUE the frame constant is pushed with, and where it comes from.
-//
-// _MapFrameMetersPerDevicePixel is the ruler the line shader converts EVERY px-valued width property with
-// (width, gap, line-offset) plus the dash parameterisation. Two things can be wrong with it and this file
-// pins both:
-//
-//   BASIS. The shader's dash divisor is _Width (device px) × this global, so the global must be
-//   metres per DEVICE pixel. CameraPoseMath.MetersPerPixel(zoom) is metres per LOGICAL pixel and owes a
-//   ÷ dpr. Getting that wrong is off by exactly dpr, i.e. the IDENTITY at dpr 1, which is the only ratio
-//   the rest of the suite runs at.
-//
-//   SOURCE. The push lives in MapCamera.SyncToCamera and is MEASURED off the camera. Derived
-//   instead from a Web-Mercator zoom formula it only HAPPENS to equal the camera's own scale at
-//   AltitudeMultiplier 1, and any render path that never called ApplyZoom reads whatever an earlier
-//   fixture left in this PROCESS global — which is how a z8 fixture rendered against a stale z5
-//   ruler, a clean factor of 8.
-//
-// A Core-only round trip is VACUOUS for the basis half, because the dash period in world metres is
-// (w_logical·dpr) × (mpp_logical/dpr) × Σ and the dpr cancels — only a tooth that reads the two halves from
-// the two files that own them can see a basis error. It is NOT vacuous for the source half:
-// SyncToCamera_TracksTheAltitudeMultiplier_NotTheZoomFormula below is a pure CPU tooth and is the only row
-// in the suite that can tell the two derivations apart.
+// Pins the ruler _MapFrameMetersPerDevicePixel on two axes. BASIS: metres per DEVICE px, so a missing ÷ dpr
+// is invisible at dpr 1. SOURCE: measured off the camera in MapCamera.SyncToCamera; a zoom-formula push
+// ignores AltitudeMultiplier, and a path that never called ApplyZoom reads a stale PROCESS global.
+// Non-obvious why: the dpr cancels in a world-space round trip, so only a direct read of the pushed uniform
+// sees a basis error. See docs/device-pixel-ratio-design.md § "The px-valued surface".
 
 #if UNITY_EDITOR
 using NUnit.Framework;
@@ -98,23 +81,11 @@ namespace MapRenderer.Tests.Style
                    * math.tan(math.radians(cam.CurrentProperties.VerticalFovDeg) * 0.5) / cam.ViewportPx.y;
 
         /// <summary>
-        /// The pushed frame constant is metres per DEVICE pixel AND is the camera's own measured
-        /// scale at the look-at — two independent readings of one number, asserted together.
-        ///
-        /// <para>The device-px clause: expected values are computed from
-        /// <see cref="CameraPoseMath.MetersPerPixel"/> rather than written as literals, so the tooth pins the
-        /// RELATION (the ÷ dpr) and not a transcription of the zoom curve. The 1.5 row is there because a
-        /// dyadic ratio can hide reciprocal-vs-divide drift; the 0.0 and 100.0 rows are there because the ÷
-        /// must go through <see cref="DeviceScaling.PerLogicalPxToPerDevicePx"/>'s plausibility band — a raw
-        /// <c>/ dpr</c> reads +∞ and 3.06 on those two. Their expected values are the same under the
-        /// camera-measured derivation, and not by luck: the same fallback is inherited through
-        /// <see cref="MapCamera.ViewportLogicalPx"/> → <see cref="DeviceScaling.DeviceToLogicalPx"/>, which is
-        /// the only place the ratio enters the altitude framing.</para>
-        ///
-        /// <para>The camera clause catches a stale ruler. A fixture rendering at z8 that read this global
-        /// after a z5 fixture would read 2445.985 = <c>MetersPerPixel(5.0)</c> — three whole zoom levels of
-        /// stale process state — while its own camera measures 305.748113. This clause compares the two
-        /// directly.</para>
+        /// The pushed constant is metres per DEVICE pixel AND the camera's measured scale at the look-at.
+        /// Expected values come from <see cref="CameraPoseMath.MetersPerPixel"/>, pinning the ÷ dpr relation.
+        /// The 1.5 row catches reciprocal-vs-divide drift; the 0.0 and 100.0 rows need
+        /// <see cref="DeviceScaling.PerLogicalPxToPerDevicePx"/>'s plausibility band. The camera clause
+        /// catches a stale ruler left by an earlier fixture at another zoom.
         /// </summary>
         [TestCase(8.0,  1.0,   1.0, TestName = "MetresPerDevicePx_Zoom8_Dpr1")]
         [TestCase(8.0,  2.0,   2.0, TestName = "MetresPerDevicePx_Zoom8_Dpr2")]
@@ -154,15 +125,10 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>The discriminating row.</b> The constant tracks the CAMERA, not the zoom formula.
-        ///
-        /// <para><see cref="MapCamera.AltitudeMultiplier"/> is an art-direction scale on the orbit radius:
-        /// at 1.5 the camera sits 1.5× further out, so a device pixel covers 1.5× as much ground and the
-        /// ruler must read 1.5× larger. A push that read <c>MetersPerPixel(zoom)/dpr</c> would not contain
-        /// the multiplier at all — it would stay at 305.748 while the camera is at 458.622, and every
-        /// px-width line would render 1.5× too thin. This is the ONE row
-        /// that separates the two derivations; every row of
-        /// <see cref="SyncToCamera_PushesTheCameraMeasuredMetresPerDevicePixel"/> is green under both.</para>
+        /// <b>The discriminating row.</b> The constant tracks the CAMERA, not the zoom formula. At
+        /// <see cref="MapCamera.AltitudeMultiplier"/> 1.5 the camera sits 1.5× further out, so the ruler must
+        /// read 1.5× larger; a <c>MetersPerPixel(zoom)/dpr</c> push ignores the multiplier. Every row of
+        /// <see cref="SyncToCamera_PushesTheCameraMeasuredMetresPerDevicePixel"/> is green under both.
         /// </summary>
         [Test]
         public void SyncToCamera_TracksTheAltitudeMultiplier_NotTheZoomFormula()

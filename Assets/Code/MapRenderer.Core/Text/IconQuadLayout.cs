@@ -8,11 +8,9 @@ namespace MapRenderer.Core.Text
     /// <summary>
     /// Turns one resolved <see cref="SpriteEntry"/> + <c>icon-*</c> layout properties into one symbol-local,
     /// anchor-relative <see cref="SymbolQuad"/> in the sheet's pixel space. The icon analogue of
-    /// <see cref="TextQuadLayout"/>: the same hAlign factor and y-down→y-up offset negation, but one quad, so
-    /// one pure function.
-    /// <para>The vertical half differs: a sprite has no baseline or ascent slack, so its box IS its ink, and
-    /// <c>vAlign = 0.5</c> already centres the ink. Text needs an optical-centre formula for the same result
-    /// (<c>docs/road-shields-design.md</c>). A three-valued vertical anchor to match text would break this.</para>
+    /// <see cref="TextQuadLayout"/>: the same hAlign factor and y-down→y-up offset negation, but one quad.
+    /// Vertically, a sprite's box IS its ink, so <c>vAlign = 0.5</c> already centres it; text needs an
+    /// optical-centre formula instead (<c>docs/road-shields-design.md</c>).
     /// </summary>
     public static class IconQuadLayout
     {
@@ -54,16 +52,9 @@ namespace MapRenderer.Core.Text
             minX -= skirtPx; maxX += skirtPx;
             minY -= skirtPx; maxY += skirtPx;
 
-            // UVs span the sprite's PADDED rect (content + the transparent border SpriteSheet's repack adds) with
-            // NO inset; pixelRatio divides only the logical SIZE. The border is a non-obvious why: published
-            // sheets are full-bleed and abutting, so without it the silhouette is the polygon edge, which pops
-            // whole pixels with MSAA off. With it, the silhouette is a one-texel alpha ramp that bilinear
-            // filtering antialiases, and the sampler stays off the neighbouring sprite.
-            // The identity that holds both halves together, for every sprite and every icon-size:
-            //     uvWidth * sheetWidth / quadWidth == PixelRatio / iconSize
-            // Texels-per-drawn-pixel is the SAME for border and content. A padded atlas with a nominal quad
-            // SHRINKS the ink; a grown quad with the UV rect on the content GROWS it by (W+2P)/W. Pinned by
-            // IconQuadLayoutTests and SymbolIconResamplingTests.
+            // Non-local invariant: UVs span the PADDED rect with no inset, and the quad grows by the same border,
+            // so uvWidth * sheetWidth / quadWidth == PixelRatio / iconSize for border and content alike; either
+            // half alone shrinks or grows the ink (IconQuadLayoutTests, SymbolIconResamplingTests).
             float2 uvTopLeft = new float2(entry.X - entry.Padding, entry.Y - entry.Padding) / sheetSize;
             float2 uvBottomRight =
                 new float2(entry.X + entry.Width + entry.Padding, entry.Y + entry.Height + entry.Padding) / sheetSize;
@@ -81,13 +72,10 @@ namespace MapRenderer.Core.Text
 
         /// <summary>
         /// The drawn width per side, in baked px, of the transparent border around <paramref name="entry"/>'s
-        /// content. It divides out the sheet's pixel ratio and applies <c>icon-size</c>, as the content's size
-        /// does. ONE formula with two entry points that must not drift, a non-local invariant: <see cref="Layout"/>
-        /// grows the quad by it, and every consumer that recovers the CONTENT box (the bounds formula,
-        /// <c>CurvedGlyph.CellSkirt</c>) insets by it. <c>0</c> when the sprite has no border.
-        /// <para>The <c>pixelRatio</c> guard matches <c>FillPattern.TryResolve</c>'s: an explicit
-        /// <c>"pixelRatio": 0</c> parses through, and at <c>Padding == 0</c> the skirt would be NaN, which a
-        /// collision box then compares false against everything.</para>
+        /// content, scaled like the content (pixel ratio, <c>icon-size</c>); 0 without a border.
+        /// Non-local invariant: <see cref="Layout"/> grows the quad by it and <c>CurvedGlyph.CellSkirt</c> insets
+        /// by it, so both use this one formula. The <c>pixelRatio</c> guard (as in <c>FillPattern.TryResolve</c>)
+        /// stops a parsed <c>"pixelRatio": 0</c> from making the skirt NaN.
         /// </summary>
         public static float SkirtPx(in SpriteEntry entry, float iconSize)
             => entry.Padding / (entry.PixelRatio > 0f ? entry.PixelRatio : 1f) * iconSize;

@@ -7,14 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// Which pixel space a px-valued style property's CONSUMER measures against — the target of
-    /// <see cref="DeviceScaling.LogicalToDevicePx"/>. A MapLibre style's <c>px</c> values are LOGICAL (CSS)
-    /// pixels: a <c>line-width: 2</c> road is 2 logical px (<c>2 × dpr</c> physical px) on every panel —
-    /// the member says what the consumer on the far side expects. <see cref="Logical"/>: the consumer
-    /// already divides by the device-pixel ratio (symbol shaders' <c>_ScreenParamsLogical</c>, or CPU
-    /// framing) — the IDENTITY, no conversion owed. <see cref="Device"/>: the consumer measures against
-    /// the PHYSICAL framebuffer (line/fill shaders' <c>MapPixelsToWorld</c>, the SDF text shader's
-    /// <c>fwidth</c> scale) — the logical value must be multiplied by the ratio.
+    /// Which pixel space a px-valued style property's CONSUMER measures against, the target of
+    /// <see cref="DeviceScaling.LogicalToDevicePx"/>. Style <c>px</c> values are LOGICAL (CSS) pixels.
+    /// <see cref="Logical"/>: the consumer already divides by the ratio (symbol shaders'
+    /// <c>_ScreenParamsLogical</c>, CPU framing). <see cref="Device"/>: the consumer measures the physical
+    /// framebuffer (line/fill <c>MapPixelsToWorld</c>, the SDF text <c>fwidth</c> scale).
     /// </summary>
     public enum PixelSpace
     {
@@ -28,16 +25,9 @@ namespace MapRenderer.Unity.View
     /// <summary>
     /// Device-density ↔ logical-pixel scaling: <see cref="LogicalToDevicePx"/> takes a style's px value out
     /// to its consumer's space, <see cref="DeviceToLogicalPx(double,double)"/> takes a physical measurement
-    /// in. Both fall back to a ratio of 1 through the same private guard, so paint, camera framing,
-    /// tile-cover framing and interaction seams cannot disagree about an unconfigured ratio.
-    ///
-    /// <para>The framing viewport is normalised to LOGICAL pixels (<c>logicalPx = physicalPx / dpr</c>) so an
-    /// on-screen tile occupies a constant PHYSICAL size across panel densities — the "512 convention" tile is
-    /// defined at <see cref="ReferenceDpi"/>. The device-pixel ratio is <c>actualDpi / ReferenceDpi</c>.</para>
-    ///
-    /// <para>Pure math over an explicit <c>double</c>: the Unity layer reads <c>Screen.dpi</c> and passes it
-    /// here. A positive density is a precondition — tests and headless keep the serialized
-    /// <c>DevicePixelRatio</c> and never call this.</para>
+    /// in. Both fall back to a ratio of 1 through one private guard, so no two consumers disagree. The
+    /// framing viewport is in LOGICAL pixels, so a tile keeps a constant physical size across densities
+    /// (the "512 convention" tile is defined at <see cref="ReferenceDpi"/>).
     /// </summary>
     public static class DeviceScaling
     {
@@ -73,14 +63,9 @@ namespace MapRenderer.Unity.View
 
         /// <summary>
         /// The ONE device→logical conversion, the inverse of <see cref="LogicalToDevicePx"/>:
-        /// <c>logicalPx = devicePx / dpr</c>. Every site taking a PHYSICAL measurement into the map's
-        /// logical-pixel basis routes through it — the camera's framing viewport, the tile selector's
-        /// framing viewport, and the mouse/touch interaction seams. Its input is a MEASUREMENT (a
-        /// framebuffer size, a cursor coordinate), not a style value, so it takes no
-        /// <see cref="PixelSpace"/> — a measurement has exactly one meaningful target (logical), while a
-        /// style <c>px</c> value's target depends on which consumer reads it. Do not "unify" the two
-        /// signatures. Division, never multiplication by a reciprocal: at a non-dyadic ratio <c>v * (1/d)</c>
-        /// differs from <c>v / d</c> in the last bit for a third of all values.
+        /// <c>logicalPx = devicePx / dpr</c>, for every physical measurement (framing viewports, cursor/touch).
+        /// A measurement has one target (logical), so it takes no <see cref="PixelSpace"/>. Non-obvious why:
+        /// it divides, since at a non-dyadic ratio <c>v * (1/d)</c> differs from <c>v / d</c> in the last bit.
         /// </summary>
         public static double DeviceToLogicalPx(double devicePx, double devicePixelRatio)
             => devicePx / SafeRatio(devicePixelRatio);
@@ -91,14 +76,11 @@ namespace MapRenderer.Unity.View
             => devicePx / SafeRatio(devicePixelRatio);
 
         /// <summary>
-        /// Restate a RATE expressed per LOGICAL pixel as the same rate per DEVICE pixel:
-        /// <c>perDevicePx = perLogicalPx / dpr</c>. The dash parameterisation's ruler
-        /// (<c>CameraPoseMath.MetersPerPixel(zoom)</c>, metres per logical px) meets a <c>_Width</c> that
-        /// reached the shader in DEVICE px, so the two must share a basis. NOT
-        /// <see cref="DeviceToLogicalPx(double,double)"/>, whose input is a physical MEASUREMENT — this
-        /// input (and output) is a per-pixel RATE; the arithmetic coincides, the meaning does not. Routed
-        /// through <see cref="SafeRatio"/> because a raw <c>/ devicePixelRatio</c> sends the ruler to
-        /// <c>+∞</c> at dpr 0 and propagates NaN into every dashed layer.
+        /// Restates a RATE per logical pixel as the same rate per device pixel:
+        /// <c>perDevicePx = perLogicalPx / dpr</c>. The dash ruler (<c>CameraPoseMath.MetersPerPixel</c>)
+        /// meets a <c>_Width</c> in device px, so the two must share a basis. The arithmetic matches
+        /// <see cref="DeviceToLogicalPx(double,double)"/>, but the input is a rate, not a measurement.
+        /// <see cref="SafeRatio"/> keeps dpr 0 from sending the ruler to <c>+∞</c>.
         /// </summary>
         public static double PerLogicalPxToPerDevicePx(double perLogicalPx, double devicePixelRatio)
             => perLogicalPx / SafeRatio(devicePixelRatio);
@@ -114,17 +96,12 @@ namespace MapRenderer.Unity.View
         /// headroom above real hardware.</summary>
         private const double MaxPlausibleRatio = 8.0;
 
-        /// <summary>The ratio actually applied: one outside the plausible band is unusable, so it degrades
-        /// to 1. A non-positive or infinite ratio blanks or mirrors the paint and sends the camera framing
-        /// to infinity; a merely implausible one (0.1, 100) rescales the whole map. This is the single home
-        /// of that fallback for both directions
-        /// (<c>DevicePixelRatioFramingTests.RatioFallback_HasExactlyOneHome_InDeviceScaling</c>). Non-local
-        /// invariant: a FALLBACK, not a clamp — a clamp would invent a plausible-looking value (a map drawn
-        /// at the floor still looks like a map, invisible to inspection), where the fallback yields the
-        /// neutral default every test runs at. <c>NaN</c> and both infinities fail both comparisons and are
-        /// rejected like any other implausible value — a DECISION, not an accident. The band
-        /// (<see cref="MinPlausibleRatio"/>…<see cref="MaxPlausibleRatio"/>, inclusive) sits far from real
-        /// hardware on both ends; see each bound's own doc for why.</summary>
+        /// <summary>The ratio applied: one outside the inclusive band <see cref="MinPlausibleRatio"/> to
+        /// <see cref="MaxPlausibleRatio"/> (NaN and infinities included) falls back to 1. This is the one
+        /// home of that fallback
+        /// (<c>DevicePixelRatioFramingTests.RatioFallback_HasExactlyOneHome_InDeviceScaling</c>).
+        /// Non-obvious why: a clamp would draw a plausible-looking wrong map; the fallback gives the
+        /// neutral default every test runs at.</summary>
         private static double SafeRatio(double devicePixelRatio)
             => devicePixelRatio >= MinPlausibleRatio && devicePixelRatio <= MaxPlausibleRatio
                 ? devicePixelRatio

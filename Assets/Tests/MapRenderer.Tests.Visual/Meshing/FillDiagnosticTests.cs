@@ -1,12 +1,9 @@
 // Fill-diagnostic and alternate-source-path GPU/visual acceptance tests.
 //
-// The three-way split follows TWO using collisions, not the line cap: `CameraProperties`
-// (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System.Object vs
-// UnityEngine.Object) — both CS0104. Within that constraint each file below groups
-// its dominant fill sub-area.
-// This file: the bare-CameraProperties user (MapViewStyledFillTests) plus
-// System-importers that are neutral on the UnityEngine.Rendering axis — the
-// band cost/compare diagnostics and the GeoJson-sourced fill proof.
+// Non-obvious why: the three-way file split follows two CS0104 using collisions, not the line cap —
+// `CameraProperties` (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System vs
+// UnityEngine). This file holds the bare-CameraProperties user (MapViewStyledFillTests) plus the
+// System-importers neutral on UnityEngine.Rendering: the band diagnostics and the GeoJson fill proof.
 //
 // Contents:
 //   MapViewStyledFillTests           — decisive tests for per-layer styled fill rendering in MapView.
@@ -39,48 +36,19 @@ using ProfilerRecorderHandle = Unity.Profiling.LowLevel.Unsafe.ProfilerRecorderH
 
 namespace MapRenderer.Tests.Visual
 {
-    // Unity EditMode only — uses MonoBehaviour, Mesh, per-layer material inspection.
-    // NOT included in Tools/core-tests.
-    //
-    // Decisive acceptance tests for per-layer styled fill rendering.
-    //
-    // ALL decisive assertions here are CPU-side (mesh.GetColors() or per-layer material inspection).
-    // They CANNOT degrade to Inconclusive — no GPU context is required for the decisive teeth.
+    // Unity EditMode only (MonoBehaviour, Mesh, per-layer material inspection). Every decisive assertion
+    // is CPU-side (mesh.GetColors() or material inspection), so none needs a GPU context.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapViewStyledFillTests — decisive tests for per-layer styled fill rendering in MapView.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Decisive tests for per-layer styled fill rendering in <see cref="MapView"/>.
-    ///
-    /// Acceptance teeth (all CPU-side, cannot degrade to Inconclusive):
-    ///
-    /// #1 — Multiple distinct fill-layer draws (DECISIVE):
-    ///   MapView with a 2-fill-layer inline style over the fixture produces a tile container with
-    ///   exactly 2 child renderers, each with a distinct material at a distinct renderQueue.
-    ///   Proves the live loop iterates fill layers in style order (not single-material mono-color).
-    ///
-    /// #2 — Draw order (DECISIVE):
-    ///   The second fill layer's material has renderQueue > first fill layer's material renderQueue.
-    ///   Proves painter's algorithm ordering.
-    ///
-    /// #3 — ≥2 distinct baked vertex colors from demo style (DECISIVE):
-    ///   MapView with the committed maplibre-demo-style.json (the 'countries-fill' layer has a
-    ///   'match' expression with a palette of ≥6 colors) produces a mesh over the fixture tile
-    ///   whose mesh.GetColors() contains ≥2 distinct linear-space colors. Proves data-driven
-    ///   per-feature color baking is wired end-to-end (not white/mono-color).
-    ///
-    /// #4 — Gamma correct baked colors (DECISIVE):
-    ///   The baked vertex colors in the mesh are closer to their expected linear value than to
-    ///   their raw sRGB value — MeshBuilder.Build() applied Color.linear.
-    ///   Uses a constant-color 1-fill-layer style with a known sRGB color to get a deterministic
-    ///   expected linear value.
-    ///
-    /// #5 — ZoomStyleApplier wired (DECISIVE):
-    ///   A zoom-dependent fill-color expression (interpolate at zoom 0→1 between red and blue)
-    ///   produces different material output at zoom=0 vs zoom=1. Proves ApplyZoom is called and
-    ///   actually changes the uniform.
+    /// Decisive CPU-side tests for per-layer styled fill rendering in <see cref="MapView"/>:
+    /// #1 two fill layers give two layer meshes with distinct materials; #2 a later layer has a higher
+    /// renderQueue (painter's order); #3 a data-driven <c>match</c> bakes ≥2 distinct vertex colours;
+    /// #4 baked vertex colours are linearised; #5 a zoom-dependent paint value changes the uniform
+    /// through <c>ZoomStyleApplier.ApplyZoom</c>.
     /// </summary>
     [TestFixture]
     public class MapViewStyledFillTests : BaseTestFixture
@@ -186,10 +154,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ─── Interleaved fill/line draw order follows STYLE order, not type (regression) ──────────
-        // A [fill, line, fill] style: the middle line must composite BETWEEN the two fills, i.e.
-        // queue(fill-bottom) < queue(line-mid) < queue(fill-top). The old code bucketed records by
-        // type (all fills, then all lines), producing queue(fill-bottom) < queue(fill-top) < queue(line-mid)
-        // — a line declared between two fills wrongly drew on top of BOTH. The style's layer order is SSOT.
+        // A [fill, line, fill] line must draw BETWEEN the fills; bucketing by type would put it on top of both.
 
         private static StyleDocument FillLineFillStyle() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -248,11 +213,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ─── #3: ≥2 distinct baked vertex colors (DECISIVE) ──────────────────────────────────────
-        //
-        // Uses a fill-color match expression on "CONTINENT" — the property that the fixture tile's
-        // countries layer actually encodes (confirmed: DataDrivenColorBakeTests, 8 distinct values
-        // including "Asia" and "South America"). The demo style uses ADM0_A3 which the z0 fixture
-        // tile does NOT encode, so the test uses an inline style targeting the known CONTINENT key.
+        // Matches on "CONTINENT", which the z0 fixture encodes (the demo style's ADM0_A3 it does not).
 
         private static StyleDocument ContinentFillStyle() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -317,11 +278,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.Greater(mesh.vertexCount, 0, "Fill mesh must have vertices");
 
                 // ── DECISIVE: ≥2 distinct vertex colors ───────────────────────────────────────
-                // The fixture has features with CONTINENT = "Asia", "South America", "Europe",
-                // "Africa", "North America", "Oceania", "Antarctica" (8 distinct values).
-                // The match expression maps Asia → red-ish, Europe → green-ish, Africa → blue-ish.
-                // All features must NOT have white vertex color — the default branch gives gray (128,128,128).
-                // At minimum: Asia (r≈0.55,g≈0.03,b≈0.03) ≠ default gray (r≈0.216,g≈0.216,b≈0.216).
+                // Several CONTINENT values give Asia's red and the default grey; one colour means no per-feature bake.
                 var colors = new List<Color>();
                 mesh.GetColors(colors);
 
@@ -367,19 +324,13 @@ namespace MapRenderer.Tests.Visual
 
         // ─── #4: Gamma-correct baked vertex colors (DECISIVE) ────────────────────────────────────
 
-        // The constant-color arm of gamma linearization is observed in
-        // PaintColorRenderTests.ConstantFillColor_RenderedPixel_MatchesAuthored; this fixture is now
-        // data-driven (a `match` expression), so it exercises only the data-driven bake.
+        // Data-driven bake only; PaintColorRenderTests.ConstantFillColor_RenderedPixel_MatchesAuthored
+        // observes the constant-colour arm of gamma linearisation.
         [Test]
         public void MapView_DataDrivenFillColor_VertexColorsAreLinearized()
         {
-            // Use a known sRGB value where linear ≠ sRGB: rgba(127, 0, 0) → sRGB≈0.498, linear≈0.212.
-            // The decisive check: stored R is closer to linear (≈0.212) than to sRGB (≈0.498).
-            // This proves MeshBuilder.Build() called Color.linear before Mesh.SetColors.
-            // Both `match` arms below hold the SAME rgba(127,0,0,1) on purpose: this forces
-            // DependsOnFeature == true (so the value bakes to vColor, not _BaseColor) while pinning the
-            // authored 127 so the linearization check stays byte-level — simplifying to a constant
-            // fill-color would move the value to _BaseColor and red this test for the wrong reason.
+            // Non-obvious why: both `match` arms hold the same rgba(127,0,0,1) (sRGB 0.498, linear 0.212)
+            // so DependsOnFeature is true and the value bakes to vColor; a constant would go to _BaseColor.
             const string styleJson = @"{
                 ""version"": 8,
                 ""name"": ""GammaTest"",
@@ -458,15 +409,8 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ─── #5: ZoomStyleApplier wired — zoom-dependent paint changes at different zoom levels ──
-        //
-        // Directly tests ZoomStyleApplier + FillPaint in isolation (not via MapView shader path).
-        // This avoids the headless shader-unavailability issue: in batch mode the Map/Fill
-        // shader may not compile, falling back to Sprites/Default which lacks _Opacity. Instead we
-        // create a Standard shader material (guaranteed available in Unity) and assert the ZoomStyleApplier
-        // pushes different float values as zoom changes. This tests the WIRING of ApplyZoom directly.
-        //
-        // MapView calls ApplyZoom in Tick() BEFORE the early-out — the structural assertion below
-        // proves the call is wired by driving the zoom-dependent evaluator state change.
+        // Non-obvious why: tested on a Standard material, not via MapView, because in batch mode Map/Fill
+        // may fall back to Sprites/Default, which lacks _Opacity.
 
         [Test]
         public void ZoomStyleApplier_ZoomDependentStops_ChangesFloatUniformWithZoom()
@@ -491,9 +435,8 @@ namespace MapRenderer.Tests.Visual
                 "FillPaint.Opacity from a stops expression must be Zoom-kind (IsZoomDependent=true). " +
                 "If false, ZoomStyleApplier.ApplyZoom will never re-evaluate it.");
 
-            // Create a Standard shader material (always available in Unity EditMode).
-            // Use a float property name that Standard doesn't have; SetFloat/GetFloat still
-            // works on any property because Unity materials store arbitrary float overrides.
+            // _MyZoomOpacity is not a Standard property; a material stores any float override, so
+            // SetFloat/GetFloat still round-trip it.
             var mat = Track(new Material(Shader.Find("Standard") ?? Shader.Find("Sprites/Default"))
             {
                 name = "ZoomTest"
@@ -532,10 +475,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_Tick_CallsApplyZoom_Structurally()
         {
-            // Proves that MapView.LateUpdate() calls ApplyZoom by checking FillLayerCount > 0
-            // after Initialise with a zoom-opacity style, and that ApplyZoom was invoked at
-            // least once (by checking the material's float has been set from its default 0→0.3).
-            // Uses a Standard material to bypass the Fill shader availability issue.
+            // Structural: a zoom-opacity style builds one fill bundle that survives a LateUpdate. The
+            // ZoomStyleApplier test above pins the value change itself.
             const string styleJson = @"{
                 ""version"": 8, ""name"": ""T"",
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""x""] } },
@@ -644,41 +585,24 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Measurement harness for the fill boundary band's cost. NOT a tooth — every test here is [Explicit], so
-    // an unfiltered gate run never touches it (an [Ignore] would set result=Skipped and red the gate instead).
+    // Measurement harness for the fill boundary band's cost. NOT a tooth: every test here is [Explicit], so an
+    // unfiltered gate run never touches it (an [Ignore] would set result=Skipped and red the gate instead).
     //
-    // Written because every argument about the band so far has been made from vertex COUNTS against
-    // GlobeFillSubdivider.DefaultMaxInteriorVertices — a constant this project chose for itself — and nobody
-    // had measured what those vertices cost to draw.
-    //
-    // WHAT THIS REPORTS IS A PROXY, NOT GPU FRAME TIME. Do not quote a number from here as one. Batch EditMode
-    // has a live Metal device but no player loop, and it was measured here (Probe_WhichTimingInstrumentsExist-
-    // Headless) that SystemInfo.supportsGpuRecorder is False and FrameTimingManager returns gpuFrameTime=0.000
-    // on every frame — a 'GPU Frame Time' recorder is LISTED among the available stats, but nothing feeds it.
-    // So the clock below is wall time around a batch of Camera.Render() calls with one terminal readback that
-    // blocks on the GPU. It resolves an ARM-TO-ARM DIFFERENCE, because the fixed per-render overhead (~0.55 ms
-    // here) is common to both arms and cancels; the absolute medians are not a frame time and do not transfer
-    // to a real frame, which draws many tiles and many layers per pass rather than one mesh.
+    // Limitation: it reports a PROXY, not GPU frame time. Batch EditMode has no player loop, no GPU recorder
+    // and gpuFrameTime=0 (Probe_WhichTimingInstrumentsExistHeadless), so the clock is wall time around a batch
+    // of Camera.Render() calls with one blocking readback. Per-render overhead cancels between the two arms,
+    // so only the ARM-TO-ARM DIFFERENCE is meaningful; the absolute medians are not a real frame's cost.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillBandFrameCostDiagnostic — Measures the fill boundary band's cost
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Measures the fill boundary band's cost, band-on versus band-off, over real MVT fixtures.
-    ///
-    /// <para><b>What the arms are.</b> Both arms run the identical shader and the identical camera; the only
-    /// difference is <c>FillMeshPipeline.LayerInput.SuppressBoundaryBand</c>, reached through the existing
-    /// test-only knob on <see cref="TestTileMeshBuilder.BuildFillFromLayer"/>. No production code is
-    /// modified to make this measurable.</para>
-    ///
-    /// <para><b>What the clock is.</b> Batch EditMode has a live Metal device but no player loop,
-    /// so there is no GPU frame timer (<see cref="Probe_WhichTimingInstrumentsExistHeadless"/> records what
-    /// is actually available). The number below is therefore a labelled PROXY: wall clock around
-    /// <see cref="RendersPerSample"/> bare <c>Camera.Render()</c> calls followed by ONE terminal readback
-    /// that drains the GPU, divided by the render count. Readback is outside the per-render divisor's
-    /// numerator only to the extent of one drain per sample, and it is identical in both arms, so it
-    /// cancels in the arm-to-arm difference — which is the quantity reported.</para>
+    /// Measures the fill boundary band's cost, band-on versus band-off, over real MVT fixtures. The arms
+    /// share shader and camera and differ only in <c>FillMeshPipeline.LayerInput.SuppressBoundaryBand</c>,
+    /// set through <see cref="TestTileMeshBuilder.BuildFillFromLayer"/>. The clock is wall time around
+    /// <see cref="RendersPerSample"/> <c>Camera.Render()</c> calls plus one draining readback, divided by
+    /// the render count; the readback is the same in both arms, so it cancels in the reported difference.
     /// </summary>
     [TestFixture]
     [Explicit("Measurement harness, not a tooth — run by name.")]
@@ -761,19 +685,11 @@ namespace MapRenderer.Tests.Visual
         // ── Calibration: does this clock see the quantity the band changes? ────────────────────────────
 
         /// <summary>
-        /// Ordinal zero, before any band number is trusted: duplicate ONE arm's mesh into 1/2/4/8 renderers
-        /// and confirm the clock grows with the draw load. An instrument that reads flat here reads flat for
-        /// the band too, and a null band result from it would mean nothing.
-        ///
-        /// <para>Two ladders, because they separate what the band actually adds. <b>Full</b> copies sit on
-        /// top of each other — vertex work AND fragment work multiply (the painter contract leaves ZWrite
-        /// off, so there is no early-z rejection to hide the overdraw). <b>Pinhead</b> copies are shrunk to
-        /// about one pixel — their vertices are still transformed and submitted while they cover almost no
-        /// fragments, which is the vertex-only sensitivity the band's 3x vertex count depends on.</para>
-        ///
-        /// <para>The band-OFF arm is the one duplicated: a pinhead-scaled band-ON mesh would
-        /// displace its outer ring by one DEVICE pixel measured in world metres, which at that scale is
-        /// enormous relative to the object and would not be the same geometry at all.</para>
+        /// Calibration: duplicate ONE arm's mesh into 1/2/4/8 renderers and confirm the clock grows with the
+        /// draw load; a clock flat here makes a null band result meaningless. <b>Full</b> copies overlap, so
+        /// vertex and fragment work multiply (ZWrite off, no early-z). <b>Pinhead</b> copies are ~1 pixel:
+        /// vertex work only. Band-OFF is duplicated because a pinhead band-ON mesh would push its outer ring
+        /// one device pixel in world metres, which at that scale is different geometry.
         /// </summary>
         [Test]
         public void Calibrate_ClockSeesDrawLoad()
@@ -798,16 +714,10 @@ namespace MapRenderer.Tests.Visual
         // ── The measurement ────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Band on versus band off, ABAB-interleaved, over the whole fixture corpus at two magnifications.
-        ///
-        /// <para>Interleaved rather than run-one-arm-then-the-other because this machine hosts other agents:
-        /// a monotonic drift from someone else's build would otherwise land entirely on whichever arm ran
-        /// second and read as a band cost. The paired per-sample difference reported alongside the two
-        /// medians is what survives that.</para>
-        ///
-        /// <para>Magnification 1 frames the whole tile; magnification 4 crops to a quarter of it in each
-        /// axis, which lengthens the on-screen boundary the band's one-pixel strip has to cover while the
-        /// submitted vertex count stays identical — the two halves of the band's cost, separated.</para>
+        /// Band on versus band off, ABAB-interleaved so a monotonic drift from other load on the machine does
+        /// not land on one arm; the paired per-sample difference is reported with the two medians.
+        /// Magnification 4 crops to a quarter per axis: the on-screen boundary the band's one-pixel strip
+        /// covers grows while the vertex count stays the same, so the two halves of the cost separate.
         /// </summary>
         [Test]
         public void Measure_BandOnVersusBandOff()
@@ -830,9 +740,8 @@ namespace MapRenderer.Tests.Visual
                     using var offPlaced = scene.Place(without,  copies: 1, pinhead: false);
                     scene.SetMagnification(mag);
 
-                    // Precondition, before any timing: the two arms must actually RENDER differently. If
-                    // they do not, the band never reached the framebuffer and every number below would be a
-                    // measurement of nothing.
+                    // Precondition: the arms must RENDER differently, or the band never reached the
+                    // framebuffer and every timing below measures nothing.
                     int differing = scene.CountDifferingPixels(onPlaced, offPlaced, out bool bothBlank);
                     if (bothBlank)
                     {
@@ -904,15 +813,11 @@ namespace MapRenderer.Tests.Visual
         // ── Scene: camera, lit ambient, off-screen target, and the clock ───────────────────────────────
 
         /// <summary>
-        /// The timed scene: an off-screen target, a top-down orthographic camera framing the fitted tile,
-        /// and the lit-ambient recipe (quality level 0, flat ambient, one directional light) that
-        /// <c>TiltedGroundScene.Create</c> established — restored on dispose, because it is process-global
-        /// state that would otherwise corrupt every lit render for the rest of the batch process.
-        ///
-        /// <para>Orthographic and untilted on purpose: under an orthographic projection
-        /// <c>MapPixelsToWorld</c>'s w-ratio is exactly 1, so the band is exactly one device pixel wide
-        /// everywhere in frame and the fragment count it adds is a clean function of on-screen perimeter.
-        /// </para>
+        /// The timed scene: an off-screen target, a top-down orthographic camera and the lit-ambient recipe
+        /// of <c>TiltedGroundScene.Create</c> (quality 0, flat ambient, one directional light). Dispose
+        /// restores the ambient state, which is process-global. Orthographic and untilted, so
+        /// <c>MapPixelsToWorld</c>'s w-ratio is 1: the band is one device pixel wide everywhere, and its
+        /// added fragments are a function of on-screen perimeter.
         /// </summary>
         private sealed class Scene : IDisposable
         {
@@ -963,14 +868,10 @@ namespace MapRenderer.Tests.Visual
             public void SetMagnification(float mag) => Cam.orthographicSize = ViewSize * 0.5f / mag;
 
             /// <summary>Instantiates <paramref name="copies"/> renderers sharing one mesh and material,
-            /// fitted to <see cref="ViewSize"/>.
-            ///
-            /// <para><paramref name="pinhead"/> shrinks every copy to a near-zero on-screen footprint
-            /// instead of moving it out of frame. Moving it out would be wrong: Unity culls a renderer whose
-            /// BOUNDS miss the frustum, so an off-frustum copy submits no vertices at all and that ladder
-            /// would measure culling and read flat. A pinhead copy stays inside the frustum, so every one of
-            /// its vertices goes through the vertex shader while covering about one pixel — which isolates
-            /// the vertex half of the band's cost.</para></summary>
+            /// fitted to <see cref="ViewSize"/>. Non-obvious why: <paramref name="pinhead"/> shrinks each
+            /// copy instead of moving it out of frame, because Unity culls a renderer whose bounds miss the
+            /// frustum; a pinhead copy still runs every vertex through the vertex shader over ~1 pixel.
+            /// </summary>
             public Placed Place(MeshArm arm, int copies, bool pinhead)
             {
                 var root = new GameObject("BandCost_Root");
@@ -1176,17 +1077,12 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Image-production harness for the fill boundary band: renders band-OFF and band-ON frames over real MVT
-    // fixtures and writes them to disk as PNGs for a human to judge by eye. NOT a tooth — every test here is
-    // [Explicit], so an unfiltered gate run never touches it.
+    // Image-production harness for the fill boundary band: writes band-OFF and band-ON PNGs over real MVT
+    // fixtures for a human to judge. NOT a tooth: every test is [Explicit], so a gate run never touches it.
     //
-    // WHY BAND-OFF IS THE "BEFORE". The band-off arm is `FillMeshPipeline.LayerInput.SuppressBoundaryBand`,
-    // which removes ALL band geometry — the exact fill rendering `main` produces. Toggling it isolates THIS
-    // change: same build, same shader, same camera, same mesh pipeline, one flag apart. Checking out `main`
-    // would also drag in every unrelated commit on the branch.
-    //
-    // Scene, camera and mesh-arm construction are modelled on FillBandFrameCostDiagnostic (which measures the
-    // band's COST over the same corpus); that file is left untouched.
+    // Non-obvious why: the "before" is `FillMeshPipeline.LayerInput.SuppressBoundaryBand`, which removes all
+    // band geometry, so the two arms are one flag apart in the same build, shader and camera. Scene and
+    // mesh-arm construction follow FillBandFrameCostDiagnostic, which measures the band's COST.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillBandVisualCompareDiagnostic — Produces before/after image pairs of the fill boundary band over real MVT fixtures
@@ -1261,15 +1157,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Renders every case in both arms, writes four PNGs per case (full frame ×2, 8× crop ×2), and
-        /// reports the graded-pixel count for BOTH arms.
-        ///
-        /// <para>The band-OFF graded count is the control, not decoration: MSAA is off in this project's URP
-        /// asset and every case draws one uniform fill colour, so band-OFF must come back at or near zero. A
-        /// substantial count there would mean the classifier is reading shading or per-feature colour as a
-        /// ramp, and no band-ON number from the same run could be believed.</para>
-        ///
-        /// <para>Both arms are classified against references taken from the band-OFF frame (background =
-        /// its corner pixel, full = its brightest pixel), so the two counts are read off one ruler.</para>
+        /// reports the graded-pixel count for BOTH arms. Band-OFF is the control: with MSAA off and one fill
+        /// colour it must read near zero, or the classifier is reading shading as a ramp. Both arms use
+        /// band-OFF references (background = corner pixel, full = brightest pixel), so one ruler reads both.
         /// </summary>
         [Test]
         public void Produce_BeforeAfterImages()
@@ -1476,18 +1366,13 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Picks the crop window from the band-OFF classification: the window scoring highest on
-        /// <c>2 · min(horizontal, vertical)</c> silhouette transitions.
-        ///
-        /// <para>The min of the two axes rather than their sum is what makes it a DIAGONAL boundary: an
-        /// axis-aligned edge produces transitions across one step direction only and scores zero, while a
-        /// 45° edge produces both in equal number. The band's whole claim is about a diagonal silhouette
-        /// (an axis-aligned one is bit-identical under either gradient), so that is what the crop must
-        /// show.</para>
+        /// <c>2 · min(horizontal, vertical)</c> silhouette transitions. The min, not the sum, selects a
+        /// DIAGONAL boundary: an axis-aligned edge scores zero and a 45° edge scores highest. The band's
+        /// claim is about diagonal silhouettes; an axis-aligned one is bit-identical under either gradient.
         /// </summary>
         /// <param name="classes">The band-OFF classification.</param>
-        /// <param name="score">The winning window's score — reported, because a LOW one means this
-        /// fixture's densest window is nearly axis-aligned and the crop is not showing the diagonal case
-        /// the band's gradient claim is about.</param>
+        /// <param name="score">The winning window's score. A LOW score means the crop is nearly
+        /// axis-aligned and does not show the diagonal case.</param>
         /// <returns>The window's bottom-left corner in frame pixels.</returns>
         private static int2 PickCrop(Ink[] classes, out int score)
         {
@@ -1554,13 +1439,10 @@ namespace MapRenderer.Tests.Visual
         // ── Scene ──────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The render scene: an off-screen target, a top-down orthographic camera framing the fitted tile,
-        /// and the lit-ambient recipe <c>TiltedGroundScene.Create</c> established — restored on dispose,
-        /// because it is process-global state.
-        ///
-        /// <para>Orthographic and untilted on purpose: under an orthographic projection the band is exactly
-        /// one device pixel wide everywhere in frame, so a crop from any part of the frame shows the same
-        /// ramp width the shipped renderer produces looking straight down.</para>
+        /// The render scene: an off-screen target, a top-down orthographic camera and the lit-ambient recipe
+        /// of <c>TiltedGroundScene.Create</c>, restored on dispose because it is process-global state.
+        /// Orthographic, so the band is one device pixel wide everywhere and a crop from any part of the
+        /// frame shows the ramp width the renderer produces looking straight down.
         /// </summary>
         private sealed class Scene : IDisposable
         {
@@ -1735,41 +1617,34 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — the declarative visual-test authoring kit's proof fixture.
-    // NOT registered in Tools/core-tests/core-tests.csproj.
-    //
-    // The single fill-only proof fixture carrying the kit's three acceptance teeth: the fill renders where
-    // authored and background where empty; the kit routes through the REAL StyleParser.Parse (two arms);
-    // layers bind by source id, and a dangling id yields no geometry AND wires no source. Fill only — no
-    // symbols, no lines, no seam-dedup.
-
     // ───────────────────────────────────────────────────────────────────────────────────
     // GeoJsonFillVisualProofTests — Unity EditMode only
     // ───────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The declarative visual-test authoring kit's fill-only proof fixture (Unity EditMode only). It pins
+    /// the fill rendering where authored, routing through the real <c>StyleParser.Parse</c>, and a dangling
+    /// source id yielding no geometry and wiring no source. Fill only: no symbols, no lines, no seam-dedup.
+    /// </summary>
     [TestFixture]
     internal class GeoJsonFillVisualProofTests
     {
         // ── The proof geometry: one tile, one polygon, generous margins on every side ──────────────────
-        //
-        // The tile IS the frame: at tilt 0 a tile always projects to exactly WebMercator.TilePixelSize (512)
-        // device px, independent of viewport size (CameraPoseMath.AltitudeForZoom scales altitude to the
-        // viewport so MetresPerDevicePixel == MetersPerPixel(zoom) always) — so SnapPx = 512 makes the tile
-        // fill the frame exactly, and tile-local unit-square coordinates ARE frame-fraction coordinates.
+
+        // At tilt 0 a tile projects to WebMercator.TilePixelSize (512) device px at any viewport size, so
+        // SnapPx = 512 makes the tile the frame and tile-local unit coordinates are frame fractions.
         private static readonly TileId ProofTile = new TileId { Z = 6, X = 40, Y = 25 };
         private const int SnapPx = 512;
 
-        // Polygon spans the tile-local unit square [0.2,0.8]² (60% of the tile, centered) — comfortably
-        // inside GeoJsonSliceOptions.Default's ~1.5%-of-tile buffer, so no tile-edge interaction (seam-dedup
-        // is out of scope here).
+        // Polygon spans the tile-local unit square [0.2,0.8]², clear of GeoJsonSliceOptions.Default's
+        // ~1.5%-of-tile buffer, so it has no tile-edge interaction.
         private const double PolyLo = 0.2, PolyHi = 0.8;
 
         // Center sample box: unit square [0.45,0.55]² — well inside the filled [0.2,0.8]² region.
         private const int CenterLo = 230, CenterHi = 282;
 
-        // Corner sample boxes: 51×51 px (~0.1 of the tile) at each frame corner — well outside the filled
-        // region, and origin-symmetric (all four corners as a SET, never "the top-left corner" — the frame is
-        // bottom-left origin).
+        // Corner sample boxes: 51×51 px at each frame corner, outside the fill. They are read as a SET, so
+        // the frame's bottom-left origin does not matter.
         private const int CornerSize = 51;
 
         private static (double west, double south, double east, double north) ProofRectangle()
@@ -1841,10 +1716,8 @@ namespace MapRenderer.Tests.Visual
                 $"fill must occupy a tolerant central band of the frame: filled={verdict.FilledFraction:P1}, " +
                 $"buckets={verdict.DistinctRegionBucketsHit}/64");
 
-            // White fill under the lit-ambient recipe (0.9 flat ambient + one directional light): the center
-            // region must bias toward white — i.e. clearly brighter than the dark-slate background on every
-            // channel (relative to background, not an absolute floor, since the exact post-tonemap brightness
-            // is a lighting-pipeline detail this kit does not pin).
+            // The lit white fill must be clearly brighter than the background on every channel. The check is
+            // relative, because the kit does not pin the exact post-tonemap brightness.
             double[] center = frame.RegionMeanColor(CenterLo, CenterLo, CenterHi, CenterHi);
             double[] bg = { VisualScene.BackgroundColor.r, VisualScene.BackgroundColor.g, VisualScene.BackgroundColor.b };
             Assert.Greater(center[0], bg[0] + 0.15, "the center region (white fill, lit ambient) must bias toward white — red channel");
@@ -1894,11 +1767,8 @@ namespace MapRenderer.Tests.Visual
         // ── G-VR: golden reference-image regression (change detector, layered ALONGSIDE the analytic
         // teeth above — those stay the correctness oracle; this only catches "different from last bake") ──
 
-        // Reference re-baked 2026-09-08 for the fill boundary band, recorded because a re-bake with no
-        // reason is indistinguishable from one done to go green. Against the previous bake: 1236 differing
-        // px, all on a one-pixel ring on the silhouette (a ~310 px square, ~1240 px of perimeter), all moved
-        // TOWARD the fill colour, none farther than 1.5 px out, ~96,000 px of interior untouched — softened
-        // edges, not displaced geometry, which would have moved tens of thousands of pixels.
+        // The reference includes the fill boundary band: against a band-less bake only a one-pixel ring on
+        // the silhouette differs, moved toward the fill colour, with the interior untouched.
         [Test]
         public void Golden_Gv0Fill_MatchesBakedReference()
         {

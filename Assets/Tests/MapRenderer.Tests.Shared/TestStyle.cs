@@ -1,7 +1,5 @@
-// One construction facade for the eight style-property types. Engine-free by design (references only
-// string/JsonValue/MapRenderer.Core.Style.*) — no `Color`, so this file can never pick which of the suite's
-// two Color bindings a call site meant. The matching <Compile Include> for this file lives in
-// Tools/core-tests/core-tests.csproj.
+// One construction facade for the eight style-property types, engine-free for Tools/core-tests. It names no
+// `Color`, so it never picks which of the suite's two Color bindings a call site meant.
 
 using MapRenderer.Core.Json;
 using Background = MapRenderer.Core.Style.Background;

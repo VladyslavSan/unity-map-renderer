@@ -1,6 +1,5 @@
-// Unity EditMode only — T-TOUCHSTACK structural guard.
-// Mirrors MapControllerInputTests: reads TouchController.cs as text and asserts
-// the presence/absence of required strings, so structural correctness is a runnable test.
+// Unity EditMode only — structural guard: reads TouchController.cs as text and asserts the
+// presence/absence of required strings, like MapControllerInputTests.
 
 using System.IO;
 using MapRenderer.App;
@@ -153,12 +152,10 @@ namespace MapRenderer.Tests.Cameras
         // ── Touch-DPI closure — the seam runs in LOGICAL px ──────────────────────────────────────
 
         /// <summary>
-        /// The touch interaction seam must be DPI-normalized like the
-        /// mouse seam — <see cref="TouchController"/> converts the viewport + finger positions with
-        /// <c>DeviceScaling.DeviceToLogicalPx</c> so anchors share the render camera's logical basis (no
-        /// retina pan/pinch drift). This is the one regression point the headless gate can't exercise (DPR=1,
-        /// no synthetic touches), so guard it structurally. Its twin for the mouse seam lives in
-        /// <c>MapControllerInputTests</c>.
+        /// The touch seam must be DPI-normalized like the mouse seam: <see cref="TouchController"/> converts the
+        /// viewport and finger positions with <c>DeviceScaling.DeviceToLogicalPx</c>, so anchors share the render
+        /// camera's logical basis. Headless runs have DPR=1 and no synthetic touches, so the guard is structural.
+        /// Its mouse twin lives in <c>MapControllerInputTests</c>.
         /// </summary>
         [Test]
         public void TouchController_ConvertsSeamThroughTheDeviceToLogicalConversion()
@@ -167,9 +164,8 @@ namespace MapRenderer.Tests.Cameras
             Assert.IsTrue(src.Contains("DevicePixelRatio"),
                 "TouchController.cs must read Config.DevicePixelRatio to run the interaction seam in logical px " +
                 "(the touch-DPI closure — else retina pan/pinch drifts off the fingers).");
-            // BOTH the viewport AND the finger positions must be converted. A partial fix that normalizes only
-            // one still drifts the anchor — and this structural guard is the only durable protection (the
-            // functional path is DPR=1 / no-synthetic-touch and can't be exercised headless).
+            // BOTH the viewport AND the finger positions must be converted; normalizing only one still
+            // drifts the anchor.
             int conversions = DeviceScalingSeam.ConversionCallCount(src);
             Assert.GreaterOrEqual(conversions, 2,
                 $"TouchController.cs must convert BOTH the viewport AND the finger positions — found " +

@@ -1,8 +1,5 @@
 // MapView/MapViewTests.cs — MapView telemetry, mesh-build, restyle, live-loop and style-commit teeth, PlayMode half.
-//
-// All six settle over real frames (yield, never Thread.Sleep). MapViewMaterialValidationOrderingTests.cs
-// stays its own file — it imports System, and every file here calls bare Object.DestroyImmediate
-// (UnityEngine.Object), a using collision the merge rule resolves by not merging, never by qualifying.
+// All six settle over real frames (yield, never Thread.Sleep).
 //
 // Contents:
 //   MapTelemetryTests              — render/tile telemetry, PlayMode half: async-settle teeth over real frames.
@@ -95,10 +92,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         private static async UniTask<TileResponse> SpinUntilReleased(CancellationTokenSource release)
         {
             await UniTask.SwitchToThreadPool();
-            // Park until cancelled or the ~60s safety cap. Guard the WaitHandle access: if the release path
-            // disposed the CTS before this ThreadPool continuation ran, `release.Token.WaitHandle` throws
-            // ObjectDisposedException — a disposed source means the fetch WAS released, so resolve absent as
-            // if it had woken cleanly, rather than faulting the fetch with an unexpected ODE.
+            // A CTS disposed before this continuation runs makes `WaitHandle` throw ObjectDisposedException;
+            // that means the fetch was released, so resolve absent instead of faulting.
             try { release.Token.WaitHandle.WaitOne(60000); }
             catch (System.ObjectDisposedException) { }
             return TileResponse.Absent(TileEncoding.Mvt);
@@ -132,9 +127,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 var snap = view.CaptureTelemetry();
                 Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
 
-                // Independently recompute the SAME cover from the SAME view inputs MapView itself feeds the
-                // selector (BuildTileSelectionConfig/EnsureSelector) — same min/max zoom, on-screen px, Flat
-                // LOD, GeometryAwareFarPlane (planar default), same camera + framing viewport.
+                // Recompute the SAME cover from the SAME inputs MapView feeds its selector (zoom range,
+                // on-screen px, Flat LOD, GeometryAwareFarPlane, camera and framing viewport).
                 var independent = new FrustumTileSelector(
                     view.Config.TileSelection.MinZoom, view.Config.TileSelection.MaxZoom, view.Config.TileSelection.OnScreenTilePx,
                     new FlatLodStrategy(), new GeometryAwareFarPlane());
@@ -151,12 +145,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "VisibleTileCount must equal an independently recomputed cover over the same view inputs " +
                     "— a shallow impl returning a constant or 0 diverges here.");
 
-                // Must CHANGE between two materially different views (a zoom change). NOTE: zoom 4 → 8 does
-                // NOT change the count here — the 512-px on-screen-tile convention keeps the near-field
-                // grid size roughly CONSTANT across zoom for a fixed square viewport (by design: altitude and
-                // tile ground size scale together), so a zoom change only "changes" VisibleTileCount below the
-                // saturation point. Confirmed directly (FrustumTileSelector over this viewport): z0=1, z1=4,
-                // z2..z4=16 (constant thereafter) — so 4 → 1 is the smallest genuinely material zoom change.
+                // Non-obvious why: at 512 px per tile the count is constant from z2 up over this viewport
+                // (z0=1, z1=4, z2+=16), so zoom 4 → 1 is the smallest change that alters it.
                 view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 1.0 });
                 yield return PumpUntilSettled(view);
                 int changed = view.CaptureTelemetry().VisibleTileCount;
@@ -239,17 +229,14 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
             finally
             {
-                // Release the held fetches and drain so nothing leaks (observe-on-teardown discipline).
-                // A `finally` cannot contain `yield return` (CS1625), so the drain is the SYNCHRONOUS
-                // DrainMeshBuilds (spins the ThreadPool builds inline) — never Thread.Sleep.
+                // Release the held fetches and drain so nothing leaks. A `finally` cannot yield (CS1625), so
+                // the drain is the synchronous DrainMeshBuilds.
                 release.Cancel();
                 for (int f = 0; f < 300; f++) { view.LateUpdate(); view.DrainMeshBuilds(); }
                 view.Teardown();
             }
-            // The assertions above are all synchronous (immediate post-tick state) — nothing in the try
-            // block needs a frame boundary. This yield exists only so the compiler emits an iterator
-            // state machine (a method with zero `yield` statements can't return IEnumerator); it must sit
-            // here, outside `finally`, since `yield return`/`yield break` is illegal inside one (CS1625).
+            // The assertions above need no frame boundary. This yield only makes the method an iterator, and
+            // it sits outside `finally` because a `finally` cannot yield (CS1625).
             yield break;
         }
 
@@ -313,13 +300,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "nothing has been evicted into the cache yet — the live cover still owns every built mesh");
                 Assert.AreEqual(0, afterLoad.PreparedCacheBytesHeld);
 
-                // Evict the whole cover — pan far away; every Built tile transfers into the PreparedTileCache
-                // in THIS tick (release is unthrottled — the whole _toRelease diff is processed synchronously
-                // inside one Tick, no need to PumpUntilSettled to "finish" the eviction). Deliberately do NOT
-                // PumpUntilSettled here: letting the away-location's fresh fetches reach Built before panning
-                // back would transfer THEM into the cache too on the very next Tick (a released-but-Built
-                // tile always transfers), contaminating the entry-count assertions below with unrelated
-                // entries that have nothing to do with the revisit under test.
+                // Pan away: release is unthrottled, so every Built tile enters the cache in THIS tick. Do NOT
+                // settle here: away tiles that reach Built would enter the cache too and skew the counts below.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
                 view.LateUpdate();
 
@@ -329,9 +311,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 Assert.Greater(afterEvict.PreparedCacheBytesHeld, 0,
                     "cached meshes must report non-zero held bytes — BytesHeld must reflect reality.");
 
-                // Revisit — pan back to the original (lon,lat) BEFORE the away-location tiles have had any
-                // chance to reach Built (see note above): the cache must serve a hit for every originally-
-                // cached tile, handing ownership (and the entry) back OUT (Model B TryTake).
+                // Pan back before any away tile reaches Built: the cache must serve a hit for every cached
+                // tile and hand the entry back OUT (Model B TryTake).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
                 view.LateUpdate(); // the recompute (cover diff + probe) runs in THIS tick
                 var afterRevisitTick = view.CaptureTelemetry();
@@ -439,15 +420,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         }
 
         /// <summary>
-        /// docs/telemetry-design.md's pull model: a panel that is never pulled is never written — which
-        /// is exactly a DISABLED panel, because a disabled MonoBehaviour gets no <c>Update</c>. Pulling once fills
-        /// it (the positive control: without it this would also pass if the pull were simply broken), and a panel
-        /// whose reference is cleared stops updating again.
-        ///
-        /// <para>Note what the pull model makes this test STRONGER at: the old subscription version could only
-        /// assert on <c>HasSubscribers</c> — the state the early-out read — and admitted it could not distinguish
-        /// "did not capture" from "captured and told nobody". Here the panel's own fields ARE the evidence: frames
-        /// pass, the providers refresh, and the panel stays zero because nothing read it.</para>
+        /// docs/telemetry-design.md's pull model: a panel that is never pulled is never written, which is a
+        /// DISABLED panel, because a disabled MonoBehaviour gets no <c>Update</c>. One pull fills it (the
+        /// positive control against a broken pull), and a panel whose reference is cleared stops updating.
+        /// The panel's own fields are the evidence: frames pass, providers refresh, and the panel stays zero.
         /// </summary>
         [UnityTest]
         public IEnumerator MapTelemetryPanel_NeverPulled_IsNeverWritten_AndPullingFillsIt()
@@ -489,9 +465,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "positive control: one pull fills the panel from the provider's live struct.");
                 Assert.Greater(panel.VisibleTileCount, 0);
 
-                // Clearing the reference is what a panel switched off mid-session looks like to Pull(). Zeroing the
-                // mirror fields by hand first is what gives this teeth: a Pull that ignored the null Map would
-                // write them straight back to the non-zero values above.
+                // A cleared reference is a panel switched off mid-session. Zero the fields by hand: a Pull that
+                // ignored the null Map would write them back to the non-zero values above.
                 panel.Map = null;
                 panel.VisibleTileCount = 0;
                 panel.LoadedTileCount  = 0;
@@ -509,25 +484,15 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         }
 
         // ── Each owner publishes its own telemetry (docs/telemetry-design.md) ─────────────────────
-        //
-        // The two LABEL providers are tested where they are actually driven — SymbolSubsystemPumpTests
-        // and SymbolFadeTests — because LoadTestStyle never wires the symbol subsystem, so no MapView-level
-        // test can reach CurrentBatch / SymbolPlacementSystem.Tick at all (see the design doc's note).
+        // Non-obvious why: LoadTestStyle never wires the symbol subsystem, so SymbolSubsystemPumpTests and
+        // SymbolFadeTests test the two symbol providers instead.
 
         /// <summary>
-        /// A CLEAN tick must not blank the readout. <c>TileManager.Tick</c> returns early when the cover is
-        /// unchanged, so a refresh reached from inside that path would leave the levels reading zero exactly when
-        /// the camera goes still — the state you stare at longest. This is why the refresh sits in a shell around
-        /// <c>TickCore</c> rather than at the end of the work.
-        ///
-        /// <para><b>Weaker than the push-model test it replaces, deliberately, and here is exactly how.</b> The old
-        /// version counted publish CALLBACKS, so it could assert "one publish per tick, including the early-return
-        /// path". A pull has no callback to count, and no captured value can be perturbed from a test without adding
-        /// production surface the no-test-only-members rule forbids — so "the refresh ran" is no longer directly
-        /// observable. What survives IS falsifiable: a clean tick that refreshed from the early-return path would
-        /// produce zeros, and the loop below would fail. "The refresh runs at all" is now guaranteed structurally
-        /// instead — it is one line in <c>Tick</c>, outside <c>TickCore</c>, where the early return cannot reach it.
-        /// Reinstating a per-refresh stamp on the snapshot would make it observable again.</para>
+        /// A CLEAN tick must not blank the readout. The tile loop returns early when the cover is unchanged, so
+        /// a refresh inside that path would read zero when the camera goes still. The refresh therefore sits in
+        /// <c>Tick</c>, a shell around <c>TickCore</c> that the early return cannot skip.
+        /// Limitation: a pull has no callback to count, so this test cannot observe that the refresh ran; it
+        /// catches only a refresh that blanks the levels.
         /// </summary>
         [UnityTest]
         public IEnumerator TileTelemetry_SurvivesACleanTick_WithoutBlankingTheLevels()
@@ -625,12 +590,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         // ── Cover-key: TILT must trigger a cover recompute (frustum selector integration) ─────────
 
         /// <summary>
-        /// The frustum-based <c>FrustumTileSelector</c> makes the visible set depend on TILT — so
-        /// <c>TileManager.Tick</c>'s cover-recompute key MUST include tilt, else tilting the camera (the exact
-        /// bug scenario) leaves the far field toward the horizon stale. This drives the FULL TileManager path
-        /// (which the selector-level acceptance test bypasses): a stub source serves every tile, so
-        /// <c>LoadedTileCount == cover size</c>. Tilting from overhead to 60° with lon/lat/zoom/heading fixed
-        /// must GROW the cover (the horizon trapezoid). A tilt-blind key would leave the count unchanged.
+        /// <c>FrustumTileSelector</c> makes the visible set depend on TILT, so <c>TileManager.Tick</c>'s
+        /// cover-recompute key must include tilt, or the far field toward the horizon goes stale. This drives
+        /// the full TileManager path: a stub source serves every tile, so <c>LoadedTileCount == cover size</c>,
+        /// and tilting from overhead to 60° with all else fixed must GROW the cover.
         /// </summary>
         [UnityTest]
         public IEnumerator TileCover_RecomputesOnTiltChange_FarFieldGrows()
@@ -672,18 +635,15 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        // ── Tooth 1: no live .Schedule().Complete() — mesh build is deferred ≥ 1 frame ──────
+        // ── No live .Schedule().Complete() — mesh build is deferred ≥ 1 frame ───────────────
 
         /// <summary>
-        /// Behavioral test for tooth 1: on the same frame the fetch completes, the tile must NOT
-        /// transition to Built == true (mesh build is deferred to a later frame / poll cycle).
-        ///
-        /// Setup: the source returns synchronously (Task.FromResult), so after the first Tick() the fetch
-        /// task IsCompleted == true. Mesh build is kicked as a background Task and must NOT be consumed in
-        /// that same Tick().
+        /// On the frame the fetch completes, the tile must NOT turn Built: the mesh build is deferred to a
+        /// later frame. The source returns synchronously, so the first Tick() both completes the fetch and
+        /// kicks the build, and must not consume it.
         /// </summary>
         [UnityTest]
-        public IEnumerator Tooth1_MeshBuildDeferred_TileNotBuiltInSameFetchFrame()
+        public IEnumerator MeshBuildDeferred_TileNotBuiltInSameFetchFrame()
         {
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go = Track(new GameObject("MapView_T1"));
@@ -701,16 +661,12 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                // First Tick: cover is dirty, tile is requested.
-                // FixtureSource returns synchronously, so fetch IsCompleted immediately.
-                // The mesh build Task is KICKED here but NOT consumed.
+                // First Tick: the tile is requested and fetched, and its mesh build is kicked but not consumed.
                 view.LateUpdate();
 
-                // Immediately after the first Tick, the tile should NOT yet be built.
-                // AllTilesSettled() must return false because mesh build is in-flight.
-                // (If this assertion fails, mesh build is synchronous in Tick — tooth 1 violated.)
+                // The mesh build is still in flight, so nothing has settled yet.
                 Assert.IsFalse(view.AllTilesSettled(),
-                    "Tooth 1: After the Tick that kicks mesh build, AllTilesSettled() must be false. "  +
+                    "After the Tick that kicks mesh build, AllTilesSettled() must be false. "  +
                     "Mesh build must be deferred to a later frame (async Task.Run path), not consumed " +
                     "synchronously in the same Tick() call that starts it.");
 
@@ -728,21 +684,15 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        // ── Tooth 3: correctness parity — async path == sync path ──────────────────────────────
+        // ── Correctness parity — async path == sync path ───────────────────────────────────────
 
         /// <summary>
-        /// The async MapView live loop (build off-main + upload on main) must produce the same
-        /// vertex count AND vertex positions as a direct synchronous call to StyledFillTileBuilder.BuildMesh.
-        ///
-        /// The async arm projects vertices with a scalar managed C# loop
-        /// (<c>ProjectVerticesManaged</c>), which replicates the builder's double-precision arithmetic. This
-        /// test pins that no ULP difference exists: positions must be exactly equal.
-        ///
-        /// This mirrors MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder but
-        /// exercises the async path explicitly by waiting for async settle.
+        /// The async MapView live loop (build off-main, upload on main) must produce the same vertex count
+        /// AND vertex positions as a direct synchronous fill build, with no ULP difference. It mirrors
+        /// MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder over the async settle.
         /// </summary>
         [UnityTest]
-        public IEnumerator Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath()
+        public IEnumerator AsyncPath_ProducesSameGeometryAsSyncPath()
         {
             byte[] bytes = SampleTileFixture.Bytes();
             var    src   = TestDataSource.FromBytes(bytes);
@@ -784,34 +734,31 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 Mesh syncMesh = TestTileMeshBuilder.BuildFillFromLayer(
                     mvtLayer, TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), paint, 0.0,
                     new TileId { Z = 0, X = 0, Y = 0 }, projection: null, layout: null,
-                    // Same window as the MapView arm — decoded through the SAME factory the view
-                    // uses. Without this the reference arm builds unclipped and the oracle silently
-                    // stops being a comparison the moment the config default is non-disabled.
+                    // Same clip window as the MapView arm; without it the reference arm builds unclipped
+                    // and stops being a comparison once the config default clips.
                     clip: MapRenderer.Core.Tiles.TileBufferClip.FromInspectorUnits(view.Config.FillTileBufferClip));
                 Assert.IsNotNull(syncMesh);
 
                 Assert.AreEqual(syncMesh.vertexCount, asyncMesh.vertexCount,
-                    "Tooth 3: Async live-loop mesh vertex count must equal direct sync builder output. " +
+                    "Async live-loop mesh vertex count must equal direct sync builder output. " +
                     "Same feature set + same managed projection = same vertex layout.");
 
-                // Position comparison — both paths use the same ProjectVerticesManaged code,
-                // so positions must be bit-for-bit equal (no ULP drift between async and sync).
+                // Positions must be bit-for-bit equal (no ULP drift between async and sync).
                 Vector3[] asyncVerts = asyncMesh.vertices;
                 Vector3[] syncVerts  = syncMesh.vertices;
 
-                // Compare a sample of vertices (first, middle, last) to avoid iterating thousands of verts.
-                // Full equality is impractical in a test but position-sampling demonstrates parity.
+                // Compare a sample (first, middle, last) instead of every vertex.
                 if (syncVerts.Length > 0)
                 {
                     int mid  = syncVerts.Length / 2;
                     int last = syncVerts.Length - 1;
 
                     Assert.AreEqual(syncVerts[0], asyncVerts[0],
-                        "Tooth 3: First vertex position must match between sync and async paths.");
+                        "First vertex position must match between sync and async paths.");
                     Assert.AreEqual(syncVerts[mid], asyncVerts[mid],
-                        $"Tooth 3: Middle vertex [{mid}] position must match.");
+                        $"Middle vertex [{mid}] position must match.");
                     Assert.AreEqual(syncVerts[last], asyncVerts[last],
-                        $"Tooth 3: Last vertex [{last}] position must match.");
+                        $"Last vertex [{last}] position must match.");
                 }
             }
             finally
@@ -820,30 +767,16 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        // ── Tooth 4: cancellation — released mid-flight tile is discarded ─────────────────────
+        // ── Cancellation — released mid-flight tile is discarded ──────────────────────────────
 
         /// <summary>
-        /// Request tiles at z=5, kick mesh build mid-flight, pan far away to evict original tiles,
-        /// then verify no stale GameObjects are created for the evicted tiles after settle.
-        ///
-        /// Verifies the cancellation contract: a mesh build completing after ReleaseTile must not
-        /// create a GameObject for the released tile.
-        ///
-        /// Strategy:
-        ///   - Start at z=5, lon=0: loads a 3x3 cover around tile (5,16,16).
-        ///   - One Tick kicks mesh build tasks for all fetched tiles.
-        ///   - IMMEDIATELY pan far east (lon=170) — the cover is now around (5,31,16).
-        ///     The two covers are non-overlapping, so all original tiles are evicted.
-        ///   - The eviction Tick releases all original tiles. Their mesh build tasks may still
-        ///     be running or just completed. ReleaseTile removes them from _loaded so subsequent
-        ///     PumpPending snapshots exclude them — ConsumeMeshBuild is never called.
-        ///   - After full settle, original tiles must NOT be accessible as built tiles.
-        ///
-        /// Tick-exact: <c>enabled=false</c> suppresses PlayMode's auto-LateUpdate, so the two
-        /// hand-driven <c>view.LateUpdate()</c> calls below are the only two ticks that run.
+        /// The cancellation contract: a mesh build that completes after ReleaseTile must not create a
+        /// GameObject for the released tile. ReleaseTile removes the tile from <c>_loaded</c>, so later
+        /// PumpPending snapshots exclude it and ConsumeMeshBuild never runs for it. The test kicks builds at
+        /// z=5, then pans to a non-overlapping cover (lon=170) before they finish.
         /// </summary>
         [UnityTest]
-        public IEnumerator Tooth4_ReleasedMidFlight_NoGameObjectCreated()
+        public IEnumerator ReleasedMidFlight_NoGameObjectCreated()
         {
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go = Track(new GameObject("MapView_T4"));
@@ -876,7 +809,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
                 // Original center tile must be gone from _loaded.
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
-                    "Tooth 4: Original tile (5,16,16) must be evicted after panning.");
+                    "Original tile (5,16,16) must be evicted after panning.");
 
                 // Let everything settle (new cover tiles build).
                 yield return PumpUntilSettled(view, maxFrames: 2500);
@@ -884,7 +817,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // After full settle, the evicted original tile must still be absent.
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
-                    "Tooth 4: Released tile must not have been re-created as a GameObject " +
+                    "Released tile must not have been re-created as a GameObject " +
                     "even if its mesh build task completed after release.");
 
                 // New cover must be built.
@@ -914,11 +847,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64; view.Config.MaxMeshBuildsPerTick = 64;
-            // Style B's "https://example.com/..." tile template is a PLACEHOLDER, never meant to be
-            // fetched for real — without this override, PumpUntilSettled's real cover/fetch loop would hit
-            // the network (via the DEFAULT TileDataSourceFactory), producing a flaky/slow test AND an
-            // unobserved-exception console flood from the doomed request (mirrors MapViewSetStyleTests'
-            // convention: every non-file:// test either overrides the factory or stays fully offline).
+            // Style B's "https://example.com/..." template is a placeholder; without this override the
+            // settle loop would hit the network through the default factory and flood unobserved exceptions.
             view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
             return view;
         }
@@ -1124,9 +1054,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
     [TestFixture]
     public class MapViewSetStyleTests : BaseTestFixture
     {
-        // Yield frames until a (Preserved) UniTask completes on the main thread — the file:// document loader
-        // and the inline-source spec build both complete on the ThreadPool (no PlayerLoop), so a real frame
-        // gives them wall-clock. Never Thread.Sleep.
+        // Yield frames until a (Preserved) UniTask completes. The file:// loader and the inline-source spec
+        // build complete on the ThreadPool, so real frames give them wall-clock.
         private static IEnumerator Await(UniTask task, int maxSpins = 10000)
         {
             var t = task.Preserve();
@@ -1362,9 +1291,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
     [TestFixture]
     public class MapViewSourceSpecTests : BaseTestFixture
     {
-        // rasterSrc is URL-only (no inline tiles[]) — a regression that incorrectly builds a spec for a
-        // raster layer would fetch its TileJSON too, making "zero document loads" a real falsifier, not a
-        // vacuous one.
+        // rasterSrc is URL-only (no inline tiles[]), so a spec wrongly built for a raster layer would fetch
+        // its TileJSON and break "zero document loads".
         private const string MixedStyle = @"{
             ""version"": 8,
             ""sources"": {

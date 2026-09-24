@@ -43,28 +43,14 @@ namespace MapRenderer.Unity.Rendering.Tile
     }
 
     /// <summary>
-    /// A byte-budgeted LRU cache of prepared (built) per-tile-layer <see cref="Mesh"/> objects, keyed by
-    /// <see cref="PreparedKey"/> — a structural clone of <see cref="MapRenderer.Core.Data.TileCache"/>
-    /// (Dictionary + intrusive <see cref="LinkedList{T}"/> + single lock), specialised for byte-budget
-    /// eviction and <see cref="Mesh"/> ownership/destruction instead of count-bounded raw-byte storage.
-    ///
-    /// <para><b>Ownership — Model B (take-on-hit / put-on-release), single owner at all times.</b> A mesh is
-    /// in this cache IFF its tile is currently out of the render cover — the in-cover working copy lives in
-    /// <c>TileManager._loaded</c>. <see cref="Put"/> (a Built tile leaving the cover) transfers ownership IN;
-    /// <see cref="TryTake"/> (the tile re-entering the cover, a hit) transfers ownership OUT — the entry is
-    /// REMOVED, not merely promoted, so an evictable cache entry is never simultaneously a live in-cover draw
-    /// item (no pinning needed, and eviction can never destroy a mesh that is being drawn).</para>
-    ///
-    /// <para><b>Empty-layer completeness.</b> A <c>Mesh</c> value of <see langword="null"/> is a valid entry
-    /// — the "this layer produced no geometry for this tile" marker (0 bytes). <see cref="Contains"/> lets the
-    /// caller probe per-layer completeness (every dense layerId present, produced-or-marker) before treating a
-    /// tile as a full cache hit.</para>
-    ///
-    /// <para><b>Main-thread only.</b> <c>UnityEngine.Object.Destroy</c>/<c>DestroyImmediate</c> are main-thread
-    /// APIs, so every mutating call (<see cref="Put"/>, <see cref="TryTake"/>, <see cref="Dispose"/>) must run
-    /// on the Unity main thread — <c>TileManager</c> only ever calls this from <c>Tick</c>/<c>ReleaseTile</c>/
-    /// <c>Dispose</c>. The lock is kept for structural parity with <c>TileCache</c>'s template; there is no
-    /// worker-thread access to guard against in practice.</para>
+    /// A byte-budgeted LRU cache of prepared per-tile-layer <see cref="Mesh"/> objects, keyed by
+    /// <see cref="PreparedKey"/>. It has the shape of <see cref="MapRenderer.Core.Data.TileCache"/> and owns
+    /// and destroys the meshes it holds. Non-local invariant: a mesh is here only while its tile is out of
+    /// the render cover (Model B). <see cref="Put"/> takes ownership in; <see cref="TryTake"/> removes the
+    /// entry, so eviction never destroys a mesh that is drawn. A <see langword="null"/> mesh marks a layer
+    /// with no geometry; <see cref="Contains"/> probes per-layer completeness before a full hit.
+    /// Mutating calls run on the main thread only, because <c>Destroy</c> is main-thread; the lock only
+    /// mirrors <c>TileCache</c>.
     /// </summary>
     internal sealed class PreparedTileCache : VerifiedDisposable
     {
@@ -82,20 +68,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly object _lock = new object();
         private long _bytesHeld;
 
-        // A pre-warmed pool of LinkedListNode<Entry> instances — Put/TryTake/eviction reuse a detached
-        // node instead of `new LinkedListNode<Entry>(...)`, so a Tick that evicts a Built tile into this
-        // cache (a REAL scenario — a heading/tilt change rotates the viewport quad and can churn which
-        // tiles cover a whole-world zoom level even at a constant tile COUNT) stays allocation-free,
-        // preserving the pre-existing zero-alloc Tick contract
-        // (MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory — specifically its
-        // heading/tilt sub-case, which exercises exactly this ReleaseTile -> TransferBuiltMeshesToCache ->
-        // Put path). Verified empirically: with this pool removed, that test fails deterministically on a
-        // `new LinkedListNode<Entry>` allocation in the cover-churn Put.
-        //
-        // Pre-filled once at construction to <c>min(countCap, MaxPrewarmedNodes)</c> — the cache can never
-        // hold more than countCap entries simultaneously, so that many nodes cover every Put without a
-        // fallback allocation in the overwhelmingly common case; a pathological burst beyond the prewarmed
-        // count still falls back to `new` rather than fail (correctness over the (already generous) budget).
+        // Non-obvious why: a heading/tilt change churns which tiles cover the view at a constant tile count,
+        // so a Tick puts Built tiles here. Reused nodes keep that Tick allocation-free, as the heading/tilt
+        // case of MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory asserts.
+        // The pool holds min(countCap, MaxPrewarmedNodes) nodes; a larger burst falls back to `new`.
         private const int MaxPrewarmedNodes = 1024;
         private readonly Stack<LinkedListNode<Entry>> _nodePool;
 

@@ -10,22 +10,14 @@ using MapRenderer.Tests; // TestSymbolPlan — <see cref> in CopySymbolInto's do
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Appends hand-built <see cref="ShapedSymbol"/>s straight into a <see cref="SymbolTileBuffer"/> —
-    /// mirroring what <c>StyledSymbolTileBuilder.Shape</c>'s point/curved/icon emit branches produce, so a
-    /// test fixture can feed <c>SymbolTileBlockBaker.Bake</c> directly.
+    /// Appends hand-built <see cref="ShapedSymbol"/>s into a <see cref="SymbolTileBuffer"/>, mirroring
+    /// <c>StyledSymbolTileBuilder.Shape</c>'s point/curved/icon emit branches, to feed <c>SymbolTileBlockBaker.Bake</c>.
     ///
-    /// <para><b>Default-value contract (READ BEFORE ADDING A PARAMETER).</b> Every optional parameter below
-    /// defaults to <c>default(T)</c> of its own type, NOT the "spec" default the corresponding
-    /// <see cref="ShapedSymbol"/> field's own XML doc describes (e.g. an omitted <c>keepUpright</c> is
-    /// <c>false</c>, not the style-spec's <c>true</c>; an omitted <c>maxAngleDeg</c> is <c>0f</c>, not <c>45</c>;
-    /// an omitted <c>paint</c> is <c>default(SymbolPaint)</c> — all-zero — NOT <see cref="SymbolPaint.Default"/>'s
-    /// opaque black). Do NOT "helpfully" substitute a spec default here — leaving every unset field at
-    /// <c>default(T)</c> is what keeps every fixture in this cluster byte-identical across a refactor of the
-    /// underlying representation.</para>
-    ///
-    /// <para>Field → default(T) table (every field not called out below is either a required parameter here —
-    /// <c>anchorRender</c>/<c>quads</c>/<c>boundsMin</c>/<c>boundsMax</c> for a point, <c>glyphs</c>/<c>anchors</c>/
-    /// <c>path</c> for a curved symbol — or has no scalar counterpart (the pooled span starts/counts)):</para>
+    /// <para>Non-local invariant: every optional parameter defaults to <c>default(T)</c>, NOT the spec default
+    /// the <see cref="ShapedSymbol"/> field describes (<c>keepUpright</c> is <c>false</c>, not <c>true</c>;
+    /// <c>maxAngleDeg</c> is <c>0f</c>, not <c>45</c>), which keeps every fixture in this cluster byte-identical
+    /// across a representation refactor. Never substitute a spec default. The table omits required parameters
+    /// and the pooled span starts/counts:</para>
     /// <list type="table">
     /// <item><term><c>text</c>/<c>iconImage</c></term><description><c>null</c>, which <see cref="SymbolStringTable.Intern"/>
     /// resolves to <c>TextId</c>/<c>IconImageId</c> = <c>0</c> — still <c>default(int)</c></description></item>
@@ -44,12 +36,8 @@ namespace MapRenderer.Tests.Text.Placement
     /// </summary>
     internal static class TestSymbolTileBuffer
     {
-        // ShapedSymbol carries interned TextId/IconImageId ints, not raw strings — every AddPoint/
-        // AddCurved call below takes the plain string and interns it. A caller that cares about ids
-        // matching ACROSS buffers/calls (e.g. a cross-tile dedup fixture) passes its own SymbolStringTable
-        // explicitly; a caller that does not (the overwhelming majority of hand-built single-buffer fixtures)
-        // falls back to this ONE shared, never-reset table — never a fresh table per call, which would let two
-        // DIFFERENT strings collide onto the same id (both getting 1) across separate Add* calls.
+        // Add* interns each string. A table per call would give two DIFFERENT strings the same id, so a
+        // caller without its own table shares this one, never reset.
         private static readonly SymbolStringTable DefaultStringTable = new SymbolStringTable();
 
         /// <summary>Appends one POINT (or icon — see <paramref name="kind"/>) symbol. Every scalar parameter
@@ -59,9 +47,8 @@ namespace MapRenderer.Tests.Text.Placement
         /// <param name="quads">This symbol's baked-px glyph/icon quads (may be null/empty).</param>
         /// <param name="boundsMin">The laid-out block's anchor-relative bounding box min corner.</param>
         /// <param name="boundsMax">The laid-out block's anchor-relative bounding box max corner.</param>
-        /// <param name="stringTable">Interns <paramref name="text"/>/<paramref name="iconImage"/>; null (the
-        /// default) uses the shared <see cref="DefaultStringTable"/> — pass an explicit table when the test
-        /// needs literal id values or cross-buffer id parity.</param>
+        /// <param name="stringTable">Interns <paramref name="text"/>/<paramref name="iconImage"/>; null uses the
+        /// shared <see cref="DefaultStringTable"/>. Pass one for literal ids or cross-buffer id parity.</param>
         internal static void AddPoint(SymbolTileBuffer buffer, double3 anchorRender, IReadOnlyList<SymbolQuad> quads,
             float2 boundsMin, float2 boundsMax,
             string text = default, double3 up = default, string iconImage = default, SymbolKind kind = default,

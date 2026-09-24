@@ -14,14 +14,9 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Filters
 {
     /// <summary>
-    /// Property filter acceptance tests. Validates that <see cref="FeatureSelector.SelectFeatures"/>
-    /// returns real non-empty subsets when filtering by feature properties and feature id on the
-    /// actual fixture tile.
-    ///
-    /// Each legacy filter form is mirrored by the equivalent expression form to confirm parity.
-    /// Negative-control ("Nowhere" → 0) proves the filter is genuinely selective.
-    ///
-    /// Fixture numbers pinned 2026-06-20 from a probe run.
+    /// <see cref="FeatureSelector.SelectFeatures"/> returns real non-empty subsets when it filters the fixture
+    /// tile by feature properties and feature id. Each legacy filter form has a matching expression form.
+    /// A negative control ("Nowhere" → 0) shows the filter is selective. Fixture counts come from a probe run.
     /// </summary>
     [TestFixture]
     public class PropertyFilterTests

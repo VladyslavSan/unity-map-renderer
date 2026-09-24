@@ -4,14 +4,10 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// The parsed MapLibre line <b>layout</b> properties for a single line style layer — the join/cap/limit
-    /// knobs baked at build time, split out of the former <c>LinePaint</c>. Read from the layer's
-    /// <c>layout</c> sub-tree via <see cref="PropertyNames"/>. Engine-free; clean-room (public Style Spec).
-    ///
-    /// Join and Cap are parsed once at construction into their typed enum values so the ribbon builder can
-    /// consume them directly (no per-build string switch). <c>MiterLimit</c> and <c>RoundLimit</c> remain
-    /// plain <c>double</c> because the ribbon builder's miter-ratio math runs in <c>double</c>
-    /// (changing to <c>float</c> would introduce a precision delta with no spec justification).
+    /// The parsed MapLibre line <b>layout</b> properties for a single line style layer: the join/cap/limit
+    /// knobs baked at build time. Join and Cap parse once at construction into typed enums, so the ribbon
+    /// builder needs no per-build string switch. <c>MiterLimit</c> and <c>RoundLimit</c> stay <c>double</c>
+    /// because the ribbon builder's miter-ratio math runs in <c>double</c>.
     /// </summary>
     public sealed class LayoutProperties
     {

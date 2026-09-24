@@ -70,14 +70,9 @@ namespace MapRenderer.Tests
 
         /// <summary>The closed-form screen span, AT THE LOOK-AT ONLY, of a world segment of
         /// <paramref name="lengthMetres"/> along the tilt axis: <c>lengthMetres / mpp · cos(tilt)</c>. Used
-        /// ONLY to cross-check the projective ruler (<see cref="GroundSegmentSpanPx"/>); every consumer uses
-        /// that ruler, which stays valid off-centre and at other depths where this closed form does not.
-        ///
-        /// <para>Limitation no test can observe: <c>mpp</c> is a per-FRAME constant fixed at the look-at
-        /// depth, so this form is wrong at any other depth by the depth ratio — a fixture anchored at the
-        /// look-at sees that error as zero and cannot observe depth-dependent behaviour at all. Prefer the
-        /// depth-GENERAL <see cref="ClosedFormPerpendicularSpanPx"/> whenever the measurand is not at the
-        /// look-at.</para></summary>
+        /// ONLY to cross-check the projective ruler (<see cref="GroundSegmentSpanPx"/>). Limitation: <c>mpp</c>
+        /// is fixed at the look-at depth, so this form is wrong elsewhere by the depth ratio, and a look-at
+        /// fixture cannot see it; use <see cref="ClosedFormPerpendicularSpanPx"/> away from the look-at.</summary>
         public static double ClosedFormAcrossAzimuthSpanPx(
             double lengthMetres, double metresPerDevicePixel, Angle tilt)
             => lengthMetres / metresPerDevicePixel * tilt.Cos;
@@ -112,16 +107,9 @@ namespace MapRenderer.Tests
         /// <summary>The closed-form screen span, AT ANY DEPTH, of a world displacement of
         /// <paramref name="lengthMetres"/> PERPENDICULAR to the camera's view axis, at view depth
         /// <paramref name="viewDepthMetres"/>: <c>L·|P11|·H / (2w)</c>. The depth-GENERAL sibling of
-        /// <see cref="ClosedFormAcrossAzimuthSpanPx"/> (look-at only): its terms are the raw projection
-        /// (<c>camera.projectionMatrix.m11</c>, <c>camera.pixelHeight</c>) and a measured view depth, so it
-        /// stays correct as a symbol recedes.
-        ///
-        /// <para>Validity, a limitation no test can observe: exact for a displacement perpendicular to the
-        /// view axis (both endpoints then share one <c>w</c>, so the perspective divide is a single scale
-        /// factor), and a small-span approximation otherwise. <c>|P11|·H</c> equals <c>|P00|·W</c>
-        /// identically (<c>P00 = P11/aspect</c>, <c>aspect = W/H</c>), so it is also the correct factor for a
-        /// HORIZONTAL perpendicular displacement at any aspect. Cross-checked against the live projection at
-        /// two depths by the off-look-at fixture's oracle-acceptance tooth.</para></summary>
+        /// <see cref="ClosedFormAcrossAzimuthSpanPx"/>, built from <c>projectionMatrix.m11</c>, pixel height
+        /// and a measured depth. Limitation: exact only perpendicular to the view axis (one shared <c>w</c>),
+        /// a small-span approximation otherwise; <c>|P11|·H == |P00|·W</c>, so it holds horizontally too.</summary>
         public static double ClosedFormPerpendicularSpanPx(
             double lengthMetres, double viewDepthMetres, double absP11, double viewportHeightPx)
             => lengthMetres * absP11 * viewportHeightPx / (2.0 * viewDepthMetres);

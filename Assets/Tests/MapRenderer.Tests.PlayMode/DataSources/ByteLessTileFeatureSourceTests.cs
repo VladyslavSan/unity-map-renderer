@@ -1,7 +1,5 @@
-// A BYTELESS source (no IDataSource, no bytes, no FetchAsync) flows through the UNCHANGED per-layer
-// fan-out. PlayMode: drives the real cover→build→settle loop over real frames (yield, never
-// Thread.Sleep). The pure async-Task GetTile teeth live in the EditMode half
-// (MapRenderer.Tests.DataSources.TileFeatureSourceGetTileTests).
+// A BYTELESS source (no IDataSource, no bytes, no FetchAsync) flows through the same per-layer fan-out,
+// driven over real frames. The pure GetTile teeth live in TileFeatureSourceGetTileTests (EditMode).
 
 using System.Collections;
 using System.Collections.Generic;

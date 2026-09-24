@@ -1,7 +1,5 @@
 // Mvt/MvtDecodeTests.cs — MVT tag/property/geometry decode teeth, plain bare-NUnit-Is group (EditMode).
-//
-// Split from Mvt/MvtNativeShapeTests.cs by the using-collision rule: these four use bare NUnit Is
-// and must never share a file with that pair's Is = UnityEngine.TestTools.Constraints.Is alias.
+// Split from Mvt/MvtNativeShapeTests.cs by the using-collision rule: that file aliases Is to the Unity one.
 //
 // Contents:
 //   MvtDecodeTagColumnHardeningTests  — MvtDecoder.FlattenFeatureColumn sizes both tag-slice columns to the feature count.
@@ -34,20 +32,10 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Regression tooth for
-    /// <see cref="MvtDecoder.ValidateTagSliceColumnsMatchFeatureCount"/>: the tag-slice columns' feature-
-    /// count lockstep check must both (a) actually throw on a mismatch and (b) run BEFORE
-    /// <c>MvtLayer.AdoptGeometry</c> inside <c>MvtDecoder.DecodeLayer</c> — the ordering that keeps a
-    /// mismatch from leaking the just-adopted geometry buffer (the layer is not yet reachable from
-    /// <c>tile.Layers</c> at that point, so <c>Decode</c>'s catch cannot free it; see the call site's
-    /// comment in <c>MvtDecoder.cs</c>).
-    ///
-    /// <para>A REAL mismatch is unreachable through <see cref="MvtDecoder.Decode"/> — <c>FlattenFeatureColumn</c>
-    /// sizes both tag-slice columns to the feature count — so (a) is pinned directly
-    /// against the check (broadened to <c>internal</c> for exactly this), and (b) is pinned by scanning
-    /// <c>MvtDecoder.cs</c>'s own source for the two calls' relative order, the same source-scan technique
-    /// <c>Structure/NeutralGeometryPathTests</c> already uses for a fence a reflection-only assertion
-    /// cannot express.</para>
+    /// <see cref="MvtDecoder.ValidateTagSliceColumnsMatchFeatureCount"/> must (a) throw on a mismatch and
+    /// (b) run BEFORE <c>MvtLayer.AdoptGeometry</c> in <c>MvtDecoder.DecodeLayer</c>, which keeps a mismatch
+    /// from leaking the adopted geometry buffer. A real mismatch is unreachable through <see cref="MvtDecoder.Decode"/>,
+    /// so (a) calls the <c>internal</c> check directly and (b) scans <c>MvtDecoder.cs</c> for the call order.
     /// </summary>
     [TestFixture]
     public class MvtDecodeTagColumnHardeningTests
@@ -152,13 +140,9 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// MVT property/id decoding tests. Validates:
-    ///   1. Key table, value table, and per-feature Properties/Id decoded correctly from the fixture.
-    ///   2. All MVT Value variant types (string, float, double, int, uint, sint, bool) decoded from
-    ///      synthetic hand-built tile bytes.
-    ///   3. Malformed tag input (odd-length, out-of-range index) is skip-tolerant, no throw.
-    ///
-    /// Fixture numbers probed and pinned 2026-06-20.
+    /// MVT property/id decoding: key table, value table and per-feature Properties/Id from the fixture;
+    /// every MVT Value variant (string, float, double, int, uint, sint, bool) from hand-built tile bytes;
+    /// and malformed tag input (odd length, out-of-range index) skipped without a throw.
     /// </summary>
     [TestFixture]
     public class MvtPropertyDecodeTests
@@ -326,13 +310,7 @@ namespace MapRenderer.Tests.Mvt
 
         // ── Synthetic variant type tests ─────────────────────────────────────────────────────────
         //
-        // The fixture only uses string and uint variants. The tests below cover the remaining
-        // variants (float, double, int, sint-negative, bool) via hand-built minimal tile bytes.
-        //
-        // Tile encoding: each minimal tile is [layer_field3_tag, layer_len, layer_bytes].
-        // Layer: [version=15 tag+val, name tag+val, key tag+val, value tag+val, feature tag+val].
-        // Feature: [type tag+val, tags tag+val, geometry tag+val (dummy)].
-        // Value sub-message varies by variant.
+        // The fixture has only string and uint variants; hand-built minimal tile bytes cover the rest.
 
         // Helpers for building minimal protobuf bytes.
 
@@ -636,19 +614,10 @@ namespace MapRenderer.Tests.Mvt
     /// <c>Capacity</c> equals its <c>Count</c> exactly — no growth over-allocation.
     /// </summary>
     /// <remarks>
-    /// RED without the pre-size: a <see cref="System.Collections.Generic.List{T}"/> grown by doubling lands on
-    /// the next power of two ≥ Count, strictly greater whenever Count is not itself a reached power of two.
-    /// The fixture-has-a-non-power-of-two guard keeps the tooth from passing vacuously on a layer whose count
-    /// a doubling build would coincidentally land on.
-    ///
-    /// <para><b>Recorded limitation — the <c>Values</c> arm is dropped.</b> This stage moved
-    /// <see cref="MvtLayer.Values"/> off <c>List&lt;MvtValue&gt;</c> onto <c>NativeArray&lt;MvtValueNative&gt;</c>,
-    /// sized to the exact decoded count (no <c>Capacity</c> to over-allocate) — the
-    /// "no growth over-allocation" property this file pins now belongs to the DECODE's transient
-    /// <c>List&lt;MvtValueNative&gt;</c> scratch, which falls out of scope before this test can observe it.
-    /// Value-table COUNT correctness (as opposed to allocation shape) is still pinned — by
-    /// <c>MvtPropertyDecodeTests.Countries_ValueTable_HasExpectedCount</c> (914, via <c>.Length</c>) — so this
-    /// is a narrowing of what this file observes, not a silently weakened tooth.</para>
+    /// A list grown by doubling lands on the next power of two ≥ Count, so a non-power-of-two layer is required.
+    /// Limitation: the <c>Values</c> table is not observed here. <see cref="MvtLayer.Values"/> is a
+    /// <c>NativeArray</c> sized to the decoded count, and the decode's transient list is out of scope. Its
+    /// count is pinned by <c>MvtPropertyDecodeTests.Countries_ValueTable_HasExpectedCount</c>.
     /// </remarks>
     [TestFixture]
     public class MvtDecodePresizeTests
@@ -678,9 +647,8 @@ namespace MapRenderer.Tests.Mvt
                 if (layer.Features.Count > 0 && !IsPowerOfTwo(layer.Features.Count)) sawNonPowerOfTwo = true;
             }
 
-            // The Capacity==Count check only discriminates the fix when at least one count is not a power of
-            // two (a doubling build would otherwise coincidentally land on Count). Fail loudly if the fixture
-            // ever loses that property rather than let the tooth pass vacuously.
+            // Capacity==Count discriminates only if some count is not a power of two (a doubling build could
+            // land on Count by chance), so fail if the fixture loses that property.
             Assert.That(sawNonPowerOfTwo, Is.True,
                 "fixture must contain a layer whose feature count is not a power of two for this tooth to bite.");
         }
@@ -714,15 +682,10 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The string→id key hoist — the integration proof, over the real fixture, that
-    /// <see cref="FeatureSelector"/>'s per-layer bind step resolves a filter's constant-key <c>get</c>/<c>has</c>
-    /// names ONCE per <see cref="FeatureSelector.SelectFeatures(StyleLayer, ITileLayer, double, List{SelectedTileFeature})"/>
-    /// call — not once per feature — and that the hoisted int-key binding path (via the
-    /// <see cref="ITileLayer"/> overload) and the plain string-lookup path (via the
-    /// <see cref="FeatureSelector.SelectFeatures(StyleLayer, IReadOnlyList{IFeature}, double, List{SelectedTileFeature})"/>
-    /// features-list overload, which never probes for <see cref="IIndexedFeatureSource"/> capability and so
-    /// always evaluates by name) select the same features over the SAME decoded feature set, exactly as
-    /// before the hoist.
+    /// Over the real fixture, <see cref="FeatureSelector"/>'s per-layer bind step resolves a filter's
+    /// constant-key <c>get</c>/<c>has</c> names ONCE per <c>SelectFeatures</c> call, not once per feature.
+    /// The hoisted int-key path (<see cref="ITileLayer"/> overload) and the by-name path (the features-list
+    /// overload, which never probes <see cref="IIndexedFeatureSource"/>) select the same features.
     /// </summary>
     [TestFixture]
     public class KeyBindingHoistTests
@@ -773,12 +736,10 @@ namespace MapRenderer.Tests.Mvt
             }
         }
 
-        /// <summary>A thin <see cref="ITileLayer"/>/<see cref="IIndexedFeatureSource"/> adapter over a real
-        /// (already-decoded) <see cref="MvtLayer"/>: forwards <see cref="Features"/> as given (so a test can
-        /// vary N independently of the layer's own feature count) and <see cref="Geometry"/> straight from
-        /// the real layer (borrowed, never disposed here — the tracked <see cref="MvtTile"/> owns it), and
-        /// answers <see cref="KeyResolver"/> with a <see cref="CountingKeyResolver"/> wrapping the real
-        /// layer's Dense resolver.</summary>
+        /// <summary>An <see cref="ITileLayer"/>/<see cref="IIndexedFeatureSource"/> adapter over a decoded
+        /// <see cref="MvtLayer"/>. <see cref="Features"/> is given, so a test can vary N; <see cref="Geometry"/>
+        /// is borrowed (the tracked <see cref="MvtTile"/> owns it); <see cref="KeyResolver"/> is a
+        /// <see cref="CountingKeyResolver"/> over the real layer's resolver.</summary>
         private sealed class CountingIndexedTileLayer : ITileLayer, IIndexedFeatureSource
         {
             private readonly MvtLayer _real;
@@ -832,9 +793,8 @@ namespace MapRenderer.Tests.Mvt
             int allFeaturesResolveCount = allLayerAdapter.Resolver.CallCount;
             int allFeaturesSelected = into.Count;
 
-            // The filter has exactly one get-node -> exactly one TryResolveKey call per SelectFeatures call,
-            // however many features it scans. A per-feature lookup (the un-hoisted behaviour) would instead
-            // scale with N: 1 at N=1, layer.Features.Count at N=all.
+            // One get-node -> one TryResolveKey call per SelectFeatures call, however many features it
+            // scans. A per-feature lookup would scale with N: 1 at N=1, layer.Features.Count at N=all.
             Assert.That(oneFeatureResolveCount, Is.EqualTo(1),
                 "one get-node -> exactly one TryResolveKey call, even at N=1");
             Assert.That(allFeaturesResolveCount, Is.EqualTo(1),
@@ -928,13 +888,10 @@ namespace MapRenderer.Tests.Mvt
 
         /// <summary>
         /// <see cref="DensePropertyStore"/>'s instance field set must be EXACTLY
-        /// <c>{MvtLayerPropertyResolver, int}</c> — the resolver plus its feature ordinal, nothing more.
-        /// The per-feature <c>(offset,count)</c> slice now lives in the layer's native columns (read by
-        /// ordinal through <see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/>), so the store holds no
-        /// copy of it — leaner than the earlier two-int shape. Still no <c>uint[]</c> (the pre-flatten
-        /// representation) and no <c>NativeArray&lt;uint&gt;</c> (a 48 B per-store handle in the Editor that
-        /// would erase the whole stage's win across ~495 stores/tile). Only an exact field-set assertion
-        /// catches a bloated design — a looser "no uint[]" check would pass it.
+        /// <c>{MvtLayerPropertyResolver, int}</c> — the resolver plus its feature ordinal. The slice lives in
+        /// the layer's native columns (<see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/>). A per-store
+        /// <c>uint[]</c> or <c>NativeArray&lt;uint&gt;</c> handle would multiply across every store in a tile,
+        /// and only an exact field-set assertion catches it; a looser "no uint[]" check would pass.
         /// </summary>
         [Test]
         public void Store_HasExactFieldSet_ResolverAndOrdinal()
@@ -1030,12 +987,10 @@ namespace MapRenderer.Tests.Mvt
                 "precondition: the fixture must decode at least one non-empty value table, or this tooth is vacuous");
         }
 
-        /// <summary>The actual leak guard for the value table: frees <see cref="MvtLayer.Values"/> exactly
-        /// once, and a second <c>Dispose</c> is a no-op. <b>This is the tooth that catches a missed free</b> —
-        /// if <see cref="MvtLayer.Dispose"/> forgot to free <c>Values</c>, the values-array read-after-dispose
-        /// UAF tooth would stay GREEN (its resolver's <c>tagWords</c> read throws first, shadowing the
-        /// values-array check — see <c>MvtValueCompactionTests.TryGetByKeyIndex_AfterValuesArrayDisposed_FailsLoud</c>'s
-        /// doc), so free-exactly-once is the only tooth that observes a missed free.</summary>
+        /// <summary>The leak guard for the value table: <see cref="MvtLayer.Dispose"/> frees
+        /// <see cref="MvtLayer.Values"/> once, and a second <c>Dispose</c> is a no-op. It is the only tooth
+        /// that sees a missed free: the read-after-dispose tooth stays green, because its <c>tagWords</c>
+        /// read throws first.</summary>
         [Test]
         public void DecodedTile_FreesValues_ExactlyOnce()
         {
@@ -1091,18 +1046,15 @@ namespace MapRenderer.Tests.Mvt
             Assert.That(countries, Is.Not.Null, "precondition: the fixture has a 'countries' layer");
             IFeature feature = countries.Features[0];
 
-            // Anti-vacuity: prove the read succeeds WHILE the tile is alive, on a key guaranteed present
-            // (every countries feature has NAME — see DensePropertyStoreTests). A missing key would return
-            // false at the TryGetKeyIndex gate before ever touching the tag-words buffer, so it would not
-            // exercise — or falsify — the read this tooth is about.
+            // Anti-vacuity: the read succeeds while the tile is alive, on a key every countries feature has.
+            // A missing key returns false at the TryGetKeyIndex gate and never touches the tag-words buffer.
             bool foundWhileAlive = feature.TryGetProperty("NAME", out Value _);
             Assert.That(foundWhileAlive, Is.True, "precondition: NAME must resolve while the tile is alive");
 
             tile.Dispose();
 
-            // Strict form first (brief: don't degrade to Assert.Catch without first establishing the exact
-            // type reds). If a future Collections version changes the thrown type, tighten/loosen here —
-            // see the dev report for the type observed on the pinned version.
+            // Assert.Throws pins the exact exception type. If a Collections upgrade changes the thrown type,
+            // update it here rather than degrading to Assert.Catch.
             Assert.Throws<ObjectDisposedException>(() => feature.TryGetProperty("NAME", out Value _),
                 "reading a property after MvtLayer.Dispose must throw ObjectDisposedException — a disposed " +
                 "NativeArray read under collections safety checks, not a silent stale value.");
@@ -1110,9 +1062,8 @@ namespace MapRenderer.Tests.Mvt
 
         // ── Repeated tags field — last-wins + lazy parse (deliberate; see DecodeFeature's doc) ────
 
-        // Minimal hand-rolled protobuf byte builders — mirrors MvtPropertyDecodeTests.cs's technique
-        // verbatim (same helper shapes), so a synthetic malformed-tile fixture stays consistent across
-        // both files rather than growing a second construction style.
+        // Minimal hand-rolled protobuf byte builders, the same helper shapes as MvtPropertyDecodeTests, so
+        // synthetic malformed tiles share one construction style.
         private static byte[] Varint(ulong v)
         {
             var list = new List<byte>();
@@ -1160,10 +1111,8 @@ namespace MapRenderer.Tests.Mvt
         [Test]
         public void RepeatedTagsField_MalformedEarlierOccurrence_DoesNotThrow_ResolvesFromLastOccurrence()
         {
-            // Two occurrences of the tags field (field 2, wire type 2) inside one feature message:
-            //   1st: length=1, data=[0x80] — a single continuation byte with no terminator; parsing this
-            //        as a packed varint throws "varint overruns buffer".
-            //   2nd: length=2, data=[0x00,0x00] — a valid pair (keyIdx=0, valIdx=0).
+            // Two tags fields (field 2, wire type 2) in one feature: the 1st is [0x80], an unterminated varint
+            // that throws if parsed; the 2nd is [0x00,0x00], a valid pair (keyIdx=0, valIdx=0).
             byte[] malformedTagsOccurrence = Cat(Tag(2, 2), LengthDelimited(new byte[] { 0x80 }));
             byte[] validTagsOccurrence     = Cat(Tag(2, 2), LengthDelimited(Cat(Varint(0), Varint(0))));
             byte[] featureTags = Cat(malformedTagsOccurrence, validTagsOccurrence);
@@ -1212,10 +1161,8 @@ namespace MapRenderer.Tests.Mvt
         // canary must clear this by a wide margin to prove the meter is alive.
         private const long CalibrationFloor = 100_000;
 
-        // Ceiling between the RE-MEASURED green (~49,200 B/tile) and the per-feature-uint[] RED-verify
-        // (356,966 B/tile, see the file header): ~101 KB above green, ~207 KB below red — both clear the
-        // ~100 KB meter noise floor and the observed run-to-run variance (49,152 B / 49,356 B across
-        // repeated green runs on this tree).
+        // The ceiling sits between the green allocation and a per-feature uint[] regression, with more
+        // than CalibrationFloor of margin on each side.
         private const long Ceiling = 150_000;
 
         private static byte[] LoadFixture()

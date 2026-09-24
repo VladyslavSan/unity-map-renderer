@@ -25,22 +25,17 @@ namespace MapRenderer.Core.Geometry
         public static int SegmentSteps(double3 upA, double3 upB, double maxRefineAngleRad)
         {
             double ang = math.acos(math.clamp(math.dot(upA, upB), -1.0, 1.0));
-            // Clamp in DOUBLE space before the int cast. For a tiny maxRefineAngleRad the ratio can exceed int
-            // range, and an out-of-range (int) cast is platform-defined (x64 gives int.MinValue, ARM64 saturates):
-            // casting first would return 1 on x64 for the segment that needs the most steps.
+            // Clamp in double before the int cast: an out-of-range (int) cast is platform-defined (x64 gives
+            // int.MinValue), so casting first would return 1 for the segment that needs the most steps.
             return (int)math.clamp(math.ceil(ang / maxRefineAngleRad), 1.0, MaxCurveSegments);
         }
 
         /// <summary>
-        /// Densifies tile-local <paramref name="tilePath"/> so each segment's projected arc stays under
-        /// <paramref name="maxRefineAngleRad"/>; per-point surface normals <paramref name="ups"/> (same count and
-        /// order) drive the split metric. Each segment splits into <see cref="SegmentSteps"/> equal parts by
-        /// LINEAR interpolation in tile space, collinear on the original chord, so the cumulative arc length at
-        /// every ORIGINAL vertex is unchanged and no anchor moves along the line.
-        /// <para>An ∞ tolerance returns <paramref name="tilePath"/> unchanged and reads no <paramref name="ups"/>
-        /// (pinned by <c>Subdivide_InfiniteTolerance_ReturnsPathValueUnchanged</c>). This is a backstop for a
-        /// direct caller, not the live Mercator guard: <c>SymbolFeatureExtractor.Extract</c> checks
-        /// <c>IsPositiveInfinity</c> itself and never calls <see cref="Subdivide"/> on that path.</para>
+        /// Densifies <paramref name="tilePath"/> so each segment's projected arc, measured by the per-point
+        /// normals <paramref name="ups"/>, stays under <paramref name="maxRefineAngleRad"/>. Each segment splits
+        /// into <see cref="SegmentSteps"/> equal LINEAR parts in tile space, so no original vertex's arc length
+        /// or anchor moves. An ∞ tolerance returns the path unchanged and reads no <paramref name="ups"/>
+        /// (<c>Subdivide_InfiniteTolerance_ReturnsPathValueUnchanged</c>).
         /// </summary>
         public static List<double2> Subdivide(
             IReadOnlyList<double2> tilePath, IReadOnlyList<double3> ups, double maxRefineAngleRad)

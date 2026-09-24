@@ -3,13 +3,10 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The non-artifact-specific base contract for one render layer's per-tile worker-pass participation in
-    /// <see cref="TileLayerProcessorRunner"/>. The input is an already-decoded <see cref="IDecodedTile"/>,
-    /// not raw bytes — a conforming processor cannot decide to decode the fetched bytes for itself; every
-    /// runner entry reads the shared <c>SharedDisposable{IDecodedTile}</c> instead of decoding for its own
-    /// cadence, and the decode itself is encoding-driven (<see cref="ITileDecoder"/>), so this contract is
-    /// not MVT-specific. Two sibling capability interfaces extend this base independently:
-    /// <see cref="ITileMeshLayerProcessor"/> (mesh settlement) and
+    /// The base contract for one render layer's per-tile worker pass in <see cref="TileLayerProcessorRunner"/>.
+    /// The input is the shared, already-decoded <see cref="IDecodedTile"/>, never raw bytes, and the decode is
+    /// encoding-driven (<see cref="ITileDecoder"/>), so the contract is not MVT-specific. Two sibling interfaces
+    /// extend it: <see cref="ITileMeshLayerProcessor"/> (mesh settlement) and
     /// <see cref="ITileWorkerThenMainLayerProcessor"/> (a main-thread tail).
     /// </summary>
     internal interface ITileLayerProcessor

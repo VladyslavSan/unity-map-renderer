@@ -7,16 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// One fill layer's graph output. <see cref="FillMeshGraph.Schedule"/> returns it with
-    /// <see cref="Handle"/> UNCOMPLETED: the caller polls <c>Handle.IsCompleted</c>, calls
-    /// <see cref="Dispose"/> (which completes first), or reads outputs only after its own
-    /// <c>Handle.Complete()</c>.
-    ///
-    /// <para><b>Two ways to end up with a value.</b> A layer with nothing to draw makes
-    /// <see cref="FillMeshGraph.Schedule"/> return <c>default</c> — <see cref="IsCreated"/> false, no lists
-    /// allocated, <see cref="Handle"/> the completed default handle. Every other call allocates real lists
-    /// up front and schedules the whole chain over them, even when the layer turns out to have zero
-    /// polygons, because the graph cannot know that at schedule time.</para>
+    /// One fill layer's graph output. <see cref="FillMeshGraph.Schedule"/> returns it with <see cref="Handle"/>
+    /// uncompleted: poll <c>Handle.IsCompleted</c>, call <see cref="Dispose"/> (which completes first), or read
+    /// after <c>Handle.Complete()</c>. A layer with nothing to draw gets <c>default</c> (<see cref="IsCreated"/>
+    /// false, completed default handle); every other call allocates its lists up front, even for zero polygons,
+    /// because the graph cannot tell at schedule time.
     /// </summary>
     public struct FillGraphOutput : IDisposable
     {
@@ -35,14 +30,11 @@ namespace MapRenderer.Jobs.Fill
         /// <see cref="GlobeFillVertex.East"/>, scattered by <see cref="GlobeFillScatterJob"/>.</summary>
         public NativeList<double3> VertexEast;
 
-        /// <summary>The boundary band's per-vertex attribute — <c>(dirEast, dirNorth, side)</c> in the
-        /// vertex's own surface frame, one per <see cref="TileVertices"/> entry, reaching the shaders as
-        /// TEXCOORD3. <c>(0,0,0)</c> on every interior vertex and on the band's inner ring; <c>side = 1</c>
-        /// with an outward miter on its outer ring. Written by <see cref="AggregateJob"/> (zeros), then
-        /// <see cref="FillBandJob"/> (the band's own slots). Subdivision carries the same values on
-        /// <see cref="GlobeFillVertex.Band"/>, so a midpoint vertex can hold an INTERPOLATED band. The two
-        /// halves are independent: <c>dirEast/dirNorth</c> displaces, <c>side</c> is only the coverage
-        /// coordinate, and the shader never multiplies one by the other.</summary>
+        /// <summary>The band's per-vertex attribute <c>(dirEast, dirNorth, side)</c> in the vertex's surface frame
+        /// (TEXCOORD3): <c>(0,0,0)</c> on interior and inner-band vertices, <c>side = 1</c> with an outward miter on
+        /// the outer ring. <see cref="AggregateJob"/> writes zeros, <see cref="FillBandJob"/> the band; subdivision
+        /// carries it on <see cref="GlobeFillVertex.Band"/>, so a midpoint can hold an interpolated band. The
+        /// shader never multiplies the direction by <c>side</c>.</summary>
         public NativeList<float3> VertexBand;
 
         /// <summary>Feature index of each vertex (into the caller's selected-feature list), one per
@@ -71,8 +63,7 @@ namespace MapRenderer.Jobs.Fill
         public bool IsCreated;
 
         // ── Leak/balance counters ────────────────────────────────────────────────────────────────────
-        // A static allocate-and-count helper pairs with Dispose's decrement, so the increment cannot be
-        // forgotten at a call site.
+        // A static allocate-and-count helper pairs with Dispose's decrement, so no call site can skip it.
 
         private static long _liveCount;
         private static long _buffersAllocated;

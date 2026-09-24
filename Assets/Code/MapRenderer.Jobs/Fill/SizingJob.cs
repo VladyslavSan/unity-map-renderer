@@ -8,21 +8,11 @@ namespace MapRenderer.Jobs.Fill
     /// <summary>
     /// The fill graph's sizing node: the four prefix-sum offset tables, plus every flat scratch and output
     /// list that <see cref="FillGatherJob{TComparer}"/>, <see cref="EarcutBatchJob"/> and
-    /// <see cref="AggregateJob"/> consume, sized once and up front. A single-threaded job may resize a list
-    /// it owns. It also reports <see cref="FillGraphCounts.RingCount"/>, a one-line read of
-    /// <see cref="RingOffsets"/>, which it already borrows.
-    ///
-    /// <para><b>Schedulable standalone</b> — its capacities are plain <c>int</c> fields, not derived from a
-    /// borrowed input, so a test can hand it an undersized <see cref="MaxPolygons"/>/<see cref="MaxHoles"/>
-    /// and observe the error flag without building a whole graph.</para>
-    ///
-    /// <para><b>Error, not a throw</b>, which a Burst job cannot raise. On overrun <see cref="Execute"/>
-    /// returns before touching any output list, so every one stays at length 0.</para>
-    ///
-    /// <para><b>Clear vs. uninitialised must match, or the output differs silently.</b>
-    /// <c>Buffers.FlatSortedHoleCounts</c>, <c>Buffers.PerPolyIndexCount</c> and
-    /// <c>Buffers.PerPolyForceClip</c> are <see cref="NativeArrayOptions.ClearMemory"/>; every other flat
-    /// list is <see cref="NativeArrayOptions.UninitializedMemory"/>.</para>
+    /// <see cref="AggregateJob"/> consume, sized up front; it also reports
+    /// <see cref="FillGraphCounts.RingCount"/>. On overrun it sets <see cref="Error"/> and returns before
+    /// touching any output list. Non-local invariant: <c>FlatSortedHoleCounts</c>, <c>PerPolyIndexCount</c>
+    /// and <c>PerPolyForceClip</c> are cleared and every other flat list is uninitialised; a mismatch with
+    /// the consumers changes the output silently.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct SizingJob : IJob
@@ -111,14 +101,9 @@ namespace MapRenderer.Jobs.Fill
                 indexOffsets.Add(indexOffsets[pi] + idxCap);
             }
 
-            // Defence-in-depth. A non-monotonic table would otherwise surface only as an Editor-only
-            // GetSubArray bounds throw downstream; this turns it into an error code compiled into every
-            // build. Strictly increasing holds: workCap >= 16, idxCap >= 3, sortedHoleLen >= 1, and
-            // polyVC >= 3 because RingAssemblyJob skips any ring shorter than 3 vertices.
-            //
-            // This return, and the two capacity returns above, protect the whole downstream chain: every
-            // column a downstream node bounds its own loop by stays at length 0. The four offset tables may
-            // already be non-empty here, but no node bounds a loop by one of them.
+            // Non-obvious why: a non-monotonic table would otherwise show only as an Editor bounds throw.
+            // Each step is positive (polyVC >= 3, as RingAssemblyJob skips shorter rings). On return every
+            // column a node bounds its loop by stays at length 0; no node bounds a loop by an offset table.
             for (int pi = 0; pi < polyCount; pi++)
             {
                 if (vertexOffsets[pi + 1] <= vertexOffsets[pi] || holeCountOffsets[pi + 1] <= holeCountOffsets[pi] ||

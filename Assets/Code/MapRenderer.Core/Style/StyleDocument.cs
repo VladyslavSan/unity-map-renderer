@@ -4,14 +4,10 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// The parsed root of a MapLibre Style document (Style Spec root). Typed common fields plus the
-    /// ordered layer list and the named sources. Tolerated root keys the renderer does not yet model
-    /// (<c>center</c>/<c>zoom</c>/<c>bearing</c>/<c>pitch</c>/<c>light</c>/<c>terrain</c>/
-    /// <c>projection</c>/<c>metadata</c>/…) are preserved on <see cref="Root"/> as raw JSON rather than
-    /// thrown, for forward-compat and later stages.
-    ///
-    /// Layer order is significant (painter's algorithm — see <c>Rendering/LayerDrawOrder.cs</c>); the
-    /// <see cref="Layers"/> list preserves the declared order.
+    /// The parsed root of a MapLibre Style document: typed common fields, the ordered layer list, and the
+    /// named sources. Root keys the renderer does not model (<c>center</c>, <c>light</c>, <c>terrain</c>, …)
+    /// survive on <see cref="Root"/> as raw JSON. <see cref="Layers"/> keeps the declared order, which is the
+    /// painter's order (<c>Rendering/LayerDrawOrder.cs</c>).
     /// </summary>
     public sealed class StyleDocument
     {

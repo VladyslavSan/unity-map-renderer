@@ -2,12 +2,9 @@ namespace MapRenderer.Core.Expressions
 {
     /// <summary>
     /// A parsed, ready-to-evaluate expression node. Built once by <see cref="ExpressionParser"/>; evaluated
-    /// many times against an <see cref="EvaluationContext"/>.
-    ///
-    /// <see cref="Evaluate"/> may throw <see cref="ExpressionEvaluationException"/> on a spec-defined error
-    /// (coercion failure, out-of-range, type mismatch). Internal nodes call each other through
-    /// <see cref="Evaluate"/> and let it propagate. Callers should use <see cref="TryEvaluate"/>, the public
-    /// boundary, which catches the error and returns failure rather than crashing the host.
+    /// many times against an <see cref="EvaluationContext"/>. <see cref="Evaluate"/> throws
+    /// <see cref="ExpressionEvaluationException"/> on a spec-defined error, and nodes let it propagate.
+    /// Callers use <see cref="TryEvaluate"/>, the public boundary, which returns failure instead.
     /// </summary>
     public abstract class Expression
     {

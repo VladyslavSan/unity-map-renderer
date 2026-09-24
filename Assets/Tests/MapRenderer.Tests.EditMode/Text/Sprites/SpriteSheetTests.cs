@@ -34,13 +34,9 @@ namespace MapRenderer.Tests.Text.Sprites
 
     /// <summary>
     /// The sprite sheet must be fetched for a style that has <b>no symbol layers</b>.
-    ///
-    /// <para><c>SymbolSubsystem.SetStyle</c> must not return early on "no symbol layers — stay idle"
-    /// before kicking off the fetch: <c>fill-pattern</c> resolves against the same sheet, so a style with
-    /// pattern fills and no symbol layers would never fetch a sheet if that early return fired — every
-    /// pattern layer would stay unresolved and clip forever, no error, no warning, just missing fills.</para>
-    ///
-    /// <para>Liberty hides this (it has symbol layers), which is exactly why it needs its own tooth.</para>
+    /// <c>fill-pattern</c> resolves against the same sheet, so an early "no symbol layers" return in
+    /// <c>SymbolSubsystem.SetStyle</c> before the fetch leaves every pattern layer unresolved, with no error.
+    /// Liberty has symbol layers and hides this, so it needs its own tooth.
     /// </summary>
     [TestFixture]
     public class SpriteFetchGatingTests : BaseTestFixture
@@ -104,11 +100,9 @@ namespace MapRenderer.Tests.Text.Sprites
     /// <summary>
     /// <see cref="SpriteSheet"/> decodes the fixture sprite PNG, repacks it with a one-texel
     /// transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord
-    /// <c>(x,y)</c> — of the <b>repacked</b> index — reads back at <c>Texture2D.GetPixel(x,y)</c>. That is
-    /// the SAME contract <see cref="GlyphAtlasTexture"/> establishes for the glyph atlas (see
-    /// <see cref="SpriteSheet"/>'s orientation-contract doc). The color pins below are the ultimate check:
-    /// if the flip direction is wrong, they read transparent/black instead of the fixture's marker/star/dot
-    /// colors.
+    /// <c>(x,y)</c> — of the <b>repacked</b> index — reads back at <c>Texture2D.GetPixel(x,y)</c>, the same
+    /// contract <see cref="GlyphAtlasTexture"/> holds for the glyph atlas. A wrong flip makes the color pins
+    /// read transparent instead of the fixture's marker/star/dot colors.
     /// </summary>
     [TestFixture]
     public class SpriteSheetTests
@@ -162,9 +156,8 @@ namespace MapRenderer.Tests.Text.Sprites
                 Texture2D texture = sheet.Texture;
                 SpriteIndex index = sheet.View.Index;
 
-                // The repack relocates every sprite, so the colour pins must be read at the sprite's NEW
-                // rect. Reading them through the derived index (rather than at hand-written coordinates) is
-                // what keeps this an ORIENTATION tooth instead of a packing-layout tooth.
+                // The repack relocates every sprite. Reading the colour pins through the derived index keeps
+                // this an ORIENTATION tooth instead of a packing-layout tooth.
                 Assert.IsTrue(index.TryGetSprite("marker", out SpriteEntry marker));
                 Assert.IsTrue(index.TryGetSprite("star", out SpriteEntry star));
                 Assert.IsTrue(index.TryGetSprite("dot", out SpriteEntry dot));
@@ -181,10 +174,8 @@ namespace MapRenderer.Tests.Text.Sprites
                 AssertColorApprox(texture.GetPixel(dot.X + 4, dot.Y + 4), 0, 0, 255, 255,
                     "dot sprite must read blue 4 texels inside its repacked rect");
 
-                // Anti-flip guard: the VERTICAL MIRROR of the dot sample. The dot's cell is only 10 texels
-                // tall in a 26-texel sheet, so its mirror lands in the sheet's empty region, which the
-                // composer clears to transparent. If the row flip were backwards (or doubled), this
-                // coordinate would alias the dot's opaque blue instead.
+                // Anti-flip guard: the dot's 10-texel cell mirrors into the 26-texel sheet's transparent empty
+                // region. A backwards or doubled row flip reads the dot's opaque blue here instead.
                 int mirroredY = sheet.View.Size.y - 1 - (dot.Y + 4);
                 Assert.AreNotEqual(dot.Y + 4, mirroredY, "the mirror must not coincide with the sample itself");
                 AssertColorApprox(texture.GetPixel(dot.X + 4, mirroredY), 0, 0, 0, 0,
@@ -205,10 +196,8 @@ namespace MapRenderer.Tests.Text.Sprites
             {
                 SpriteAtlasView view = sheet.View;
 
-                // Hand-derived, not copied off a run. Cells (rect + 1 texel of border per side): star 26x26,
-                // marker 18x18, dot 10x10. Shelf width starts at max(source 64, widest cell 26) == 64;
-                // height-descending they lay on ONE shelf as 26 + 18 + 10 == 54 <= 64, so the packed sheet is
-                // 64 wide and one shelf (the tallest cell, 26) tall.
+                // Hand-derived cells (rect + 1 border texel per side): star 26, marker 18, dot 10. Width is
+                // max(source 64, widest cell 26) == 64; 26 + 18 + 10 == 54 fits ONE shelf, 26 tall.
                 var expectedSize = new int2(64, 26);
                 Assert.AreEqual(expectedSize, view.Size, "repacked sheet size");
 
@@ -290,9 +279,7 @@ namespace MapRenderer.Tests.Text.Sprites
         {
             using var source = new FixtureSpriteSource();
 
-            // FixtureSpriteSource resolves via UniTask.FromResult -- already completed, so
-            // GetAwaiter().GetResult() does not block (mirrors the synchronous-fixture-source pattern;
-            // contrast the SwitchToThreadPool sources, which need a spin-wait).
+            // FixtureSpriteSource resolves via UniTask.FromResult, so GetAwaiter().GetResult() does not block.
             SpriteResponse response = source.FetchAsync().GetAwaiter().GetResult();
 
             Assert.IsTrue(response.HasData, "the committed fixture sheet must be found");
@@ -305,17 +292,11 @@ namespace MapRenderer.Tests.Text.Sprites
             Assert.IsTrue(index.TryGetSprite("star", out _));
             Assert.IsTrue(index.TryGetSprite("dot", out _));
 
-            // The SOURCE dimensions, asserted directly off a decode. Not derivable from the bound sheet:
-            // the repack packs the three indexed cells into a 64x26 output whatever the source height was,
-            // because source height is not a packing lower bound (ShelfRectPacker's only lower bound is
-            // width). A 64x128 fixture would therefore satisfy the repacked-size comparison below while
-            // silently breaking every sheet coordinate the other icon tests hand-derive — so the height
-            // tooth has to be taken here, on the decode itself.
+            // The SOURCE size, asserted on the decode. Non-obvious why: the repack output is 64x26 whatever the
+            // source height, because ShelfRectPacker bounds only width, so a 64x128 fixture passes the size
+            // check below yet breaks every sheet coordinate the other icon tests hand-derive.
             var decoded = Track(new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, mipChain: false));
             {
-                // The static form of the `LoadImage` EXTENSION method — this file carries no
-                // top-level `using UnityEngine;` (it qualifies its few engine references instead), and an
-                // extension method cannot be reached through a qualified type name.
                 Assert.IsTrue(UnityEngine.ImageConversion.LoadImage(decoded, response.Png),
                     "the fetched bytes must decode as a PNG");
                 Assert.AreEqual(new int2(64, 64), new int2(decoded.width, decoded.height),
@@ -340,10 +321,8 @@ namespace MapRenderer.Tests.Text.Sprites
         [Test]
         public void SpriteSourceFactory_NullSpriteUrl_ReturnsNullAndWarnsOnce()
         {
-            // The "warn once" latch is process-wide, and the sprite fetch runs for far more styles
-            // (it is not gated on a style having symbol layers — fill-pattern resolves against the same
-            // sheet). Any earlier test that applies a sprite-less style consumes the one warning, so clear
-            // the latch here rather than let this assertion depend on test order.
+            // The "warn once" latch is process-wide, and any earlier test that applies a sprite-less style
+            // consumes the one warning. Clearing it here keeps this assertion independent of test order.
             SpriteSourceFactory.WarnedMissingUrl = false;
 
             LogAssert.Expect(UnityEngine.LogType.Warning, new Regex("SpriteSourceFactory"));

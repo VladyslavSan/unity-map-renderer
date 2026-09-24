@@ -7,17 +7,9 @@ using MapRenderer.Tests.TestSupport;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Test-side validator for the polygon triangulation stage (decode → assemble → earcut). Checks that a
-    /// triangulation faithfully reproduces its source polygon-with-holes, independent of projection (it works
-    /// in flat tile space). It is rasterisation-based, not area-only: a thin folded sliver has
-    /// ~zero area but is visible, so an area check alone would pass a torn mesh.
-    ///
-    /// Invariants (see docs/mesh-triangulation-robustness-design.md):
-    ///   • ForceClips == 0        — the triangulator made no clean drop (it dropped no locus it could not ear-clip);
-    ///   • WindingFlips == 0      — no inverted (folded) triangle;
-    ///   • AreaRelError small     — Σ tri area ≈ Σ(outer − holes);
-    ///   • MismatchPct small      — rasterised coverage matches the even-odd source fill, so no phantom holes
-    ///                              (source-inside-but-untriangulated) and no spill (triangulated-but-outside).
+    /// Checks, in flat tile space, that a triangulation reproduces its source polygon-with-holes: ForceClips,
+    /// WindingFlips, AreaRelError, and a rasterised coverage diff (a folded sliver has ~zero area but is
+    /// visible). See docs/mesh-triangulation-robustness-design.md § "Validation instruments".
     /// </summary>
     public static class MeshCoverageValidator
     {
@@ -52,17 +44,10 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// Validate an ALREADY-triangulated result against its ground-truth polygon rings — the caller
-        /// triangulates (via the Burst <c>EarcutJob</c>, directly or through the production fill path)
-        /// and supplies both the triangles and <paramref name="forceClips"/> (the triangulator's own
-        /// clean-drop count); this validator only checks the result, so it works for any triangulation
-        /// source.
-        ///
-        /// Winding-flip detection uses ONE global majority sign across every triangle in
-        /// <paramref name="tris"/>: the triangulator normalises every polygon's outer ring to the same
-        /// CCW-on-screen convention, so a whole tile's triangles share one winding sign on clean output —
-        /// a flip anywhere is a fold. This is the only option available here since the caller's flat
-        /// triangle list carries no per-polygon boundary markers.
+        /// Validates an ALREADY-triangulated result against its ground-truth rings; the caller supplies the
+        /// triangles and <paramref name="forceClips"/>, so any triangulation source works. Winding flips use
+        /// ONE majority sign across <paramref name="tris"/>: every outer ring is normalised to one winding, so
+        /// a flip anywhere is a fold, and the flat list carries no per-polygon markers.
         /// </summary>
         public static Report ValidateTriangulation(
             IReadOnlyList<Polygon> groundTruthPolys, List<(double2 a, double2 b, double2 c)> tris,

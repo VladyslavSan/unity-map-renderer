@@ -4,45 +4,13 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Sutherland–Hodgman clip of ONE ring against an axis-aligned window — the managed, engine-free twin of
-    /// <c>RingClipJob</c>, for the client-side GeoJSON slicer (which must stay engine-free
-    /// in <c>MapRenderer.Core</c>, and so cannot reach for a Burst job over native containers).
-    ///
-    /// <para><b>Coordinate space and winding (producer declaration).</b> Input and output are both tile-local
-    /// <c>double2</c>, origin top-left, Y down. Rings are <b>implicitly closed</b> (the first vertex is not
-    /// repeated), matching production's MVT decoder <c>MvtDecodeJob</c>. Sutherland–Hodgman
-    /// is orientation-preserving, so
-    /// this type <b>chooses no winding at all</b>: <b>output winding equals input winding</b>, and the
-    /// relative sign between an exterior ring and its holes survives unchanged.</para>
-    ///
-    /// <para>Which absolute sign an exterior ring carries is decided upstream, at the place it is produced —
-    /// <c>GeoJson.GeoJsonParser</c> normalises it and <c>GeoJson.GeoJsonTileSlicer</c> declares it for the
-    /// sliced output; both state the MVT convention there. Stating it here as well would claim a guarantee
-    /// this type does not make, and would contradict <c>RingClipJob</c> — the bit-identical
-    /// twin, which names the other canonical because it clips a different producer's rings. The two agree on
-    /// the only thing either one actually guarantees: winding is preserved.</para>
-    ///
-    /// <para>The Unity-front reversal for stock Cull Back stays where it is, at the mesh-write boundary in
-    /// <c>StyledFillTileBuilder</c> (<c>docs/coordinates-and-projections.md</c>).</para>
-    ///
-    /// <para><b>Why it is exact at the corners.</b> S–H is exact for a CONVEX clip region against an
-    /// arbitrary (possibly concave) subject; the window is an axis-aligned rectangle, hence convex, so the
-    /// four sequential half-plane passes compose to the exact intersection region. A polygon that fully
-    /// CONTAINS the window reduces to the window rectangle itself with no special case — each pass replaces
-    /// the crossing edges with the plane segment.</para>
-    ///
-    /// <para><b>Degenerate output is expected and fine.</b> A subject passing AROUND a corner emits one ring
-    /// with zero-width channels along the boundary rather than two disjoint rings. That is a representation
-    /// artefact, not an area error — the enclosed area is still exactly the intersection — and it is cleared
-    /// downstream by <c>RingAssemblyJob</c>'s <c>rLen &lt; 3</c> / <c>|area2| &lt; 1</c> filters and
-    /// <c>EarcutJob</c>'s cure → split → drop cascade.</para>
-    ///
-    /// <para><b>Deliberate duplication, pinned rather than assumed.</b> This is a structural mirror of
-    /// <c>RingClipJob</c>: same plane order, same inclusive boundary test, same exact-boundary
-    /// <c>Intersect</c>, same zero-length-edge dedup, same trailing first==last collapse, same bbox fast
-    /// path. <c>RingWindowClipperParityTests</c> pins the two BIT-IDENTICAL over a randomised corpus, which
-    /// is what converts the copy from an unverified smell into a checked equivalence — and leaves a clean
-    /// retirement path: <c>RingClipJob</c> can delegate to it.</para>
+    /// Sutherland–Hodgman clip of ONE ring against an axis-aligned window: the managed, engine-free twin of
+    /// <c>RingClipJob</c> for the Core GeoJSON slicer. Input and output are tile-local <c>double2</c>, origin
+    /// top-left, Y down, rings implicitly closed. It preserves winding and chooses none; the producers
+    /// (<c>GeoJsonParser</c>, <c>GeoJsonTileSlicer</c>) declare the sign. S–H is exact for the convex window
+    /// against any subject; a subject passing around a corner leaves zero-width channels, which
+    /// <c>RingAssemblyJob</c>'s filters and <c>EarcutJob</c> clear. Non-local invariant: it mirrors
+    /// <c>RingClipJob</c> step for step, and <c>RingWindowClipperParityTests</c> pins the two bit-identical.
     /// </summary>
     public static class RingWindowClipper
     {
@@ -121,9 +89,8 @@ namespace MapRenderer.Core.Geometry
                 prevInside = curInside;
             }
 
-            // Close the ring: an exit crossing whose entry vertex sat exactly ON the plane emits that vertex
-            // a second time, and the wrap-around can leave the first and last equal. Both are zero-length
-            // edges, and both are what turn an on-boundary quad into a 5-vertex ring.
+            // Close the ring: an on-plane entry vertex can be emitted twice, and the wrap can leave
+            // first == last. Both are zero-length edges that turn an on-boundary quad into 5 vertices.
             if (next.Count > 1 && SameVertex(next[next.Count - 1], next[0]))
                 next.RemoveAt(next.Count - 1);
 

@@ -100,16 +100,10 @@ namespace MapRenderer.Jobs.Geometry
         public NativeArray<int> RingFeatureIdx;
 
         /// <summary>Per-FEATURE geometry kind, length <see cref="FeatureCount"/> — ring <c>r</c>'s kind is
-        /// <c>FeatureGeometryType[RingFeatureIdx[r]]</c>. Per-feature rather than per-ring because no producer
-        /// emits a mixed-kind feature (MVT <c>Feature.type</c> is singular; the GeoJSON slicer maps one source
-        /// feature to one kind), so this column plus <see cref="RingFeatureIdx"/> fully determines ring kind.
-        /// <para><b>Why it exists at all.</b> Ring kind cannot be recovered from the coordinates: a LineString
-        /// ring and a polygon ring are the same shape of data, and an area-based classifier would treat the
-        /// LineString as a spurious exterior or hole — silent triangulation corruption, not a crash. It is
-        /// also blittable, so a Burst consumer needs no managed <c>IFeature</c>.</para>
-        /// <para><b>Cleared on allocation</b>: an unfilled element reads
-        /// <see cref="TileGeometryType.Unknown"/>, which every consumer's kind gate rejects. A producer that
-        /// forgets to fill this renders NOTHING (loud) rather than something WRONG (silent).</para></summary>
+        /// <c>FeatureGeometryType[RingFeatureIdx[r]]</c>; no producer emits a mixed-kind feature. Kind cannot
+        /// be recovered from coordinates, because a LineString ring looks like a polygon ring. Cleared on
+        /// allocation, so an unfilled element reads <see cref="TileGeometryType.Unknown"/>, which every kind
+        /// gate rejects: a producer that forgets it renders nothing rather than something wrong.</summary>
         public NativeArray<TileGeometryType> FeatureGeometryType;
 
         /// <summary>Number of rings actually produced — <b>the count the producing job reported</b>, not
@@ -149,9 +143,7 @@ namespace MapRenderer.Jobs.Geometry
         /// <summary>Mints an <b>array-backed</b> buffer sized for a decode pass: <paramref name="maxVertices"/>
         /// vertices, <paramref name="maxRings"/> + 1 ring offsets (sentinel), <paramref name="maxRings"/>
         /// ring→feature entries and <paramref name="featureCount"/> per-feature kind slots.
-        /// <see cref="RingCount"/>/<see cref="VertexCount"/> start at 0 — the producing job reports them.
-        /// <para><paramref name="featureCount"/> sits before the two capacities so a positional mistake is a
-        /// compile error at every call site rather than a silently swapped <c>int</c>.</para></summary>
+        /// <see cref="RingCount"/>/<see cref="VertexCount"/> start at 0 — the producing job reports them.</summary>
         public static TileGeometryBuffers Allocate(TileId tile, double extent, int featureCount, int maxRings, int maxVertices)
         {
             return new TileGeometryBuffers
@@ -172,13 +164,9 @@ namespace MapRenderer.Jobs.Geometry
 
         /// <summary>Mints a <b>list-backed</b> buffer that takes <b>ownership</b> of the three lists a
         /// length-authoritative stage (fill's visited-ring derive, clipping or not) produced, exposing them
-        /// as <c>AsArray()</c> views. The caller must not dispose the lists afterwards —
-        /// <see cref="Dispose"/> does, and disposing the views instead would be invalid.
-        /// <para><paramref name="featureGeometryTypeToCopy"/> is <b>copied</b>, not taken: the derive reads a
-        /// buffer it only <b>borrows</b> under the two-tier contract above, so the source must be left
-        /// intact and keep owning its own column.</para>
-        /// <para>The derive renumbers no feature index (it selects and reorders whole rings, carrying each
-        /// ring's <c>RingFeatureIdx</c> with it), so the copied column is still valid as-is.</para></summary>
+        /// as <c>AsArray()</c> views; <see cref="Dispose"/> frees them, so the caller must not. The kind column
+        /// is copied, not taken, because its source is borrowed; the derive keeps feature indices, so the copy
+        /// stays valid.</summary>
         public static TileGeometryBuffers AdoptDerivedLists(
             TileId tile, double extent, NativeArray<TileGeometryType> featureGeometryTypeToCopy,
             NativeList<double2> vertices, NativeList<int> ringOffsets, NativeList<int> ringFeatureIdx)

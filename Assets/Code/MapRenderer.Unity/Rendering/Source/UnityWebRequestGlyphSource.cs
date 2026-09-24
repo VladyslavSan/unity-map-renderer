@@ -8,20 +8,11 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// <see cref="IGlyphSource"/> implementation over <see cref="UnityWebRequest"/>,
-    /// mirroring <see cref="UnityWebRequestDataSource"/> almost exactly (cancellation, absent-vs-error
-    /// mapping, UniTask). Builds the fetch URL from a glyph-PBF <c>glyphs</c> template
-    /// (<c>{fontstack}/{range}.pbf</c> tokens, per the MapLibre Style Spec) and fetches raw bytes — it
-    /// does NOT decode (that is <see cref="GlyphPbfDecoder"/>'s job, run by the Unity <c>GlyphManager</c>).
-    ///
-    /// <para>
-    /// <c>{fontstack}</c> is URL-escaped (a font name commonly contains spaces, e.g. "Noto Sans Regular")
-    /// before substitution; <c>{range}</c> becomes the inclusive 256-codepoint span
-    /// <c>"{rangeStart}-{rangeStart+255}"</c> (the glyph-PBF range convention).
-    /// </para>
-    ///
-    /// Clean-room: standard UnityWebRequest HTTP pattern (same as <see cref="UnityWebRequestDataSource"/>);
-    /// no MapLibre source read.
+    /// <see cref="IGlyphSource"/> over <see cref="UnityWebRequest"/>, with the same cancellation and
+    /// absent-vs-error mapping as <see cref="UnityWebRequestDataSource"/>. Fills the style's <c>glyphs</c>
+    /// template and fetches raw bytes; <see cref="GlyphPbfDecoder"/> decodes them. <c>{fontstack}</c> is
+    /// URL-escaped (font names contain spaces); <c>{range}</c> is the inclusive 256-codepoint span
+    /// <c>"{rangeStart}-{rangeStart+255}"</c>.
     /// </summary>
     public sealed class UnityWebRequestGlyphSource : IGlyphSource
     {
@@ -39,10 +30,8 @@ namespace MapRenderer.Unity.Rendering.Source
             using var req = UnityWebRequest.Get(url);
             req.downloadHandler = new DownloadHandlerBuffer();
 
-            // Same absent-vs-error mapping as UnityWebRequestDataSource: 404/204 -> Absent(); a
-            // cancellation racing the request can surface as a generic UnityWebRequestException rather
-            // than OperationCanceledException, so re-map it when the token requested cancellation; any
-            // other error (5xx, connection failure) re-throws.
+            // Same mapping as UnityWebRequestDataSource: 404/204 -> Absent(), a cancel surfacing as a
+            // generic UnityWebRequestException -> OperationCanceledException, other errors re-throw.
             try
             {
                 await req.SendWebRequest().ToUniTask(cancellationToken: ct);

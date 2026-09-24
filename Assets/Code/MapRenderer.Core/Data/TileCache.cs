@@ -6,13 +6,9 @@ namespace MapRenderer.Core.Data
 {
     /// <summary>
     /// A capacity-bounded LRU (Least-Recently-Used) in-memory cache keyed by <see cref="TileId"/>.
-    /// Thread-safe: all public operations are guarded by a single lock.
-    /// <para>
-    /// Implementation: a <see cref="Dictionary{TileId,LinkedListNode}"/> for O(1) keyed lookup +
-    /// a <see cref="LinkedList{T}"/> that tracks recency (head = MRU, tail = LRU).
-    /// On a cache hit, the node is moved to head. On insert beyond capacity, the tail (LRU) is
-    /// evicted before insertion.
-    /// </para>
+    /// Thread-safe: all public operations are guarded by a single lock. A dictionary gives O(1)
+    /// lookup and a <see cref="LinkedList{T}"/> tracks recency (head = MRU); a hit moves its node
+    /// to the head, and an insert beyond capacity evicts the tail first.
     /// </summary>
     public sealed class TileCache
     {

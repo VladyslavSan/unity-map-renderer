@@ -10,18 +10,10 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Builds synthetic <see cref="InMemoryDecodedTile"/>s and keeps them alive until the test that made them
-    /// ends.
-    ///
-    /// <para><b>Why this exists.</b> A decoded tile owns <c>Allocator.Persistent</c> buffers, so
-    /// the ~10 symbol/line fixture files, each built on a plain managed <c>ITileLayer</c>, would start
-    /// leaking native memory unless every one of their ~60 helper call sites grew a <c>using</c>. Leak
-    /// detection is off in the batch gate, so those leaks would be <b>invisible</b> — the failure
-    /// class this helper exists to prevent. One tracked factory plus a one-line <c>[TearDown]</c> per fixture keeps the
-    /// helpers <c>static</c> and the call sites unchanged, and makes the release a property of the fixture
-    /// rather than of each author's memory.</para>
-    ///
-    /// <para>Test-thread only: EditMode fixtures build their tiles synchronously in the test body, even when
-    /// they later hand them to a pool task.</para>
+    /// ends. Non-obvious why: a decoded tile owns <c>Allocator.Persistent</c> buffers, and leak detection is
+    /// off in the batch gate, so a missed release is invisible; a one-line <c>[TearDown]</c> per fixture makes
+    /// the release a property of the fixture, not of each helper call site.
+    /// Test-thread only: fixtures build tiles in the test body, even when a pool task consumes them.
     /// </summary>
     public static class TestDecodedTiles
     {

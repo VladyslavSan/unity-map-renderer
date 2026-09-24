@@ -12,43 +12,16 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 {
     /// <summary>
-    /// GameObject render backend (internal, IDisposable) — the engine for <c>RenderBackend.GameObject</c>.
-    ///
-    /// The simplest, most debuggable backend: each tile-layer draw item is a child <see cref="GameObject"/>
-    /// carrying a <see cref="MeshFilter"/> + <see cref="MeshRenderer"/> (drawn by URP's SRP Batcher),
-    /// grouped under a per-tile container GameObject (<c>"Tile z/x/y"</c>) under a single backend root.
-    /// Unlike the instanced backends (<see cref="Backend.BRG.TileRenderer"/>, <see cref="Backend.Entities.TileRenderer"/>) it
-    /// registers no batches and uploads no per-instance buffers — it leans on Unity's stock renderer. The
-    /// per-GameObject advantage is debuggability: every tile / layer is a node in the scene Hierarchy,
-    /// selectable and toggle-able in the Inspector — an explicit opt-in; for the Entities backend the
-    /// Entities Hierarchy covers the same debug need.
-    ///
-    /// Hierarchy: backend root → per-tile container (<c>"Tile z/x/y"</c>, carries the floating-origin
-    /// transform) → per-layer child (<c>"water"</c>, <c>"road-primary"</c>, …, identity local transform).
-    /// <see cref="Rebuild"/> writes one transform per tile (the container's <c>localPosition</c>), not one
-    /// per layer; the layer children sit at the container origin so they move with it. The container is
-    /// destroyed once its last layer is removed (an evicted tile leaves no empty node).
-    ///
-    /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c> directly on
-    /// the Material) plus per-feature (vertex colours baked into the mesh), so <see cref="Rebuild"/> does no
-    /// material work — same as the instanced backends. <paramref name="layerMaterials"/> is the FULL-WIDTH,
-    /// global-SLOT-aligned material list (fill/line/symbol/background in one slot order), so
-    /// <c>materialIndex</c> matches <see cref="BRG.TileRenderer.AddTileLayer"/> /
-    /// <see cref="Entities.TileRenderer.AddTileLayer"/>. This ctor only STORES the list (no registration,
-    /// no index-0 seed), so a null entry at a symbol/background slot needs no guard here.
-    ///
-    /// Mesh lifetime: this backend creates and destroys only GameObjects. The Mesh assets are owned by
-    /// <c>TileManager</c> (its leak guard) and must NOT be destroyed here — <see cref="RemoveItem"/> and
-    /// <see cref="Dispose"/> destroy GameObjects only.
-    ///
-    /// Clean-room: design follows the floating-origin tile math (<see cref="FloatingOrigin.TileLocalToScene"/>)
-    /// shared with the instanced backends.
+    /// GameObject render backend for <c>RenderBackend.GameObject</c>: each tile-layer draw item is a child
+    /// <see cref="GameObject"/> with a <see cref="MeshFilter"/> + <see cref="MeshRenderer"/>, under a per-tile
+    /// container, so every tile and layer is a node in the Hierarchy. The layer list is full-width and
+    /// slot-aligned with the instanced backends; a null symbol/background slot needs no guard here.
+    /// Non-local invariant: <c>TileManager</c> owns the Mesh assets, so this backend destroys GameObjects only.
     /// </summary>
     internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
-        // One draw item = one layer child GameObject (a child of its tile's container).
-        // internal, not private: _items is internal for the test-assembly observability extensions, and a
-        // field cannot be more accessible than its type.
+        // One draw item = one layer child GameObject. Internal because the internal _items field
+        // (read by test-assembly extensions) cannot be more accessible than its type.
         internal struct ItemRec
         {
             public MeshNode Node;
@@ -61,9 +34,8 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // Per-layer style id (e.g. "water", "road-primary"), parallel to _layerMaterials. Names each layer
         // GameObject after its style layer in the Hierarchy; empty/short ⇒ fall back to the material name.
         private readonly List<string>   _layerNames     = new List<string>();
-        // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
-        // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off (never default(...), never throw);
-        // the same fallback the other two backends use, so a divergence is a test failure, not a silent drift.
+        // Per-layer IRenderLayer.CastShadows, parallel to _layerMaterials, verbatim from TileManager.LayerShadowModes.
+        // Absent or short ⇒ Off, the same fallback as the other two backends.
         private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
         // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
         // slot's children are drawn. Absent or short ⇒ visible, identically in all three backends.
@@ -72,23 +44,15 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // for observability, kept off the public surface.
         internal readonly Dictionary<int, ItemRec> _items = new Dictionary<int, ItemRec>();
 
-        // The shared root → per-tile-container tree (Backend.SceneTileTree) — this backend owns the
-        // per-layer child (the MeshFilter/MeshRenderer draw item) side only; the tile container itself,
-        // its floating-origin transform, and its refcount teardown are the tree's job.
+        // The shared per-tile container tree. This backend owns only the per-layer children; the containers,
+        // their floating-origin transforms and their refcount teardown belong to the tree.
         internal SceneTileTree _tree;
 
-        // Layer children recycle, for the same reason the symbol leaves do (see WorldSymbolRenderer): each one
-        // costs new GameObject + AddComponent<MeshFilter> + AddComponent<MeshRenderer>, the AddComponents
-        // dominating, and a zoom step replaces the WHOLE cover at once. This backend churns HARDER than the
-        // symbol path — one child per tile LAYER, not per (layer, kind) symbol slot.
-        //
-        // A released child parks under _poolRoot, which is INACTIVE. ObjectPool is scene-unaware, so without
-        // a reparent the child stays under its tile container; and SetParent(null) is not the answer either —
-        // that promotes it to a SCENE-ROOT object, live in the Hierarchy, in the one backend whose whole
-        // purpose is Inspector debuggability. MeshNode.Release drops mesh/material and disables the renderer;
-        // dropping the mesh is load-bearing, since TileManager owns Mesh lifetime and destroys it right after
-        // RemoveItem, so a parked child holding the reference would carry a destroyed Mesh into its next
-        // tenancy.
+        // Inactive parent for released layer children; the pool recycles them because each costs two
+        // AddComponents and a zoom step replaces the whole cover. ObjectPool does not reparent, and
+        // SetParent(null) would make a parked child an active scene root. Non-obvious why: MeshNode.Release
+        // drops the mesh because TileManager destroys it right after RemoveItem, so a parked child that kept it
+        // would carry a destroyed Mesh into its next tenancy.
         private GameObject _poolRoot;
         private readonly ObjectPool<MeshNode> _layerPool;
 
@@ -168,11 +132,8 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
                 maxSize: 1024);
         }
 
-        // Draw-item / container / root observability — DrawItemCount, ContainerCount, Root, Container and
-        // GetInstanceTranslation — has no production caller. It lives as extension methods in the test
-        // assembly (GameObjectTileRendererTestExtensions), reading _items/_tree via InternalsVisibleTo — the
-        // footprint the conventions sanction for test-only surface. They add no post-dispose guard: reading a
-        // torn-down backend is a bug, not a case to accommodate.
+        // Test-only observability (DrawItemCount, ContainerCount, Root, …) lives in the test assembly's
+        // GameObjectTileRendererTestExtensions, which read _items/_tree and have no post-dispose guard.
 
         /// <summary>
         /// XZ scene-space bounding box covering all live tile containers (each container's position, plus
@@ -285,11 +246,9 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
         /// <summary>
         /// Refreshes each tile container's <c>localPosition</c> and <c>localRotation</c> from
-        /// <paramref name="frame"/> (origin ≡ look-at; camera-relative rendering) via the shared
-        /// <see cref="SceneTileTree"/>. One transform write per tile, not per layer — the layer children sit
-        /// at the container origin and move with it. Does no material work (<c>ZoomStyleApplier</c> mutates
-        /// the shared materials live, same as the instanced backends). For Mercator the rebase is identity,
-        /// so this reduces to a translation write.
+        /// <paramref name="frame"/> (origin = look-at) via the shared <see cref="SceneTileTree"/>: one transform
+        /// write per tile, since the layer children sit at the container origin. Does no material work, because
+        /// <c>ZoomStyleApplier</c> writes the shared materials directly.
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {

@@ -10,33 +10,15 @@ using MapRenderer.Unity.Concurrency;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The GeoJSON implementation of <see cref="ITileFeatureSource"/>: tiles sliced locally from a retained
-    /// dataset instead of fetched from a server. It owns no fetcher, no scheduler and no cache — the whole
-    /// of it is "project once, then slice on demand".
-    ///
-    /// <para>The handle is EAGER, exactly as the MVT one is: <see cref="GetTile"/> slices, then hands back
-    /// a <see cref="SharedDisposable{T}"/> over the finished tile — every drop path is an OWNER with a
-    /// release in it, so a tile handed to a record that never kicks is freed when the record dies.</para>
-    ///
-    /// <para>The slice stays OFF the main thread under the desktop policy, routed through
-    /// <see cref="TileDecodeDispatch.DecodeAsync"/> — the same dispatch the MVT source uses, under
-    /// whichever <see cref="IWorkScheduler"/> this source was constructed with, and pinned by
-    /// <c>GeoJsonSourceTests.GetTile_SlicesOffTheMainThread</c>. Under
-    /// <see cref="ThreadPoolWorkScheduler"/> (desktop/editor) this is a pool hop, because slicing inline
-    /// inside <c>Tick</c> would stall the main thread once per cover tile; under
-    /// <see cref="InlineWorkScheduler"/> (WebGL) the slice runs synchronously on whatever thread calls
-    /// <c>GetTile</c> — there is no worker thread to hop to.</para>
-    ///
-    /// <para>Reusing the shared decode dispatch verbatim keeps every lease tooth (the pool hop's completion
-    /// invariant, the profiler marker, the refcount, dispose-outside-the-lock ordering) unmodified. The
-    /// price: a permanently-null <c>bytes</c> argument, which <see cref="ITileDecoder.Decode"/> documents.</para>
-    ///
-    /// <para>Slice options are a CONSTRUCTOR PARAMETER, never a constant: extent and buffer set the
-    /// positional resolution of everything this source will ever state, so a hardcoded
-    /// <c>GeoJsonSliceOptions.Default</c> here would turn a per-source choice into a production constant.</para>
-    ///
-    /// Internal (not public): constructed only from <c>MapView.BuildSourceSpecs</c> and from the test
-    /// assembly via <c>InternalsVisibleTo</c>.
+    /// The GeoJSON <see cref="ITileFeatureSource"/>: tiles sliced locally from a retained dataset, with no
+    /// fetcher, scheduler or cache. The handle is eager, as in the MVT source: <see cref="GetTile"/> slices,
+    /// then returns a <see cref="SharedDisposable{T}"/>, so a record that never kicks still frees its tile.
+    /// Non-obvious why: the slice uses the MVT source's <see cref="TileDecodeDispatch.DecodeAsync"/>. Under
+    /// <see cref="ThreadPoolWorkScheduler"/> it hops to the pool, so no slice stalls <c>Tick</c>
+    /// (<c>GeoJsonSourceTests.GetTile_SlicesOffTheMainThread</c>); under <see cref="InlineWorkScheduler"/>
+    /// (WebGL) it runs inline.
+    /// The shared dispatch passes a null <c>bytes</c>, which <see cref="ITileDecoder.Decode"/> documents.
+    /// Slice options are a constructor parameter because extent and buffer set each source's resolution.
     /// </summary>
     internal sealed class GeoJsonTileFeatureSource : ITileFeatureSource
     {
@@ -45,19 +27,16 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly ITileDecoder            _decoder;
         private readonly IWorkScheduler          _scheduler;
 
-        /// <param name="dataset">The parsed dataset. Projected ONCE here — projection is zoom-independent, so
-        /// it is the whole of the work that can be shared across every tile this source will serve. Recorded
-        /// cost: that happens on the main thread inside <c>SetStyle</c>, O(N) once per style-set; negligible
-        /// for a fixture, a hitch for a large dataset.</param>
+        /// <param name="dataset">The parsed dataset, projected once here for every tile (projection is
+        /// zoom-independent). Limitation: this O(N) step runs on the main thread in <c>SetStyle</c>.</param>
         /// <param name="options">Slice options — a parameter, not a constant (see the type doc).</param>
         /// <param name="scheduler">The execution policy the slice hop runs under — see
         /// <see cref="TileDecodeDispatch.DecodeAsync"/>.</param>
         internal GeoJsonTileFeatureSource(GeoJsonDataset dataset, in GeoJsonSliceOptions options,
             IWorkScheduler scheduler)
         {
-            // Validated HERE, not at the first slice. These options are retained for the source's whole
-            // life, so an unusable set would otherwise surface once per tile, as a faulted GetTile task, far
-            // from the wiring site that chose it.
+            // Validate here, not at the first slice: the options live as long as the source, so a bad set
+            // would otherwise fault every GetTile task, far from the wiring site.
             options.Validate();
 
             _dataset   = GeoJsonProjectedDataset.Project(dataset);

@@ -1,12 +1,7 @@
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references, or a dependency
-// on MapRenderer.Jobs.Mvt — see DataSourceTests.cs's header for why that file cannot make this claim.
-//
-// The scheduler-ordering invariant this file owns: TileScheduler.Request reserves the _inFlight/_cts
-// slot synchronously, under its own lock, BEFORE a source's fetch can complete — so a synchronously-
-// completing source's cleanup can never observe a slot nothing has assigned yet. No thread-pool hop is
-// needed to establish that ordering, and none may be reintroduced.
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine, NativeArray or
+// MapRenderer.Jobs.Mvt dependency.
+// Non-local invariant: TileScheduler.Request reserves the _inFlight/_cts slot under its lock BEFORE a fetch
+// can complete, so a synchronously-completing source never sees an unassigned slot; no thread-pool hop is needed.
 
 using System;
 using System.IO;
@@ -22,9 +17,8 @@ namespace MapRenderer.Tests.DataSources
     public class TileSchedulerOrderingTests
     {
         // -----------------------------------------------------------------------------------------
-        // Repo-root locator — same walk as DataSourceTests.LoadFixtureBytes, duplicated here rather
-        // than hoisted into MapRenderer.Tests.Shared — a deliberate, deferred follow-up, not an oversight.
-        // Do NOT use Application.dataPath — that would make this file engine-bound.
+        // Repo-root locator, the same walk as DataSourceTests.LoadFixtureBytes. Application.dataPath would
+        // make this file engine-bound.
         // -----------------------------------------------------------------------------------------
 
         private static string FindRepoRoot()
@@ -75,7 +69,7 @@ namespace MapRenderer.Tests.DataSources
             => new TileResponse(new byte[] { seed, (byte)(seed + 1), (byte)(seed + 2) }, TileEncoding.Mvt);
 
         // -----------------------------------------------------------------------------------------
-        // T1 — the ordering invariant that holds with no thread-pool hop in TileScheduler.
+        // The ordering invariant that holds with no thread-pool hop in TileScheduler.
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
@@ -113,17 +107,11 @@ namespace MapRenderer.Tests.DataSources
         }
 
         /// <summary>
-        /// A source that THROWS synchronously from <c>FetchAsync</c> (not merely returns a faulted
-        /// <c>UniTask</c>) exercises the catch block's cleanup reentrantly, the same way a
-        /// synchronously-completing source exercises the success path above. Before the fix, the
-        /// unconditional <c>_inFlight[id] = fetchTask</c> assignment ran AFTER the catch block had
-        /// already removed and disposed the CTS, stamping a permanently stale FAULTED entry — every
-        /// later <c>Request</c> for that tile would replay that same faulted task forever, never
-        /// re-fetching. Checked in the order that matters most first: the registered task must fault;
-        /// a second <c>Request</c> for the same tile must issue a fresh fetch rather than being handed
-        /// the stale faulted task (the user-visible symptom, and strictly stronger than an entry-count
-        /// check — a future change could clear <c>InFlightCount</c> correctly and still hand back a
-        /// stale task); only then, <c>InFlightCount</c> must return to zero.
+        /// A source that THROWS synchronously from <c>FetchAsync</c> runs the catch block's cleanup reentrantly.
+        /// An <c>_inFlight[id] = fetchTask</c> assignment after that cleanup would leave a stale FAULTED entry
+        /// that every later <c>Request</c> replays. Checks, strongest first: the task faults; a second
+        /// <c>Request</c> issues a fresh fetch (a correct <c>InFlightCount</c> alone does not prove this); then
+        /// <c>InFlightCount</c> returns to zero.
         /// </summary>
         [Test]
         public async Task SyncThrowingSource_NoStaleFaultedInFlightEntry_SubsequentRequestRefetches()
@@ -166,17 +154,14 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // T3 — no thread-pool hop anywhere in TileScheduler.cs, comments included.
+        // No thread-pool hop anywhere in TileScheduler.cs, comments included.
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// Named-API regression guard: <c>TileScheduler.cs</c> must contain ZERO occurrences of
-        /// <c>SwitchToThreadPool</c> or <c>RunOnThreadPool</c>, in code OR comments — the ordering
-        /// invariant is now a lock-and-conditional-registration fact, not a scheduling one, and no
-        /// replacement comment may reintroduce the false justification. Does NOT prove no thread hop exists
-        /// by any mechanism — a different API, or a hop inside the injected <see cref="IDataSource"/>, would
-        /// pass this. It is a regression guard on this one file, by path; <c>FileDataSource.cs</c>
-        /// legitimately keeps a guarded occurrence (see T4).
+        /// <c>TileScheduler.cs</c> must contain ZERO occurrences of <c>SwitchToThreadPool</c> or
+        /// <c>RunOnThreadPool</c>, in code OR comments: the ordering rests on the lock, not on scheduling.
+        /// Limitation: a hop through another API, or inside the injected <see cref="IDataSource"/>, passes.
+        /// <c>FileDataSource.cs</c> keeps a guarded occurrence, pinned by the test below.
         /// </summary>
         [Test]
         public void TileScheduler_IntroducesNoThreadPoolHop()
@@ -191,23 +176,15 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // T4 — FileDataSource's hop stays, but only inside its WebGL-excluding guard.
+        // FileDataSource's hop stays, but only inside its WebGL-excluding guard.
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// <c>FileDataSource.cs</c>'s <c>await UniTask.SwitchToThreadPool();</c> is a genuine offload
-        /// (blocking <c>File.ReadAllBytes</c>), not an ordering guard, and stays — but only inside
-        /// <c>#if !UNITY_WEBGL || UNITY_EDITOR</c>, or a WebGL player hangs on it — the same hazard
-        /// <see cref="TileScheduler"/>'s own hop no longer carries. Keyed on the CALL STATEMENT, never the bare token —
-        /// the file names <c>SwitchToThreadPool</c> in prose too (its rewritten class doc explains the
-        /// guard, which naturally names what is being guarded), so a token-count assertion would fail on
-        /// this plan's own edit. Index-ordering, not mere presence: three unordered greps would pass on a
-        /// guard that wraps nothing.
-        /// Does NOT prove the WebGL path works — nothing in the desktop suite can. It pins that the
-        /// branch stays deliberate.
-        /// <para><b>Known limitation:</b> <c>endGuardIndex</c> takes the FIRST <c>#endif</c> after the
-        /// guard opens. A future nested <c>#if</c> inside the guarded block would satisfy the ordering
-        /// checks against that inner block's <c>#endif</c> for the wrong reason. Recorded, not fixed.</para>
+        /// <c>FileDataSource.cs</c>'s <c>await UniTask.SwitchToThreadPool();</c> offloads a blocking read and
+        /// must sit inside <c>#if !UNITY_WEBGL || UNITY_EDITOR</c>, or a WebGL player hangs on it. The test
+        /// matches the CALL STATEMENT, not the token the file's prose also names, and checks the order of guard,
+        /// call and <c>#endif</c>. Limitation: it takes the FIRST <c>#endif</c>, so a nested <c>#if</c> could
+        /// satisfy it wrongly, and it cannot prove the WebGL path works.
         /// </summary>
         [Test]
         public void FileDataSource_ThreadPoolHop_IsGuardedForWebGl()
@@ -221,9 +198,8 @@ namespace MapRenderer.Tests.DataSources
             Assert.AreEqual(1, CountOccurrences(source, callStatement),
                 $"FileDataSource.cs must contain the call statement '{callStatement}' exactly once.");
 
-            // Line-anchored: a directive starts at column 0, so a "\n" prefix rules out matching the
-            // class doc's own <c>#if !UNITY_WEBGL || UNITY_EDITOR</c> prose mention, which is preceded
-            // by "(<c>" rather than a newline.
+            // Line-anchored: the "\n" prefix skips the class doc's prose mention of the directive, which
+            // follows "(<c>" rather than a newline.
             int guardIndex = source.IndexOf("\n" + guard, StringComparison.Ordinal);
             Assert.Greater(guardIndex, -1,
                 $"FileDataSource.cs must contain the exact guard line '{guard}'.");

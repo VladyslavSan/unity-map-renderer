@@ -23,17 +23,10 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>
         /// Exact pre-count of the rings and vertices <see cref="MvtDecodeJob.Execute"/> emits for a layer's
-        /// flattened command stream, computed by walking every command the way the decode job does. The
-        /// count is exact, not a heuristic: the job emits one ring and one vertex per MoveTo point, and one
-        /// vertex per LineTo point, for ANY input — a malformed multi-point <c>MoveTo</c> included. Sizing
-        /// from it makes under-allocation impossible, so no build can produce the out-of-range write.
-        ///
-        /// <b>Must mirror <see cref="MvtDecodeJob.Execute"/> exactly.</b> The job advances its read cursor by
-        /// 2 param uints per MoveTo/LineTo point and reads no params for ClosePath or an unknown command. If
-        /// you change one, change the other — they desync silently and re-introduce the overflow.
-        ///
-        /// A truncated param stream can still make the decode job read PAST the feature's command range.
-        /// That is an input-read overflow; the counts here match what the job WRITES either way.
+        /// command stream: one ring and one vertex per MoveTo point, one vertex per LineTo point, for any
+        /// input. Non-local invariant: this walk must advance its cursor exactly as the decode job does
+        /// (2 params per MoveTo/LineTo point, none for ClosePath or unknown), or the two desync silently and
+        /// the job writes out of range. A truncated param stream still over-reads input, never over-writes.
         /// </summary>
         /// <remarks>Takes the same native-flat <c>(commands, featureOffsets, featureLengths)</c> shape
         /// <see cref="MvtDecodeJob"/> reads. A feature with <c>featureLengths[fi] == 0</c> is
@@ -109,21 +102,16 @@ namespace MapRenderer.Jobs.Fill
             public TileGeometryBuffers Geometry;
 
             /// <summary>Ring indices into <see cref="Geometry"/>, in the exact order this layer wants them
-            /// triangulated — the caller's selection AND its draw order in one array, so fill's
-            /// <c>fill-sort-key</c> rank lives here. Caller-owned; <see cref="FillMeshGraph.Schedule"/>
-            /// only reads it.
-            /// <para><b>Must group each feature's rings contiguously</b>: <see cref="RingAssemblyJob"/> resets
-            /// its exterior sign on a feature CHANGE, so a feature's rings split across the order would have
-            /// its second run re-read as a fresh exterior with a fresh sign.</para></summary>
+            /// triangulated, so it carries the <c>fill-sort-key</c> rank. Caller-owned and read-only here.
+            /// It must group each feature's rings contiguously: <see cref="RingAssemblyJob"/> resets its
+            /// exterior sign on a feature change, so a split feature's second run is a new exterior.</summary>
             public NativeArray<int> RingVisitOrder;
 
             /// <summary>Suppresses the outward boundary band for this layer. The default <c>false</c> emits
-            /// it, which every real fill layer wants. Set by the callers whose geometry has no silhouette to
-            /// antialias: <c>FillExtrusionMeshGraph</c>'s roof, whose buildings keep hard edges, and
-            /// <c>BackgroundQuad</c>, whose every edge abuts the neighbour tile's identical quad, where a
-            /// band is a double-composited rim.
-            /// <para>The style's <c>fill-antialias</c> also lands here: a layer that opts out emits no band
-            /// geometry at all. <c>StyledFillTileBuilder.BuildLayerInput</c> resolves it.</para></summary>
+            /// it. Set for geometry with no silhouette to antialias: <c>FillExtrusionMeshGraph</c>'s roof (hard
+            /// building edges) and <c>BackgroundQuad</c> (each edge abuts the neighbour's identical quad, so a
+            /// band is a double rim). <c>StyledFillTileBuilder.BuildLayerInput</c> also sets it from
+            /// <c>fill-antialias</c>.</summary>
             public bool SuppressBoundaryBand;
 
             /// <summary>The RTC render-space origin the mesh vertices are baked relative to — the tile's SW

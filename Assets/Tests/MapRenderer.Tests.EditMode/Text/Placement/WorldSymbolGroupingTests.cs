@@ -1,20 +1,9 @@
-// Unity EditMode only — real Camera/Mesh/GameObject/Texture2D (WorldSymbolRenderer's SceneTileTree creates
-// real GameObjects). NOT registered in core-tests.csproj.
-//
-// World symbols join the SAME root → per-tile-container → per-symbol-layer-node →
-// text/icon-sibling-children tree the GameObjects tile backend uses
-// (Rendering/Backend/GameObjects/TileRenderer.cs), via the shared SceneTileTree. A flat
-// Dictionary<(TileKey,Slot,Kind)> of root-parented GameObjects, each re-writing the tile's
-// floating-origin transform every frame, is the regression this pins against:
-//   • Grouping: two symbols (text + icon) on the SAME tile+slot must be SIBLINGS under ONE layer node under
-//     ONE tile container; a THIRD symbol on a DIFFERENT tile must get its OWN separate container — but the
-//     LIVE tile-container count must equal the number of DISTINCT TILES (2), never the number of slots (3),
-//     which a one-GameObject-per-slot regression would fail. Asked via
-//     WorldSymbolTileCount(), not the root's raw childCount: the root also carries the inactive pool nodes
-//     that recycled leaves and containers park under.
-//   • One transform write per tile, not per slot: a text/icon child's own LOCAL transform must stay at
-//     identity — only its tile container carries the per-frame floating-origin placement, matching the
-//     GameObjects backend's oracle formula (FloatingOrigin.TileToSceneRebased).
+// Unity EditMode only: WorldSymbolRenderer's SceneTileTree creates real GameObjects. NOT in core-tests.csproj.
+// World symbols join the root → tile container → symbol-layer node → text/icon children tree that the
+// GameObjects tile backend uses, via the shared SceneTileTree. Non-local invariant: the live tile-container
+// count equals the number of DISTINCT tiles, never of slots, and only a tile container carries the per-frame
+// floating-origin transform (FloatingOrigin.TileToSceneRebased); a text/icon child stays at local identity.
+// Count via WorldSymbolTileCount(): the root's childCount also includes the inactive pool nodes.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -70,11 +59,8 @@ namespace MapRenderer.Tests.Text.Placement
             TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, float2.zero, new float2(18f, 18f),
                 paint: SymbolPaint.Default, textSizePx: 24f, sortKey: 0f, featureIndex: featureIndex, tileKey: tileKey,
                 allowOverlap: true,
-                // PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey
-                // — so two symbols sharing the SAME anchor (as every call site here does) with Text left at its
-                // default would collide on FadeId. FadeId is the display key (SymbolCandidate.FadeId's
-                // uniqueness contract), so co-live candidates sharing an id both show when one wins. Distinct
-                // per-featureIndex text keeps every call site's identity unique.
+                // PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage), so same-anchor symbols need
+                // distinct text, or they share the FadeId display key and both show when one wins.
                 text: "T" + featureIndex);
         }
 
@@ -183,10 +169,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Idle-reclaim lifecycle: child destroy → layer-node refcount → tile ReleaseChildFrom ──────────
-        // The only pre-existing K=60-crossing tooth (SymbolPlacementAllocTests) uses a slot that never builds
-        // a GameObject (no material resolved), so the NEW refcount-decrement/destroy code this rework added
-        // (WorldSymbolRenderer.ReleaseChild + SceneTileTree.ReleaseChildFrom) was reached only by reasoning,
-        // not exercised. This drives a REAL text+icon pair through reclaim end-to-end.
+        // Drives a REAL text+icon pair through reclaim; SymbolPlacementAllocTests' reclaim slot has no GameObject.
         [Test]
         public void IdleReclaim_ReleasesChild_ThenLayerNode_ThenTileContainer_AndRecyclesThemOnReEmit()
         {
@@ -256,29 +239,22 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.IsNull(system.WorldSlotTransform(tileAKey, 0, SymbolKind.Text), "the text child must be released from its slot once idle.");
                 Assert.AreEqual(0, system.WorldSymbolTileCount(), "ZERO live tile containers once every tile has gone idle.");
 
-                // These nodes are RECYCLED, not destroyed — they park under an INACTIVE pool node that hangs
-                // off the tree root. So `== null` would fail a working pool, and reachability from the root
-                // does not discriminate either (the pool node is under the root too). What separates parked
-                // from live is that a parked node is not active in the hierarchy. This still
-                // catches the original ReleaseChild defect — an orphan left under its live container would
-                // remain ACTIVE.
+                // Parked nodes sit under an INACTIVE pool node below the root: `== null` and root reachability
+                // cannot tell parked from live, but activeInHierarchy can (a leaked orphan stays active).
                 Assert.IsFalse(layerNode.gameObject.activeInHierarchy,
                     "the layer node must leave the LIVE tree once its last child (text) is reclaimed (WorldSymbolRenderer.ReleaseChild).");
                 Assert.IsFalse(container.gameObject.activeInHierarchy,
                     "the tile container must leave the LIVE tree once its last layer node is gone (SceneTileTree.ReleaseChildFrom).");
 
-                // Stated before any re-emit, and before anything DEREFERENCES these: with pooling broken they
-                // are destroyed, and every assertion below would otherwise fail as a MissingReferenceException
-                // from walking `.parent` — red, but saying nothing about why.
+                // Checked before any re-emit or dereference: with pooling broken these are destroyed, and the
+                // asserts below would fail as a MissingReferenceException from `.parent` without saying why.
                 Assert.IsTrue(textChild  != null, "reclaim must PARK the text leaf for reuse, not destroy it.");
                 Assert.IsTrue(iconChild  != null, "reclaim must PARK the icon leaf for reuse, not destroy it.");
                 Assert.IsTrue(layerNode  != null, "reclaim must PARK the layer node for reuse, not destroy it.");
                 Assert.IsTrue(container  != null, "reclaim must PARK the tile container for reuse, not destroy it.");
 
                 // ── Re-emit the SAME tile+slot: every node must come back as the SAME instance ──
-                // The tooth that fails if pooling silently stops working (a Return that destroys, a Rent that
-                // always creates). Behaviour would still be correct — just as expensive as before pooling —
-                // and nothing else in this fixture would notice.
+                // Nothing else here notices a pool that stops working (a Return that destroys, a Rent that creates).
                 for (int i = 0; i < 3; i++)
                     system.TickSymbols(in frame, textAndIcon, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
@@ -290,9 +266,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreSame(container, layerNode.parent, "…which itself re-parents under the recycled tile container.");
                 Assert.AreEqual(1, system.WorldSymbolTileCount(), "exactly one live tile container again.");
 
-                // A recycled leaf must carry NO state from its previous tenancy: that slot's Mesh was destroyed
-                // immediately after the leaf was released, so a leaf that kept the binding would point at a
-                // destroyed Mesh (pink in the Editor) until something rebound it.
+                // A recycled leaf must carry NO state from its previous tenancy: the slot's Mesh is destroyed on
+                // release, so a leaf that kept the binding would draw a destroyed Mesh (pink in the Editor).
                 Assert.IsTrue(system.IsWorldSlotVisible(tileAKey, 0, SymbolKind.Text), "the recycled text leaf must draw again.");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(tileAKey, 0, SymbolKind.Text, out Mesh reusedMesh) && reusedMesh != null,
                     "the recycled leaf's slot must hold a live mesh.");

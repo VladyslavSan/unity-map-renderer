@@ -1,16 +1,10 @@
 // Unity EditMode only — the golden reference-image regression layer.
 // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: Texture2D encode/decode).
 //
-// A CHANGE DETECTOR layered ALONGSIDE the visual kit's existing analytic teeth (SnapshotCoverage / InkStatsIn
-// / the oracle in GeoJsonPointSymbolFixtureTests) — it does not replace them. A golden can only say "different
-// from the last bake" and will happily lock in a WRONG image; the analytic assertions stay the correctness
-// oracle. Two traps guarded here, both load-bearing — see docs/lessons-learned.md:
-//   1. Vacuous all-black golden: a nonzero-ink precondition (frame-wide, via VisualFrame.InkStatsIn — NOT
-//      SnapshotCoverage.IsBlank, which reads TRUE on a sparse symbol frame too, see
-//      GeoJsonPointSymbolFixtureTests.Neg_) runs before every compare, so an all-black frame fails
-//      rather than passing vacuously.
-//   2. Orientation-blind compare: the frame is bottom-left; a Texture2D.LoadImage'd PNG must be read back
-//      the SAME way. RED-verified empirically against a flipped reference.
+// Non-obvious why: a golden is a CHANGE DETECTOR beside the kit's analytic teeth, not a replacement. It only
+// says "different from the last bake" and can lock in a WRONG image. It guards two traps (docs/lessons-learned.md):
+//   1. Vacuous all-black golden: a frame-wide nonzero-ink precondition runs before every compare.
+//   2. Orientation-blind compare: the frame is bottom-left, and a loaded PNG must be read back the same way.
 
 #if UNITY_EDITOR
 using System;
@@ -21,13 +15,11 @@ using UnityEngine;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// The golden-image comparer: <see cref="Assert"/> is the entry point a fixture calls after
-    /// <see cref="VisualScene.Render"/>. References live at
-    /// <c>Assets/Fixtures/visual-references~/&lt;referenceName&gt;.png</c> — the trailing <c>~</c> makes Unity
-    /// ignore the folder (no importer pass, no <c>.meta</c>, no lossy Texture2D copy, never in a build), which
-    /// is correct because the reference is read by file path (<see cref="ReferencePath"/> + raw bytes), never
-    /// through the AssetDatabase. Failure artifacts (actual / expected / heat-mapped diff) are written to
-    /// <c>Logs/snapshots/</c> via <see cref="SnapshotRenderer.WritePngFromRgba32"/>.
+    /// The golden-image comparer: a fixture calls <see cref="Assert"/> after <see cref="VisualScene.Render"/>.
+    /// References live at <c>Assets/Fixtures/visual-references~/&lt;referenceName&gt;.png</c>; the <c>~</c>
+    /// makes Unity skip the folder, and the reference is read as raw bytes from the path
+    /// <see cref="ReferencePath"/> returns.
+    /// Failure artifacts (actual, expected, heat-mapped diff) go to <c>Logs/snapshots/</c>.
     /// </summary>
     internal static class GoldenImage
     {
@@ -51,10 +43,8 @@ namespace MapRenderer.Tests
         /// <param name="referenceName">Reference file stem, no extension (e.g. "gv0-fill").</param>
         public static void Assert(VisualFrame frame, string referenceName)
         {
-            // Nonzero-ink precondition — frame-wide, the SAME background predicate SnapshotCoverage uses
-            // (InkStatsIn delegates to SnapshotCoverage.Tolerance). NOT frame.Coverage().IsBlank: IsBlank
-            // fires at >=97% background, which reads TRUE on a legitimate sparse symbol frame and would
-            // resolve Inconclusive forever.
+            // Nonzero-ink precondition, frame-wide. Not Coverage().IsBlank: it fires at >=97% background, which
+            // is TRUE on a legitimate sparse symbol frame.
             frame.InkStatsIn(0, 0, frame.Width, frame.Height, out _, out int totalInk);
             if (totalInk == 0)
             {

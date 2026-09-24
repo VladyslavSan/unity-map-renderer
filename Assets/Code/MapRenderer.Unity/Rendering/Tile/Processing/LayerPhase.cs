@@ -1,17 +1,11 @@
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Which cadence(s) an
-    /// <see cref="ITileLayerProcessor"/> runs on. The mesh processors implement only <see cref="WorkerOnly"/> — the
-    /// fill/line fan-out is entirely a worker-thread write into a main-thread-allocated mesh array (or, for
-    /// a graph-arm fill layer, a worker-thread build of the graph's measure-step input), so
-    /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> rejects <see cref="WorkerThenMain"/> (that mesh
-    /// pass has no main-thread tail to give it — a MESH processor requesting it is a programming error, not
-    /// a phase to silently downgrade to worker-only).
-    /// <see cref="WorkerThenMain"/> is the symbol cadence's: worker-side extraction (<c>TileSymbolLayerProcessor</c>)
-    /// followed by a main-thread shaping tail, choreographed by
-    /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> (worker half) plus the symbol
-    /// coordinator's batched main-thread tail loop.
+    /// Which cadence(s) an <see cref="ITileLayerProcessor"/> runs on. Mesh processors are <see cref="WorkerOnly"/>:
+    /// the fill/line fan-out is all worker-thread work, so <see cref="TileLayerProcessorRunner.RunWorkerPass"/>
+    /// rejects <see cref="WorkerThenMain"/> as a programming error rather than downgrade it.
+    /// <see cref="WorkerThenMain"/> is the symbol cadence: worker-side extraction, then a main-thread shaping
+    /// tail, run by <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> and the symbol coordinator.
     /// </summary>
     internal enum LayerPhase
     {

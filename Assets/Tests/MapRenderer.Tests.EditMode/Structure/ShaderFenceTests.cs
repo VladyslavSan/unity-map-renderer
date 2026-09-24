@@ -1,9 +1,5 @@
-// Structure/ShaderFenceTests.cs — shader/material structural fences: DOTS-instancing struct<->shader
-// parity, the ShaderProperties registry's four-way parity, the no-raw-string Material access guard,
-// fill/line shader pass structure, the fill-band vertex-attribute parity, the Core-assembly engine-free
-// boundary, the *.md citation fence, PreparedKey's field-count shape, and the render-layer factory's
-// sole-dispatch-point guard. Unity EditMode only — reads source files under Application.dataPath. NOT
-// registered in core-tests.csproj.
+// Structure/ShaderFenceTests.cs — shader/material structural fences. Unity EditMode only — reads source
+// files under Application.dataPath. NOT registered in core-tests.csproj.
 //
 // Contents:
 //   InstanceStructShaderParityTests        — MapInstanceData struct <-> DOTS-instanced shader property parity.
@@ -81,9 +77,8 @@ namespace MapRenderer.Tests.Structure
             return ShaderPropertyParser.TypeToFloatCount(typeName);
         }
 
-        // ParseDotsProps is in ShaderPropertyParser (shared with MaterialPropertyRegistryParityTests).
-        // The private alias below keeps the call sites below unchanged so this test class remains
-        // readable without requiring grep-and-replace.
+        // A local alias for ShaderPropertyParser.ParseDotsProps (shared with
+        // MaterialPropertyRegistryParityTests).
         private static Dictionary<string, int> ParseDotsProps(string filePath)
             => ShaderPropertyParser.ParseDotsProps(filePath);
 
@@ -208,22 +203,8 @@ namespace MapRenderer.Tests.Structure
     // MaterialPropertyRegistryParityTests — the ShaderProperties registry vs shader Properties/CBUFFER/DOTS
     // ───────────────────────────────────────────────────────────────────────────────────
 
-// Material Property Registry Parity Tests — runs in the Unity EditMode test assembly
-// (moved from Tools/core-tests, which used test-binary-relative path arithmetic that broke on the
-// Assets/Code/ folder move). Paths are now resolved via ShaderPropertyParser's
-// AssetDatabase-anchored helpers — move-proof.
-//
-// Validates the four-way set equality:
-//   • sharedCBUFFER (from ShaderProperties/PropertyNames.cs CBUFFER region, 14)
-//   • ShaderProperties/Line/PropertyNames.cs (12 line-only: 10 CBUFFER + 2 editor-only keyword drivers),
-//     ShaderProperties/Fill/PropertyNames.cs (7 fill-only)
-//   • Line_LitInput.hlsl CBUFFER (24 after stripping companions)
-//   • Fill_LitInput.hlsl CBUFFER (21 after stripping companions)
-//   (line counts dropped by 2 — _MetersPerPixel + _AaEdgeWidth retired)
-//   • Line/Fill DOTS blocks (must equal their respective CBUFFER sets)
-//   • Line.shader / Fill.shader Properties{} blocks (must be supersets of the registry)
-//
-// Exact counts: assert exact, never >. Fail loud if a regex silently matches nothing.
+// Material Property Registry Parity: the PropertyNames regions (shared, line-only, fill-only), each shader's
+// CBUFFER and DOTS block, and each .shader Properties{} superset agree. Exact counts fail a regex that matches nothing.
 //
 
     [TestFixture]
@@ -281,9 +262,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void LineCbufferRegionCount_IsExactly10()
         {
-            // Guards the region split itself: SharedUnionLineNames_EqualsLineCbuffer now reads only the
-            // CBUFFER region, so without an exact count here a real CBUFFER property could be dropped into
-            // the editor-only region and silently escape the parity assertion.
+            // Guards the region split: SharedUnionLineNames_EqualsLineCbuffer reads only the CBUFFER region,
+            // so a CBUFFER property moved into the editor-only region would escape parity without this count.
             var set = ParseLineCbufferRegion();
             Assert.That(set.Count, Is.EqualTo(10),
                 $"Line/PropertyNames.cs CBUFFER region must have exactly 10 const string values. " +
@@ -316,9 +296,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void SharedCbufferRegion_EqualsLineFillIntersection()
         {
-            // The 14 shared CBUFFER names in PropertyNames.cs must be exactly the intersection of
-            // the two shader CBUFFER sets. A mismatch means a prop was declared shared but is only
-            // in one shader (or vice versa).
+            // The shared CBUFFER names in PropertyNames.cs are exactly the intersection of the two shader
+            // CBUFFER sets.
             var shared = ParseSharedCbufferRegion();
             var lineCbuffer = ShaderPropertyParser.ParseCbufferMembers(
                 ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
@@ -531,20 +510,8 @@ namespace MapRenderer.Tests.Structure
     // NoRawStringMaterialAccessGuardTests — no raw-string Material property access anywhere in the repo
     // ───────────────────────────────────────────────────────────────────────────────────
 
-// No-Raw-String Material Access Guard — runs in the Unity EditMode test assembly (moved from
-// Tools/core-tests, which used test-binary-relative path arithmetic that broke on the Assets/Code/
-// folder move). Paths are now resolved via ShaderPropertyParser's AssetDatabase-anchored helpers.
-//
-// Structural guards that enforce:
-//   1. Registry layout: six registry files exist under Rendering/ShaderProperties/{,Line,Fill}/.
-//      ShaderPropertiesCompat.cs is gone. The old flat-directory files are gone.
-//   2. Migration completeness: no file under MapRenderer.Unity uses the old prefixed class names
-//      (LinePropertyId, FillPropertyId, LinePropertyNames, FillPropertyNames) or the compat-shim
-//      class declaration (class ShaderProperties). ShaderPropertiesToken is gone.
-//   3. No raw-string Material API: no file under Assets/Code/MapRenderer.Unity/**/*.cs uses
-//      .Set/Get(Float|Color|Vector|Int|Texture)("...") or .HasProperty("...") string-literal forms.
-//   4. No bare literals in PropertyId files: every PropertyId.cs member is defined as
-//      Shader.PropertyToID(PropertyNames.X), never Shader.PropertyToID("_Foo").
+// No-Raw-String Material Access Guard: the six registry files exist, no prefixed or shim class name
+// survives, no Material/Shader call takes a string literal, and every PropertyId uses PropertyNames.X.
 
     [TestFixture]
     public class NoRawStringMaterialAccessGuardTests
@@ -617,9 +584,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void NoCompatClassDeclaration_InUnityAssembly()
         {
-            // The compat shim's class declaration must not exist anywhere. The token "ShaderProperties"
-            // now only appears as a namespace segment (ShaderProperties.PropertyId.X etc.) — never as a
-            // class declaration (class ShaderProperties).
+            // "ShaderProperties" is a namespace segment only; no `class ShaderProperties` may exist.
             var classDeclaration = new Regex(@"\bclass\s+ShaderProperties\b");
 
             var offenders = new List<string>();
@@ -660,19 +625,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void NoRawStringMaterialApiCalls_InUnityAssembly()
         {
-            // Flag any line matching the raw-string Material API patterns:
-            //   • .SetFloat("   .SetColor("   .SetVector("   .SetInt("   .SetTexture("
-            //   • .GetFloat("   .GetColor("   .GetVector("   .GetInt("   .GetTexture("
-            //   • .HasProperty("
-            // …and their Shader.Set/GetGlobal* counterparts. The global forms went uncovered until
-            // this stage simply because nothing wrote a shader global; the frame constant
-            // _MapFrameMetersPerDevicePixel is the first, and line-pattern will add a second. A
-            // global's name is exactly as easy to typo as a material property's, and a typo'd global reads
-            // back 0 in silence.
-            // Every call site uses a cached int id from ShaderProperties.PropertyId /
-            // ShaderProperties.Line.PropertyId / ShaderProperties.Fill.PropertyId (or, for globals,
-            // ShaderProperties.FrameGlobalIds), so there should be ZERO matching lines. No whole-file
-            // exclusions (BaseShaderGUI is fully migrated).
+            // Flag any Set/Get(Float|Color|Vector|Int|Texture)(" or HasProperty(" call, including the
+            // Shader.*Global* forms (a typo'd global reads back 0 in silence). No file is excluded.
             var badPattern = new Regex(
                 @"\.(Set|Get)(Global)?(Float|Color|Vector|Int|Texture)\s*\(\s*""|\.HasProperty\s*\(\s*""");
 
@@ -701,11 +655,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void PropertyIdFiles_NoBareLiterals()
         {
-            // Every member of every PropertyId.cs under ShaderProperties/ must be defined as
-            // Shader.PropertyToID(PropertyNames.X) — never Shader.PropertyToID("_Foo").
-            // A bare literal would bypass the single-source-of-truth guarantee (parity tests parse
-            // PropertyNames, not PropertyId — so a hardcoded "_Foo" in PropertyId.cs passes every
-            // existing parity test today but silently breaks the registry contract).
+            // Every PropertyId member is Shader.PropertyToID(PropertyNames.X): the parity tests parse only
+            // PropertyNames, so a bare "_Foo" literal here would pass them all.
             var bareLiteralPattern = new Regex(@"Shader\.PropertyToID\s*\(\s*""");
 
             var propertyIdFiles = Directory.GetFiles(ShaderPropertiesDir, "PropertyId.cs", SearchOption.AllDirectories);
@@ -752,9 +703,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ShaderFiles_AllRequiredFilesExist()
         {
-            // Checked by NAME (move-proof): MapShaderPath asserts each resolves to exactly one file somewhere
-            // under Shaders/Map/, regardless of the Lit/Unlit folder split. Includes the unlit twins so the
-            // new tree is fully pinned, not half-covered.
+            // Checked by NAME: MapShaderPath resolves each to exactly one file under Shaders/Map/, whatever
+            // the Lit/Unlit folder; the unlit twins are included.
             string[] required = new[]
             {
                 // Fill — lit + shared
@@ -818,9 +768,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ShaderFiles_FillAndLineLiveUnderMapLayer()
         {
-            // Per-layer shaders live under Shaders/Map/<Layer>/, not the flat Shaders/ root. Asserted
-            // on the resolved path so the Lit/Unlit leaf (Map/Fill/Lit/Fill.shader) still counts as "under
-            // the Fill layer" — the layer is pinned, the mode subfolder is not.
+            // Per-layer shaders live under Shaders/Map/<Layer>/; the layer is pinned, the Lit/Unlit
+            // subfolder is not.
             Assert.That(ShaderPropertyParser.MapShaderPath("Fill.shader").Replace('\\', '/'),
                 Does.Contain("/Map/Fill/"), "Fill.shader must live under Shaders/Map/Fill/.");
             Assert.That(ShaderPropertyParser.MapShaderPath("Line.shader").Replace('\\', '/'),
@@ -830,14 +779,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void MapKindRoots_HoldOnlyGenuinelySharedIncludes()
         {
-            // The Lit/Unlit split: the two .shader entry points and their mode-specific .hlsl
-            // moved into Lit/ and Unlit/; the kind ROOT (Map/<Kind>/, top level only) must hold EXACTLY the
-            // includes BOTH twins reuse — the vertex hook + the two depth passes, plus whatever else a kind
-            // genuinely shares (Fill also shares its boundary-band coverage between the Lit and Unlit
-            // forward passes). This is the structural contract the split created; without this tooth
-            // someone could drop an unlit input back into the kind root and nothing would notice. Every
-            // entry is named, so admitting a shared file is a deliberate edit here, not a widened wildcard.
-            // RED-verify by moving any file up one level.
+            // The kind ROOT (Map/<Kind>/, top level) holds EXACTLY the includes both Lit and Unlit reuse: the
+            // vertex hook, two depth passes, and named extras (Fill's band coverage). No wildcard admits more.
             (string kindDir, string vertex, string[] alsoShared)[] kinds =
             {
                 (MapFillDir,      "Fill_VertexModify.hlsl",          new[] { "Fill_BandCoverage.hlsl" }),
@@ -1075,11 +1018,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillExtrusionVerticalGradient_NotRendered_NoWallDarkeningFold()
         {
-            // fill-extrusion-vertical-gradient is NOT rendered: the maintainer abandoned the
-            // fake-AO wall-base darkening in favour of real ambient + shadows/SSAO (Core still PARSES the
-            // property — this is a shader-side removal only). This is a regression tooth: the darkening must
-            // stay gone and cannot creep back. Structural (headless cannot render fragments) — RED-verify by
-            // re-adding the helper or the vColor fold.
+            // fill-extrusion-vertical-gradient is parsed but NOT rendered: real ambient + shadows/SSAO replace
+            // the fake-AO wall darkening. Structural, because headless cannot render fragments.
             string vmod = ReadShaderFile("FillExtrusion_VertexModify.hlsl");
             Assert.That(vmod, Does.Not.Contain("FillExtrusionVerticalGradientFactor"),
                 "FillExtrusion_VertexModify.hlsl must NOT define the abandoned vertical-gradient factor helper.");
@@ -1098,10 +1038,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillExtrusionShader_WiresCustomEditor()
         {
-            // The material editor must be WIRED, not just authored — the shader's CustomEditor is what
-            // makes LitShaderGUI.ValidateMaterial run in the inspector (deriving _EMISSION/_NORMALMAP/… from
-            // material properties). Without this line the GUI class exists but never drives keyword sync.
-            // RED-verify by deleting the CustomEditor directive.
+            // The shader's CustomEditor makes LitShaderGUI.ValidateMaterial run in the inspector and derive
+            // _EMISSION/_NORMALMAP/… keywords; without it the GUI class never drives keyword sync.
             string text = ReadShaderFile("FillExtrusion.shader");
             Assert.That(text, Does.Contain("CustomEditor \"MapRenderer.Unity.Editor.FillExtrusionShaderGUI\""),
                 "Map/FillExtrusion must declare CustomEditor \"MapRenderer.Unity.Editor.FillExtrusionShaderGUI\".");
@@ -1187,18 +1125,8 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void MapLayerFiles_ShareOnlyViaSanctionedInclude()
         {
-            // Each layer folder is self-contained (no reach into Common/). There are exactly two
-            // KINDS of sanctioned cross-folder `../` reach, both validated STRUCTURALLY (resolve on disk),
-            // not by a string allow-list:
-            //   (1) the ONE sanctioned Map-root shared include — PixelsToWorld.hlsl (the shared
-            //       px→world, reached from each kind's vertex file); and
-            //   (2) the Lit/Unlit split — a .shader / mode-specific .hlsl in Map/<Kind>/{Lit,
-            //       Unlit}/ reaches ONE level up to its OWN kind root for the three shared includes
-            //       (<Kind>_VertexModify/VertexExtrude, _DepthOnlyPass, _DepthNormalsPass).
-            // Every `../` include must resolve to a real file that is EITHER the Map-root shared include OR
-            // still inside the SAME kind's tree. That blocks a reach into Common/, into a SIBLING layer, or
-            // outside Map/ — the reaches this test exists to catch — and also catches a dangling include
-            // that resolves to nothing.
+            // Every `../` include must resolve on disk to the Map-root PixelsToWorld.hlsl or a file in the
+            // SAME kind's tree. That blocks Common/, sibling layers, outside Map/, and dangling includes.
             var mapRootShared = new[]
             {
                 Path.GetFullPath(Path.Combine(MapDir, "PixelsToWorld.hlsl")),
@@ -1249,15 +1177,9 @@ namespace MapRenderer.Tests.Structure
         /// <summary>
         /// NO map fragment pass discards on the fade uniform. Fade is a per-slot DRAW gate
         /// (<c>ITileRenderBackend.SetLayerVisible</c>) — a gated layer submits no draw item, so the fragment
-        /// never runs and a clip there is dead work.
-        ///
-        /// <para>Exempt from the length limit for a limitation no rendered tooth can observe: 11 of the 18
-        /// pass sites cannot rasterise in the shipped configuration (Forward+, queue >= 3000,
-        /// CastShadows.Off on every kind but fill-extrusion), so a clip re-added to one of them stays
-        /// invisible until a configuration flip makes the pass live. This fence is their sole observer. It
-        /// matches the ARGUMENT (<c>_Opacity</c>), so the line-coverage and pattern-cutout
-        /// <c>clip()</c>s are untouched, and it strips comments first, so a commented-out clip does not
-        /// fail it.</para>
+        /// never runs and a clip there is dead work. Limitation: most pass sites cannot rasterise in the
+        /// shipped configuration, so this fence is their sole observer. It matches the <c>_Opacity</c>
+        /// argument, so other <c>clip()</c>s pass, and strips comments first.
         /// </summary>
         [Test]
         public void NoMapPassBody_DiscardsOnTheLayerFadeUniform()
@@ -1321,12 +1243,8 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>
         /// <c>MapPixelsToWorld</c> is genuinely shared by every layer that converts a screen-pixel offset to
-        /// world metres in the vertex shader. Reaching into <c>Common/</c> is forbidden, so before this include existed
-        /// this was DUPLICATED per layer instead — sentinel-pinned copies verified byte-identical by the
-        /// (now-retired) <c>SharedShaderBlocks_AreIdenticalAcrossLayers</c>. That test only ever caught
-        /// drift between existing copies; it said nothing if a copy came back after the hoist. This is the
-        /// positive replacement: the shared file exists and every carrier includes it, AND — the clause that
-        /// actually catches re-duplication — no carrier locally re-defines the function.
+        /// world metres in the vertex shader: the shared file exists, every carrier includes it, and no
+        /// carrier re-defines the function locally, which is the clause that catches re-duplication.
         /// </summary>
         [Test]
         public void SharedPixelsToWorldInclude_ReferencedByEveryCarrier()
@@ -1361,12 +1279,9 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillVertexModify_ContainsNoReturn()
         {
-            // Fill_VertexModify.hlsl's fill-translate guard is an `if` block, not an early `return`.
-            // fill-translate is [0,0] on every shipped layer, so that branch is taken for essentially
-            // every vertex drawn — an early return there would make "below the return" a place where code
-            // looks correct, compiles, and never runs in production. The boundary band's displacement is
-            // exactly the code that would go there. This forbids the shape from returning; a
-            // forbidden-token check fails CLOSED, so it cannot pass by matching nothing.
+            // Non-obvious why: fill-translate is [0,0] on every shipped layer, so an early `return` in its guard
+            // would make any code placed after it dead on almost every shipped vertex. The forbidden-token
+            // check fails CLOSED.
             string code = ShaderPropertyParser.StripHlslComments(
                 File.ReadAllText(ShaderPropertyParser.MapShaderPath("Fill_VertexModify.hlsl"), Encoding.UTF8));
 
@@ -1466,10 +1381,8 @@ namespace MapRenderer.Tests.Structure
 
         // ── Helper ─────────────────────────────────────────────────────────────
 
-        // Reads a shader source file by NAME (move-proof: resolved anywhere under Shaders/Map/ via
-        // ShaderPropertyParser.MapShaderPath). Content tests below don't care which Lit/Unlit folder a file
-        // sits in — only the dedicated layout tests (ShaderFiles_*, MapKindRoots_HoldOnlyTheSharedThree)
-        // assert folder structure.
+        // Reads a shader source file by NAME via MapShaderPath; only the layout tests (ShaderFiles_*,
+        // MapKindRoots_HoldOnlyGenuinelySharedIncludes) assert folder structure.
         private static string ReadShaderFile(string filename)
             => File.ReadAllText(ShaderPropertyParser.MapShaderPath(filename), Encoding.UTF8);
     }
@@ -1478,23 +1391,10 @@ namespace MapRenderer.Tests.Structure
     // FillBandAttributeTests — fill-band forward/depth pass vertex-attribute parity
     // ───────────────────────────────────────────────────────────────────────────────────
 
-// FillBandAttributeTests.cs — the fill boundary band's plumbing, checked where a rendered test cannot.
-//
-// WHY THESE ARE FILE-READING TESTS AND NOT RENDERS. A TEXCOORDn semantic binds to the MESH's
-// VertexAttributeDescriptor index, globally — not to a pass's own Attributes struct — and an UNBOUND
-// semantic silently zero-fills rather than failing to compile.
-//
-// The unqualified form of that claim — "no render can tell the six passes apart" — was TRUE ONLY WHILE
-// every vertex carried side = 0, i.e. before the band node existed: back then a pass that forgot the
-// attribute rendered exactly like one that has it, because the zero-fill WAS the correct value. Now that
-// real band geometry ships, a missing attribute in one of the two FORWARD passes is render-visible. What
-// stays invisible, and is what still justifies reading declarations rather than pixels, is the four
-// DEPTH-writing passes: their band fragments are clipped, so a missing attribute there changes no pixel
-// and no depth sample either way, and the only instrument that can see it is one that reads the file.
-//
-// The same holds for the depth clip itself. A band fragment at coverage 0 under a pass's hardcoded
-// ZWrite On writes depth and casts a shadow, so a missing clip fattens the shadow silhouette — and now
-// that band fragments exist, that is a live defect rather than a latent one.
+// FillBandAttributeTests — the fill boundary band's plumbing, checked by reading files.
+// Limitation: an unbound TEXCOORDn semantic zero-fills silently, and in the four DEPTH-writing passes the
+// band fragments are clipped, so a missing attribute there changes no pixel or depth sample. A missing
+// depth clip does show: a coverage-0 band fragment under ZWrite On fattens the shadow silhouette.
 
     [TestFixture]
     public class FillBandAttributeTests : BaseTestFixture
@@ -1616,9 +1516,8 @@ namespace MapRenderer.Tests.Structure
             {
                 string body     = ReadPassBody(pass.BodyFile);
                 bool shades     = body.IndexOf("MapFillBandCoverage(input.side)", StringComparison.Ordinal) >= 0;
-                // The whole ternary, not just its opening: `clip(input.side > 0 ? 1 : -1)` is the
-                // inversion that discards the fill INTERIOR and keeps only the band, and a match on
-                // the condition alone reads it as correct.
+                // The whole ternary: the inverted `clip(input.side > 0 ? 1 : -1)` keeps only the band,
+                // and a match on the condition alone reads it as correct.
                 bool clips      = Regex.IsMatch(body,
                     @"clip\(\s*input\.side\s*>\s*0\.0\s*\?\s*-1\.0\s*:\s*1\.0\s*\)");
                 string where    = $"{pass.Shader} -> {pass.BodyFile}";
@@ -1672,16 +1571,10 @@ namespace MapRenderer.Tests.Structure
         // ── The formula is the shipped one ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// The fill's coverage is the line path's shipped outer-edge ramp, not a re-derivation, and both
-        /// files are read here so it stays that way. The gradient in particular must remain EUCLIDEAN:
-        /// <c>fwidth</c> is the Manhattan length, over-reads by up to 1.41x on a diagonal silhouette, and
-        /// agrees exactly with the Euclidean form on every axis-aligned fixture — so no axis-aligned tooth
-        /// anywhere can catch that substitution and this one must.
-        ///
-        /// <para>The line file writes <c>absSide</c> where the fill writes <c>side</c>: the line's band
-        /// straddles its centre so its coordinate is signed, while the fill's band lies wholly outside the
-        /// boundary and never goes negative. That single substitution is applied here and is the only
-        /// licensed difference between the two expressions.</para>
+        /// The fill's coverage is the line path's outer-edge ramp, read from both files. Limitation: the
+        /// gradient must stay EUCLIDEAN, and <c>fwidth</c> (Manhattan) agrees with it on every axis-aligned
+        /// fixture, so only this tooth sees the swap. The one licensed difference is <c>absSide</c> in the
+        /// line versus <c>side</c> in the fill, whose band never goes negative.
         /// </summary>
         [Test]
         public void FillBandCoverage_IsVerbatimTheShippedLineCoverageExpression()
@@ -1712,19 +1605,10 @@ namespace MapRenderer.Tests.Structure
         // ── The displacement and the coverage coordinate never multiply ─────────────────────────
 
         /// <summary>
-        /// <c>Fill_VertexModify.hlsl</c>'s band displacement must NOT be scaled by <c>band.z</c>.
-        ///
-        /// <para>The attribute's two halves are independent: <c>band.xy</c> IS the displacement in device
-        /// pixels (miter factor in its magnitude) and <c>band.z</c> is only the coverage coordinate. A
-        /// product of the two is indistinguishable from the correct expression on the FLAT arm, where the
-        /// band job emits <c>z</c> in <c>{0,1}</c> and <c>xy == 0</c> whenever <c>z == 0</c> — so every flat
-        /// tooth, every golden and both frozen digests stay green either way. On the CURVED arm
-        /// <c>GlobeFillSubdivideJob</c> splits a band edge at its midpoint and lerps BOTH halves, so the
-        /// product is quadratic in the split parameter: the strip pinches to a quarter pixel at every
-        /// midpoint and compounds with depth, exactly where the shipped globe scene lives.</para>
-        ///
-        /// <para>A forbidden-token check, so it fails CLOSED: it cannot pass by matching nothing. RED-verify
-        /// by restoring the <c>* band.z</c> factor on the <c>positionOS +=</c> line.</para>
+        /// <c>Fill_VertexModify.hlsl</c>'s band displacement (<c>band.xy</c>) must NOT be scaled by the coverage
+        /// coordinate <c>band.z</c>. Limitation: on the FLAT arm the product equals the correct value, so only
+        /// the CURVED arm shows it, where subdivision lerps both halves and the strip pinches at every midpoint.
+        /// The forbidden-token check fails CLOSED.
         /// </summary>
         [Test]
         public void BandDisplacement_IsNotScaledByTheCoverageCoordinate()
@@ -1737,10 +1621,8 @@ namespace MapRenderer.Tests.Structure
                 "Fill_VertexModify.hlsl no longer measures the band displacement through " +
                 "MapPixelsToWorld(bandCenterWS, ...) — this tooth reads that statement and can no longer " +
                 "find it, so it is measuring nothing. Re-point it at the displacement site.");
-            // The WHOLE statement, not the tail after the anchor: a `* band.z` written BEFORE the
-            // MapPixelsToWorld call is the form a restore would most naturally take, and a window that
-            // starts at the anchor cannot see it. No earlier ';' gives -1 → start 0, so the window only
-            // ever widens — this never fails open.
+            // The WHOLE statement, so a `* band.z` BEFORE the MapPixelsToWorld call is seen. No earlier ';'
+            // gives start 0, so the window only widens.
             int start = code.LastIndexOf(';', anchor) + 1;
             int end   = code.IndexOf(';', anchor);
             Assert.That(end, Is.GreaterThan(start), "the displacement statement must be terminated.");
@@ -1802,21 +1684,10 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The fence that makes the Core/Jobs split enforceable rather than remembered.
-    ///
-    /// <para><b>This is a fence, not a migration target.</b> <c>MapRenderer.Core</c> references only
-    /// <c>Unity.Mathematics</c> and <c>UniTask</c> today and has zero <c>NativeArray</c> uses, so nothing here
-    /// had to be cleaned up. What this tooth guards is the <b>naive fix</b> that was declined: adding
-    /// <c>"Unity.Collections"</c> to <c>MapRenderer.Core.asmdef</c> so <c>SymbolFeatureExtractor</c> could read
-    /// a <c>TileGeometryBuffers</c> without leaving Core. That one-line edit compiles, passes every existing
-    /// test, and silently erases the split the design states — <i>Core keeps the managed
-    /// evaluation surface and never reads coordinates; Jobs owns the blittable geometry</i>. The move paid for the
-    /// split by moving the extractor into <c>MapRenderer.Unity</c> instead (and 75 tests out of the fast
-    /// <c>dotnet</c> loop); without this tooth that cost could be quietly refunded.</para>
-    ///
-    /// <para><b>The source scan is comment-stripped, and that is not optional.</b> Core carries a dozen prose
-    /// mentions of <c>NativeArray</c>/<c>NativeList</c>/<c>Unity.Collections</c> — every one a doc comment
-    /// saying "blittable, so a Burst job can hold it". A raw-text scan would be RED on landing.</para>
+    /// The fence that makes the Core/Jobs split enforceable: Core keeps the managed evaluation surface and
+    /// never reads coordinates; Jobs owns the blittable geometry. Adding <c>"Unity.Collections"</c> to
+    /// <c>MapRenderer.Core.asmdef</c> compiles and passes every other test, so only this tooth sees it.
+    /// The source scan strips comments, because Core's doc comments mention <c>NativeArray</c>.
     /// </summary>
     [TestFixture]
     public class CoreAssemblyBoundaryTests
@@ -1859,13 +1730,8 @@ namespace MapRenderer.Tests.Structure
             // ── Clause 2: no source file under Core uses Unity.Collections in CODE.
             string coreRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Core");
             string[] coreFiles = Directory.GetFiles(coreRoot, "*.cs", SearchOption.AllDirectories);
-            // Not a file-count floor: Core is a legacy assembly the roadmap is shrinking
-            // (ARCHITECTURE.md's module boundaries), so a threshold here would eventually fail a SUCCESSFUL migration and
-            // invite lowering the number, which quietly weakens this fence. Non-vacuity only needs "the
-            // scan actually visited files" — the Jobs positive control below already proves the matcher
-            // can see Unity.Collections when it's really there; this precondition covers the one hazard
-            // that control cannot: coreRoot resolving to an empty (or wrong) directory, which would make
-            // the "no offenders" result below true for the wrong reason.
+            // Non-empty, not a file-count floor: Core is shrinking, and a floor would fail a successful
+            // migration. This catches a coreRoot that resolves to an empty or wrong directory.
             Assert.IsNotEmpty(coreFiles,
                 "precondition: the Core scan must have visited at least one .cs file — a scan that visited " +
                 "none would report 'no offenders' just as loudly, and the Jobs positive control does not " +
@@ -1880,9 +1746,8 @@ namespace MapRenderer.Tests.Structure
                         offenders.Add($"{file.Substring(coreRoot.Length)} ('{form}')");
             }
 
-            // Non-vacuity (the positive control that matters): the SAME scan over MapRenderer.Jobs must find
-            // Unity.Collections in both the asmdef and at least one source file. A zero over Core proves
-            // nothing if the matcher cannot see the thing it reports as absent.
+            // Positive control: the SAME scan over MapRenderer.Jobs finds Unity.Collections in the asmdef and
+            // in at least one source file, so the matcher can see what it reports absent from Core.
             string jobsAsmdefPath = Path.Combine(
                 Application.dataPath, "Code", "MapRenderer.Jobs", "MapRenderer.Jobs.asmdef");
             FileAssert.Exists(jobsAsmdefPath);
@@ -1941,21 +1806,9 @@ namespace MapRenderer.Tests.Structure
     // MdCitationFenceTests — every *.md citation in source resolves to a tracked file
     // ───────────────────────────────────────────────────────────────────────────────────
 
-// Unity EditMode only — shells out to git and reads source files via ShaderPropertyParser.RepoRoot.
-// NOT registered in core-tests.csproj.
-//
-// Prevention tooth. Block reconstruction is ported from the census script that found the
-// original 21 phantom names / 51 sites: this repo hard-wraps comments — a real path can split across
-// two `//` lines, which a line-bound scan both invents phantoms from (by splitting a real path) and
-// hides real ones behind (by never rejoining them).
-//
-// Scope: only a citation that carries an actual `*.md` FILENAME is checked. A bare pointer with no
-// filename (`§4`, `design doc §6`, `S20 stage doc §6`) is out of scope — deciding which
-// document "design doc" means is a judgment call, not a mechanical sweep, and is not this tooth's job.
-//
-// This tooth pins the CURRENT set of cited documents: renaming, moving, or deleting a `.md` file that
-// source cites reds this test. That is doing its job — update the citing comment(s) to the new name (or
-// state the fact inline and drop the pointer, per this ticket's own repair rule), it is not a false alarm.
+// Unity EditMode only — shells out to git and reads sources via ShaderPropertyParser.RepoRoot.
+// Non-obvious why: comments are rejoined into blocks, because a hard-wrapped path splits across two `//`
+// lines. Only a citation with a `*.md` FILENAME is checked. A renamed cited `.md` reds this; fix the citation.
 
     /// <summary>
     /// Tripwire: no committed <c>.cs</c>/<c>.hlsl</c>/<c>.shader</c>/<c>.sh</c>/<c>.py</c> file under
@@ -1976,10 +1829,8 @@ namespace MapRenderer.Tests.Structure
         {
             string repoRoot = ShaderPropertyParser.RepoRoot;
 
-            // The two lists are drawn from different populations. A citation resolves only
-            // against COMMITTED documents — an untracked local .md exists on one machine and nowhere
-            // else, which is the defect class this fence exists for. But the scan must read untracked
-            // sources too, or it cannot see a phantom in the commit that introduces one.
+            // Citations resolve only against COMMITTED documents (an untracked .md exists on one machine),
+            // but the scan also reads untracked sources, to see a phantom in the commit that adds it.
             var trackedMdBasenames = new HashSet<string>(
                 Git(repoRoot, "ls-files").Where(p => p.EndsWith(".md", StringComparison.Ordinal))
                     .Select(Path.GetFileName),
@@ -2024,11 +1875,8 @@ namespace MapRenderer.Tests.Structure
                         i++;
                     }
 
-                    // Exact basename match only — NOT a suffix check. A wrapped path split into a
-                    // bare fragment must not then pass by matching as a suffix of a real name such as
-                    // "meshing-design.md"; that hole sits directly in the path of the likeliest phantom.
-                    // This comment names no phantom filename: the scan below reads THIS
-                    // file too, so an illustrative fake name here would fail the fence it documents.
+                    // Exact basename match, NOT a suffix check, so a wrapped fragment cannot pass as a suffix of a
+                    // real name. Non-obvious why: the scan reads THIS file, so no comment here names a fake file.
                     foreach (Match m in MdToken.Matches(block.ToString()))
                     {
                         string basename = Path.GetFileName(m.Value);
@@ -2056,9 +1904,8 @@ namespace MapRenderer.Tests.Structure
         {
             var files = Git(repoRoot, "ls-files");
             files.AddRange(Git(repoRoot, "ls-files --others --exclude-standard"));
-            // `ls-files` reports the INDEX, which still lists a path deleted in the working tree but not
-            // yet staged — reading it below would throw. A path missing from disk carries no citation to
-            // check, so dropping it here loses no coverage.
+            // `ls-files` reports the INDEX, which lists a path deleted but not staged; reading it would throw,
+            // and a missing file carries no citation, so it is dropped.
             return files.Where(p => File.Exists(Path.Combine(repoRoot, p))).ToList();
         }
 
@@ -2143,21 +1990,15 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// E1 (the render-layer model): <c>RenderLayerFactory</c> is
-    /// the ONE registry mapping a <see cref="MapRenderer.Core.Style.StyleLayer"/> subtype to its runtime
-    /// render layer. This is a grep guard, modeled on
-    /// <see cref="MapRenderer.Tests.Text.Placement.SymbolPlacementStructureTests"/>'s <c>AddTileLayer</c>
-    /// guard: neither <c>MapView</c> nor <c>SymbolSubsystem</c> may re-dispatch on a
-    /// <c>Fill</c>/<c>Line</c>/<c>Symbol</c> <c>StyleLayer</c> subtype — they derive "which sources to
-    /// fetch" / "which layers are mine" from the already-built <c>RenderLayerSet</c> instead (the three
-    /// scattered switches, now killed to one).
+    /// <c>RenderLayerFactory</c> is the ONE registry mapping a <see cref="MapRenderer.Core.Style.StyleLayer"/>
+    /// subtype to its render layer. A grep guard: neither <c>MapView</c> nor <c>SymbolSubsystem</c> may
+    /// re-dispatch on a <c>StyleLayer</c> subtype; they read the built <c>RenderLayerSet</c> instead.
     /// </summary>
     [TestFixture]
     public class RenderLayerRegistryStructureTests
     {
-        // Matches a StyleLayer-subtype type-check ("is Fill.StyleLayer", "is MapRenderer.Core.Style.Symbol.StyleLayer",
-        // "is not Line.StyleLayer") — a re-dispatch outside the one registry. Deliberately narrow (the CALL
-        // form only) so prose in a doc comment discussing the constraint is not itself flagged.
+        // Matches a StyleLayer-subtype type-check ("is Fill.StyleLayer", "is not Line.StyleLayer"); only the
+        // code form, so prose about the constraint is not flagged.
         private static readonly Regex Offender =
             new Regex(@"is\s+(\w+\.)*\s*(Fill|Line|Symbol)\.StyleLayer", RegexOptions.Compiled);
 
@@ -2204,16 +2045,10 @@ namespace MapRenderer.Tests.Structure
             }
         }
 
-        /// <summary>The Mercator-only background gate — a <c>SetVisible</c>
-        /// method on <c>BackgroundRenderLayer</c> that <c>MapView</c> toggled via
-        /// <c>b.SetVisible(!curvedGround)</c> — is DELETED; background is now a per-covered-tile TileMesh
-        /// layer projected through the same IProjection fill/line use, so the globe renders a correctly
-        /// curved background instead of hiding it entirely.
-        ///
-        /// <para>Scoped to <c>BackgroundRenderLayer.cs</c> (the gate's own file), not a grep of
-        /// <c>MapView.cs</c> for ANY <c>SetVisible(</c>: the method being gone is compile-backed (a MapView
-        /// call could not resolve without it), and this narrow scope can't be falsely tripped by an unrelated
-        /// future <c>SetVisible</c> call elsewhere in <c>MapView</c>.</para></summary>
+        /// <summary><c>BackgroundRenderLayer</c> has no <c>SetVisible</c> gate: background is a per-covered-tile
+        /// TileMesh layer projected like fill/line, so the globe renders it curved instead of hiding it. The
+        /// scan covers only <c>BackgroundRenderLayer.cs</c>; a <c>MapView</c> call would not compile without
+        /// the method.</summary>
         [Test]
         public void BackgroundRenderLayer_HasNoMercatorVisibilityGate()
         {

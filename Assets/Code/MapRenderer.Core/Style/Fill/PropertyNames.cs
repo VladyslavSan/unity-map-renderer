@@ -20,8 +20,7 @@ namespace MapRenderer.Core.Style.Fill
         public const string FillPattern         = "fill-pattern";
 
         // ── Engine extensions (NOT MapLibre Style Spec) ───────────────────────────────────────────
-        // Prefixed `x-` so they never collide with a future spec key. MapLibre ignores unknown keys, so a style
-        // that carries them still renders there, without the extension.
+        // Prefixed `x-` so they never collide with a future spec key; MapLibre ignores unknown keys.
 
         /// <summary>
         /// <c>x-fill-pattern-metres</c> — the pattern's TILING PERIOD in Web-Mercator metres: the world

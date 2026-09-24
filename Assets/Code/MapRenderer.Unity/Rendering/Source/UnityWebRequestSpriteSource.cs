@@ -1,8 +1,5 @@
-// @2x/hi-DPI sprite-sheet URL selection (MapLibre's "sprite@2x.json"/"sprite@2x.png" convention) is
-// v1-simplified to always fetch the 1x sheet (base + ".json" / base + ".png") — per-sprite pixelRatio
-// scaling (SpriteEntry.PixelRatio) is handled downstream in IconQuadLayout, not by picking a different
-// sheet resolution here. Deferred: a device-DPI-aware @2x sheet fetch, mirroring how glyph-PBF fetching
-// has no DPI concept at all.
+// Limitation: this always fetches the 1x sheet, never the "@2x" one; IconQuadLayout applies the per-sprite
+// SpriteEntry.PixelRatio downstream.
 
 using System;
 using System.Net;
@@ -17,11 +14,7 @@ namespace MapRenderer.Unity.Rendering.Source
     /// <see cref="ISpriteSource"/> implementation over <see cref="UnityWebRequest"/>, mirroring
     /// <see cref="UnityWebRequestGlyphSource"/> (cancellation, absent-vs-error mapping, UniTask). Fetches
     /// the sheet's index JSON and PNG bytes from <c>{baseUrl}.json</c> / <c>{baseUrl}.png</c>, per the
-    /// MapLibre Style Spec's root <c>sprite</c> URL convention — it does NOT decode the PNG (that is
-    /// <see cref="Unity.Text.SpriteSheet"/>'s job, run by the Unity-side sprite manager).
-    ///
-    /// Clean-room: standard UnityWebRequest HTTP pattern (same as <see cref="UnityWebRequestGlyphSource"/>);
-    /// no MapLibre source read.
+    /// style spec's root <c>sprite</c> URL convention. <see cref="Unity.Text.SpriteSheet"/> decodes the PNG.
     /// </summary>
     public sealed class UnityWebRequestSpriteSource : ISpriteSource
     {
@@ -48,10 +41,8 @@ namespace MapRenderer.Unity.Rendering.Source
             using var req = UnityWebRequest.Get(url);
             req.downloadHandler = new DownloadHandlerBuffer();
 
-            // Same absent-vs-error mapping as UnityWebRequestGlyphSource: 404/204 -> null (caller maps to
-            // Absent()); a cancellation racing the request can surface as a generic UnityWebRequestException
-            // rather than OperationCanceledException, so re-map it when the token requested cancellation;
-            // any other error (5xx, connection failure) re-throws.
+            // Same mapping as UnityWebRequestGlyphSource, except 404/204 -> null (the caller maps it to
+            // Absent()). This covers FetchBytesAsync below too.
             try
             {
                 await req.SendWebRequest().ToUniTask(cancellationToken: ct);

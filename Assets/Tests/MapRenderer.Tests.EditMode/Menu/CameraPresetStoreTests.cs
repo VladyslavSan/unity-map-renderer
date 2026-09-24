@@ -3,12 +3,10 @@ using MapRenderer.App.Menu;
 
 namespace MapRenderer.Tests.EditMode.Menu
 {
-    /// <summary>Round-trip / lifecycle teeth for <see cref="CameraPresetStore"/> — the debug-menu camera-preset
-    /// persistence. Writes to editor PlayerPrefs, so it uses a TEST-ONLY key prefix (never the production
-    /// <see cref="CameraPresetStore.DefaultKeyPrefix"/>): editor PlayerPrefs are one per-project store shared with
-    /// Play mode, and a suite that cleared the production slots would delete the user's real saved presets on every
-    /// gate run (the "presets keep resetting" bug). Every slot is cleared before and after each test so the suite
-    /// leaves no state behind under its own prefix.</summary>
+    /// <summary>Round-trip / lifecycle tests for <see cref="CameraPresetStore"/>, the debug-menu preset persistence.
+    /// Non-obvious why: it uses a test-only key prefix because editor PlayerPrefs are shared with Play mode, so
+    /// clearing the <see cref="CameraPresetStore.DefaultKeyPrefix"/> slots would delete the user's real presets.
+    /// Every slot is cleared before and after each test.</summary>
     public class CameraPresetStoreTests
     {
         // Distinct from CameraPresetStore.DefaultKeyPrefix so this suite's clears never touch a real saved preset.
@@ -80,11 +78,9 @@ namespace MapRenderer.Tests.EditMode.Menu
         }
 
         /// <summary>Two stores on DIFFERENT key prefixes are fully isolated: clearing every slot of one leaves the
-        /// other's saved presets intact. This is the guarantee that lets this suite use a test-only prefix without
-        /// wiping the user's real presets under <see cref="CameraPresetStore.DefaultKeyPrefix"/> — the "presets keep
-        /// resetting" bug: a suite's <c>ClearAll</c> running over the production keys unless scoped by prefix. Uses two synthetic prefixes,
-        /// never the production one, so the tooth itself touches no real preset. A store that ignored its prefix
-        /// argument (one fixed namespace) reds this: B's clear would wipe A's slot.</summary>
+        /// other's presets intact. This isolation lets the suite's <c>ClearAll</c> spare the real presets under
+        /// <see cref="CameraPresetStore.DefaultKeyPrefix"/>. Both prefixes are synthetic. A store that ignores its
+        /// prefix reds this: B's clear wipes A's slot.</summary>
         [Test]
         public void DistinctKeyPrefixes_AreIsolated_ClearOfOneLeavesTheOther()
         {

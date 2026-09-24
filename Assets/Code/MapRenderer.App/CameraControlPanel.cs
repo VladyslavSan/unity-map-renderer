@@ -7,18 +7,11 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// A dev/authoring surface that two-way binds Zoom / Tilt / Heading sliders to the live
-    /// camera. A <b>thin shuttle</b>: it owns no reconcile logic — every frame it hands its serialized
-    /// floats to the pure engine-free <see cref="CameraSliderBinding.Reconcile"/>, applies the returned
-    /// patch through the existing write seam, and writes the returned display values back into the fields.
-    ///
-    /// <para><b>Kept out of <c>Controller</c>:</b> this is the Editor/authoring input source only. Runtime
-    /// gestures — mouse and keyboard, touch — are independent sources over the same seam, so this is a
-    /// separate component and does not touch the pan/zoom <see cref="Controller"/>.</para>
-    ///
-    /// <para><b>Play-mode only:</b> <see cref="MapView.Camera"/> is constructed only on the
-    /// runtime wiring/startup path, so in edit mode it is null. <see cref="Update"/>
-    /// null-guards <see cref="Map"/>/<see cref="MapView.Camera"/> and no-ops cleanly when unwired.</para>
+    /// A dev/authoring surface that two-way binds Zoom / Tilt / Heading sliders to the live camera. It owns no
+    /// reconcile logic: each frame it hands its fields to <see cref="CameraSliderBinding.Reconcile"/>, applies
+    /// the returned patch through the camera write seam, and writes the display values back into the fields.
+    /// It is separate from <see cref="Controller"/> because runtime gestures are independent sources over the
+    /// same seam. Play-mode only: <see cref="Update"/> no-ops while <see cref="MapView.Camera"/> is unwired.
     /// </summary>
     public sealed class CameraControlPanel : MonoBehaviour
     {
@@ -48,10 +41,8 @@ namespace MapRenderer.App
         [Tooltip("Look-at longitude (WGS-84 degrees). Read-only readout.")]
         public double Longitude;
 
-        // ── Baseline: the last values the panel synced, in the same units as the fields.
-        // Compared against the fields to tell a user drag from camera self-motion. Float-precision is
-        // fine: CameraSliderBinding compares with an epsilon that absorbs the double→float serialization
-        // round-trip (the field-vs-baseline guard never compares against the live camera).
+        // The last synced values; a field that differs from them is a user drag, not camera motion.
+        // Float precision suffices: the reconcile epsilon absorbs the double→float round-trip.
         private SliderValues _baseline;
         private bool         _baselineInitialised;
 
@@ -69,9 +60,8 @@ namespace MapRenderer.App
 
             CameraProperties camera = Map.Camera.CurrentProperties;
 
-            // First wired frame: ADOPT the camera — pull all three sliders (and the baseline) to it so the
-            // serialized Inspector defaults are NOT misread as user edits and do not stomp the frame-0
-            // framing the bootstrapper set. After this, fields == baseline ⇒ the reconcile below is idle.
+            // First wired frame: adopt the camera into the sliders and baseline, so the Inspector
+            // defaults are not misread as user edits that stomp the bootstrapper's frame-0 framing.
             if (!_baselineInitialised)
             {
                 Zoom    = (float)camera.Zoom;

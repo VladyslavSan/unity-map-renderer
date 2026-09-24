@@ -9,20 +9,11 @@ using MapRenderer.Unity.Concurrency;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The MVT implementation of the raised <see cref="ITileFeatureSource"/> seam —
-    /// byte-fetch (<see cref="IDataSource"/>), scheduling/caching (<see cref="TileScheduler"/>/
-    /// <see cref="TileCache"/>), and <see cref="ITileDecoder"/> resolution all live HERE, encapsulated
-    /// behind <see cref="GetTile"/>; the coordinator (<c>TileManager</c>) never names any of them. Wraps the
-    /// <see cref="TileScheduler"/> unchanged — this is a boundary seam, not a fetch-behaviour change.
-    ///
-    /// <para><see cref="GetTile"/> fetches, then DECODES — once, on the pool, through
-    /// <see cref="TileDecodeDispatch.DecodeAsync"/> — and hands back a <see cref="SharedDisposable{T}"/>
-    /// carrying the caller's one reference. There is no lazy handle: a decode that only happened when
-    /// somebody read it would have drop paths that free nothing — the leak the reference count exists to
-    /// prevent.</para>
-    ///
-    /// Internal (not public): constructed only from <c>MapView.BuildSourceSpecs</c> (the one production site
-    /// that names this type) and from the test assembly via <c>InternalsVisibleTo</c>.
+    /// The MVT <see cref="ITileFeatureSource"/>: byte-fetch (<see cref="IDataSource"/>), scheduling/caching
+    /// (<see cref="TileScheduler"/>/<see cref="TileCache"/>) and <see cref="ITileDecoder"/> resolution live
+    /// behind <see cref="GetTile"/>. It decodes once on the pool (<see cref="TileDecodeDispatch.DecodeAsync"/>)
+    /// and returns a <see cref="SharedDisposable{T}"/> with the caller's one reference. It is never lazy:
+    /// a lazy handle would have drop paths that free nothing.
     /// </summary>
     internal sealed class MvtTileFeatureSource : ITileFeatureSource
     {
@@ -33,8 +24,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly IWorkScheduler _workScheduler;
 
         /// <param name="byteSource">The byte fetcher. Owned (disposed on <see cref="Dispose"/>) iff
-        /// <paramref name="ownsByteSource"/> — mirrors the exact ownership <c>TileManager.SetSources</c> used
-        /// to apply itself before the raise.</param>
+        /// <paramref name="ownsByteSource"/>.</param>
         /// <param name="workScheduler">The execution policy the decode hop runs under — see
         /// <see cref="TileDecodeDispatch.DecodeAsync"/>.</param>
         /// <param name="cacheCapacity">LRU capacity for the internal <see cref="TileCache"/>.</param>
@@ -49,13 +39,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             _workScheduler  = workScheduler;
         }
 
-        /// <summary>Fetch via the (unchanged) scheduler, then decode the bytes through
-        /// <see cref="TileDecodeDispatch.DecodeAsync"/> — absent (<c>!HasData</c>) maps to a null handle, the
-        /// coordinator's null-for-absent contract. This method never hops back to the main thread: the
-        /// real invariant the drain-spin needs is completion staying OFF the PlayerLoop (see
-        /// <see cref="TileDecodeDispatch"/>'s class doc), which <see cref="TileDecodeDispatch.DecodeAsync"/>
-        /// supplies on the <c>HasData</c> path and synchronous/inline completion supplies otherwise — not
-        /// the fetch scheduler ending on a thread-pool hop, which does not happen here.</summary>
+        /// <summary>Fetches via the scheduler, then decodes through
+        /// <see cref="TileDecodeDispatch.DecodeAsync"/>; absent (<c>!HasData</c>) maps to a null handle. It
+        /// never hops back to the main thread. The drain-spin needs completion off the PlayerLoop (see
+        /// <see cref="TileDecodeDispatch"/>): the decode hop gives that on the <c>HasData</c> path, and inline
+        /// completion gives it otherwise.</summary>
         public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
             TileResponse resp = await _scheduler.Request(id, ct);

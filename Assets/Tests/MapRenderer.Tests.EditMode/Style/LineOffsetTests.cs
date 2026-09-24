@@ -1,10 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
-//
-// Stays its own file: its `using MapRenderer.Core.Style.Line;` (a namespace import, for
-// LineOffset) brings `MapRenderer.Core.Style.Line.StyleLayer` into scope, colliding with the bare
-// `StyleLayer` (MapRenderer.Core.Style.StyleLayer) used elsewhere in StyleTests.cs (CS0104) — see
-// docs/conventions-short.md's "Plain-import collisions" note.
+// Non-obvious why: this is its own file because `using MapRenderer.Core.Style.Line;` brings a second
+// `StyleLayer` into scope, which collides with the bare one in StyleTests.cs (CS0104).
 
 using System;
 using System.Collections.Generic;
@@ -19,17 +16,9 @@ namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// <see cref="LineOffset"/>: perpendicular band-center shift, sign/symmetry,
-    /// zoom coupling, width independence, join cleanliness, and shader structure guard.
-    ///
-    /// All decisive teeth are CPU-side via <see cref="LineOffset.Displace"/> over
-    /// <see cref="FlatRibbonStations"/> — hand-derived vertex stations, not a builder. The subject
-    /// under test is <c>LineOffset.Displace</c> itself (pure engine-free math), and both fixtures this
-    /// file needs (a straight segment, one 90° corner) are cheap to derive directly from the
-    /// join/cap definitions, so routing them through a Burst job for four vertices would only drop
-    /// these tests out of the 0.1s core-tests loop for no gain. The HLSL mirror is guarded by the
-    /// greppable assertion.
-    ///
-    /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
+    /// zoom coupling, width independence, join cleanliness, and shader structure guard. The CPU teeth run
+    /// <see cref="LineOffset.Displace"/> over hand-derived <see cref="FlatRibbonStations"/>, not a Burst
+    /// builder, so they stay in the core-tests loop; a greppable assertion guards the HLSL mirror.
     /// </summary>
     [TestFixture]
     public class LineOffsetTests
@@ -78,14 +67,10 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// Return (originalCenter, displacedCenter) pairs for every station (pair of left/right
-        /// vertices at the same DistanceAlong) of the straight-line fixture.
-        ///
-        /// originalCenter  = midpoint of the two undisplaced vertex positions (= the centerline point).
-        /// displacedCenter = midpoint of the two displaced vertex positions after applying Displace.
-        ///
-        /// The actual shift is (displacedCenter − originalCenter), which must be perpendicular to
-        /// the tangent and have magnitude offsetM — this is what Tooth 1 checks.
+        /// Returns (original, displaced) band centers for every station (left/right vertex pair at the
+        /// same DistanceAlong) of the straight-line fixture: the midpoints of the two vertices before and
+        /// after Displace. StraightSegment_BandCenterShiftsPerpendicularByOffsetM checks that their
+        /// difference is perpendicular with magnitude offsetM.
         /// </summary>
         private static List<(double2 original, double2 displaced)> BandCentersForStraightLine(double offsetM)
         {
@@ -115,7 +100,7 @@ namespace MapRenderer.Tests.Style
             return results;
         }
 
-        // Convenience overload that returns only the displaced centers (for Tooth 2 symmetry).
+        // Convenience overload that returns only the displaced centers (for the sign/symmetry teeth).
         private static List<double2> DisplacedCenters(double offsetM)
         {
             var pairs = BandCentersForStraightLine(offsetM);
@@ -131,10 +116,10 @@ namespace MapRenderer.Tests.Style
         /// <summary>Euclidean length of a 2D vector.</summary>
         private static double Len(double2 v) => Math.Sqrt(v.x * v.x + v.y * v.y);
 
-        // ── Tooth 1 (DECISIVE): perpendicular shift ──────────────────────────────────────────
+        // ── DECISIVE: perpendicular shift ────────────────────────────────────────────────────
 
         [Test]
-        public void Tooth1_StraightSegment_BandCenterShiftsPerpendicularByOffsetM()
+        public void StraightSegment_BandCenterShiftsPerpendicularByOffsetM()
         {
             // Straight line A(0,0)→B(10,0); tangent = (1,0); expected perpendicular normal = (0,1).
             // With offsetM=3, band centers should shift by 3 in the normal (Y) direction.
@@ -162,10 +147,10 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── Tooth 2: sign + symmetry ─────────────────────────────────────────────────────────
+        // ── sign + symmetry ──────────────────────────────────────────────────────────────────
 
         [Test]
-        public void Tooth2_Sign_PlusNAndMinusNOffsetToOppositeSides()
+        public void Sign_PlusNAndMinusNOffsetToOppositeSides()
         {
             double offsetM = 5.0;
             var centersPlus  = DisplacedCenters(+offsetM);
@@ -187,9 +172,9 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void Tooth2_ZeroOffset_DisplacementIsExactlyZero()
+        public void ZeroOffset_DisplacementIsExactlyZero()
         {
-            // Tooth 2: offset=0 must produce zero displacement (byte-equal to no-offset control).
+            // offset=0 must produce zero displacement (byte-equal to no-offset control).
             foreach (var v in FlatRibbonStations.StraightLine())
             {
                 double2 disp = LineOffset.Displace(v.Normal, v.Side, 0.0);
@@ -200,10 +185,10 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── Tooth 3: zoom-coupled px→m conversion ────────────────────────────────────────────
+        // ── zoom-coupled px→m conversion ─────────────────────────────────────────────────────
 
         [Test]
-        public void Tooth3_OffsetMeters_ScalesLinearlyWithMetersPerPixel_WhenPixelMode()
+        public void OffsetMeters_ScalesLinearlyWithMetersPerPixel_WhenPixelMode()
         {
             // At two zooms with different metersPerPixel, the ratio of offsetM values must match
             // the ratio used by width (zoom-coupled, same px→m path).
@@ -220,9 +205,9 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void Tooth3_WidthAndOffset_ShareSamePxToMRatio_AtTwoZooms()
+        public void WidthAndOffset_ShareSamePxToMRatio_AtTwoZooms()
         {
-            // Width and offset must produce the same ratio at two zoom levels (tooth 3).
+            // Width and offset must produce the same ratio at two zoom levels.
             double widthPx   = 8.0;
             double offsetPx  = 5.0;
             double mpp1      = 0.25;
@@ -244,7 +229,7 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void Tooth3_OffsetMeters_InMeterMode_IsIdentity()
+        public void OffsetMeters_InMeterMode_IsIdentity()
         {
             // When widthIsPixels=false, offset is already in meters — metersPerPixel is ignored.
             double offsetM_val = 7.5;
@@ -255,14 +240,13 @@ namespace MapRenderer.Tests.Style
                 "In meter mode, OffsetMeters must return the offset unchanged.");
         }
 
-        // ── Tooth 4: width-independent ───────────────────────────────────────────────────────
+        // ── width-independent ────────────────────────────────────────────────────────────────
 
         [Test]
-        public void Tooth4_WidthIndependent_BandCenterShiftDoesNotChangeWithWidth()
+        public void WidthIndependent_BandCenterShiftDoesNotChangeWithWidth()
         {
-            // Band center shift = offsetM, regardless of widthM. Verify by using Displace
-            // for two different width scales and confirming the center displacement is equal.
-            // (Width affects the extrusion magnitude, not the offset displacement.)
+            // Band center shift = offsetM, regardless of widthM: width scales the extrusion magnitude,
+            // not the offset displacement.
             double offsetM = 4.0;
 
             // Find a station (e.g., DistanceAlong == 0).
@@ -279,16 +263,8 @@ namespace MapRenderer.Tests.Style
             }
             Assert.IsTrue(foundLeft && foundRight, "Expected a station at DistanceAlong=0.");
 
-            // Simulate two different widths by scaling the normal: widthM is applied by the
-            // vertex shader as `unitDir * miter * outerM`. The normal from the tessellator
-            // carries the miter factor; the offset term `normal * side * offsetM` is independent
-            // of outerM (the band thickness). Verify by checking that Displace does not depend
-            // on any scale applied to the position (only to the extrusion normal direction).
-
-            // The displacement vector should have magnitude = |offsetM| * |normal| / |normal|...
-            // Actually: Displace returns normal * side * offsetM. For a unit-normal straight segment
-            // normal has magnitude 1, so displacement magnitude = |offsetM| = 4.0.
-            // If width were doubled (not changing the normal), displacement stays |offsetM|.
+            // The shader applies width as `unitDir * miter * outerM`; the offset term
+            // `normal * side * offsetM` has no outerM, so here the shift stays |offsetM| at any width.
 
             double2 leftDisp  = LineOffset.Displace(left.Normal,  left.Side,  offsetM);
             double2 rightDisp = LineOffset.Displace(right.Normal, right.Side, offsetM);
@@ -310,18 +286,14 @@ namespace MapRenderer.Tests.Style
                 "Doubling offsetM must double the center shift — width scale is independent.");
         }
 
-        // ── Tooth 5: joins survive ───────────────────────────────────────────────────────────
+        // ── joins survive ────────────────────────────────────────────────────────────────────
 
         [Test]
-        public void Tooth5_MiterJoin_OffsetCenterlinesMeetAtJoin()
+        public void MiterJoin_OffsetCenterlinesMeetAtJoin()
         {
-            // 3-point polyline with a moderate angle. Miter join (default).
-            // At a moderate offset, the join station should produce a single band center
-            // whose displacement from the zero-offset position is ≈ offsetM in the
-            // perpendicular direction to each adjacent segment.
-            //
-            // Large-offset miter explosion on sharp corners is a documented limitation
-            // (MapLibre parity). This test uses a 90° corner at moderate offset.
+            // A 90° miter corner at moderate offset gives one finite band center at the join.
+            // Limitation: the raw miter factor grows without bound on a sharp corner;
+            // line-miter-limit caps the shift (LineOffset.cs).
             double offsetM = 2.0;
 
             // The miter join station of a 90° left corner: the miter normal is at 45° (bisecting the
@@ -339,35 +311,25 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(double.IsInfinity(center.x) || double.IsInfinity(center.y),
                 "Miter join band center must not be Infinite at moderate offset.");
 
-            // The magnitude of the center displacement should be finite and reasonable.
-            // For a 90° miter: miter factor = 1/cos(45°) ≈ √2 ≈ 1.414.
-            // Expected center shift magnitude = sqrt2 * offsetM ≈ 2.828.
-            // (The miter extends the shift by the miter factor — this is the documented behavior.)
+            // A 90° miter extends the shift by 1/cos(45°) ≈ √2, so the expected magnitude is ≈ 2.828;
+            // the assertion only bounds it.
             double centerMag = Len(center);
             Assert.That(centerMag, Is.LessThan(10.0 * offsetM),
                 $"Miter join center shift should be bounded at moderate offset. Got: {centerMag}. " +
                 "Note: large-offset sharp corners can blow up (MapLibre parity limitation — see LineOffset.cs).");
         }
 
-        // ── Tooth 6 (greppable): shader uses sideAndDist.x in offset term ────────────────────
+        // ── greppable: shader uses sideAndDist.x in offset term ──────────────────────────────
 
         [Test]
-        public void Tooth6_Shader_OffsetTermUsesSideAndDistX_NotWidenSymmetrically()
+        public void Shader_OffsetTermUsesSideAndDistX_NotWidenSymmetrically()
         {
-            // Guard against the "sign-folding" regression: if a dev accidentally folds offset
-            // into outerM (the magnitude), both sides widen symmetrically and ALL of teeth 1/2/4
-            // would pass on the CPU but fail on the GPU. The greppable HLSL assertion catches it.
-            //
-            // The offset term lives in Line_VertexExtrude.hlsl (a shared helper) — one site, consumed by all
-            // five line passes.
-
-            // Extrusion logic (including the offset term) lives in Line_VertexExtrude.hlsl (shared,
-            // resolved by name — move-proof).
+            // Non-obvious why: offset folded into outerM widens both sides symmetrically; the CPU teeth
+            // stay green while the GPU is wrong. The offset term lives once, in Line_VertexExtrude.hlsl.
             string hlsl = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
 
-            // The offset term must reference sideAndDist.x (the per-vertex side value).
-            // This is the structural guarantee that the offset shifts the band CENTER,
-            // not the half-width (which would be a symmetric widening, failing teeth 1/2/4).
+            // The offset term must multiply by sideAndDist.x (the per-vertex side), so it shifts the band
+            // CENTER rather than widening the half-width.
             Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * _LineOffset * pxToWorld)"),
                 "Line_VertexExtrude.hlsl offset term must multiply by sideAndDist.x " +
                 "to achieve a side-consistent shift (band center shift, not symmetric widening). " +

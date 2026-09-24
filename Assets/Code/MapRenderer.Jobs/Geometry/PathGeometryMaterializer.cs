@@ -7,26 +7,12 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Jobs.Geometry
 {
     /// <summary>
-    /// Waist 1's producer seam for geometry that is already a list of paths rather than a command stream —
-    /// the second production producer, alongside <see cref="MvtGeometryMaterializer"/>. A source that emits
-    /// coordinates natively (the background quad's four corners; a sliced GeoJSON feature) reaches the
-    /// pipeline through here instead of transcoding into MVT commands.
-    ///
-    /// <para>It is a <b>flatten-and-copy</b>, nothing more: features are walked in order and each feature's
-    /// paths in order, so a consumer joins back through <c>RingFeatureIdx</c>, which indexes the supplied
-    /// feature list. <b>No transformation, no filtering, no rewind and no reordering</b> — rings shorter than
-    /// 3 points are carried through, because filtering is the consuming stage's job (interface contract, "No
-    /// ring filtering").</para>
-    ///
-    /// <para><b>THE NAMED FENCE.</b> The supplied paths must already be <b>tile-local <c>double2</c> in
-    /// <c>[−b, extent + b]</c>, Y-down</b> — never geodetic, never projected. Ring assembly's and earcut's
-    /// thresholds are calibrated to tile-integer magnitude; degrees are a different scale entirely.
-    /// <c>b</c> is the producer's buffer: a tile's own square is <c>[0, extent]</c>, but every buffered
-    /// producer overruns it, MVT wire geometry included, so a fence written as
-    /// <c>[0, extent]</c> would declare conforming input out of contract.</para>
-    ///
-    /// <para><b>Ownership transfers on return</b> (interface contract). Nothing is cached: each call mints a
-    /// fresh buffer.</para>
+    /// Waist 1's producer for geometry that is already a list of paths (the background quad, a sliced GeoJSON
+    /// feature), beside <see cref="MvtGeometryMaterializer"/>. It flattens and copies features and paths in
+    /// order, with no transform, filter, rewind or reorder; <c>RingFeatureIdx</c> indexes the supplied list.
+    /// Non-local invariant: paths must be tile-local, Y-down, in <c>[−b, extent + b]</c> (<c>b</c> = the
+    /// producer's buffer), because ring assembly and earcut thresholds assume tile-integer scale. Each call
+    /// returns a fresh buffer that the caller owns.
     /// </summary>
     public sealed class PathGeometryMaterializer : ITileGeometryMaterializer
     {
@@ -68,20 +54,13 @@ namespace MapRenderer.Jobs.Geometry
                     vertTotal += paths[p].Count;
             }
 
-            // The early-out is on the FEATURE count, matching MvtGeometryMaterializer's. On `ringTotal == 0`
-            // a layer with features PRESENT but no paths would return `default` — FeatureCount 0 beside a
-            // non-empty ITileLayer.Features. Consumers size their per-feature columns from one and index
-            // them by ordinals drawn from the other, so the two Waist 1 producers must agree on that count.
-            // A features-but-no-rings layer mints a ring-less buffer that still carries the kind column.
+            // Non-local invariant: early-out on the FEATURE count, as MvtGeometryMaterializer does, so a layer
+            // with features but no rings still carries its kind column and FeatureCount matches its Features.
             if (featureCount == 0)
                 return default;
 
-            // The kind column is a SECOND list joined to `features` by position, so a length mismatch would
-            // fault the write loop below. Validated BEFORE Allocate: after it, four
-            // Allocator.Persistent arrays exist and a throw here would strand them with no caller able to
-            // dispose them — the one exit path the "caller disposes on every exit path" contract cannot
-            // cover. Checked by reading the code rather than by arguing reachability, the same standard
-            // MvtGeometryMaterializer's throw-path catch is held to.
+            // Validated BEFORE Allocate: a throw after it would leak the Persistent arrays, which no caller
+            // can dispose.
             if (_featureGeometryTypes == null || _featureGeometryTypes.Count != featureCount)
                 throw new ArgumentException(
                     $"featureGeometryTypes must have one entry per feature ({featureCount}); got " +

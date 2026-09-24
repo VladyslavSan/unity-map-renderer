@@ -1,9 +1,5 @@
-// Unity EditMode only — structural guard: no legacy UnityEngine.Input,
+// Unity EditMode only — structural guard over MapController's source text: no legacy UnityEngine.Input,
 // scroll normalized by WheelNotchUnits, Keyboard.current present, null-guarded.
-//
-// Mirrors the ShaderStructureTests pattern: reads the source file as text and asserts
-// the presence/absence of required strings. This makes tooth 4 a durable, runnable test
-// rather than a manual grep.
 
 using System.IO;
 using NUnit.Framework;
@@ -185,13 +181,10 @@ namespace MapRenderer.Tests.Cameras
         // ── T3-5 — the mouse seam runs in LOGICAL px ─────────────────────────────────────────────
 
         /// <summary>
-        /// T3-5, the twin of <c>TouchInputStackTests</c>' touch-seam tooth: the mouse seam needs the
-        /// same structural dpr guard the touch seam has.
-        ///
-        /// <para><see cref="MapController"/> must convert BOTH the viewport AND the cursor through
-        /// <c>DeviceScaling.DeviceToLogicalPx</c>, so the gesture anchors and <c>ScreenToGround</c> share the
-        /// render camera's logical basis. Structural because the functional path cannot be exercised headless
-        /// (dpr 1, no synthetic mouse) — the same reason the touch tooth is written this way.</para>
+        /// The mouse twin of <c>TouchInputStackTests</c>' touch-seam test: <see cref="MapController"/> must
+        /// convert BOTH the viewport AND the cursor through <c>DeviceScaling.DeviceToLogicalPx</c>, so gesture
+        /// anchors and <c>ScreenToGround</c> share the render camera's logical basis. Limitation: it is
+        /// structural because headless runs have dpr 1 and no synthetic mouse.
         /// </summary>
         [Test]
         public void MapController_ConvertsSeamThroughTheDeviceToLogicalConversion()

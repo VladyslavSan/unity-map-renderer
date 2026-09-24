@@ -1,11 +1,5 @@
-// Filters/FiltersTests.cs — engine-lane filter-evaluation tests: the MvtFeature/IFeature fold,
-// FeatureSelector's source-layer/$type/compiled-filter seam, the native filter VM's production-boundary
-// wiring, and the VM's own parity/refusal/error-model oracle. Not registered in core-tests.csproj (each
-// file pulls in MapRenderer.Jobs.Mvt/.Tiles or Unity.Collections).
-//
-// PropertyFilterTests.cs stays its own file: it carries a bare `using System;` that collides with these
-// four files' bare `ValueType` references (`System.ValueType` vs `MapRenderer.Core.Expressions.ValueType`,
-// CS0104) — see docs/conventions-short.md's "Plain-import collisions" note.
+// Engine-lane filter tests: MvtFeature as IFeature, FeatureSelector, and the native filter VM's wiring and
+// parity oracle. PropertyFilterTests.cs is separate: its `using System;` makes the bare ValueType ambiguous.
 //
 // Contents:
 //   MvtFeatureIFeatureContractTests   — MvtFeature implements IFeature directly against its exact documented
@@ -41,37 +35,16 @@ namespace MapRenderer.Tests.Filters
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Load-bearing byte-parity guard: <c>MvtFeature</c> implements
-    /// <see cref="IFeature"/> directly. This test pins that implementation against its EXACT
-    /// documented semantics, not just "some
-    /// reasonable behaviour"):
-    /// <list type="bullet">
-    ///   <item><c>TryGetProperty</c>: a feature with no real property store (its <see cref="MvtFeature.Store"/>
-    ///     defaulted to the <c>EmptyPropertyStore</c> Null Object), or a missing key, returns <c>false</c> +
-    ///     <c>Value.Null</c> — never throws.</item>
-    ///   <item><c>Properties</c>: an empty dictionary for a feature whose <see cref="MvtFeature.Store"/> is
-    ///     the default Null Object.</item>
-    ///   <item><c>GeometryType</c>: straight pass-through.</item>
-    /// </list>
-    ///
-    /// <para>Feature <c>Id</c> is not exercised here: since the id-representation cleanup deleted
-    /// <c>IFeature.HasId</c>, <c>MvtFeature.Id</c> is a plain stored <see cref="Value"/> (a direct
-    /// auto-property, no fold to pin), and the decode-level narrowing (present id →
-    /// <c>Value.Number((double)ReadVarint())</c>, absent field-1 → <c>Value.Null</c>, id 0 → a valid
-    /// <c>Value.Number(0)</c>) is pinned in <c>MvtPropertyDecodeTests</c>.</para>
-    ///
-    /// <para>The three tests over a POPULATED property bag (<c>TryGetProperty_PresentKey</c>,
-    /// <c>TryGetProperty_MissingKey</c>, <c>Properties_NonNullField</c>) build a
-    /// <see cref="DictionaryFeature"/> instead of an <see cref="MvtFeature"/> — <see cref="MvtFeature.Store"/>
-    /// is internal and can only legitimately hold a real <see cref="MapRenderer.Jobs.Mvt.DensePropertyStore"/>
-    /// (a view over decoded <c>NativeArray</c> tag words), which this engine-free-styled file cannot hand-roll.
-    /// They therefore exercise the <see cref="IFeature"/> contract via the double, not
-    /// <see cref="MvtFeature"/>'s own forwarding — the store-forwarding this file used to pin over a
-    /// hand-built dictionary is instead covered, over 1000+ real decoded (layer, feature, key) combinations,
-    /// by <c>DensePropertyStoreTests.TryGetProperty_AgreesWithResolveToDictionary_ForEveryKeyAndEveryFeature_AcrossAllLayers</c>.
-    /// The two empty-bag tests below stay on <see cref="MvtFeature"/> itself (no populated bag needed),
-    /// so the Null-Object pin they exist for is unaffected.</para>
+    /// <c>MvtFeature</c>'s <see cref="IFeature"/> semantics: with the <c>EmptyPropertyStore</c> Null Object
+    /// or a missing key, <c>TryGetProperty</c> returns <c>false</c> + <c>Value.Null</c> and never throws;
+    /// <c>Properties</c> is then empty; <c>GeometryType</c> passes through. <c>Id</c> decoding is pinned in
+    /// <c>MvtPropertyDecodeTests</c>, and store forwarding in <c>DensePropertyStoreTests</c>.
     /// </summary>
+    /// <remarks>
+    /// Non-obvious why: the populated-bag tests use a <see cref="DictionaryFeature"/>, because
+    /// <see cref="MvtFeature.Store"/> is internal and holds only a real
+    /// <see cref="MapRenderer.Jobs.Mvt.DensePropertyStore"/>, which this file cannot hand-roll.
+    /// </remarks>
     [TestFixture]
     public class MvtFeatureIFeatureContractTests
     {
@@ -332,13 +305,10 @@ namespace MapRenderer.Tests.Filters
         // ── The ordinal-returning overload ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The ordinal is the feature's position in the <b>source layer's</b> feature list — never its
-        /// position in the selection. Every per-feature side array a consumer joins to the shared geometry
-        /// buffer is keyed on it, and <c>RingFeatureIdx</c> indexes the layer, so a slot-based ordinal
-        /// mis-attributes colours, widths and symbols the moment a filter rejects anything.
-        ///
-        /// <para>The fixture makes the two differ: the only matching feature sits at layer position 2 and
-        /// selection position 0, so a slot-indexed implementation reports 0 and fails here.</para>
+        /// The ordinal is the feature's position in the <b>source layer</b>, never in the selection: per-feature
+        /// side arrays and <c>RingFeatureIdx</c> key on the layer, so a slot ordinal mis-attributes colours,
+        /// widths and symbols once a filter rejects anything. The only match sits at layer position 2 and
+        /// selection position 0.
         /// </summary>
         [Test]
         public void SelectFeaturesByOrdinal_ReportsThePositionInTheLayer_NotInTheSelection()
@@ -384,18 +354,14 @@ namespace MapRenderer.Tests.Filters
                 Assert.AreSame(landuse.Features[i], selected[i].Feature, $"…paired with feature {i}");
             }
 
-            // Null-tolerance, matching the IDecodedTile overload: an unresolvable layer selects nothing.
-            // Cast disambiguates the null between the ITileLayer overload and its IReadOnlyList<IFeature>
-            // sibling (added for the read-once worker path) — this pins the ITileLayer one specifically.
+            // An unresolvable layer selects nothing. The cast picks the ITileLayer overload over its
+            // IReadOnlyList<IFeature> sibling.
             FeatureSelector.SelectFeatures(layer, (ITileLayer)null, 0.0, selected);
             Assert.AreEqual(0, selected.Count, "a null tile layer must leave the output empty");
         }
 
         // ── Compiled-filter memo ──────────────────────────────────────────────────────────────────
-        // Every case below uses an ARRAY filter on purpose. Compile() returns shared MatchAll/MatchNone
-        // SINGLETONS for null and for bare true/false, so a reference-equality tooth written against
-        // those would pass with no memo at all — it cannot discriminate. An array filter is the value
-        // where the code is not inert: uncached, each Compile allocates a fresh CompiledFilter.
+        // ARRAY filters only: the shared null/true/false singletons pass a reference check with no memo.
 
         private const string ArrayFilter = "[\"==\",\"$type\",\"LineString\"]";
 
@@ -422,9 +388,8 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void CompiledFilter_ReassignedFilter_IsRecompiled()
         {
-            // StyleLayer.Filter is a public mutable field. Keying the memo on the LAYER would serve the
-            // stale compile here; keying on the node misses and recompiles. This is the assertion that
-            // makes the choice of key load-bearing rather than incidental.
+            // StyleLayer.Filter is mutable: a memo keyed on the LAYER serves the stale compile here, while one
+            // keyed on the node recompiles.
             var layer = MakeLayer("roads", ArrayFilter);
             var before = FeatureSelector.FilterFor(layer);
 
@@ -458,9 +423,9 @@ namespace MapRenderer.Tests.Filters
     /// <summary>
     /// The VM-wiring stage's acceptance teeth, at the PRODUCTION <see cref="FeatureSelector"/> boundary —
     /// as opposed to <c>NativeFilterVmTests</c>, whose oracle drives the VM directly. Covers: byte-identical
-    /// parity across the three <see cref="ITileLayer"/> overloads (T1), that the native seam is actually
-    /// probed and dispatched to per-feature rather than silently skipped (T2), and that both refusal gates
-    /// — compile refusal and rebind refusal — correctly fall back to the managed path (T3).
+    /// parity across the three <see cref="ITileLayer"/> overloads, that the native seam is actually
+    /// probed and dispatched to per-feature rather than silently skipped, and that both refusal gates
+    /// — compile refusal and rebind refusal — correctly fall back to the managed path.
     /// </summary>
     [TestFixture]
     public class FeatureSelectorNativeFilterTests
@@ -474,19 +439,15 @@ namespace MapRenderer.Tests.Filters
         {
             _tile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, SampleTileFixture.Bytes());
             _coveredLibertyFilters = CollectCoveredLibertyFilters();
-            // The parity sweep needs at least one filter that partitions a fixture layer non-trivially, or
-            // its non-degeneracy guard is unsatisfiable (see BuildDiscriminatingFilter). The liberty corpus
-            // happens to select all-or-nothing on every layer of this small fixture.
+            // The liberty corpus selects all-or-nothing on this fixture, so add one partitioning filter for the
+            // sweep's non-degeneracy guard.
             _parityFilters = new List<JsonValue>(_coveredLibertyFilters) { BuildDiscriminatingFilter() };
         }
 
-        /// <summary>A filter guaranteed to partition the fixture's <c>countries</c> layer non-trivially —
-        /// <c>NAME == (first country's NAME)</c> — so the parity sweep always contains at least one
-        /// <c>0 &lt; selected &lt; total</c> case. Without it the non-degeneracy guard would be
-        /// unsatisfiable over this fixture, and a stuck-constant native bug (always include / always exclude)
-        /// could pass parity vacuously wherever managed is itself all-or-nothing. Compilable (<c>get</c> ==
-        /// string literal — the safe id-vs-byte form) and native-bindable; self-checked here so a fixture
-        /// change surfaces loudly rather than as a mysterious guard failure.</summary>
+        /// <summary><c>NAME == (first country's NAME)</c>, which partitions <c>countries</c> as
+        /// <c>0 &lt; selected &lt; total</c>, so a stuck-constant native bug cannot pass parity vacuously. It
+        /// uses the safe <c>get</c> == literal form, and it checks that it compiles and native-binds, so a
+        /// fixture change fails here first.</summary>
         private static JsonValue BuildDiscriminatingFilter()
         {
             MvtLayer countries = _tile.GetLayer("countries");
@@ -507,11 +468,8 @@ namespace MapRenderer.Tests.Filters
             // or it does not do its job.
             Assert.IsTrue(NativeFilterCompiler.TryCompile(filter, out NativeFilterProgram program),
                 "precondition: the discriminating filter must be VM-compilable");
-            // ...and it must actually native-BIND over countries — this is T1's ONLY non-degenerate case, so
-            // the anti-vacuity guard only protects the NATIVE path if the VM actually runs here. Were name0 to
-            // collide in the countries value table (a fixture property), Rebind would refuse and this case
-            // would silently fall to managed, disarming T1's native coverage. Assert it so a fixture change
-            // fails LOUDLY in setup rather than quietly.
+            // ...and it must native-BIND over countries: it is the sweep's only non-degenerate case, and a
+            // refused Rebind would fall back to managed and disarm the native coverage.
             Assert.IsTrue(program.Rebind(countries.DenseKeyResolver, Allocator.TempJob, out NativeArray<int> probe),
                 "precondition: the discriminating filter must native-bind over countries (unique NAME → one value id)");
             probe.Dispose();
@@ -548,8 +506,8 @@ namespace MapRenderer.Tests.Filters
             Id = "t", Source = "s", SourceLayer = sourceLayer, Filter = filter,
         };
 
-        /// <summary>The managed reference computation T1/T3 compare the production selector against —
-        /// deliberately independent of <see cref="FeatureSelector"/>'s own managed path (no key binding),
+        /// <summary>The managed reference computation the parity and fallback tests compare the production
+        /// selector against — independent of <see cref="FeatureSelector"/>'s own managed path (no key binding),
         /// so it cannot share a bug with either side of the dispatch it is checking.</summary>
         private static List<IFeature> ManagedSelect(JsonValue filterJson, MvtLayer layer)
         {
@@ -561,7 +519,7 @@ namespace MapRenderer.Tests.Filters
             return result;
         }
 
-        // ── T1 — production-boundary parity ─────────────────────────────────────────────────────
+        // ── Production-boundary parity ─────────────────────────────────────────────────────
 
         [Test]
         public void SelectFeatures_ListOverload_MatchesManagedParity_ForEveryCoveredFilter_EveryLayer()
@@ -657,10 +615,11 @@ namespace MapRenderer.Tests.Filters
                 "guard: at least one (filter, layer) combination must be non-degenerate");
         }
 
-        // ── T2 — dispatch coverage (the vacuous-all-fallback guard) ─────────────────────────────
+        // ── Dispatch coverage (the vacuous-all-fallback guard) ─────────────────────────────
 
         /// <summary>Finds a covered filter that actually native-binds against <paramref name="layer"/> (not
-        /// refused by the rebind's ≥2-id guard) — so T2's per-feature <c>Matches</c> count is meaningful.
+        /// refused by the rebind's ≥2-id guard) — so the dispatch-coverage test's per-feature
+        /// <c>Matches</c> count is meaningful.
         /// Disposes its own probe binding; returns null if none of the corpus binds.</summary>
         private static JsonValue FindNativeBindableFilter(MvtLayer layer)
         {
@@ -704,7 +663,7 @@ namespace MapRenderer.Tests.Filters
                 "the whole layer must be addressed through ONE batched MatchAll call, not per-feature dispatch");
         }
 
-        // ── T3 — fallback correctness (both refusal gates) ──────────────────────────────────────
+        // ── Fallback correctness (both refusal gates) ──────────────────────────────────────
 
         // Two-get comparison: the byte-identity argument only holds for get-vs-number-literal; a
         // get-vs-get shape could compare two strings, so it stays refused.
@@ -792,19 +751,12 @@ namespace MapRenderer.Tests.Filters
                 Assert.AreSame(expected[i], into[i].Feature);
         }
 
-        // ── Test-assembly spy decorator (T2, and T3's rebind refusal) ───────────────────────────
+        // ── Test-assembly spy decorator (dispatch coverage and rebind refusal) ───────────────────────────
 
-        /// <summary>Test-assembly capability decorator around a real <see cref="MvtLayer"/> — forwards every
-        /// <see cref="ITileLayer"/>/<see cref="IIndexedFeatureSource"/>/<see cref="INativeFilterSource"/>
-        /// call to the inner layer, counting <see cref="TryBindNativeFilterCalls"/> and the returned
-        /// matcher's <see cref="MatchAllCalls"/>. Never a production member — conventions forbid a test-only
-        /// counter on <see cref="MvtLayer"/> itself, so this decorator lives here instead, exactly the
-        /// allowed footprint for test-code (an adapter in the test assembly, not a member on the production
-        /// type).
-        ///
-        /// <para><paramref name="forceRefuse"/> makes <see cref="TryBindNativeFilterCalls"/> still count the
-        /// probe but always answer null — standing in for a real rebind refusal, without depending on
-        /// the fixture actually containing one.</para></summary>
+        /// <summary>A test decorator around a real <see cref="MvtLayer"/> that forwards every call and counts
+        /// <see cref="TryBindNativeFilterCalls"/> and the matcher's <see cref="MatchAllCalls"/>; a test-only
+        /// counter may not live on <see cref="MvtLayer"/>. <paramref name="forceRefuse"/> still counts the probe
+        /// but answers null, in place of a real rebind refusal.</summary>
         private sealed class NativeFilterSourceSpy : ITileLayer, IIndexedFeatureSource, INativeFilterSource
         {
             private readonly MvtLayer _inner;
@@ -870,13 +822,9 @@ namespace MapRenderer.Tests.Filters
     {
         private static MvtTile _tile;
 
-        /// <summary><c>sample-tile.bytes</c>'s one layer ('countries') carries none of
-        /// liberty's real match get-keys (<c>class</c>/<c>brunnel</c>), so tooth 1's sweep over it alone
-        /// never exercises <c>InStringSet</c>'s membership SCAN for those keys — only the Null/absent-
-        /// default case. This second real fixture (croatia-dalmatia, chosen over the fixture corpus for
-        /// carrying the most <c>transportation</c> features: 33, with 3 carrying <c>brunnel</c>) is what
-        /// closes that gap; see the per-key floors below. (Its 9 <c>ramp</c>-carrying features don't help
-        /// here — <c>ramp</c> is excluded from the floors, see the tooth's own doc for why.)</summary>
+        /// <summary>A second real fixture (croatia-dalmatia). <c>sample-tile.bytes</c>'s only layer carries none
+        /// of liberty's match keys (<c>class</c>/<c>brunnel</c>), so it never runs <c>InStringSet</c>'s
+        /// membership SCAN; this tile has the most <c>transportation</c> features, 3 with <c>brunnel</c>.</summary>
         private static MvtTile _croatiaTile;
 
         private static List<JsonValue> _coveredLibertyFilters;
@@ -908,11 +856,8 @@ namespace MapRenderer.Tests.Filters
         }
 
         /// <summary>True iff <paramref name="node"/> contains a <c>["match", ["get", <paramref name="key"/>],
-        /// ...]</c> sub-tree anywhere — deliberately NARROWER than "uses this key at all": only a
-        /// <c>match</c> input compiles to <c>InStringSet</c> (a bare <c>==</c>/<c>!=</c> against the same key
-        /// compiles to a different, non-scanning op). Gating the per-key non-vacuity counters on this walk
-        /// — not on key presence alone — is what review requires: presence over-claims "the membership
-        /// scan ran" for a key whose filters are all equality forms.</summary>
+        /// ...]</c> sub-tree. Only a <c>match</c> input compiles to <c>InStringSet</c>; an <c>==</c>/<c>!=</c>
+        /// on the key does not scan, so key presence alone would over-claim that the scan ran.</summary>
         private static bool FilterUsesGetKeyViaMatch(JsonValue node, string key)
         {
             if (node == null || !node.IsArray) return false;
@@ -924,12 +869,10 @@ namespace MapRenderer.Tests.Filters
             return false;
         }
 
-        /// <summary>Compiles every filtered liberty.json layer, splitting it into the covered filter JSON
-        /// (returned, for the parity/refusal teeth below) and the refused layer ids (recorded into
-        /// <see cref="_refusedLibertyLayerIds"/>, empty when coverage is complete) plus the total filtered
-        /// layer count (<see cref="_totalFilteredLibertyLayers"/>) — a bare count can regress by coincidence
-        /// (a filter gained AND one lost still sums to the same total), so the coverage pin below asserts
-        /// the refused set by identity, not just its size.</summary>
+        /// <summary>Compiles every filtered liberty.json layer. Returns the covered filters, and records the
+        /// refused layer ids in <see cref="_refusedLibertyLayerIds"/> and the total in
+        /// <see cref="_totalFilteredLibertyLayers"/>. The refused set is kept by identity, because a count
+        /// cannot tell one filter gained and another lost.</summary>
         private static List<JsonValue> CollectCoveredLibertyFilters()
         {
             var covered = new List<JsonValue>();
@@ -951,15 +894,10 @@ namespace MapRenderer.Tests.Filters
 
         // ── coverage pin ────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Pins the measured fast-path coverage: all 105 of liberty.json's
-        /// filtered layers compile end-to-end through the accepted op subset (103 before <c>road_link</c>/
-        /// <c>road_link_casing</c> gained the compact <c>InStringSet</c> membership path; 93
-        /// before <c>has</c> and ordered comparisons were added; 44 before <c>match</c>). The last 2
-        /// (<c>road_link</c>/<c>road_link_casing</c>) were previously refused: their old desugaring
-        /// (<c>!all(input != a, …)</c>, which re-emits the input <c>get</c> per label) overflowed the VM's
-        /// bounded op-count for their 10+ labels; <c>InStringSet</c> compiles them in O(1) ops regardless of
-        /// label count. Nothing is left uncovered — asserted by the refused set being empty (a bare count
-        /// cannot tell "nothing refused" apart from "one gained, a different one lost").</summary>
+        /// <summary>All 105 of liberty.json's filtered layers compile through the accepted op subset. The
+        /// 10+-label <c>road_link</c> matches fit the VM's op budget only because <c>InStringSet</c> compiles
+        /// them in O(1) ops whatever the label count. The refused set must be empty, which a count alone
+        /// cannot show.</summary>
         [Test]
         public void CoveredLibertyFilters_Count_Is105()
         {
@@ -969,38 +907,20 @@ namespace MapRenderer.Tests.Filters
             Assert.That(_coveredLibertyFilters.Count, Is.EqualTo(105));
         }
 
-        // ── tooth 1 — parity oracle ─────────────────────────────────────────────────────────────
+        // ── Parity oracle ─────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// For every covered liberty filter and every feature of every layer of BOTH fixture tiles: the
-        /// native VM's include/exclude decision must equal managed <see cref="CompiledFilter.Matches"/>,
-        /// bit for bit. Filters are pure functions of the feature, so applying a filter to features from a
-        /// differently-named layer is legitimate and widens coverage.
-        ///
-        /// <para><b>The per-key non-vacuity floors.</b> <c>sample-tile.bytes</c>'s one
-        /// layer ('countries') carries none of liberty's real match get-keys (<c>class</c>/<c>brunnel</c>),
-        /// so a sweep over it alone never exercises <c>InStringSet</c>'s membership SCAN for those keys —
-        /// only the Null/absent-default case (real coverage, but not of the scan itself). The added
-        /// <c>_croatiaTile</c> pass is what closes that gap, and the two per-KEY counts below are what
-        /// proves it closed rather than merely widening an already-vacuous aggregate: an aggregate floor is
-        /// satisfied by <c>class</c> alone (dense on every layer) and would stay green with <c>brunnel</c>
-        /// at zero — an oracle is vacuous when the fixture lacks the keys its filters read.
-        ///
-        /// <para><b><c>ramp</c> is deliberately excluded</b> — not an uncovered gap, an out-of-remit key.
-        /// All 18 liberty filters reading it are numeric equality (<c>==</c>/<c>!=</c> against the literal
-        /// <c>1</c>); none is a <c>match</c> form (verified: walked every one), so <c>ramp</c> can never
-        /// drive <c>InStringSet</c>'s membership scan — the exact mechanism this tooth exists to close the
-        /// gap on. A floor on it would be unachievable by construction; re-adding it here would be re-
-        /// introducing the vacuous-aggregate shape this edit exists to avoid, just renamed per-key.</para>
-        ///
-        /// One gap remains and is accepted, not closed here: croatia's <c>brunnel</c> key is present on its
-        /// <c>transportation</c> layer only (its <c>waterway</c>/<c>water</c> layers don't carry it) —
-        /// liberty's other 4 <c>waterway</c>/<c>water</c>-sourced <c>brunnel</c> filters (of 62 total; the
-        /// split is <c>transportation</c> 58 / <c>waterway</c> 3 / <c>water</c> 1) stay uncovered. Croatia
-        /// covers the 58. Also accepted: croatia's 3 <c>brunnel</c> features are all <c>tunnel</c>, so the
-        /// corpus's only <c>brunnel=bridge</c> case (in <c>water-8-135-80.pbf.bytes</c>) leaves the
-        /// match-true "bridge" arm untaken here — recorded rather than adding a third fixture decode.</para>
+        /// For every covered liberty filter and every feature of every layer of BOTH fixture tiles, the native
+        /// VM's decision must equal managed <see cref="CompiledFilter.Matches"/>. Filters are pure functions of
+        /// the feature, so crossing layers widens coverage. Separate per-KEY floors for <c>class</c> and
+        /// <c>brunnel</c> prove <c>InStringSet</c>'s scan ran; <c>ramp</c> has none, because every liberty
+        /// filter on it is numeric equality, never <c>match</c>.
         /// </summary>
+        /// <remarks>
+        /// Limitation: croatia's <c>brunnel</c> is on <c>transportation</c> only, so 4 of liberty's 62
+        /// <c>brunnel</c> filters (<c>waterway</c>/<c>water</c>) stay uncovered. Its 3 <c>brunnel</c> features
+        /// are all <c>tunnel</c>, so the match-true "bridge" arm is never taken.
+        /// </remarks>
         [Test]
         public void Vm_AgreesWithManagedCompiledFilter_ForEveryCoveredFilter_EveryFeature_EveryLayer()
         {
@@ -1037,9 +957,7 @@ namespace MapRenderer.Tests.Filters
                             Assert.That(nativeMatched, Is.EqualTo(managedMatched),
                                 $"layer '{layer.Name}' feature[{fi}]: native/managed disagree for {filterJson}");
 
-                            // Non-vacuity: whether THIS (filter, feature) pair actually drives InStringSet's
-                            // membership SCAN — get resolves to a real String, the type both class and
-                            // brunnel carry as match/InStringSet inputs.
+                            // Counts a pair that drives InStringSet's scan: the get resolves to a real String.
                             if (usesClass && feature.TryGetProperty("class", out Value cv) && cv.Type == ValueType.String) classNonNull++;
                             if (usesBrunnel && feature.TryGetProperty("brunnel", out Value bv) && bv.Type == ValueType.String) brunnelNonNull++;
                         }
@@ -1051,23 +969,14 @@ namespace MapRenderer.Tests.Filters
                 }
             }
 
-            // Migrated from the pre-batching per-feature-evaluator sweep onto MatchAll — the comparison
-            // count did not drop: measured 2026-09-05, this exact two-tile corpus, 133350 (was floored at a
-            // stale `> 10000`). Floored above half its measured value (a halved count must fail) and
-            // comfortably below it (ordinary variation must not flake) — the same rule the per-key floors
-            // below already use: 90000 is 67.5% of 133350, safely above the 66675 half-point.
+            // Floor rule, as for the per-key floors below: above half the corpus count (133350), so a halved
+            // count fails, and below it, so ordinary variation does not.
             Assert.That(comparisons, Is.GreaterThan(90000),
                 "precondition: the oracle must exercise many (filter, layer, feature) combinations — " +
                 "too few and a shallow/broken VM could pass this test vacuously (measured 133350)");
 
-            // Per-key floors, each asserted separately (never summed — an aggregate is satisfied by `class`
-            // alone), and each gated on MATCH-FORM participation (FilterUsesGetKeyViaMatch), not mere key
-            // presence — review: a presence-only gate over-claims "the membership scan ran" for a key
-            // whose filters are all equality forms (this is exactly what caught `ramp`, and would have let
-            // an all-equality `brunnel` corpus pass a presence-based floor vacuously). Measured 2026-09-05
-            // over croatia-dalmatia + sample-tile, this exact corpus: class=27864, brunnel=57. Each floor
-            // sits above half its measured value (a halved count must fail) and comfortably below it
-            // (ordinary variation must not flake): class > 20000 (13932 fails), brunnel > 40 (28 fails).
+            // Per-key floors, never summed (`class` alone would satisfy a sum), gated on match-form use. The
+            // corpus gives class=27864, brunnel=57; each floor sits between half and the full count.
             Assert.That(classNonNull, Is.GreaterThan(20000),
                 "class: InStringSet's membership scan must run densely via match forms (measured 27864)");
             Assert.That(brunnelNonNull, Is.GreaterThan(40),
@@ -1075,16 +984,12 @@ namespace MapRenderer.Tests.Filters
                 "transportation features carrying this key (measured 57)");
         }
 
-        // ── tooth 1b — explicit match parity (membership + negated) ───────────────────────────────
+        // ── Explicit match parity (membership + negated) ───────────────────────────────
 
         /// <summary>
-        /// Hand-built <c>match</c> parity teeth, membership and negated, over a real fixture layer —
-        /// explicit and self-contained alongside the corpus sweep (tooth 1), which also exercises the 57
-        /// covered filters (of all 105) containing a <c>match</c> node anywhere that liberty.json
-        /// contributes automatically (against the fixture's one layer, whose <c>get</c> keys don't overlap
-        /// liberty's match inputs — see tooth 1's caveat — so THIS tooth is what exercises a real String
-        /// <c>get</c> result against real labels). Each case is required to select a proper non-empty subset
-        /// of 'countries', or the guard is unsatisfiable.
+        /// Hand-built <c>match</c> parity, membership and negated, over 'countries'. The corpus's match filters
+        /// key on properties this layer lacks, so this test is what runs a real String <c>get</c> against real
+        /// labels. Each case must select a proper non-empty subset.
         /// </summary>
         [Test]
         public void Vm_AgreesWithManagedCompiledFilter_ForHandBuiltMatch_MembershipAndNegated()
@@ -1107,10 +1012,8 @@ namespace MapRenderer.Tests.Filters
             AssertMatchParity(BuildMatchFilter("NAME", names, member: true), countries);
             AssertMatchParity(BuildMatchFilter("NAME", names, member: false), countries);
 
-            // Scalar (non-array) label — exercises TryEmitMatch's non-IsArray label normalization (now
-            // feeding the compact InStringSet path for a get-input string label), which the liberty corpus never
-            // hits (all 78 match nodes carry array labels), so a wrong scalar handling would otherwise ship
-            // untested.
+            // A scalar label runs TryEmitMatch's non-array normalization, which the liberty corpus never hits:
+            // all its match nodes carry array labels.
             AssertMatchParity(BuildScalarMatchFilter("NAME", names[0], member: true), countries);
         }
 
@@ -1144,7 +1047,7 @@ namespace MapRenderer.Tests.Filters
                 JsonValue.OfBool(!member),
             });
 
-        // ── tooth 1c — explicit `has` parity ───────────────────────────────────────────────────
+        // ── Explicit `has` parity ───────────────────────────────────────────────────
 
         /// <summary>
         /// Hand-built <c>["has","class"]</c> over a synthetic 2-feature layer where <c>class</c> is present
@@ -1178,13 +1081,9 @@ namespace MapRenderer.Tests.Filters
 
         /// <summary>
         /// <c>["has","class"]</c> where feature 0's <c>class</c> tag points at a value that decoded to
-        /// <see cref="MvtValueNative.Null"/> (an empty / unknown-field Value sub-message — legal protobuf a
-        /// non-conformant tile can carry, which <c>MvtDecoder.DecodeValue</c> stores as <c>Null</c>). Managed
-        /// <c>has</c> reports the key PRESENT (<c>TryGetByKeyIndex</c> returns found the moment the tag pair
-        /// exists, whatever the value's type); the VM must agree — presence is tag existence, not
-        /// <c>value.Type != Null</c>. RED-verifies against the pre-fix <c>ReadTag(k).Type != Null</c>, which
-        /// reported this present-Null key as absent, diverging from managed. (get/Equal do NOT share this — both
-        /// sides read Null for a present-Null value, so they never disagreed.)
+        /// <see cref="MvtValueNative.Null"/> (an empty Value sub-message a non-conformant tile can carry).
+        /// Managed <c>has</c> reports the key PRESENT, and the VM must agree: presence is tag existence, not
+        /// <c>value.Type != Null</c>. RED against a VM that tests <c>ReadTag(k).Type != Null</c>.
         /// </summary>
         [Test]
         public void Vm_AgreesWithManagedCompiledFilter_ForHandBuiltHas_PresentButNullValue()
@@ -1224,14 +1123,10 @@ namespace MapRenderer.Tests.Filters
             }
         }
 
-        /// <summary>Builds a 2-feature layer (mirroring
-        /// <c>FeatureSelectorNativeFilterTests.Rebind_RefusesWhenALiteralMatchesTwoOrMoreValueStrings</c>'s
-        /// synthetic-resolver construction) where key <c>class</c> resolves to a value for feature 0's tag
-        /// slice; feature 1 carries a tag for the DIFFERENT key <c>other</c> instead (not an empty slice) —
-        /// so the absent case exercises <c>ReadTag</c>'s backward scan finding no matching key index, the
-        /// real-MVT shape, rather than short-circuiting on a zero-length slice. The proper-subset presence
-        /// shape <c>has</c>'s parity tooth needs. Out parameters are the backing native arrays; caller
-        /// disposes them.</summary>
+        /// <summary>Builds a 2-feature layer: feature 0 has a <c>class</c> tag, and feature 1 has a tag for the
+        /// DIFFERENT key <c>other</c>, not an empty slice, so the absent case runs <c>ReadTag</c>'s backward
+        /// scan as a real MVT does. The out parameters are the backing native arrays; the caller disposes
+        /// them.</summary>
         private static MvtLayer BuildHasProperSubsetLayer(
             out NativeArray<MvtValueNative> values, out NativeArray<uint> tagWords,
             out NativeArray<int> tagOffsets, out NativeArray<int> tagLengths)
@@ -1256,21 +1151,14 @@ namespace MapRenderer.Tests.Filters
             return layer;
         }
 
-        // ── tooth 1e' — many-label InStringSet evaluation: real membership scan + absent-label sentinel ──
+        // ── Many-label InStringSet evaluation: real membership scan + absent-label sentinel ──
 
         /// <summary>
-        /// A hand-built 15-label <c>match</c> (the <c>road_link</c>-shaped count that forced
-        /// <c>InStringSet</c>'s existence — see <see cref="TryCompile_AcceptsManyLabelMatch_ViaInStringSet"/>)
-        /// evaluated over a synthetic layer whose <c>class</c> values actually exercise the scan: the
-        /// liberty corpus never does this — its match filters key on properties (<c>class</c>/<c>brunnel</c>/
-        /// <c>network</c>) absent from the fixture tile's only layer, so every corpus/oracle evaluation of a
-        /// real match filter sees a Null <c>get</c> and never enters <c>InStringSet</c>'s scan
-        /// (see <see cref="Vm_AgreesWithManagedCompiledFilter_ForEveryCoveredFilter_EveryFeature_EveryLayer"/>'s
-        /// doc). This tooth is the sole one exercising: a real String input matched at the first label, mid
-        /// list, and the last label (contiguous <c>Binding[start..start+count)</c> scan correctness), and a
-        /// real String input distinct from every label while 5 of the 15 labels are themselves absent from
-        /// this layer's value-strings (rebind to the -1 sentinel, <see cref="NativeFilterRebind.Rebind"/>) —
-        /// the case <c>InStringSet</c>'s byte-identity argument leans on hardest.
+        /// A 15-label <c>match</c> (see <see cref="TryCompile_AcceptsManyLabelMatch_ViaInStringSet"/>) over a
+        /// synthetic layer whose <c>class</c> values run the scan. It matches at the first, a middle and the
+        /// last label, and misses every label while 5 labels are absent from the layer and rebind to -1
+        /// (<see cref="NativeFilterRebind.Rebind"/>): the case <c>InStringSet</c>'s byte identity leans on
+        /// most.
         /// </summary>
         [Test]
         public void Vm_AgreesWithManagedCompiledFilter_ForHandBuiltManyLabelMatch_MembershipAndNegated()
@@ -1280,11 +1168,8 @@ namespace MapRenderer.Tests.Filters
                 out NativeArray<int> tagOffsets, out NativeArray<int> tagLengths);
             try
             {
-                // Interleave present (matched) and absent labels so BOTH slot 0 and the LAST slot of the
-                // emitted range are live, matched labels. A real StringId is never the -1 an absent label
-                // rebinds to, so a TRAILING run of absent labels leaves the top scan slots behaviourally
-                // dead — truncating the scan loop there would then go unpinned. class9 sits LAST here and is
-                // matched by feature 2, so dropping the top slot fails this tooth.
+                // Interleave present and absent labels so slot 0 and the LAST slot are live, matched labels; a
+                // trailing run of absent (-1) labels would leave a truncated scan unpinned.
                 var labels = new List<string>
                 {
                     "class0",                                                             // slot 0  — feature 0
@@ -1342,7 +1227,7 @@ namespace MapRenderer.Tests.Filters
             return layer;
         }
 
-        // ── tooth 1d — explicit numeric-compare parity, both directions ───────────────────────────
+        // ── Explicit numeric-compare parity, both directions ───────────────────────────
 
         /// <summary>Hand-built <c>["&lt;",["get",key],N]</c> and <c>["&gt;",N,["get",key]]</c> (operand
         /// order reversed) over a fixture numeric property spanning <c>N</c> for a proper subset of
@@ -1406,7 +1291,7 @@ namespace MapRenderer.Tests.Filters
             return (null, null, 0.0);
         }
 
-        // ── tooth 1e — type-mismatch compare excludes on both sides ───────────────────────────────
+        // ── Type-mismatch compare excludes on both sides ───────────────────────────────
 
         /// <summary>
         /// <c>["&lt;",["get","NAME"],5]</c> over a "countries" feature: <c>NAME</c> is a STRING, so managed
@@ -1486,15 +1371,11 @@ namespace MapRenderer.Tests.Filters
             }
         }
 
-        // ── tooth 2 — no managed property-store lookup on the VM entry (structural) ───────────────
+        // ── No managed property-store lookup on the VM entry (structural) ───────────────
 
-        /// <summary>Structural: the Burst job's field surface is entirely blittable — no string-keyed
-        /// lookup type could even appear here (a Burst job could not compile one anyway). Together with the
-        /// evaluator taking its native inputs through the <c>INativeFilterColumns</c> capability rather than
-        /// a concrete <c>IMvtPropertyStore</c> (a type-level fact — it holds no store reference to call),
-        /// this IS the "no managed property lookup on the VM entry" guarantee. It supersedes the earlier
-        /// call-counting spy, which only worked while the evaluator reached a feature's store — the coupling
-        /// this stage removed.</summary>
+        /// <summary>Structural: the Burst job's field surface is entirely blittable. With the evaluator reading
+        /// its inputs through <c>INativeFilterColumns</c>, not an <c>IMvtPropertyStore</c>, this means the VM
+        /// entry does no managed property lookup.</summary>
         [Test]
         public void NativeFilterEvaluationJob_FieldSurface_IsEntirelyBlittable()
         {
@@ -1506,7 +1387,7 @@ namespace MapRenderer.Tests.Filters
                     $"field '{f.Name}' must stay Burst-blittable");
         }
 
-        // ── tooth 3 — refusal correctness ──────────────────────────────────────────────────────
+        // ── Refusal correctness ──────────────────────────────────────────────────────
 
         [Test]
         public void TryCompile_AcceptsAllCoveredLibertyFilters()
@@ -1515,7 +1396,7 @@ namespace MapRenderer.Tests.Filters
                 Assert.IsTrue(NativeFilterCompiler.TryCompile(filterJson, out _), filterJson.ToString());
         }
 
-        // ── tooth 3b — many-label match compiles via InStringSet (road_link regression) ────────────────
+        // ── A many-label match compiles via InStringSet (road_link regression) ────────────────
 
         /// <summary>
         /// A synthetic <c>match</c> with 15 string labels — the shape that overflowed the VM's bounded
@@ -1582,19 +1463,13 @@ namespace MapRenderer.Tests.Filters
         [TestCase("[\"has\",\"a\",\"b\"]", TestName = "Refuses_Has_TwoArg")]
         [TestCase("[\"<\",[\"get\",\"a\"],[\"get\",\"b\"]]", TestName = "Refuses_LessThan_TwoGet")]
         [TestCase("[\"<\",[\"get\",\"a\"],\"str\"]", TestName = "Refuses_LessThan_GetVsString")]
-        // Literal-vs-literal must be NESTED under an expression-dialect parent (here "!"), same reasoning
-        // as Refuses_NestedLiteralEqualsLiteral below: a bare root ["<",1,2] is legacy dialect (both
-        // operands scalar, exactly 3 elements — see FilterDialect.IsExpressionFilter) and gets refused by
-        // LegacyFilterTranslator before ever reaching TryEmitCompare's gate.
+        // Literal-vs-literal is NESTED under "!": a bare root ["<",1,2] is legacy dialect, and
+        // LegacyFilterTranslator refuses it before TryEmitCompare's gate.
         [TestCase("[\"!\",[\"<\",1,2]]", TestName = "Refuses_LessThan_LiteralVsLiteral")]
         [TestCase("[\"get\",\"class\"]", TestName = "Refuses_NonBooleanRoot")]
         [TestCase("[\"==\",[\"geometry-type\"],[\"get\",\"x\"]]", TestName = "Refuses_GeometryTypeAgainstDynamicKey")]
-        // The two id-vs-byte string-equality shapes: literal==literal (two absent literals both rebind to
-        // the -1 sentinel → VM equal, managed unequal) and get==get (dup value-strings at distinct ids →
-        // VM unequal, managed equal). Byte-identity holds only for get/geometry-type vs a string literal.
-        // The literal==literal case must be NESTED under an expression-dialect parent (here "!"): a bare
-        // root ["==","foo","bar"] is legacy dialect and LegacyFilterTranslator rewrites it to the safe
-        // ["==",["get","foo"],"bar"] before compilation — translation never reaches under "!".
+        // Unsafe id-vs-byte shapes: literal==literal (both rebind to -1, so the VM says equal) and get==get
+        // (duplicate strings at distinct ids). Nested under "!", because legacy translation rewrites a bare root.
         [TestCase("[\"!\",[\"==\",\"foo\",\"bar\"]]", TestName = "Refuses_NestedLiteralEqualsLiteral")]
         [TestCase("[\"==\",[\"get\",\"a\"],[\"get\",\"b\"]]", TestName = "Refuses_GetEqualsGet")]
         public void TryCompile_RefusesUnsupportedFilters(string json)
@@ -1603,7 +1478,7 @@ namespace MapRenderer.Tests.Filters
             Assert.IsNull(program);
         }
 
-        // ── tooth 4 — error model (synthetic; the liberty corpus never errors) ─────────────────
+        // ── Error model (synthetic; the liberty corpus never errors) ─────────────────
 
         /// <summary>
         /// <c>["all",["get","NAME"]]</c> over a "countries" feature: <c>NAME</c> is a non-empty string, so
@@ -1645,15 +1520,12 @@ namespace MapRenderer.Tests.Filters
             }
         }
 
-        // ── tooth 5 — batched Execute: error independence across features (synthetic, mandatory) ──
+        // ── Batched Execute: error independence across features (synthetic, mandatory) ──
 
         /// <summary>
-        /// The liberty corpus never errors (see tooth 4's doc), so no corpus sweep can observe whether a
-        /// batched <c>Execute</c> lets one feature's error bleed into the next. Feature 0 forces
-        /// <see cref="NativeFilterError.NonComparable"/> (a <c>get</c> resolving to a String compared with
-        /// <c>&lt;</c> against a number literal); feature 1 has a genuinely Numeric value that must match.
-        /// If <c>Execute</c> failed to re-initialise its error code per feature, feature 0's error would
-        /// still be set when feature 1 runs, halting it at <c>programCounter</c> 0 and excluding it wrongly.
+        /// One feature's error must not bleed into the next in a batched <c>Execute</c>; the liberty corpus
+        /// never errors, so only this test sees it. Feature 0 forces <see cref="NativeFilterError.NonComparable"/>
+        /// and feature 1 must match. A per-feature error code that is not reset halts feature 1 at once.
         /// </summary>
         [Test]
         public void MatchAll_ErrorOnOneFeature_DoesNotExcludeTheNext()
@@ -1712,17 +1584,13 @@ namespace MapRenderer.Tests.Filters
             }
         }
 
-        // ── tooth 6 — batched Execute: operand stack re-initialises per feature (synthetic) ──────
+        // ── Batched Execute: operand stack re-initialises per feature (synthetic) ──────
 
         /// <summary>
-        /// <c>["all",["get","a"],["get","b"]]</c> over 2 features: feature 0's <c>a</c> is <c>false</c>, so
-        /// its <c>all</c> short-circuits at the FIRST <c>AllStep</c> without ever reading <c>b</c> — the
-        /// simplest way to leave the operand stack non-empty going into the next feature if it isn't
-        /// re-initialised per feature. Feature 1 has both <c>a</c> and <c>b</c> true, so it runs the program
-        /// to completion. If <c>Execute</c> failed to re-initialise its stack per feature, feature 1 would
-        /// start with feature 0's leftover element still on it, its end-of-program check
-        /// (<c>stack.Length == 1</c>) would see length 2, and it would wrongly report
-        /// <see cref="NativeFilterError.StackOverflow"/> instead of matching.
+        /// <c>["all",["get","a"],["get","b"]]</c>: feature 0's <c>a</c> is <c>false</c>, so <c>all</c>
+        /// short-circuits and leaves an element on the stack. Feature 1 must match. A stack that is not reset
+        /// per feature fails the end check (<c>stack.Length == 1</c>) and reports
+        /// <see cref="NativeFilterError.StackOverflow"/>.
         /// </summary>
         [Test]
         public void MatchAll_StackResidue_DoesNotBleedIntoNextFeature()
@@ -1781,15 +1649,12 @@ namespace MapRenderer.Tests.Filters
             }
         }
 
-        // ── tooth 7 — batched Execute: geometry kind read per feature (synthetic on both halves) ──
+        // ── Batched Execute: geometry kind read per feature (synthetic on both halves) ──
 
         /// <summary>
-        /// liberty.json emits zero <c>$type</c>/<c>geometry-type</c> filters, so no corpus sweep can
-        /// ever exercise <see cref="NativeOperation.GeometryEqual"/> — both the filter AND the fixture must
-        /// be hand-built. <c>["==",["geometry-type"],"Polygon"]</c> over a layer whose feature 0 is a Point
-        /// and feature 1 is a Polygon: if the batched <c>Execute</c> read the geometry-kind column at a
-        /// fixed index instead of per feature, both features would evaluate against the SAME kind and stop
-        /// disagreeing.
+        /// liberty.json has no <c>geometry-type</c> filter, so the filter and fixture are hand-built.
+        /// <c>["==",["geometry-type"],"Polygon"]</c> over a Point then a Polygon: an <c>Execute</c> that read
+        /// the geometry-kind column at a fixed index would give both features the SAME answer.
         /// </summary>
         [Test]
         public void MatchAll_GeometryKind_IsReadPerFeature()

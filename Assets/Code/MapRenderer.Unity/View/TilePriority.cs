@@ -112,10 +112,8 @@ namespace MapRenderer.Unity.View
                 return math.sqrt(dx * dx + dy * dy + dz * dz);
             }
 
-            // GroundDistanceToLookAt: horizontal-only (east/north; c1/"up" dropped) — the render origin
-            // IS the LookAt point, so this is exactly the tile's ground distance to screen-centre. On the
-            // planar Mercator the up component is always ~0 anyway; dropping it explicitly is what makes
-            // the metric a genuine GROUND distance on the globe too (curvature bulge excluded).
+            // GroundDistanceToLookAt: east/north only, from the render origin (the LookAt). Dropping "up" (c1)
+            // excludes the globe's curvature bulge, so this is a ground distance on every projection.
             return math.sqrt(c.x * c.x + c.z * c.z);
         }
 
@@ -136,13 +134,10 @@ namespace MapRenderer.Unity.View
         }
 
         /// <summary>
-        /// Stable ascending in-place sort of <paramref name="tiles"/> by <see cref="Key"/> — insertion sort
-        /// (the cover/desired set is dozens of entries, so O(n²) beats allocating a
-        /// <see cref="System.Comparison{T}"/> closure or boxing through <c>List&lt;T&gt;.Sort</c>'s
-        /// <c>IComparer</c> path). <paramref name="sortKeys"/> is caller-owned scratch, resized (never
-        /// implicitly shrunk) to fit — reused across calls so steady-state sorting allocates nothing. Ties
-        /// break on <see cref="TileId"/> (Z, then X, then Y) for a deterministic order independent of the
-        /// input list's own ordering.
+        /// Stable ascending in-place insertion sort of <paramref name="tiles"/> by <see cref="Key"/>. The set is
+        /// dozens of entries, so O(n²) beats a closure or <c>List&lt;T&gt;.Sort</c>'s boxing path, and the reused
+        /// <paramref name="sortKeys"/> keeps steady-state sorting allocation-free. Ties break on
+        /// <see cref="TileId"/> (Z, then X, then Y), so the order does not depend on the input order.
         /// </summary>
         /// <param name="tiles">The list to sort in place.</param>
         /// <param name="sortKeys">Caller-owned scratch array, grown (never shrunk) to at least

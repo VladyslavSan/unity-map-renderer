@@ -1,6 +1,5 @@
-// Unity touch source: thin EnhancedTouch adapter over the GestureIntent seam.
-// Sits alongside Controller.cs (the desktop source). Delegates ALL disambiguation to
-// TouchGestureRecognizer (Core) and ALL camera math to ViewInput.Apply — re-implements neither.
+// Unity touch source: thin EnhancedTouch adapter over the GestureIntent seam. Delegates all disambiguation
+// to TouchGestureRecognizer and all camera math to ViewInput.Apply.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -21,32 +20,16 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// A thin Unity EnhancedTouch adapter — the touch sibling of <see cref="Controller"/>.
-    ///
-    /// <para>Reads <see cref="Touch.activeTouches"/> each frame, converts them to engine-free
-    /// <see cref="TouchSample"/>s, feeds them to <see cref="TouchGestureRecognizer.Recognize"/>,
-    /// and folds each emitted <see cref="GestureIntent"/> through
-    /// <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/> into one
-    /// <see cref="CameraPropertiesUpdate"/>, then calls
-    /// <see cref="MapCamera.Apply(CameraPropertiesUpdate)"/>.</para>
-    ///
-    /// <para><b>Input backend: new Input System / EnhancedTouch</b>. Uses
-    /// <see cref="Touch.activeTouches"/> exclusively — zero legacy UnityEngine.Input API.
-    /// <see cref="EnhancedTouchSupport.Enable()"/> is called in <see cref="OnEnable"/> —
-    /// without this, <c>Touch.activeTouches</c> is always empty and touch silently does nothing.</para>
-    ///
-    /// <para><b>Zero seam edits:</b> this class references
-    /// <see cref="GestureIntent"/>, <see cref="ViewInput.Apply"/>, and <see cref="ViewContext"/>
-    /// verbatim; it does not redefine them, add intent kinds, or re-implement gesture math.</para>
-    ///
-    /// <para>Allocation-free <see cref="Update"/>: reused <c>List&lt;T&gt;</c> fields,
-    /// no LINQ, no closures.</para>
+    /// A thin EnhancedTouch adapter, the touch sibling of <see cref="Controller"/>: each frame it turns
+    /// <see cref="Touch.activeTouches"/> into <see cref="TouchSample"/>s, runs <see cref="TouchGestureRecognizer.Recognize"/>,
+    /// folds the intents through <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/> into one patch for
+    /// <see cref="MapCamera.Apply(CameraPropertiesUpdate)"/>, and allocates nothing in steady state.
+    /// <see cref="OnEnable"/> enables <see cref="EnhancedTouchSupport"/>; without it, no touches arrive.
     /// </summary>
     public sealed class TouchController : MonoBehaviour
     {
         // ── References (set at runtime during wiring) ────────────────────────────────────────────────
-        // Wired at runtime by MapHost — runtime references, not authoring data, so auto-properties (not
-        // serialized Inspector fields: MapHost sets them on Start, a serialized slot would just show a dead value).
+        // Wired by MapHost on Start, so not serialized: an Inspector slot would only show a dead value.
         public MapViewComponent Map { get; set; }
         public Camera camera { get; set; }
 
@@ -87,9 +70,8 @@ namespace MapRenderer.App
         private readonly List<TouchSample>    _samples = new List<TouchSample>();
         private readonly List<GestureIntent>  _intents = new List<GestureIntent>();
 
-        // The MinZoom floor last baked into _recognizer (touch pinch-floor parity with Controller): NaN
-        // forces the first-frame build. Rebuilding TouchGestureRecognizer allocates, so Update only rebuilds
-        // when the floor actually moves (viewport resize / projection swap), not every frame.
+        // The MinZoom floor last baked into _recognizer; NaN forces the first-frame build. A rebuild allocates,
+        // so Update rebuilds only when the floor moves (viewport resize, projection swap).
         private double _recognizerMinZoomFloor = double.NaN;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────────────────────────
@@ -132,21 +114,17 @@ namespace MapRenderer.App
         {
             if (Map == null || Map.Camera == null) return;
 
-            // Build the per-frame view context, as Controller.Update does. The interaction seam runs in
-            // LOGICAL pixels: convert the viewport AND every touch contact so anchors and the render camera
-            // share one basis, or pinch and pan drift off the fingers on a high-DPI panel. The division and
-            // its unusable-ratio fallback live in DeviceScaling.DeviceToLogicalPx, the same definition
-            // MapCamera.ViewportLogicalPx frames from, so the two bases cannot diverge.
-            // As on the mouse seam, the viewport is this component's own serialized camera (nullable, hence
-            // the Screen.width/height fallback), NOT MapCamera's ctor-enforced non-null one.
+            // Non-local invariant: as in Controller.Update, the viewport and every contact convert to LOGICAL px
+            // via the DeviceScaling.DeviceToLogicalPx that MapCamera.ViewportLogicalPx frames from; otherwise
+            // pinch and pan drift off the fingers on a high-DPI panel. This component's camera may be null,
+            // hence the Screen.width/height fallback.
             double dpr = Map.Config.DevicePixelRatio;
             double2 vp = DeviceScaling.DeviceToLogicalPx(new double2(
                 camera != null ? camera.pixelWidth  : Screen.width,
                 camera != null ? camera.pixelHeight : Screen.height), dpr);
 
-            // Touch pinch-floor parity with the desktop Controller: the floor must track the live
-            // viewport/projection, else touch pinch still floors at the stale OnEnable-baked value.
-            // Rebuilding the recognizer allocates, so only do it when the floor actually changed.
+            // The pinch floor tracks the live viewport and projection, as the desktop Controller's does;
+            // otherwise touch pinch floors at the stale value baked in OnEnable.
             double floor = CameraPoseMath.MinZoomFloor(Map.Camera.Projection, vp.x, vp.y, MinZoomMargin);
             if (floor != _recognizerMinZoomFloor)
             {
@@ -185,9 +163,8 @@ namespace MapRenderer.App
 
             if (_intents.Count == 0) return;
 
-            // Fold each intent through ViewInput.Apply into one CameraPropertiesUpdate.
-            // The fold is a non-colliding field union: each intent kind touches distinct fields
-            // (Pan→Lon/Lat; ZoomAtAnchor→Zoom/Lon/Lat; HeadingBy→Heading; TiltBy→Tilt).
+            // One frame emits Pan alone, TiltBy alone, or ZoomAtAnchor (Zoom/Lon/Lat) with HeadingBy, so no
+            // field is written twice.
             CameraPropertiesUpdate patch = default;
             for (int i = 0; i < _intents.Count; i++)
             {

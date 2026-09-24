@@ -1,16 +1,8 @@
-// Teardown-cancel: zero-leak teardown on Stop while mesh builds are in-flight (see the disposal &
-// cancellation contract, docs/async-architecture.md). Drives load, kicks mesh builds, and tears down WITHOUT
-// settling first — the exact race the maintainer reproduced (Stop while tiles are still loading).
-//
-// This is EditMode: the un-fixed stall must be measured by the TEST thread, which
-// requires Teardown() to be a direct synchronous call. EditMode's model does exactly that (OnDestroy does
-// not fire under DestroyImmediate headlessly, so tests call view.Teardown() explicitly, same as
-// DisposalLeakGuardTests). In PlayMode a 10s block would freeze the PlayerLoop and a yield-pump could not
-// observe it.
-//
-// Coverage gap (recorded, not closed here): the EditMode drain is symbol-silent, so the symbol-side leak
-// vector (SymbolTileBlock) is not exercised by this file — the maintainer's in-Editor Stop check
-// covers it.
+// Zero-leak teardown on Stop while mesh builds are in flight (docs/async-architecture.md, disposal and
+// cancellation contract): it kicks builds and tears down WITHOUT settling first.
+// Non-obvious why: this is EditMode because the TEST thread must time a direct synchronous Teardown(); in
+// PlayMode a stall freezes the PlayerLoop.
+// Limitation: the EditMode drain is symbol-silent, so SymbolTileBlock is not covered.
 
 using System;
 using System.Collections.Generic;
@@ -30,11 +22,11 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>
-    /// Teardown-cancel acceptance teeth: Tooth B (constraint 2 + the actual stall symptom — teardown must
-    /// return promptly even while a build is genuinely parked in-flight), Tooth C (regression guard — zero
-    /// <see cref="VerifiedDisposable"/> finalizer leaks; NOT RED-verifiable headlessly, since
-    /// <c>Teardown()</c> always runs to completion in this harness — see its own doc). Tooth A is
-    /// retired; the comment where it lived, below, states what replaced its coverage.
+    /// Teardown returns promptly while a build is parked in flight
+    /// (<see cref="Teardown_WhileBuildParked_ReturnsPromptly"/>), and leaves zero
+    /// <see cref="VerifiedDisposable"/> finalizer leaks (<see cref="Teardown_MidFlight_NoVerifiedDisposableLeaks"/>,
+    /// a regression guard that is not RED-verifiable headlessly). The "Gap" comment below names the teardown
+    /// state no test observes.
     /// </summary>
     [TestFixture]
     public class TeardownCancelInflightBuildsTests
@@ -42,7 +34,7 @@ namespace MapRenderer.Tests.Lifetime
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        // The LINE layer is vestigial for this file's purposes, but is kept: Tooth B/C still exercise a
+        // The LINE layer is vestigial for this file's purposes, but is kept: both tests still exercise a
         // two-layer style, matching every other cover fixture in this test family.
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -69,27 +61,12 @@ namespace MapRenderer.Tests.Lifetime
             ]
         }");
 
-        // ── Tooth A: RETIRED ────────────────────────────────────────────────────────────────────────
+        // ── Gap: teardown with a LIVE Mesh.MeshDataArray is unobserved ──────────────────────────────
 
-        // CanceledBuild_DisposesKickAllocatedPayload_CounterToBaseline is retired here. Its precondition
-        // ("the parked build's kick-allocated MeshDataArray sits undisposed right before teardown") is
-        // permanently vacuous: every layer kind is graph-arm, and a graph-arm layer allocates NO
-        // MeshDataArray at kick.
-        //
-        // The real, non-vacuous round-trip for "a MeshDataPayload gets allocated then freed" is
-        // SourceTileGraphBuildTests' ReleasedCompleteButUnconsumed_Write_StashesInThePen_ThenDrains.
-        //
-        // The honest gap: teardown while a Mesh.MeshDataArray is genuinely LIVE has NO observing tooth
-        // anywhere in this repo. That round-trip is an EVICTION path (a camera pan past the cover), not
-        // TEARDOWN, and the state is only reachable during the WRITE step, whose release path is already
-        // recorded as unobserved.
-        //
-        // Hazard worth carrying: a `gate.Set(); gate.Dispose();` with no join, while the lifetime token is
-        // still live, releases a worker that goes on to do a REAL mesh-build kick after the test method has
-        // returned. That kick moves process-wide static counters (MeshDataPayload.DebugLiveAllocCount /
-        // TileBuildGraph.DebugLiveCount) during whatever test runs next, which is exactly what this file's
-        // baseline-then-delta assertions read. Tooth B below keeps the same shape safely: Teardown()
-        // cancels the token before its finally releases the gate.
+        // Limitation: no test observes teardown while a Mesh.MeshDataArray is LIVE; that state exists only in
+        // the WRITE step, and SourceTileGraphBuildTests covers the allocate-then-free round trip on eviction.
+        // Hazard: releasing the gate with no join while the token is live lets a worker run a REAL kick after
+        // the test returns and move the static counters the next test reads; Teardown() must cancel first.
 
         /// <summary>Wraps a real <see cref="IWorkScheduler"/> and signals <see cref="BodyDone"/> AFTER the
         /// dispatched body returns (success, fault, or early cancellation-exit alike — the <c>finally</c>
@@ -106,7 +83,7 @@ namespace MapRenderer.Tests.Lifetime
                 => _inner.Schedule(c => { try { return body(c); } finally { BodyDone.Set(); } }, ct);
         }
 
-        // ── Tooth B: prompt teardown while a build is genuinely parked in-flight (constraint 2) ────
+        // ── Prompt teardown while a build is genuinely parked in-flight (constraint 2) ────
 
         /// <summary>
         /// Holds a kicked build genuinely in-flight via <see cref="TileManager.MeshBuildGateForTest"/> (set
@@ -128,9 +105,8 @@ namespace MapRenderer.Tests.Lifetime
             view.Config.MaxMeshBuildsPerTick = 64;
 
             ManualResetEventSlim gate = new ManualResetEventSlim(false);
-            // Real ThreadPool dispatch (TileManager's own production default) wrapped ONLY to observe when
-            // the released worker's body actually returns — see the class's own doc for why this, not a
-            // timing inference, is what closes the un-awaited-worker hazard a retired sibling tooth exposed.
+            // The production ThreadPool scheduler, wrapped only to observe when the released worker's body
+            // returns (see the class doc).
             var scheduler = new BodyCompletionWorkScheduler(new ThreadPoolWorkScheduler());
 
             try
@@ -138,16 +114,12 @@ namespace MapRenderer.Tests.Lifetime
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
                 view.TileManager.WorkScheduler = scheduler;
 
-                // Set the gate BEFORE any kick: every mesh-build worker parks on it (jointly with the
-                // lifetime token) as its very first statement, so the first tile kicked below is held
-                // genuinely in-flight rather than racing to completion before Teardown() runs.
+                // Set the gate BEFORE any kick: every worker parks on it first, so the first kicked tile stays
+                // in flight until Teardown() runs.
                 view.TileManager.MeshBuildGateForTest = gate;
 
-                // Kick-pump WITHOUT AwaitInFlightMeshBuilds: with the gate held, a kicked build's task never
-                // completes, so awaiting it would park this thread for the full 10s timeout and then throw
-                // TimeoutException. Fetch completion (which drives whether a tile becomes kick-eligible) is
-                // independent of the mesh-build gate, so plain repeated LateUpdate ticks are enough to
-                // observe at least one kick.
+                // Pump WITHOUT AwaitInFlightMeshBuilds: a gated build never completes, so awaiting it times out.
+                // Fetches do not wait on the gate, so plain LateUpdate ticks reach a kick.
                 int kicked = 0;
                 for (int f = 0; f < 3000 && kicked == 0; f++)
                 {
@@ -164,10 +136,8 @@ namespace MapRenderer.Tests.Lifetime
                 UnityEngine.Object.DestroyImmediate(go);
                 go = null;
 
-                // The un-fixed drain blocks WaitOffPlayerLoop(10000) per stashed task; the fix must cancel
-                // the parked build before either pen drain waits on it, so teardown completes in well under
-                // a second. A generous budget (2s) keeps this robust on a loaded CI box while still failing
-                // hard against a 10s (or even a several-second) stall.
+                // Teardown must cancel the parked build before a pen drain waits WaitOffPlayerLoop(10000) on it.
+                // The 2s budget tolerates a loaded machine and still fails a multi-second stall.
                 Assert.Less(sw.ElapsedMilliseconds, 2000,
                     $"Teardown-cancel constraint 2: Teardown() took {sw.ElapsedMilliseconds}ms while a mesh " +
                     "build was genuinely parked in-flight. The lifetime token must be cancelled BEFORE either " +
@@ -176,30 +146,19 @@ namespace MapRenderer.Tests.Lifetime
             }
             finally
             {
-                // Teardown() FIRST (only reached here if the try block threw before its own happy-path
-                // Teardown() call already ran) — it cancels the lifetime token, so a worker still parked on
-                // the gate wakes into an ALREADY-cancelled token and aborts without doing real work, rather
-                // than waking to a live token and running a genuine mesh-build kick UNAWAITED after this
-                // method returns — the exact hazard that made a retired sibling tooth in this file corrupt
-                // two unrelated tests' process-wide counters (see that tooth's own retirement note, above).
+                // Teardown() FIRST (if the try threw early): a worker parked on the gate then wakes to a cancelled
+                // token and aborts, instead of running an unawaited kick (the hazard noted above).
                 if (go != null)
                 {
                     view.Teardown();
                     UnityEngine.Object.DestroyImmediate(go);
                 }
-                // Release the gate (and any worker still parked on it) unconditionally so a RED failure
-                // never hangs the test runner. NOT disposed: a worker that just woke may still reference it
-                // briefly, and disposing a ManualResetEventSlim a concurrent thread might still touch is
-                // its own hazard — let GC reclaim it instead of racing a Dispose() against that reference.
+                // Release the gate unconditionally so a RED never hangs the runner. It is NOT disposed: a worker
+                // that just woke may still touch it, so GC reclaims it.
                 gate.Set();
 
-                // POSITIVE confirmation, not an inference: block (bounded) until the released worker's body
-                // has actually returned, so this method cannot return while a background thread might still
-                // be touching process-wide counters (MeshDataPayload.DebugLiveAllocCount et al.) that the
-                // NEXT test's own baseline-then-delta assertions read. A healthy worker signals in
-                // milliseconds (cancellation makes it an early no-op) — 5s is generous headroom, not a
-                // measured figure; a timeout here means a worker genuinely hung, which is itself a defect
-                // worth surfacing rather than silently ignoring.
+                // Wait (bounded) until the released worker's body returns, so no thread still moves the static
+                // counters the NEXT test reads. 5s is headroom; a timeout means a worker hung, which fails.
                 if (!scheduler.BodyDone.Wait(TimeSpan.FromSeconds(5)))
                     Assert.Fail("the released worker's body never signalled completion within 5s — a hang, " +
                         "not the prompt-cancellation this tooth exists to prove.");
@@ -207,7 +166,7 @@ namespace MapRenderer.Tests.Lifetime
             }
         }
 
-        // ── Tooth C: zero VerifiedDisposable leaks (regression guard, NOT RED-verifiable headlessly) ──
+        // ── Zero VerifiedDisposable leaks (regression guard, NOT RED-verifiable headlessly) ──
 
         /// <summary>
         /// Regression guard, not a RED-verifiable tooth: the production leak's proximate cause is Unity

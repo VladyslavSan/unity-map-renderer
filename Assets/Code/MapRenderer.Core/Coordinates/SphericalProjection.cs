@@ -9,10 +9,7 @@ namespace MapRenderer.Core.Geo
     /// Simple-sphere globe projection: geodetic → ECEF on a sphere of radius <see cref="Radius"/>
     /// (the WGS-84 ellipsoid's eccentricity ignored). ECEF axes are swapped to render space <c>(X, Z, Y)</c>
     /// (<c>docs/coordinates-and-projections.md</c>); the surface up is the radial normal, already unit length.
-    ///
-    /// <para>Implements the SAME <see cref="IProjection"/> as <see cref="WebMercatorProjection"/>, so the
-    /// abstraction serves both planar and globe. The geometry surface (<see cref="ProjectPoint"/> /
-    /// <see cref="Project"/> / <see cref="UpAt"/>) is Burst-callable.</para>
+    /// The geometry surface (<see cref="ProjectPoint"/> / <see cref="Project"/> / <see cref="UpAt"/>) is Burst-callable.
     /// </summary>
     public readonly struct SphericalProjection : IProjection
     {
@@ -83,16 +80,12 @@ namespace MapRenderer.Core.Geo
 
         // ── Camera interaction (managed side) — globe orbit ray-cast ───────────────────────────────
         //
-        // Reconstructs the SAME render-space camera the renderer builds (MapCamera.SyncToCamera: altitude from
-        // AltitudeForZoom, orbit via CameraPoseMath.ComputeRelativePose, look-at at the render origin, +Y up) and the
-        // look-at ENU frame the geometry is rebased into. The render-space globe is a sphere of
-        // radius R centred at (0, −R, 0): the look-at surface point sits at the origin (+Y up), so the sphere
-        // centre is R straight down. ScreenToGround casts the pixel ray at that sphere; GroundToScreen is the
-        // exact inverse (perspective-project the rebased ECEF point). Consistency with the rendered camera is
-        // what pins the grabbed point under the cursor across a drag (the anchored-pan fixed-point iteration).
-        //
-        // AltitudeMultiplier (MapCamera art-direction knob, not carried on CameraProperties) is assumed 1 — the
-        // demo default; a non-default value would offset the reconstructed camera from the rendered one.
+        // Non-local invariant: this reconstructs the same render-space camera as MapCamera.SyncToCamera
+        // (AltitudeForZoom, CameraPoseMath.ComputeRelativePose, look-at at the origin, +Y up) against the sphere
+        // centred at (0, −R, 0). ScreenToGround casts the pixel ray at it and GroundToScreen is the exact inverse;
+        // that consistency pins the grabbed point under the cursor across a drag.
+        // Limitation: AltitudeMultiplier is not on CameraProperties and is assumed 1; another value offsets the
+        // reconstructed camera from the rendered one.
 
         // Incidence-cosine below which the surface is treated as edge-on (no stable pan anchor). ~0.12 ≈ 7° off
         // the limb — a thin band that, in screen space near the limb where dr/dθ→0, is only a few pixels wide.
@@ -161,11 +154,8 @@ namespace MapRenderer.Core.Geo
                 if (t < 0.0) t = -b + sq;        // camera inside the sphere ⇒ far hit
                 p = Add(camPos, Scale(dir, t));
 
-                // Grazing guard: within a thin band inside the limb the surface is nearly edge-on, so the
-                // anchored pin is numerically singular — GroundToScreen is hyper-sensitive there and a slow drag
-                // through the edge churns the look-at (a residual spin). Incidence = −dot(normal, rayDir): 1 =
-                // face-on, → 0 at the limb. Below the threshold there is no stable anchor, so report a miss and
-                // let the pan freeze (the returned point stays valid for ScreenToGround, which ignores `hit`).
+                // Grazing guard: near the limb the anchored pin is singular and a slow drag spins the look-at.
+                // Below the incidence threshold, report a miss so the pan freezes; ScreenToGround ignores `hit`.
                 double3 nrm = math.normalize(Sub(p, centre));
                 if (-math.dot(nrm, dir) < LimbGrazingCosine) hit = false;
             }
@@ -208,16 +198,11 @@ namespace MapRenderer.Core.Geo
         }
 
         /// <summary>
-        /// Anchored globe pan via a BOUNDED rotation solve — the globe-correct replacement for the
-        /// planar affine <c>ViewInput.ApplyPan</c>, which diverges on the globe near the limb (the screen↔ground
-        /// Jacobian explodes there, so at low zoom a minor drag spins the earth). Returns the new look-at that
-        /// brings <paramref name="grabbedGround"/> (captured at drag-start) toward <paramref name="cursorPx"/>.
-        ///
-        /// <para>The point currently under the cursor is <c>C = ScreenToGround(cursorPx)</c>; the grabbed point is
-        /// <c>G</c>. Rotating the look-at by the rotation that maps C→G (as unit ECEF vectors) moves G under the
-        /// cursor. The step is a rotation by <c>acos(C·G) ≤ π</c> — <b>bounded</b>, so it can
-        /// never spin; as the drag holds, C→G and the rotation → 0 (converges). The ENU rebase references the
-        /// fixed north pole, so the pin is approximate (like the planar path), but it is always stable.</para>
+        /// Anchored globe pan: returns the new look-at that brings <paramref name="grabbedGround"/> toward
+        /// <paramref name="cursorPx"/>. It rotates the look-at by the rotation that maps the point under the cursor
+        /// to the grabbed point, an angle of at most π, so it cannot spin. Non-obvious why: the planar
+        /// <c>ViewInput.ApplyPan</c> diverges near the limb, where the screen↔ground Jacobian explodes. The pin is
+        /// approximate, because the ENU rebase references the fixed north pole.
         /// </summary>
         public GeoCoordinate3D PanLookAtForGrab(GeoCoordinate3D grabbedGround, double2 cursorPx, double2 viewportPx,
             in CameraProperties cam)

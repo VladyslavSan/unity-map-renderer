@@ -1,10 +1,5 @@
-// Line-material rendering GPU/visual acceptance tests: Lit shading, base snapshot, globe.
-//
-// Split by TWO using collisions, not the line cap: `CameraProperties` (MapRenderer.Core.Geo
-// vs UnityEngine.Rendering) and bare `Object` (System.Object vs UnityEngine.Object) —
-// both CS0104. Within that constraint each file groups its dominant line sub-area.
-// This file: UnityEngine.Rendering importers (or neutral) that use bare Object —
-// the Lit material shader, the general renderer snapshot, and the globe variant.
+// Line-material rendering GPU/visual acceptance tests: Lit shading, base snapshot, globe. Split by the CS0104
+// `CameraProperties` and bare `Object` collisions: this file holds the bare-Object users.
 //
 // Contents:
 //   LitLineSnapshotTests    — acceptance tests — Lit forward-transparent line shader.
@@ -34,29 +29,9 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance tests — the Lit forward-transparent line shader.
-    ///
-    /// Test #1 (structural): Map/Line shader exists, compiles without errors, has the full
-    ///   five-pass set (ForwardLit/ShadowCaster/DepthOnly/DepthNormals/GBuffer), each
-    ///   prepass carrying only its LightMode tag, and includes Line_LitInput.hlsl +
-    ///   Line_VertexExtrude.hlsl. NORMAL stream = +Y, extrudeN on separate TEXCOORD.
-    ///   Passes 2-5 are capability-only (present-but-inert for transparent lines).
-    ///
-    /// Test #2 (luminance delta): Line is lit — luminance changes when directional light
-    ///   intensity changes. Proves URP PBR lighting is live.
-    ///
-    /// Test #3 (world-space extrusion): Ribbon width in pixels is invariant under
-    ///   non-identity parent translate + scale transform.
-    ///
-    /// Test #4 (live _Width): SetFloat("_Width") with same-mesh reference identity.
-    ///   Measured pixel width changes proportionally without rebuilding the mesh.
-    ///
-    /// Test #5 (_Opacity): SetFloat("_Opacity", 0) → near-transparent; =1 → visible.
-    ///   Proves _Opacity is functional (not hard-coded alpha=1).
-    ///
-    /// Test #7 (coplanar z-fighting): Fill + overlapping line, no z-fighting.
-    ///   Fill and line both visible on the same scanline.
-    ///
+    /// Acceptance tests — the Lit forward-transparent line shader: the shader's pass set, live URP
+    /// lighting, world-space extrusion under a parent transform, live <c>_Width</c> and <c>_Opacity</c>
+    /// without a mesh rebuild, and no z-fighting against a coplanar fill.
     /// Camera: top-down ortho 512×512, orthoSize=70, Y=200. metersPerPixel ≈ 0.2734 m/px.
     /// </summary>
     [TestFixture]
@@ -187,9 +162,8 @@ namespace MapRenderer.Tests.Visual
                     System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
                     shaderPath));
 
-            // 1. Full five-pass set present (capability parity with Fill).
-            // ForwardLit is the primary rendering pass; the four prepasses are capability-only
-            // (present-but-inert for transparent lines; URP excludes Queue>=2501 from prepasses).
+            // 1. Full five-pass set present (capability parity with Fill). The four prepasses are inert for
+            // transparent lines: URP excludes Queue>=2501 from prepasses.
             Assert.That(src, Does.Contain("\"UniversalForward\""),
                 "Shaders/Map/Line/Line.shader must have a UniversalForward (ForwardLit) pass.");
             Assert.That(src, Does.Contain("\"ShadowCaster\""),
@@ -221,9 +195,8 @@ namespace MapRenderer.Tests.Visual
             Assert.That(passSrc, Does.Contain("InitializeStandardLitSurfaceData"),
                 "Line_LitForwardPass.hlsl must call InitializeStandardLitSurfaceData (not hand-assembled).");
 
-            // 6. Transparent state. The render state is parameterized (Blend/ZWrite/ZTest/Cull hoisted to
-            // the SubShader), so assert the parameterized DIRECTIVE + the property DEFAULTS that encode the
-            // prior hardcoded transparent line (standard alpha blend, no depth write) — NOT comment text.
+            // 6. Transparent state: assert the parameterized DIRECTIVE plus the property DEFAULTS (standard alpha
+            // blend, no depth write), not comment text.
             Assert.That(src, Does.Contain("Blend [_SrcBlend] [_DstBlend]"),
                 "Line.shader must declare parameterized blend (Blend [_SrcBlend] [_DstBlend]).");
             Assert.That(src, Does.Match(@"_SrcBlend\([^)]*\)\s*=\s*5"),
@@ -233,10 +206,8 @@ namespace MapRenderer.Tests.Visual
             Assert.That(src, Does.Match(@"_ZWrite\([^)]*\)\s*=\s*0"),
                 "Line.shader _ZWrite must default to 0 (Off) — transparent, painter's-algorithm layer order.");
 
-            // 7. The line mesh emits a NORMAL stream of +Y (0,1,0) for the lit shader.
-            // Assert on the live StyledLineTileBuilder output directly (the retired
-            // LineMeshBuilder source-text check is gone). Falsifiable identically: a non-+Y
-            // normal stream would scramble the lit luminance delta.
+            // 7. The live StyledLineTileBuilder output emits a +Y NORMAL stream for the lit shader. A non-+Y
+            // stream would scramble the lit luminance delta.
             var normalProbeMesh = SyntheticLineMesh.BuildFromPoints(
                 new List<double2> { new double2(-40, 0), new double2(40, 0) },
                 JoinType.Miter, CapType.Butt);
@@ -305,9 +276,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void LitLine_WorldSpaceExtrusion_WidthInvariantUnderParentScale()
         {
-            // Build two horizontal lines: one under identity transform, one under a parent
-            // with position=(50,0,0), scale=(3,1,3). The ribbon pixel width must be the same
-            // for both (the world-space normalize() in MapLineForwardPass ensures this).
+            // One line under identity, one under a parent at (50,0,0) scaled (3,1,3): the world-space normalize()
+            // in MapLineForwardPass keeps their pixel widths equal.
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
 
@@ -459,9 +429,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void LitLine_CoplanarFillAndLine_NoZFighting()
         {
-            // Build a fill (StyledFillTileBuilder via FillSceneHelper) and a line on the same XZ plane.
-            // Both must be visible on the same scanline — the Y lift in MapLineForwardPass
-            // (0.001m) plus ZWrite Off / Queue ordering prevents z-fighting.
+            // A fill and a line on the same XZ plane must both show on one scanline: the 0.001 m Y lift in
+            // MapLineForwardPass plus ZWrite Off and queue order prevent z-fighting.
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
             var sceneGo            = Track(new GameObject("LitLineZFightScene"));
@@ -488,9 +457,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsFalse(v.IsBlank,
                     "Fill + line scene must not be blank.");
 
-                // Both fill AND line must be visible (non-background pixels). We can check that
-                // the filled fraction is large (fill covers ~100% area) and also check for the
-                // line band specifically.
+                // Both fill AND line must be visible: the filled fraction is large, and the line band is
+                // measured on its own.
                 int lineWidthPx = MeasureContiguousWidthAroundRow(pixels, SnapW / 2, SnapH / 2);
                 float expectedPx = LineWidthM / MetersPerPx;
                 Debug.Log($"[LitLineSnapshotTests] Z-fight: fill filled={v.FilledFraction:P1}, " +
@@ -509,20 +477,10 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Headless visual snapshot tests for the GPU-driven line renderer.
-    ///
-    /// Three discriminating checks that coverage fraction alone cannot provide:
-    ///   1. Width measurement: render a horizontal line; sample a perpendicular scanline; count
-    ///      contiguous non-background pixels; assert ≈ widthMeters/metersPerPixel ± tolerance.
-    ///   2. No-rebuild proof: render; change _Width on the material (no LineMeshBuilder re-run,
-    ///      no new Mesh); re-render; assert measured width changed proportionally.
-    ///   3. AA ~1px: assert the fill→background transition spans ≤ 3px (transition band).
-    ///
-    /// Camera: top-down ortho at (0,200,0) looking down (−Y), orthographicSize=70, 512×512.
-    /// metersPerPixel = 2·70/512 ≈ 0.2734 m/px.
-    ///
-    /// Line: horizontal at z=0, x=[−40,40], Width=5m.
-    /// Expected width in pixels: 5 / (2·70/512) = 5·512/(140) ≈ 18.3px.
+    /// Headless visual snapshot tests for the GPU-driven line renderer: pixel width, a <c>_Width</c> change
+    /// without a mesh rebuild, and an AA transition of ≤ 3 px — checks coverage fraction alone cannot make.
+    /// Camera: top-down ortho at (0,200,0), orthographicSize=70, 512×512, so 0.2734 m/px. Line: horizontal
+    /// at z=0, x=[−40,40], 5 m wide, so ≈ 18.3 px.
     /// </summary>
     [TestFixture]
     public class LineSnapshotTests : BaseTestFixture
@@ -666,10 +624,8 @@ namespace MapRenderer.Tests.Visual
 
                 snap.WritePng("line-width-measurement.png");
 
-                // The horizontal line is at world z=0 → image centre row ≈ SnapH/2 = 256.
-                // Measure the contiguous width at column SnapW/2.
-                // Use MeasureContiguousLineWidthOnColumn to count only the tight band around the
-                // center row (avoids counting gaps between multiple lines on the same scanline).
+                // The line at world z=0 sits on the centre row. Count only the tight band around it, so gaps
+                // between lines on one column are not counted.
                 int colX      = SnapW / 2;
                 int centerRow = SnapH / 2;
                 int measuredPx = MeasureContiguousWidthAroundRow(snap.Pixels,
@@ -690,9 +646,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void LineEdge_AATransition_IsAtMostThreePixelsWide()
         {
-            // Render a single horizontal line and locate the top edge.
-            // Walk from fully-lit pixels outward until background is reached.
-            // Assert the transition spans ≤ 3px (fwidth ~1px + blur=1 tolerance).
+            // Walk outward from the top edge's fully-lit pixels to background. The transition must span ≤ 3 px
+            // (fwidth ~1 px plus blur=1).
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
             var lineGo             = Track(BuildSingleHorizontalLine(LineWidthMeters, out var mat));
@@ -727,14 +682,9 @@ namespace MapRenderer.Tests.Visual
         // ─── Test 5a: Non-Butt cap snapshot (Round + Square caps) ─────────────────────
 
         /// <summary>
-        /// Snapshot test for Round caps on the golden multi-line scene.
-        ///
-        /// Renders the golden shapes (h-line, L-shape, diagonal) with Round caps — the cap geometry the
-        /// Butt/Miter snapshots leave unexercised — and verifies the PNG is non-trivial and passes the
-        /// coverage gate.
-        ///
-        /// Uses the multi-line scene (same as RendersLine_WritesPng_PassesCoverage) so that fill
-        /// fraction is comfortably above the 3% blank threshold that a single thin line approaches.
+        /// Snapshot test for Round caps, which the Butt/Miter snapshots leave unexercised: the golden
+        /// multi-line scene (h-line, L-shape, diagonal) passes the coverage gate. A single thin line would sit
+        /// near the 3% blank threshold, so the multi-line scene is used.
         /// </summary>
         [Test]
         public void RoundCapScene_RendersLine_WritesPng_PassesCoverage()
@@ -869,14 +819,9 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Measure the width of the partial-alpha AA transition band above the line's top edge.
-        ///
-        /// Starting from <paramref name="topEdgeRow"/> - 1 (one row above the full-lit band),
-        /// counts how many rows going upward are "partial": brighter than background but below
-        /// the full-lit brightness of the interior. These are the anti-aliased feather pixels.
-        ///
-        /// Returns 0 if the transition is a hard 1px step (ideal), ≤ 3 is acceptable for
-        /// fragment-shader AA with blur=1.
+        /// Measure the width of the partial-alpha AA transition band above the line's top edge: the rows
+        /// above <paramref name="topEdgeRow"/> brighter than background but below the interior. Returns 0 for
+        /// a hard 1 px step; ≤ 3 is acceptable for fragment-shader AA with blur=1.
         /// </summary>
         private static int MeasureTransitionBandAboveEdge(Frame frame, int col, int topEdgeRow)
         {
@@ -973,10 +918,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeLineSnapshotTests — renders the fixture's `geolines` layer on the globe through the
-    // REAL StyledLineTileBuilder globe path, then places it via the ENU rebase and renders it. This is the
-    // visual proof that line ribbons now lie ON the sphere surface (3D centerline + radial up + tangent-plane
-    // across), not flattened onto the y=0 plane as before C-2.
+    // GlobeLineSnapshotTests — the fixture's `geolines` layer through the REAL StyledLineTileBuilder globe path
+    // and the ENU rebase: line ribbons lie ON the sphere surface, not flattened onto the y=0 plane.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GlobeLineSnapshotTests — the globe line path, rendered

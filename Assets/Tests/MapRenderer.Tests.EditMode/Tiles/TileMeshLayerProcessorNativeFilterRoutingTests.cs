@@ -24,22 +24,19 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
-    /// Proves the mesh-build path's <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> call sites actually
-    /// REACH the native-filter seam (<see cref="FeatureSelector.SelectFeatures(StyleLayer, ITileLayer, IReadOnlyList{IFeature}, double, List{SelectedTileFeature})"/>
-    /// and its scratch-array twin) — a check neither the golden manifest nor
-    /// <c>NativeFilterVmTests</c>/<c>FeatureSelectorNativeFilterTests</c> performs, since both stay green
-    /// whether the mesh-build call site binds natively or not: they observe the VM's own answers, never
+    /// Proves the mesh-build path's <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> call sites REACH the
+    /// native-filter seam (<see cref="FeatureSelector.SelectFeatures(StyleLayer, ITileLayer, IReadOnlyList{IFeature}, double, List{SelectedTileFeature})"/>
+    /// and its scratch-array twin). The golden manifest and <c>NativeFilterVmTests</c>/
+    /// <c>FeatureSelectorNativeFilterTests</c> stay green either way: they observe the VM's answers, never
     /// which overload the processor called.
     /// </summary>
     [TestFixture]
     public class TileMeshLayerProcessorNativeFilterRoutingTests
     {
-        /// <summary>Review: <paramref name="buffers"/> non-null reaches
-        /// <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>'s pooled ARRAY arm (`:85`) — what
-        /// <c>TileLayerProcessorRunner.RunWorkerPass</c> always supplies in production
-        /// (`TileLayerProcessorRunner.cs:59,72`); null reaches the non-pooled LIST arm (`:91`), what most
-        /// other EditMode tests reach. The tooth must cover both — they are two different
-        /// <c>FeatureSelector.SelectFeatures</c> overloads, and reverting either alone must be caught.</summary>
+        /// <summary><paramref name="buffers"/> non-null reaches <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>'s
+        /// pooled ARRAY arm, which <c>TileLayerProcessorRunner.RunWorkerPass</c> supplies in production; null
+        /// reaches the non-pooled LIST arm that most other EditMode tests reach. The two arms call different
+        /// <c>FeatureSelector.SelectFeatures</c> overloads, so the tooth covers both.</summary>
         private static TileLayerProcessContext MakeContext(TileBuildBuffers buffers) => new TileLayerProcessContext
         {
             Tile             = new TileId { Z = 0, X = 0, Y = 0 },
@@ -152,9 +149,8 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // Review: pooled (Buffers != null — production's ONLY arm) and non-pooled (Buffers == null —
-        // the arm most other EditMode tests reach) share this one spy/oracle. Reverting either of
-        // TileMeshLayerProcessor.cs's two call sites alone must red the matching case.
+        // Pooled (production's only arm) and non-pooled share this one spy/oracle. Reverting either
+        // TileMeshLayerProcessor call site alone reds the matching case.
         [TestCase(true)]
         [TestCase(false)]
         public void ProcessOnWorker_ProbesTheNativeSeam_AndSelectsTheManagedAnswer(bool pooled)

@@ -1,10 +1,5 @@
-// Rendering-backend GPU/visual acceptance tests, part 1 of 2.
-//
-// Split by a using collision, not the line cap: `MapRenderer.Core.Geo.CameraProperties` vs
-// `UnityEngine.Rendering.CameraProperties` (CS0104) — this file's members import
-// UnityEngine.Rendering (or neither); every file with a bare CameraProperties reference
-// is in BackendTests2.cs instead (docs/test-conventions.md's using-collision rule:
-// resolved by NOT merging, never by qualifying the test's own reference).
+// Rendering-backend GPU/visual acceptance tests, part 1 of 2. Split by the CS0104 `CameraProperties` collision
+// (docs/test-conventions.md): a bare CameraProperties user goes in BackendCameraTests.cs instead.
 //
 // Contents:
 //   EntitiesGraphicsSpikeTests  — ECS render spike: an Entities-Graphics entity renders in the headless snapshot path.
@@ -34,23 +29,13 @@ using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests.Visual
 {
-    // ECS render spike.
+    // ECS render spike: an Entities-Graphics entity drawing Map/Fill renders NON-EMPTY pixels in the headless
+    // EditMode SnapshotRenderer, the path the GameObject and BRG backends use.
     //
-    // Proves the single fact the whole epic hinges on: an Entities-Graphics entity drawing the live
-    // Map/Fill material renders NON-EMPTY pixels in the existing headless EditMode SnapshotRenderer
-    // (camera.Render()), the same path the GameObject and BRG backends use.
-    //
-    // Why this is non-trivial: Entities Graphics submits draws from EntitiesGraphicsSystem, which ticks
-    // in the player-loop presentation group — and that loop does NOT run in headless EditMode. So an EG
-    // entity renders BLANK under a bare camera.Render() until its systems are ticked manually. This spike
-    // finds the minimal manual driving sequence (or proves it needs PlayMode → honest-stop).
-    //
-    // Design: render the SAME mesh+material+transform two ways and compare —
-    //   (1) a GameObject MeshRenderer  → the CONTROL: proves GPU + Map/Fill work headless at all.
-    //   (2) an Entities-Graphics entity → THE GATE.
-    // If BOTH are blank → no GPU context in this batch session → Inconclusive. If the control renders
-    // but the entity is blank → EG did not submit under camera.Render() in EditMode → the spike has
-    // found its honest-stop result.
+    // Non-obvious why: EntitiesGraphicsSystem ticks in the player-loop presentation group, which does NOT run
+    // in headless EditMode, so an EG entity renders BLANK until its systems are ticked by hand. The SAME mesh
+    // also renders as a GameObject MeshRenderer, the control: both blank means no GPU context, and the test
+    // fails with that message.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // EntitiesGraphicsSpikeTests — ECS render spike
@@ -156,10 +141,8 @@ namespace MapRenderer.Tests.Visual
                         Value = new AABB { Center = float3.zero, Extents = new float3(1e6f) }
                     });
 
-                // Minimal driving sequence: tick the three top-level groups by name. The
-                // PresentationSystemGroup contains EntitiesGraphicsSystem (uploads instance data +
-                // registers BRG batches); camera.Render() then triggers SRP culling → EG submits.
-                // Two passes: register/upload, then steady.
+                // Tick the three top-level groups, twice (register/upload, then steady). EntitiesGraphicsSystem
+                // in the presentation group registers BRG batches; camera.Render() then makes EG submit.
                 for (int pass = 0; pass < 2; pass++)
                 {
                     world.GetExistingSystemManaged<InitializationSystemGroup>()?.Update();
@@ -204,12 +187,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeSnapshotTests — renders the z=0 "countries" fixture tile projected onto a SPHERE (SphericalProjection)
-    // and writes a PNG. The z=0 tile is the whole world in one tile, so this is a full globe of countries in one
-    // mesh — visible proof that the projection pipeline renders a spherical earth.
-    //
-    // Fills already bake the per-vertex radial normal (from the projection's Up), so the Lit material shades the
-    // sphere correctly. Positions are ECEF (origin-relative to the tile corner); FitToView frames the 3D bounds.
+    // GlobeSnapshotTests — the z=0 "countries" tile (the whole world) projected onto a SPHERE, written as a PNG.
+    // Fills bake the radial normal, so the Lit material shades the sphere; FitToView frames the ECEF bounds.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GlobeSnapshotTests — Renders the z=0 "countries" fixture tile projected onto a sphere and writes a PNG
@@ -232,9 +211,8 @@ namespace MapRenderer.Tests.Visual
                 projection: new SphericalProjection());
             Track(mapGo);
 
-            // Stock Cull Back (matches the shipped MapFill.mat) so only the near hemisphere shows (no far-side
-            // bleed through ocean gaps). Post the GPU-boundary winding reversal (StyledFillTileBuilder), the near-
-            // hemisphere fills are genuinely Unity-front → Back keeps them.
+            // Stock Cull Back, as the shipped MapFill.mat: StyledFillTileBuilder's winding reversal makes near-side
+            // fills Unity-front, so the far hemisphere does not bleed through ocean gaps.
             if (mat != null) mat.SetCull(CullMode.Back);
 
             // Directional light to shade the sphere (Lit material is near-black at ambient-only).
@@ -265,16 +243,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // EntitiesTileRenderer engine tests.
-    //
-    // Proves the ECS backend engine independently of the live MapView/TileManager wiring:
-    //   • Lifecycle: AddTileLayer creates entities; RemoveItem destroys the right one (GPU-independent).
-    //   • Floating-origin rebase: each entity's LocalToWorld translation equals
-    //     FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin) and updates on an origin shift —
-    //     byte-for-byte the same formula the BRG backend uses (GPU-independent).
-    //   • Dispose: idempotent, restores DefaultGameObjectInjectionWorld, destroys the world.
-    //   • Render smoke: an engine-created entity actually rasterizes (the rendering mechanism itself is
-    //     already de-risked by EntitiesGraphicsSpikeTests; here we confirm the engine drives it).
+    // EntitiesTileRenderer engine tests, independent of MapView/TileManager: lifecycle, floating-origin rebase
+    // (the BRG backend's formula), idempotent Dispose, and a render smoke test that the engine drives EG.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // EntitiesTileRendererTests — the ECS backend engine, independent of MapView
@@ -404,13 +374,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── Play-mode Stop race: RemoveItems tolerates the World being torn down first (GPU-independent) ──
-        // On Play-mode Stop, Unity disposes EVERY Entities World — this backend's MapEntitiesWorld included —
-        // BEFORE MapViewComponent.OnDestroy → TileManager.DoDispose → RenderTeardownRecord → RemoveItems runs.
-        // Before the _world.IsCreated guard, RemoveItems touched the deallocated EntityManager (_em.Exists) and
-        // threw ObjectDisposedException, aborting DoDispose mid-loop and stranding the whole subsystem graph
-        // (the demo's "finalized without Dispose()" flood). This reproduces that exact ordering at the unit
-        // level — the fix is a direct guard on RemoveItems, so this tooth is immune to the sibling defense-in-
-        // depth catch in MapView.Teardown (a different layer). RED-verify: delete the guard → this throws.
+        // Non-local invariant: on Play-mode Stop, Unity disposes every Entities World BEFORE
+        // MapViewComponent.OnDestroy reaches RemoveItems. Without the _world.IsCreated guard, RemoveItems would
+        // throw ObjectDisposedException and abort DoDispose mid-loop. This tooth pins that guard directly,
+        // not MapView.Teardown's separate catch.
 
         [Test]
         public void RemoveItems_AfterWorldDisposedExternally_DoesNotTouchDeadEntityManager()
@@ -510,10 +477,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(z0, Is.EqualTo(expected0.z).Within(0.01f),
                     "LocalToWorld.Z must equal TileLocalToScene.z after Rebuild.");
 
-                // The child's LocalToWorld above was computed by LocalToWorldSystem from the ROOT (the
-                // child carries only LocalTransform.Identity), so these two assertions also prove the
-                // transform hierarchy is wired: the layer is parented and ParentSystem linked it under
-                // the root (the structural proxy for the Entities-Hierarchy grouping).
+                // The child carries only LocalTransform.Identity, so its LocalToWorld came from the ROOT. These
+                // assertions show the hierarchy is wired: the layer is parented and linked under the root.
                 Assert.IsTrue(r.IsParentedToTileRoot(h, tid),
                     "The layer entity must carry a Parent pointing at its tile root.");
                 Assert.That(r.RootChildBufferCount(tid), Is.EqualTo(1),
@@ -533,11 +498,8 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── Spawn-position flash regression (GPU-independent) ───────────────────────────────────
-        // Reproduces the zoom "blink in the corner": MapView runs Rebuild BEFORE consuming new tiles,
-        // so a tile-layer added after the frame's Rebuild must still be created at its correct scene
-        // position — NOT at the world origin (identity) where it would render for one frame. Here we
-        // Rebuild first (seeds the cached origin, as the live loop does), THEN add, and assert the new
-        // entity is already positioned before any further Rebuild runs.
+        // Non-obvious why: MapView runs Rebuild BEFORE it consumes new tiles, so a layer added after Rebuild
+        // must spawn at its scene position, not at the origin, where it would flash for one frame.
 
         [Test]
         public void AddTileLayer_AfterRebuild_PositionedImmediately_NotAtOrigin()
@@ -567,11 +529,8 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── Frustum-cull bounds (GPU-independent) ───────────────────────────────────────────────
-        // Regression: at low zoom (Mercator z3–4, globe z0–1) render units are ECEF metres, so a single
-        // tile mesh spans several 1e6 m. A fixed { Center=0, Extents=1e6 } RenderBounds is both undersized
-        // AND off-centre from such a mesh, so EG frustum-culls the whole tile whenever the tile's origin
-        // corner leaves the Game frustum — tiles vanish in the Game view but not the (wider) Scene view.
-        // RenderBounds must ENCLOSE the mesh; asserting enclosure, not "≠ 1e6", encodes that invariant.
+        // Non-obvious why: at low zoom one tile mesh spans several 1e6 m, so a fixed 1e6 box would let EG cull a
+        // visible tile. RenderBounds must ENCLOSE the mesh, so the tooth asserts enclosure.
 
         [Test]
         public void AddTileLayer_RenderBounds_EncloseLargeMesh_NotFixed1e6Box()
@@ -638,10 +597,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── Steady-state allocation profile (informational) ─────────────────────────────────────
-        // Measures whether EntitiesTileRenderer.Rebuild allocates managed memory in steady state.
-        // Unlike the hand-tuned BrgTileRenderer.Rebuild (asserted zero-alloc), this drives the EG
-        // system groups, so it is expected to allocate. Logs the figure rather than hard-asserting so
-        // the truth is recorded.
+        // Rebuild drives the EG system groups and is expected to allocate, so this logs instead of asserting.
 
         [Test]
         public void Rebuild_SteadyState_AllocationProfile()
@@ -657,20 +613,10 @@ namespace MapRenderer.Tests.Visual
 
                 const int N = 50;
 
-                // AUTHORITATIVE: NUnit's GC.Alloc-recorder constraint (the same instrument the BRG zero-alloc
-                // test trusts). It counts the Mono GC.Alloc profiler sampler, so it sees transient churn and
-                // is immune to GC timing. The two naive counters were both proven WRONG on this runtime and
-                // are NOT used here:
-                //   • GC.GetTotalMemory(false) — net heap delta; GC-timing-dependent, reported 0 and ~409 on
-                //     identical code in back-to-back runs.
-                //   • GC.GetAllocatedBytesForCurrentThread() — returns a constant 0 on this Unity Mono build
-                //     (a self-check allocating 80 KB registered 0 bytes), so a "0" from it is meaningless.
-                // Rebuild ticks the EG system groups synchronously on the calling thread, so this measures
-                // their managed allocations.
-                // NOTE: the constraint reports the NUMBER OF GC.Alloc sampler calls, not a byte total — so
-                // the verdict is "allocates: yes/no" + call count, never a bytes figure (quoting it as bytes
-                // would just be a fresh wrong number). Instantiate + negate directly to avoid importing a
-                // second `Is` (would collide with NUnit's `Is` used elsewhere in this file).
+                // Non-obvious why: this constraint counts GC.Alloc sampler calls, not bytes, and is immune to GC
+                // timing. GC.GetTotalMemory depends on GC timing, and GetAllocatedBytesForCurrentThread returns 0
+                // on this Unity Mono build. Constructing it directly avoids a second, colliding `Is` import.
+                // Rebuild ticks the EG system groups synchronously on the calling thread, so this measures them.
                 var allocates = new UnityEngine.TestTools.Constraints.AllocatingGCMemoryConstraint();
                 string verdict;
                 try
@@ -757,14 +703,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeBackendSnapshotTests — proves the globe places correctly through a REAL render backend, not just
-    // the hand-wired snapshot. It is what drives the per-tile rebase-rotation branch (backends set
-    // rotation = quaternion(rebase) + position = TileToSceneRebased) with a NON-identity rebase.
-    //
-    // Drives the GameObjects backend (its transform hierarchy is GPU-independent, so the placement is asserted
-    // numerically even headless), then renders it through the SAME CameraPoseMath.ComputeRelativePose orbit the live
-    // MapCamera uses — a correctly-oriented globe means the backend wiring matches the math proven in
-    // GlobePlacementTests.
+    // GlobeBackendSnapshotTests — the globe through a REAL render backend with a NON-identity rebase: placement is
+    // asserted numerically, then rendered through the live MapCamera's CameraPoseMath.ComputeRelativePose orbit.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GlobeBackendSnapshotTests — proves the globe places correctly through a REAL render backend
@@ -854,18 +794,8 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // BRG line-prop readback tests — THE CPU-BUFFER CI GATE (GPU-independent, always green headless).
-    //
-    // Directly constructs a BrgTileRenderer from a line-only RenderLayerSet (no MapView) and asserts that:
-    //   1. FloatsPerInstance == 82 and MetadataEntryCount == 33 (exact plan-count tooth).
-    //   2. _Width packed value == mat.GetFloat(_Width id) == 40 (non-NaN, the direct pack proof).
-    //   3. _Opacity SoA float offset == 46 (byte-identical-wire spot check: fill wire layout unchanged).
-    //
-    // Falsifiability: the buggy build (no _Width plan entry) makes GetInstancePropValue return NaN instead
-    // of the material value → assertion != mat.GetFloat(id) FAILS. The non-NaN check names the failure
-    // explicitly rather than silently passing through 0.
-    //
-    // Pattern: mirrors BrgTileRendererEvictionTests (direct BrgTileRenderer construction, no MapView).
+    // BRG line-prop readback tests — the CPU-buffer gate (GPU-independent). A BrgTileRenderer built from a
+    // line-only RenderLayerSet must pack line props at the right SoA slots; a missing plan entry reads NaN.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // BrgLinePropReadbackTests — CPU-buffer readback acceptance tests
@@ -955,8 +885,7 @@ namespace MapRenderer.Tests.Visual
                     $"Packed _Width must be 40.0 (the style's line-width). Got {packedWidth}.");
 
                 // ── _Opacity byte-identical-wire spot check ───────────────────────────────────
-                // _Opacity sits at SoA float offset 46 and must stay there, so the fill wire layout is
-                // byte-identical (no offset shift for the existing 19 props).
+                // _Opacity must stay at SoA float offset 46, so the fill props' wire layout does not shift.
                 int opacitySoaOffset = brg.GetPropSoaOffset(opacityId);
                 Assert.That(opacitySoaOffset, Is.EqualTo(46),
                     $"_Opacity SoA float offset must be 46. " +

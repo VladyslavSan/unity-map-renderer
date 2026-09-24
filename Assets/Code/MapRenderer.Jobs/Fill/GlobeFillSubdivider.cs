@@ -25,18 +25,10 @@ namespace MapRenderer.Jobs.Fill
 
     /// <summary>Bitwise vertex key for <see cref="GlobeFillSubdivideJob{TProj}.Emit"/>: two emitted vertices
     /// with an equal key would write IDENTICAL <see cref="GlobeFillVertex"/> bytes, so the second may reuse
-    /// the first's index instead of allocating storage.
-    ///
-    /// <para>Stated as a PREDICATE, not a fixed field list: <b>any attribute a downstream shader reads that
-    /// can differ between two vertices sharing a tile coordinate participates in identity.</b> Keying the
-    /// WHOLE struct satisfies that predicate, where hand-picking <c>Tile</c>/<c>Feature</c> and treating
-    /// <c>World</c>/<c>Up</c>/<c>East</c> as redundant functions of <c>Tile</c> would silently omit a column
-    /// added later. NOTE the key is still enumerated FIELD BY FIELD below, so a new
-    /// <see cref="GlobeFillVertex"/> column does NOT extend it automatically;
-    /// <c>GlobeFillVertexKeySizeTests</c> is the guard that makes the next one fail loudly instead of
-    /// merging distinct vertices. <c>Mid()</c> is order-symmetric and marking reads an edge's two endpoints
-    /// alone, so two triangles sharing a split edge compute bit-identical derived fields for it and the
-    /// whole-struct key merges exactly what a canonical-input key would.</para></summary>
+    /// the first's index. Non-local invariant: the key covers every <see cref="GlobeFillVertex"/> field a
+    /// shader reads, and a new field must be added by hand (<c>GlobeFillVertexKeySizeTests</c> fails
+    /// otherwise). <c>Mid()</c> is order-symmetric, so both triangles on a split edge key it identically.
+    /// </summary>
     internal readonly struct GlobeFillVertexKey : IEquatable<GlobeFillVertexKey>
     {
         private readonly ulong _worldX, _worldY, _worldZ;
@@ -83,38 +75,13 @@ namespace MapRenderer.Jobs.Fill
     }
 
     /// <summary>
-    /// Adaptive curvature subdivision for globe fills, as a Burst job. Earcut triangulates in flat tile
-    /// space; on a curved projection the straight triangle edges chord THROUGH the sphere, so fills sink and
-    /// facet at low zoom. This refines each earcut triangle by PER-EDGE marking — an edge is marked iff it
-    /// subtends more than <c>acos(CosThresh)</c> — and one of 3 conforming templates keyed by the triangle's
-    /// mark count (0 emit / 1 bisect / 2 the "1→3" split / 3 the "1→4" split, at edge midpoints in tile
-    /// space, re-projected onto the sphere). A mark is a function of an edge's two endpoints alone, so two
-    /// triangles sharing an edge compute the identical mark: conforming without connectivity, no T-junctions
-    /// at any depth (mesh-triangulation-robustness-design.md). Bounded by <c>MaxDepth</c> and the per-tile
-    /// <see cref="InteriorBudget"/> so a whole-globe z0 tile cannot explode. A flat projection never splits.
-    ///
-    /// <para><b>Emitted vertices are SHARED</b> (<see cref="GlobeFillVertexKey"/>): <see cref="Emit"/> reuses
-    /// an existing <c>OutVerts</c> slot for a bit-identical vertex instead of tripling every leaf triangle's
-    /// corners, so <c>OutVerts</c> is the UNIQUE count and <c>OutIndices</c> the EMITTED count. The split
-    /// path and every emitted vertex's bytes are unaffected.</para>
-    ///
-    /// <para>OUTPUT WINDING: each refined triangle preserves its parent's vertex order, so the output stays
-    /// CCW — the pipeline's single canonical winding, reversed once to Unity-front at the mesh-write
-    /// boundary for stock Cull Back.</para>
-    ///
-    /// <para><b>Burst.</b> The projection is the generic struct <typeparamref name="TProj"/>, following
-    /// <see cref="ProjectPointsJob{TProj}"/>, so Burst devirtualises and inlines <c>ProjectPoint</c> and
-    /// <c>TangentBasisAt</c> with no managed call. The recursion is an EXPLICIT stack, because Burst does not
-    /// reliably support real recursion; it is DFS-bounded, a Temp allocation freed at job end, same as the
-    /// vertex-key map. Managed dispatch by projection type lives in
-    /// <see cref="GlobeFillSubdivideDispatch"/>.</para>
-    ///
-    /// <para><b>A forced stop can still leave a T-junction, and no tooth observes it.</b> The
-    /// <see cref="MaxDepth"/> cap or either vertex budget makes ONE triangle emit flat whatever its own marks
-    /// say, including a still-marked edge it shares with a neighbour that has not been forced to stop. On a
-    /// tile with non-uniform curvature the two sides reach the cap at different times: one keeps splitting
-    /// the shared edge, the other leaves it whole. The corpus and z2-quad fixtures are uniformly curved, so
-    /// every triangle there reaches its stop test in lockstep and the gap never appears.</para>
+    /// Adaptive curvature subdivision for globe fills: splits each earcut triangle by per-edge marks (an edge
+    /// subtending more than <c>acos(CosThresh)</c>) and a template keyed by mark count, bounded by
+    /// <see cref="MaxDepth"/> and two vertex budgets. Children keep the parent's order, so output stays CCW.
+    /// <see cref="Emit"/> shares bit-identical vertices: <c>OutVerts</c> is the unique count, <c>OutIndices</c>
+    /// the emitted count. It uses an explicit stack because Burst does not reliably support recursion.
+    /// Limitation: a forced stop can leave a T-junction on a non-uniformly curved tile. See
+    /// docs/mesh-triangulation-robustness-design.md § "Globe subdivision must be conforming".
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct GlobeFillSubdivideJob<TProj> : IJob where TProj : struct, IProjection
@@ -147,11 +114,8 @@ namespace MapRenderer.Jobs.Fill
 
             int interiorVerts = 0;
             var stack = new NativeList<Tri>(64, Allocator.Temp);
-            // Job-local, freed at Execute's end: an Allocator.Temp container is only valid as a LOCAL, never
-            // a field, and this job is .Schedule()'d. Keyed on the bit patterns a shared vertex WOULD write,
-            // so two split paths reaching the same tile coordinate share one OutVerts slot. Seeded from
-            // srcIndexCount, a sound lower bound on the emitted vertex count: a small seed costs a
-            // reallocate-and-rehash pass per growth, each copying every entry inserted so far.
+            // A local, because a Temp container is invalid as a field of a scheduled job. Seeded from
+            // srcIndexCount, a lower bound on emitted vertices; a small seed costs a rehash per growth.
             var indexByVertex = new NativeHashMap<GlobeFillVertexKey, int>(srcIndexCount, Allocator.Temp);
             for (int t = 0; t + 2 < srcIndexCount; t += 3)
             {
@@ -174,23 +138,11 @@ namespace MapRenderer.Jobs.Fill
                     Tri w = stack[stack.Length - 1];
                     stack.RemoveAtSwapBack(stack.Length - 1); // LIFO pop (order-independent)
 
-                    // Per-EDGE marking: a mark is a function of an edge's two endpoints ALONE, so two
-                    // triangles sharing an edge compute the identical mark — conforming without connectivity.
-                    // Force 0 marks at the depth cap or once a budget is exhausted. MUST match
-                    // SubdivisionCoverageValidator.RunMirror byte-for-byte.
-                    //
-                    // TWO bounds, two different jobs. InteriorBudget is the SUBDIVISION guard and counts only
-                    // interior vertices: the band adds about 2 triangles per ring vertex, enough on a
-                    // boundary-heavy layer to exhaust a shared budget and force the INTERIOR to emit flat.
-                    // TotalBudget is the ALLOCATION backstop.
-                    //
-                    // BOTH count EMITTED vertices, never unique storage: vertex sharing must not move a split
-                    // decision, or the job diverges from the mirror. TotalBudget is therefore conservative for
-                    // an allocation guard, which is the safe direction.
-                    //
-                    // Both feed ONE overBudget: a band quad's long edges duplicate the interior boundary edge,
-                    // so the two must stop splitting together or the band keeps refining an edge the interior
-                    // was forced to leave whole — a T-junction between fill and band.
+                    // Non-local invariant: this must match SubdivisionCoverageValidator.RunMirror byte-for-byte,
+                    // so both budgets count EMITTED vertices, never unique storage (sharing must not move a split).
+                    // InteriorBudget bounds subdivision and skips band vertices, so the band cannot starve the
+                    // interior; TotalBudget bounds allocation. Both feed ONE overBudget, so band and interior stop
+                    // splitting a shared edge together, with no T-junction between them.
                     bool overBudget = interiorVerts >= InteriorBudget || OutIndices.Length >= TotalBudget;
                     bool canSplit = w.Depth < MaxDepth && !overBudget;
                     bool markAB = canSplit && math.dot(w.A.Up, w.B.Up) < CosThresh;
@@ -249,9 +201,8 @@ namespace MapRenderer.Jobs.Fill
                         else              { apex = w.B; a0 = w.A; c0 = w.C; mVA0 = mAB; mVC0 = mBC; } // unmarked=CA
 
                         stack.Add(new Tri { A = apex, B = mVC0, C = mVA0, Depth = childDepth, Feat = w.Feat }); // corner at apex
-                        // Quad a0-mVA0-mVC0-c0 → SHORTER interior diagonal. The choice is a deterministic
-                        // tile-space comparison, so mirror and job pick the same one, and it keeps the cap
-                        // sub-triangles less anisotropic. Both choices preserve winding.
+                        // Quad a0-mVA0-mVC0-c0 → the SHORTER diagonal, a deterministic tile-space test the mirror
+                        // repeats; it keeps the sub-triangles less anisotropic. Both choices preserve winding.
                         if (math.distancesq(a0.Tile, mVC0.Tile) <= math.distancesq(mVA0.Tile, c0.Tile))
                         {
                             stack.Add(new Tri { A = a0, B = mVA0, C = mVC0, Depth = childDepth, Feat = w.Feat });
@@ -324,21 +275,15 @@ namespace MapRenderer.Jobs.Fill
         /// <summary>Hard recursion cap (4^depth worst-case fan-out) — the low-zoom runaway backstop.</summary>
         public const int    DefaultMaxDepth          = 5;
         /// <summary>Per-tile budget for the INTERIOR's subdivided vertices; once reached, remaining triangles
-        /// emit flat (no deeper split). The boundary band's own vertices do not count against it — see
-        /// <see cref="GlobeFillSubdivideJob{TProj}.InteriorBudget"/> for why the two are separate.
-        /// <para><b>Not a headroom claim.</b> A shipped low-zoom fixture already reaches most of this budget
-        /// with no band at all.
-        /// <c>GlobeFillBandTests.TheCurvedArmsInteriorKeepsHeadroomUnderItsBudget</c> is the tooth that keeps
-        /// that visible.</para></summary>
+        /// emit flat. Band vertices do not count against it. It is not a headroom claim: a low-zoom fixture
+        /// reaches most of it, which <c>TheCurvedArmsInteriorKeepsHeadroomUnderItsBudget</c> keeps visible.
+        /// </summary>
         public const int    DefaultMaxInteriorVertices = 200_000;
 
         /// <summary>Per-tile ceiling on TOTAL emitted vertices (interior + boundary band) — the ALLOCATION
-        /// backstop, a different job from <see cref="DefaultMaxInteriorVertices"/>. That one bounds how far
-        /// the interior may SUBDIVIDE, which is the exponential low-zoom case; this one bounds how much
-        /// memory one tile may take, which the band makes linear-but-large rather than exponential.
-        /// <para>It is 3x the interior budget, leaving margin for a layer more boundary-heavy than any in
-        /// the fixture corpus, and the round number says it is a backstop nobody should reach rather than a
-        /// working limit.</para></summary>
+        /// backstop, where <see cref="DefaultMaxInteriorVertices"/> bounds interior subdivision. It is 3x the
+        /// interior budget, a margin for layers more boundary-heavy than the fixtures; nothing should reach it.
+        /// </summary>
         public const int    DefaultMaxTotalVertices = 600_000;
 
         /// <summary>The fill graph's curved-arm subdivide node.

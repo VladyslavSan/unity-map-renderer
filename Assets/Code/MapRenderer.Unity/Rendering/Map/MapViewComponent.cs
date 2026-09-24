@@ -6,15 +6,11 @@ using MapRenderer.Core.Style;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// The MonoBehaviour host for a <see cref="MapView"/> — the Unity-lifecycle shell. It carries the
-    /// serialized <see cref="Config"/> (the only place Inspector fields can live), builds and owns the plain
-    /// <see cref="MapView"/> once a camera is wired, and forwards the frame/teardown lifecycle. All map logic
-    /// lives in <see cref="MapView"/>; this class holds only the MonoBehaviour glue.
-    ///
-    /// <para>The <see cref="MapView"/> is created on the first <see cref="SetCamera"/> (called once at runtime wiring
-    /// hands it a <see cref="MapCamera"/> over the main tagged camera) — so it is always born with a real
-    /// camera and its own config. Before that, and in the pre-wire <see cref="Update"/> window, the forwards
-    /// no-op; that "not wired yet" state is the MonoBehaviour's to hold, not <see cref="MapView"/>'s.</para>
+    /// The MonoBehaviour host for a <see cref="MapView"/>. It carries the serialized <see cref="Config"/>
+    /// (the only place Inspector fields can live), builds the <see cref="MapView"/> on the first
+    /// <see cref="SetCamera"/>, and forwards the frame/teardown lifecycle. All map logic lives in
+    /// <see cref="MapView"/>. Before a camera is wired the forwards no-op; that "not wired yet" state belongs
+    /// to this class, so a <see cref="MapView"/> always has a real camera.
     /// </summary>
     public sealed partial class MapViewComponent : MonoBehaviour
     {
@@ -24,10 +20,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>The map logic. Null until a camera is wired (<see cref="SetCamera"/>). Test surface.</summary>
         internal MapView View { get; private set; }
 
-        // Profiler-counter telemetry hooks, implemented in MapViewComponent.ProfilerCounters.cs — a partial
-        // half that is ENTIRELY inside `#if ENABLE_PROFILER`. With no implementing part (a release player) the
-        // C# compiler erases these calls, so the consumer is stripped structurally rather than by a comment,
-        // and this glue class stays free of conditional compilation. See docs/telemetry-design.md.
+        // Profiler-counter hooks, implemented in MapViewComponent.ProfilerCounters.cs inside `#if ENABLE_PROFILER`.
+        // A release player has no implementing part, so the compiler erases the calls (docs/telemetry-design.md).
         partial void AttachTelemetryCounters();
         partial void ReleaseTelemetryCounters();
         partial void MirrorTelemetryCounters();
@@ -65,10 +59,8 @@ namespace MapRenderer.Unity.Rendering.Map
             View?.Teardown();
         }
 
-        // The whole per-frame pipeline (camera commit -> tiles -> symbols) lives in MapView.LateUpdate; this is
-        // just the Unity trigger. LateUpdate (not Update) so it runs AFTER the input Controller's Update, which
-        // is where the camera props are mutated — so the frame always sees this frame's input. See
-        // MapView.LateUpdate for the ordered sequence and why it's one snapshot.
+        // LateUpdate, not Update: it runs after the input controller's Update mutates the camera, so the frame
+        // sees this frame's input. The ordered pipeline lives in MapView.LateUpdate.
         public void LateUpdate()
         {
             View?.LateUpdate();

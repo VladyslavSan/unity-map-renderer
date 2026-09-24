@@ -6,13 +6,10 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Text shaper: pure clean-room C#, no HarfBuzz. Pipeline: split the
-    /// source string into codepoints -> detect direction -> for an RTL run, apply Arabic joining
-    /// (<see cref="ArabicJoining"/>) to reach presentation-form atlas codepoints -> attach advances from
-    /// <see cref="IGlyphMetricsProvider"/> -> reorder to visual order (<see cref="BidiReorder"/>).
-    ///
-    /// Render-path-agnostic: no <c>Mesh</c>/<c>MeshData</c>/<c>IRenderLayer</c>, no anchor/offset/quad
-    /// assumptions — layout owns those. Not on any per-frame hot path; shaping runs at tile-layout time.
+    /// Text shaper in plain C#, no HarfBuzz: split into codepoints -> detect direction -> for an RTL run,
+    /// Arabic joining (<see cref="ArabicJoining"/>) -> advances from <see cref="IGlyphMetricsProvider"/> ->
+    /// visual order (<see cref="BidiReorder"/>). Layout owns anchors, offsets and quads. Shaping runs at
+    /// tile-layout time, not per frame.
     /// </summary>
     public sealed class CodepointTextShaper
     {
@@ -44,19 +41,10 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// No-GC caller-buffer overload: writes positioned glyphs directly into
-        /// <paramref name="output"/> (cleared first; reused across calls by the caller) instead of
-        /// allocating a <see cref="ShapedRun"/>. Guaranteed zero managed allocation on the steady LTR
-        /// path (the common map-symbol case: Latin/Cyrillic/Greek/digits/punctuation) once
-        /// <paramref name="output"/>'s backing capacity has stabilized from a prior call — no
-        /// intermediate codepoint/cluster lists, no <see cref="ShapedRun"/> class instance.
-        ///
-        /// <para>
-        /// RTL (Arabic joining + bidi) still runs through the existing allocating helpers internally
-        /// (<see cref="ArabicJoining"/>/<see cref="BidiReorder"/> — out of the zero-alloc scope, which
-        /// is the steady/cached path only) but still avoids the <see cref="ShapedRun"/> allocation by
-        /// copying its glyphs into the caller's buffer.
-        /// </para>
+        /// Caller-buffer overload: writes positioned glyphs into <paramref name="output"/> (cleared first)
+        /// instead of allocating a <see cref="ShapedRun"/>. The steady LTR path allocates nothing once
+        /// <paramref name="output"/>'s capacity has stabilized. RTL still runs through the allocating
+        /// <see cref="ArabicJoining"/>/<see cref="BidiReorder"/> helpers.
         /// </summary>
         /// <returns>The resolved direction (mirrors <see cref="ShapedRun.Direction"/>).</returns>
         public TextDirection Shape(in ShapingRequest request, List<PositionedGlyph> output)
@@ -122,14 +110,10 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Detects a single strong direction for the whole run. A run mixing strong RTL
-        /// and strong LTR codepoints throws — full UAX #9 (mixed-direction) bidi is a deferred
-        /// follow-up (see <see cref="BidiReorder"/>). Direction-neutral text (digits/punctuation/
-        /// whitespace only) defaults to left-to-right.
-        ///
-        /// Reads codepoints directly off <paramref name="text"/> (no intermediate list): this scan must be
-        /// allocation-free so the caller-buffer <see cref="Shape(in ShapingRequest, List{PositionedGlyph})"/>
-        /// overload has no per-call heap traffic on its steady LTR path.
+        /// Detects a single strong direction for the whole run. A run mixing strong RTL and strong LTR
+        /// codepoints throws, because full UAX #9 bidi is not implemented (see <see cref="BidiReorder"/>).
+        /// Direction-neutral text defaults to left-to-right. It reads codepoints straight off
+        /// <paramref name="text"/>, so the scan stays allocation-free.
         /// </summary>
         private static TextDirection DetermineDirection(string text)
         {

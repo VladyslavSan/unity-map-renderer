@@ -1,6 +1,5 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double2 — this
-// file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the namespace-collision
-// trap that forbids inline `Unity.Mathematics.X` here).
+// TOP-LEVEL `using Unity.Mathematics;` + unqualified types (see SymbolScreenProjection's header for the
+// namespace-collision trap that forbids inline `Unity.Mathematics.X` here).
 
 using System;
 using System.Collections.Generic;
@@ -11,11 +10,8 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// Computes a <c>symbol-placement: line</c> / <c>line-center</c> symbol's along-line anchors ONCE at
-    /// build time, in TILE space (projection-agnostic, zoom-invariant) — the MapLibre <c>getAnchors</c>
-    /// analogue. Anchors are returned as stable <see cref="LineAnchor"/> topology (segment + t), so the number
-    /// of anchors and their world positions are FIXED for the tile's lifetime: the per-frame placement pass
-    /// projects the line and lays glyphs out around each anchor's projected position, and the anchors do not
-    /// slide or pop as the camera zooms.
+    /// build time, in tile space, as stable <see cref="LineAnchor"/> topology (segment + t). Their number and
+    /// world positions are fixed for the tile's lifetime, so they do not slide or pop as the camera zooms.
     /// </summary>
     public static class LineAnchorPlacement
     {
@@ -27,13 +23,8 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         public const int MaxAnchors = 256;
 
-        // per-thread free-lists of whole scratch arrays — the EvalArgBuffers Rent/Return shape
-        // (MapRenderer.Core.Expressions.EvalArgBuffers), reused here because Compute runs on whatever worker
-        // thread builds a tile (SymbolFeatureExtractor is worker-safe), so a single shared buffer would race,
-        // and a per-call `new` was the prior cost: a fresh `cumulative` array plus a growing `List<LineAnchor>`
-        // and its final `ToArray()`, once per curved along-line symbol. A Stack (not a single field) survives
-        // reentrancy if Compute is ever called from within another Compute on the same thread. Every Rent is
-        // paired with a Return in a `finally`.
+        // Non-local invariant: per-thread free-lists of whole arrays (the EvalArgBuffers shape), because Compute
+        // runs on any tile-building worker; a Stack survives reentrancy, and every Rent returns in a `finally`.
         [ThreadStatic] private static Stack<double[]> _cumulativeFree;
         [ThreadStatic] private static Stack<LineAnchor[]> _anchorFree;
 
@@ -62,12 +53,9 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// Anchors along <paramref name="tilePath"/> (tile-local units), spaced by
         /// <paramref name="spacingTileUnits"/> (<c>symbol-spacing px · extent / TilePixelSize</c> at the tile's
-        /// integer zoom). <see cref="SymbolPlacement.LineCenter"/> → a single anchor at the line's mid arc
-        /// length. <see cref="SymbolPlacement.Line"/> → anchors at <c>spacing·(k+0.5)</c> from the start (capped
-        /// at <see cref="MaxAnchors"/>); a line shorter than one spacing still gets a single centred anchor so a
-        /// geometrically-valid line always yields ≥1 anchor (whether the LABEL actually fits at the current zoom
-        /// is a per-frame decision the placement pass still makes). Returns empty for &lt;2 points or a
-        /// zero-length line.
+        /// integer zoom). <see cref="SymbolPlacement.LineCenter"/>: one anchor at mid arc length;
+        /// <see cref="SymbolPlacement.Line"/>: anchors at <c>spacing·(k+0.5)</c> up to <see cref="MaxAnchors"/>,
+        /// or one centred anchor on a short line. Empty for &lt;2 points or a zero-length line.
         /// </summary>
         public static LineAnchor[] Compute(IReadOnlyList<double2> tilePath, double spacingTileUnits,
             SymbolPlacement placement)
@@ -112,9 +100,8 @@ namespace MapRenderer.Core.Text.Placement
             finally { ReturnCumulative(cumulative); }
         }
 
-        // The (segment, t) topology of the point at tile-space arc distance `arc` (clamped to [0, total]).
-        // `n` is the path's vertex count — passed explicitly, not read off `cumulative.Length`, since a rented
-        // `cumulative` may be oversized.
+        // The (segment, t) of tile-space arc distance `arc`, clamped to [0, total]. `n` is the vertex count,
+        // passed explicitly because a rented `cumulative` may be oversized.
         private static LineAnchor AnchorAtArc(double[] cumulative, int n, double arc)
         {
             double total = cumulative[n - 1];

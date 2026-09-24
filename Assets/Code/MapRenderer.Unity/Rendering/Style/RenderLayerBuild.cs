@@ -2,12 +2,9 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// The lifetime class of an <see cref="IRenderLayer"/>'s geometry — which loop feeds it (the
-    /// render-layer model). Orthogonal to <see cref="DrawPersistence"/> (who
-    /// re-draws it) and <see cref="IRenderLayer.DrawIndex"/> (its stable slot in the layer set).
-    ///
-    /// Background is a source-less per-covered-tile <see cref="TileMesh"/> layer, scheduled through the
-    /// graph like fill (<c>TileManager.KickSourcelessBackground</c>) and registered with the backend like
-    /// fill/line, so the axis collapses to these two members.
+    /// render-layer model). Orthogonal to <see cref="DrawPersistence"/> (who re-draws it) and
+    /// <see cref="IRenderLayer.DrawIndex"/> (its stable slot). Background is a source-less
+    /// <see cref="TileMesh"/> layer (<c>TileManager.KickSourcelessBackground</c>), so two members suffice.
     /// </summary>
     internal enum RenderLayerBuild
     {

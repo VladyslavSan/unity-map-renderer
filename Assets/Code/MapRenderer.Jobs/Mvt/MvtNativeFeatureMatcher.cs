@@ -9,13 +9,8 @@ namespace MapRenderer.Jobs.Mvt
     /// The MVT <see cref="INativeFeatureMatcher"/>: a rebound <see cref="NativeFilterProgram"/> plus the
     /// per-feature result/error/geometry-kind columns <see cref="MatchAll"/> runs the batched
     /// <see cref="NativeFilterEvaluationJob"/> over, all <c>Allocator.Persistent</c> — minted per selection
-    /// by <see cref="NativeFilterSelection.TryBind"/> and disposed by the caller.
-    ///
-    /// <para>A per-layer-per-build native allocation count of <b>three</b>, each sized to the layer's own
-    /// feature count (<c>O(featureCount)</c>, not the pre-batching <c>O(1)</c> pair) — batching the VM into
-    /// one job removes the per-feature <i>dispatch</i> (a struct copy, a job launch, five safety-handle
-    /// checks, once per feature); it does not remove the per-selection allocation, which merely grew from
-    /// two length-1 arrays to three feature-length ones.</para>
+    /// by <see cref="NativeFilterSelection.TryBind"/> and disposed by the caller. Each selection allocates
+    /// three feature-count-sized arrays; the batched job removes the per-feature dispatch, not this allocation.
     /// </summary>
     internal sealed class MvtNativeFeatureMatcher : INativeFeatureMatcher
     {
@@ -38,10 +33,8 @@ namespace MapRenderer.Jobs.Mvt
             int featureCount = layer.Features.Count;
             _results = new NativeArray<byte>(featureCount, Allocator.Persistent);
             _errors = new NativeArray<byte>(featureCount, Allocator.Persistent);
-            // Built unconditionally, once per selection, from the same source MvtFeature.GeometryType
-            // already reads (MvtDecoder fills both from the same decoded header) — never borrowed from
-            // MvtLayer.Geometry, which may be uncreated for a layer with no adopted geometry. See
-            // NativeFilterEvaluationJob's Kinds doc.
+            // Built from MvtFeature.GeometryType, never borrowed from MvtLayer.Geometry, which may be uncreated.
+            // See NativeFilterEvaluationJob's Kinds doc.
             _kinds = new NativeArray<int>(featureCount, Allocator.Persistent);
             for (int i = 0; i < featureCount; i++)
                 _kinds[i] = (int)layer.Features[i].GeometryType;

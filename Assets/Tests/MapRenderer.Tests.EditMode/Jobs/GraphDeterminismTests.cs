@@ -5,7 +5,7 @@
 // Contents:
 //   BurstJobRunOffMainSpikeTests       — (Established as a spike: the geometry kernels take CALLER-provided Persistent scratch — no internal Allocator.Temp — so allocating NativeArrays and .Run()-ing them off the main thread is safe.
 //   DecodedLayerGeometryTests          — the decoded layer's two store teeth: a source-layer's geometry belongs to the layer.
-//   DecodedTileOwnershipTests          — tooth B, the ownership relation: a decoded tile cannot be paired with another tile's geometry.
+//   DecodedTileOwnershipTests          — the ownership relation: a decoded tile cannot be paired with another tile's geometry.
 //   FillSizingJobTests                 — job-scheduling-design.md: the offset-table monotonicity assertion.
 //   GeoJsonTileDecoderTests            — the GeoJSON decoder half: the source-layer answer, and the sliced layer's ordinal domain.
 //   GraphDeterminismTests              — One arm per batch constant, each reading THAT node's OWN constant — a developer restoring one tuned constant to 1<<20 must red exactly that arm, and no other.
@@ -13,7 +13,7 @@
 //   LineRibbonSizingJobTests           — Arm A catches a borrowed-count out-of-bounds read in RibbonAggregateJob; Arm B is the parity check and catches only a non-monotonic offset table (a sizing-only arm cannot catch the out-of-bounds read — see FillSizingJobTests.cs's header).
 //   MvtCommandStream                   — Test-only helper (not a fixture): authors MVT geometry command streams so a test can hand MvtGeometryMaterializer an exact ring layout.
 //   MvtGeometryMaterializerTests       — the teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the buffer, and who owns the buffer afterwards.
-//   OrdinalDomainTests                 — tooth B's missing half: the selection/buffer relation, where B closed only the TileId/buffer one.
+//   OrdinalDomainTests                 — the selection/buffer relation (the TileId/buffer one is above).
 //   ProjectionManagedVersusBurstTests  — RED-verified by perturbing one arm alone, run and reverted by hand — never left in this file:   (i)  feed one arm Extent + 1.0 (a COARSE injection — a single-ULP TileCoords bump cannot red this probe;        see the file header for the magnitude…
 //   RingAssemblyDeferredCountTests     — The load-bearing claim: RingAssemblyJob.RingOffsets, taken as list.AsDeferredJobArray() BEFORE the list is populated, resolves to the list's EXECUTE-time length (after a preceding scheduled job populates it), not its length at the moment…
 //   RingAssemblyHoleAttributionTests   — The property the whole byte-identity argument for earcut's hole-bridge order rests on: every hole belongs to the same source-layer feature as its polygon's outer ring.
@@ -154,9 +154,8 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void RibbonJob_RunOnThreadPoolWorker_UsesInternalTempSafely()
         {
-            // RibbonJob allocates Allocator.Temp INTERNALLY (dedup/along/cumDist scratch), unlike the fill
-            // kernels which take caller scratch. Temp on a raw threadpool thread is the exact off-main risk —
-            // this proves it works there before the live line path depends on it.
+            // RibbonJob allocates Allocator.Temp INTERNALLY, unlike the fill kernels; this proves Temp works on
+            // a raw threadpool thread, as the off-main line path needs.
             int mainTid = Thread.CurrentThread.ManagedThreadId;
 
             int vc = -1, ic = -1;
@@ -254,14 +253,9 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The two store teeth, tested on the decoded layer. A source-layer is materialized <b>once</b>,
-    /// and what a consumer reads is genuinely <b>borrowed</b>, so it can be read twice and left
-    /// intact. The memo is the decoded LAYER's own field: the layer holds one buffer, and the
-    /// TILE's Dispose frees what it lent.
-    ///
-    /// <para>A layer's buffer is singular — unlike a store, which could be memoized correctly and
-    /// still be one of several — so what the first test discriminates is a re-materializing
-    /// <c>Geometry</c> getter, the one remaining way to reintroduce N-decodes-per-source-layer.</para>
+    /// A source-layer's geometry is materialized <b>once</b> and consumers only <b>borrow</b> it, so it can
+    /// be read twice and stays intact. The decoded layer holds the one buffer and the tile's Dispose frees
+    /// it. The first test catches a <c>Geometry</c> getter that re-materializes on each read.
     /// </summary>
     [TestFixture]
     public class DecodedLayerGeometryTests
@@ -275,14 +269,9 @@ namespace MapRenderer.Tests.Jobs
         // ── the memo ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Two reads of the SAME <see cref="ITileLayer.Geometry"/> hand back the same allocation; two
-        /// different layers of one tile do not share one.
-        ///
-        /// <para><c>NativeArray&lt;T&gt;</c> equality is pointer + length, so <c>AreEqual</c> on
-        /// <c>Vertices</c> is an identity test rather than a content test — which is exactly what
-        /// discriminates "the layer holds ONE buffer" from "the getter materializes again with identical
-        /// contents". The latter is the current shape of the 108-materializations-per-tile defect, and it is
-        /// invisible to every output test.</para>
+        /// Two reads of the SAME <see cref="ITileLayer.Geometry"/> hand back the same allocation; two layers of
+        /// one tile do not share one. <c>NativeArray&lt;T&gt;</c> equality is pointer + length, so this is an
+        /// identity test: a getter that re-materializes identical contents fails it and passes every output test.
         /// </summary>
         [Test]
         public void LayerGeometry_IsOneBufferPerSourceLayer_ByReference()
@@ -339,18 +328,10 @@ namespace MapRenderer.Tests.Jobs
         // ── borrow, not transfer ──────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <c>FillMeshGraph.Schedule</c> may be called <b>twice over the same buffer</b> — the production
-        /// shape, where several fill layers of one source-layer each run against the store's single buffer.
-        ///
-        /// <para>Three claims, and the third is the one that catches the subtle version: (a) the second run
-        /// produces buffers at all; (b) it is bit-identical to the same run over a FRESH buffer, so nothing
-        /// the first run did leaked into the input; (c) the shared buffer's four arrays are still created and
-        /// still hold their original contents afterwards.</para>
-        ///
-        /// <para>Catches a re-introduced <c>input.Geometry.Dispose()</c> (the first run kills the input; with
-        /// <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c> the second throws), an <c>AdoptDerivedLists</c> that MOVES
-        /// the kind column instead of copying it (claim c), and a clip that wrote back into the shared arrays
-        /// (claims b and c).</para>
+        /// <c>FillMeshGraph.Schedule</c> may run <b>twice over the same buffer</b>, as several fill layers of one
+        /// source-layer do. The second run produces output, bit-identical to a run over a FRESH buffer, and the
+        /// shared buffer's four arrays keep their contents. It catches an input <c>Dispose()</c>, an
+        /// <c>AdoptDerivedLists</c> that moves the kind column, and a clip that writes back into the input.
         /// </summary>
         [Test]
         public void Schedule_TwiceOverOneBorrowedBuffer_IsIdenticalAndLeavesItIntact()
@@ -457,20 +438,10 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Tooth <b>B</b> — the ownership relation: <b>a decoded tile cannot be paired with another
-    /// tile's geometry</b>.
-    ///
-    /// <para>Two clauses, both required, because they close the hazard from opposite ends. <b>B1</b> is
-    /// structural: no production method takes a <c>TileGeometryBuffers</c> and a <c>TileId</c> together —
-    /// that pair of parameters IS the mispairing shape, and its absence is what makes the defect
-    /// unexpressible. <b>B2</b> is behavioural at the decode seam: the address a buffer carries is the
-    /// address its own decode was given, over real multi-layer fixtures at two tiles differing in z, x AND
-    /// y.</para>
-    ///
-    /// <para><b>Why the shape matters.</b> A caller-supplied second copy of the tile id would let a
-    /// store be handed one tile's layers and another tile's id with nothing in the type system able to
-    /// tell. The id enters through <c>ITileDecoder.Decode(TileId, byte[])</c>, where it enters the
-    /// pipeline once.</para>
+    /// A decoded tile cannot be paired with another tile's geometry. Structurally, no production method takes
+    /// a <c>TileGeometryBuffers</c> and a <c>TileId</c> together, the mispairing shape. Behaviourally, each
+    /// buffer carries the address its own decode was given. Non-local invariant: the id enters the pipeline
+    /// once, through <c>ITileDecoder.Decode(TileId, byte[])</c>.
     /// </summary>
     [TestFixture]
     public class DecodedTileOwnershipTests
@@ -527,16 +498,10 @@ namespace MapRenderer.Tests.Jobs
         // ── B2 — behavioural, at the decode seam ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// Two DIFFERENT committed fixtures, decoded at two ids differing in <b>z, x and y</b>: every layer's
-        /// buffer carries the address its own decode was given, and the two tiles' values differ.
-        ///
-        /// <para><b>Production configuration.</b> Real multi-layer OpenMapTiles fixtures, not a synthetic
-        /// one-layer tile — the stamping happens per layer inside <c>DecodeLayer</c>, so a one-layer fixture
-        /// could not see a decoder that stamped only the first. And all three of z/x/y differ, because a
-        /// decoder that propagated only <c>z</c> would pass a z-only-different pair.</para>
-        ///
-        /// <para><b>Catches</b> a decoder stamping <c>default(TileId)</c>, a constant, or the previous
-        /// decode's id — every shape the caller-supplied-id defect could take.</para>
+        /// Two DIFFERENT real multi-layer fixtures, decoded at ids differing in <b>z, x and y</b>: every layer's
+        /// buffer carries its own decode's address. Multi-layer, because <c>DecodeLayer</c> stamps per layer. It
+        /// catches a stamp of <c>default(TileId)</c>, a constant, the previous decode's id, or only one of
+        /// z/x/y.
         /// </summary>
         [Test]
         public void EveryLayersBuffer_CarriesTheAddressItsOwnDecodeWasGiven()
@@ -587,16 +552,10 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// The same "one buffer per source-layer" claim as
-        /// <c>DecodedLayerGeometryTests.LayerGeometry_IsOneBufferPerSourceLayer_ByReference</c>, but over a
-        /// REAL decoded <see cref="MvtLayer"/>.
-        ///
-        /// <para><b>Why both exist — a blind tooth found by injection.</b> The sibling runs over
-        /// <c>InMemoryTileLayer</c>, the test double. RED-verifying "a <c>Geometry</c> getter that
-        /// re-materializes per read" (the silent per-consumer mint) injected into
-        /// <c>MvtLayer</c> left that sibling GREEN: it was pinning the double's behaviour, not production's.
-        /// This clause is the production configuration — nothing else in the repo reads a real decoded
-        /// layer's buffer twice and compares the allocation.</para>
+        /// The "one buffer per source-layer" claim of
+        /// <c>DecodedLayerGeometryTests.LayerGeometry_IsOneBufferPerSourceLayer_ByReference</c>, over a REAL
+        /// decoded <see cref="MvtLayer"/>. The sibling runs over the <c>InMemoryTileLayer</c> double, so it
+        /// stays green when <c>MvtLayer</c>'s getter re-materializes.
         /// </summary>
         [Test]
         public void ARealDecodedLayer_HandsBackTheSameAllocationOnEveryRead()
@@ -613,9 +572,8 @@ namespace MapRenderer.Tests.Jobs
                 if (!first.IsCreated) continue;
                 compared++;
 
-                // NativeArray<T>.Equals is pointer + length, so this is an IDENTITY comparison: a getter
-                // that re-materialized would return equal CONTENTS at a different address, and every
-                // output test in the suite would stay green.
+                // NativeArray<T>.Equals is pointer + length: an IDENTITY check that a re-materialized copy
+                // with equal contents fails.
                 Assert.IsTrue(first.Vertices.Equals(second.Vertices),
                     $"layer '{layer.Name}': two reads of ITileLayer.Geometry must return the SAME " +
                     "allocation. A getter that materializes afresh per read is the 108-materializations-" +
@@ -711,13 +669,9 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <summary>The C.2 observing tooth's happy-path arm: two real (non-degenerate, no-hole) polygons
-        /// within capacity produce four strictly-increasing offset tables and <see cref="FillGraphCounts.Ok"/>.
-        /// RED-VERIFIED by hand (not left in this file): temporarily change <c>SizingJob.cs</c>'s
-        /// <c>workOffsets.Add(workOffsets[pi] + workCap)</c> to <c>workOffsets.Add(pi &gt; 0 ? workOffsets[pi]
-        /// : workOffsets[pi] + workCap)</c> — polygon 1's entry then equals polygon 0's (a zero-length slice)
-        /// — and this test flips from <see cref="FillGraphCounts.Ok"/> to
-        /// <see cref="FillGraphCounts.ErrorOffsetTableNotDisjoint"/>. Revert immediately after observing it.</summary>
+        /// <summary>Two real no-hole polygons within capacity produce four strictly increasing offset tables and
+        /// <see cref="FillGraphCounts.Ok"/>. A <c>SizingJob</c> that gives polygon 1 a zero-length slice flips
+        /// it to <see cref="FillGraphCounts.ErrorOffsetTableNotDisjoint"/>.</summary>
         [Test]
         public void TwoValidPolygons_ProduceStrictlyIncreasingOffsetTables_NoErrorFlag()
         {
@@ -766,29 +720,15 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <summary>The finding that changed this stage's shape (job-scheduling-design.md's rule 2 and
-        /// <see cref="SizingJob"/>'s own doc, both above <see cref="SizingJob.Execute"/>):
-        /// <see cref="FillGatherJob{TComparer}"/> is the third node found bounding its own loop by a column
-        /// this job's early return never touches, and the only one of the three that WRITES. A sizing-only
-        /// arm (<see cref="TwoValidPolygons_ProduceStrictlyIncreasingOffsetTables_NoErrorFlag"/>) asserts what
-        /// sizing writes, not what a downstream node reads — fill carried this exact defect through that arm,
-        /// pre-existing and unfixed. So this drives all three graph nodes IN GRAPH ORDER over the SAME
-        /// buffers — this job (undersized capacity) → the real <see cref="FillGatherJob{TComparer}"/> → the
-        /// real <see cref="AggregateJob"/> — the whole mechanism the original bug lived in.
-        ///
-        /// <para>Real descriptors, not dummy ones: <see cref="FillGatherJob{TComparer}"/> dereferences
-        /// <c>PolyOuterRingIdx</c>/<c>RingOffsets</c>/<c>RingFeatureIdx</c> BEFORE it ever touches a
-        /// sizing-owned column, so a dummy descriptor set would throw for the wrong reason and this tooth
-        /// would pass on a bystander fault.</para>
-        ///
-        /// <para><b>Be honest about what this detects.</b> Pre-fix, <see cref="FillGatherJob{TComparer}"/>
-        /// writes out of bounds through an <c>.AsArray()</c> view and never resizes anything, and pre-fix
-        /// <see cref="AggregateJob"/> only reads — so every state assertion below passes on the buggy code
-        /// if the bounds check does not fire. This is a throw-detector wearing state assertions: the state
-        /// assertions pin the contract that must survive the fix, the bounds check is what makes it RED. Does
-        /// NOT assert <c>Assert.Throws</c> — that would pin the defect rather than the contract, and would
-        /// invert the day the fix lands.</para>
+        /// <summary>After <see cref="SizingJob"/>'s capacity early return, the real
+        /// <see cref="FillGatherJob{TComparer}"/> and <see cref="AggregateJob"/> run IN GRAPH ORDER over the SAME
+        /// buffers and find nothing to do. Non-local invariant: each downstream node must bound its loop by a
+        /// sizing-owned column, which the early return leaves empty. Real descriptors rule out a bystander fault.
         /// </summary>
+        /// <remarks>
+        /// Limitation: an out-of-bounds gather write goes RED only through the Burst bounds check (see
+        /// <see cref="BurstSafetyChecks_AreEnabled"/>); the state assertions pin the contract.
+        /// </remarks>
         [Test]
         public void SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo()
         {
@@ -797,9 +737,8 @@ namespace MapRenderer.Tests.Jobs
                 "without it, neither FillGatherJob's nor AggregateJob's managed-IL bounds check can fire, " +
                 "and this tooth cannot detect the release-build OOB it exists to catch.");
 #endif
-            // Two real single-ring, no-hole polygons — same shape as TwoValidPolygons_… above — but a
-            // MaxPolygons capacity too small to hold them, so this job's own early return fires and every
-            // Buffers column is left at length 0 while the descriptor arrays below still report polyCount==2.
+            // Two real polygons over a MaxPolygons too small for them: the early return leaves every Buffers
+            // column at length 0 while the descriptors still report polyCount==2.
             var polyOuterIdx   = new NativeArray<int>(new[] { 0, 1 }, Allocator.Persistent);
             var polyHoleStart  = new NativeArray<int>(new[] { 0, 0 }, Allocator.Persistent);
             var polyHoleCount  = new NativeArray<int>(new[] { 0, 0 }, Allocator.Persistent);
@@ -906,16 +845,13 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <summary>job-scheduling-design.md's Burst-safety register — the
-        /// <c>FillMeshGraphStructureTests.JobDebugger_IsEnabled_…</c>/<c>ProjectionManagedVersusBurstTests
-        /// .Burst_IsEnabled_…</c> precedent, for the mechanism <see cref="SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo"/>
-        /// relies on: that tooth's RED is a bounds exception thrown from <see cref="FillGatherJob{TComparer}"/>'s
-        /// <c>[BurstCompile]</c>d body, which carries its OWN safety-check setting independent of the test
-        /// assembly's <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c> define. RED-verify by hand, toggling
-        /// Jobs ▸ Burst ▸ Safety Checks off — confirmed empirically that the other tooth goes green (i.e.
-        /// vacuous) with this off.</summary>
+        /// <summary>Burst safety checks are on.
+        /// <see cref="SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo"/>
+        /// goes RED only through a bounds exception from <see cref="FillGatherJob{TComparer}"/>'s Burst body, whose
+        /// safety setting is independent of <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c>; with it off, that test is
+        /// vacuous.</summary>
         [Test]
-        public void BurstSafetyChecks_AreEnabled_OrT1IsVacuous()
+        public void BurstSafetyChecks_AreEnabled()
         {
             Assert.IsTrue(BurstCompiler.Options.EnableBurstSafetyChecks,
                 "Jobs ▸ Burst ▸ Safety Checks is OFF — FillGatherJob's compiled body no longer raises the " +
@@ -929,17 +865,10 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The GeoJSON decoder half: the <b>source-layer answer</b> (a geojson tile answers with its sole layer
-    /// whatever <c>source-layer</c> says, and moving that accommodation out of <c>SourceLayerResolver</c> left
-    /// the MVT answer where it was) and the <b>ordinal domain</b> of the sliced layer (one slot per feature,
-    /// and the slots ADDRESS the buffer).
-    ///
-    /// <para><b>Why the source-layer tests need a hand-encoded MVT tile.</b> The resolver does not
-    /// short-circuit an empty <c>source-layer</c> to null; each tile answers for its own format. Over any
-    /// real MVT fixture the guard is INERT — <c>GetLayer("")</c> compares against layer names and
-    /// no real layer is named <c>""</c>, so the arm passes with or without it. The discriminating input is a
-    /// layer whose <c>name</c> field is ABSENT, which decodes to a <b>null</b> name and which a style layer
-    /// with no <c>source-layer</c> (also null) would therefore match.</para>
+    /// The GeoJSON decoder: a geojson tile answers with its sole layer whatever <c>source-layer</c> says, an
+    /// MVT tile does not, and the sliced layer's ordinals (one per feature) ADDRESS the buffer. The MVT arm
+    /// needs a hand-encoded layer with an ABSENT <c>name</c>: it decodes to null, which a style layer with no
+    /// <c>source-layer</c> would match, while no real fixture layer is named null or "".
     /// </summary>
     [TestFixture]
     public class GeoJsonTileDecoderTests
@@ -1003,15 +932,10 @@ namespace MapRenderer.Tests.Jobs
                 RectangleAt(WestMin, WestMax), RectangleAt(EastMin, EastMax)));
 
         /// <summary>
-        /// The CLIPPING fixture: four features, of which the tile sliced (<see cref="SliceTile"/>) keeps only
-        /// the second and the fourth. The surviving list is therefore a <b>proper, non-prefix</b> subset of
-        /// the dataset's — the shape the ordinal-domain tests need, because a decoder that built
-        /// <c>Features</c> from the first <i>n</i> of the DATASET while taking geometry from the slice produces
-        /// the right counts, the right ordinal range, and the wrong features.
-        ///
-        /// <para>The two survivors keep the WEST/EAST layout the addressing tooth argues from; the two
-        /// discards live in neighbouring z1 tiles, a full tile away from a window that extends only
-        /// 64/4096 of a tile past the edge.</para>
+        /// The CLIPPING fixture: four features, of which <see cref="SliceTile"/> keeps the second and fourth, a
+        /// <b>proper, non-prefix</b> subset. A decoder that took <c>Features</c> from the first <i>n</i> of the
+        /// dataset gets counts and ordinals right and features wrong. The survivors are WEST then EAST; the
+        /// discards sit a full tile away, far outside the 64/4096 buffer.
         /// </summary>
         private static GeoJsonTileDecoder ClippingDecoder()
             => DecoderOver(GeoJsonTestFixtures.Collection(
@@ -1026,14 +950,9 @@ namespace MapRenderer.Tests.Jobs
         // ── a geojson tile has one layer and does not match names ─────────────────────────────────────
 
         /// <summary>
-        /// The Style Spec makes <c>source-layer</c> "required for vector sources" and unused for
-        /// geojson ones, so a geojson tile has nothing to match a name against: absent, empty and bogus all
-        /// answer with the sole layer.
-        ///
-        /// <para>The bogus arm is the one worth stating out loud, because it is the consequence rather than
-        /// the requirement: a style naming a <c>source-layer</c> over a geojson source still renders. That is
-        /// the spec's answer; match-or-null would give a fixture author a silent-empty failure mode for a key
-        /// the spec says is ignored.</para>
+        /// The Style Spec makes <c>source-layer</c> "required for vector sources" and unused for geojson, so
+        /// absent, empty and bogus names all answer with the sole layer. A style that names a
+        /// <c>source-layer</c> over a geojson source therefore still renders.
         /// </summary>
         [Test]
         public void AGeoJsonTileIgnoresTheSourceLayerNameEntirely()
@@ -1096,14 +1015,9 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// <b>The MVT side</b> — moving the accommodation into the tile must not turn "no <c>source-layer</c>"
-        /// into "the nameless layer" for a background or raster style layer over an MVT source.
-        ///
-        /// <para><b>The input is the whole tooth.</b> Over an ordinary fixture this claim is INERT: no real
-        /// layer is named <c>""</c> or null, so the name loop finds nothing with or without the guard. The
-        /// tile here is hand-encoded to hold exactly the two shapes that discriminate — a layer whose
-        /// <c>name</c> field is ABSENT (decodes to <c>Name == null</c>, which <c>l.Name == null</c> matches)
-        /// and one whose name is present and EMPTY (which <c>l.Name == ""</c> matches).</para>
+        /// Over an MVT tile, "no <c>source-layer</c>" must not select a nameless layer for a background or raster
+        /// style layer. The tile is hand-encoded with the two discriminating layers: one with an ABSENT
+        /// <c>name</c> (decodes to null) and one with an EMPTY name. No real fixture has either.
         /// </summary>
         [Test]
         public void AStyleLayerWithNoSourceLayer_StillSelectsNothingFromAnMvtTile()
@@ -1133,25 +1047,11 @@ namespace MapRenderer.Tests.Jobs
         // ── the ordinal domain of a sliced layer ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// Over a tile that CLIPS features away, the layer lists exactly the SURVIVORS, and its
-        /// ordinal domain is positions in that list.
-        ///
-        /// <para><b>The fixture is the load-bearing part.</b> Two of the dataset's four features fall in
-        /// neighbouring tiles, so the layer's feature list is a proper, <b>non-prefix</b> subset of the
-        /// dataset's. That is what discriminates the realistic defect — <c>Features</c> built from the
-        /// dataset while <c>Geometry</c> comes from the slice — in the form the adoption guard cannot see:
-        /// taking the first <i>n</i> of the dataset keeps <c>FeatureCount == Features.Count</c>, keeps every
-        /// ordinal in range, and files every per-feature bake against the wrong feature. The named-survivor
-        /// arm is the only one here that can fail on it.</para>
-        ///
-        /// <para><b>What the other two arms are, honestly.</b> The count arm cannot fail:
-        /// <c>LayerGeometryAdoption.Validate</c> throws on exactly this mismatch inside
-        /// <c>AdoptGeometry</c>, i.e. during <c>Decode</c>, so a violating decode never returns a layer to
-        /// assert against — measured, not reasoned. The ordinal-range arm cannot fail either:
-        /// <c>FeatureSelector</c> assigns <c>Ordinal = i</c> over <c>layer.Features</c>, and the guard has
-        /// already pinned that count. Both are kept as executable statements of the domain, but the claim
-        /// they look like they are pinning lives in the guard, whose own teeth are
-        /// <c>WaistOneProducerAgreementTests</c> — that is where a RED for it belongs, not here.</para>
+        /// Over a tile that CLIPS features away, the layer lists exactly the SURVIVORS, and its ordinals are
+        /// positions in that list. Only the named-survivor arm can fail on <c>Features</c> taken from the first
+        /// <i>n</i> of the dataset. Limitation: the count and ordinal-range arms cannot fail, because
+        /// <c>LayerGeometryAdoption.Validate</c> throws during <c>Decode</c> first; its own tests are
+        /// <c>WaistOneProducerAgreementTests</c>.
         /// </summary>
         [Test]
         public void ASlicedGeoJsonLayer_ListsOnlyTheSurvivingFeatures_AndItsOrdinalsAddressTheBuffer()
@@ -1212,9 +1112,8 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void AnEmptySlice_YieldsATileWithNoLayerAtAll()
         {
-            // A dataset that exists but falls entirely outside the tile asked for: the slice is empty for
-            // this tile while the decoder still has real work to reject, which "no features at all" would not
-            // exercise.
+            // A real dataset wholly outside the asked tile: the slice is empty, but the decoder still has
+            // features to reject.
             GeoJsonTileDecoder decoder = TwoRectangleDecoder();
             var farAway = new TileId { Z = 4, X = 15, Y = 15 };
 
@@ -1228,15 +1127,9 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// The addressing claim, not the counting one: each ring must be filed under the ordinal
-        /// of the feature that produced it.
-        ///
-        /// <para>Counts agreeing is cheap; a producer that permuted the path column keeps every count right
-        /// and shifts every per-feature bake onto a neighbour. The fixture makes that visible with a
-        /// monotone-X argument: the SURVIVING feature 0 is authored WEST of the surviving feature 1 and the
-        /// two are disjoint, so the ring under ordinal 1 must lie strictly east of the ring under ordinal 0.
-        /// It runs over the clipping fixture, where the survivors are the dataset's features 1 and 3 — the
-        /// argument is unchanged and the input is strictly stronger.</para>
+        /// Each ring is filed under the ordinal of the feature that produced it; a permuted path column keeps
+        /// every count right. Survivor 0 lies WEST of survivor 1 and they are disjoint, so the ring under
+        /// ordinal 1 must lie strictly east of the ring under ordinal 0.
         /// </summary>
         [Test]
         public void EveryRingIsFiledUnderItsOwnFeaturesOrdinal()
@@ -1245,9 +1138,7 @@ namespace MapRenderer.Tests.Jobs
             ITileLayer layer = tile.GetLayer(GeoJsonTileLayer.WellKnownName);
             Assert.IsNotNull(layer, "precondition: the fixture slices to a layer");
 
-            // Over the CLIPPING fixture, so the monotone-X argument runs against a proper, non-prefix subset
-            // of the dataset — a strictly stronger input for it, and the layout it needs is unchanged: the
-            // two survivors are still one western and one eastern rectangle, disjoint, in that order.
+            // The CLIPPING fixture: a non-prefix subset whose two survivors are still west then east, disjoint.
             Assert.AreEqual(SurvivingWest, NameOf(layer.Features[0]),
                 "precondition: ordinal 0 is the western survivor…");
             Assert.AreEqual(SurvivingEast, NameOf(layer.Features[1]),
@@ -1298,7 +1189,7 @@ namespace MapRenderer.Tests.Jobs
     [TestFixture]
     public class GraphDeterminismTests
     {
-        // ── B.5 — determinism: default worker count vs JobWorkerCount = 0, full column set, both arms. ──────
+        // ── Determinism: default worker count vs JobWorkerCount = 0, full column set, both arms. ──────
 
         private struct PassResult
         {
@@ -1352,17 +1243,12 @@ namespace MapRenderer.Tests.Jobs
                     holeBytes.AddRange(BitConverter.GetBytes(c.HoleCount));
                     fcBytes.AddRange(BitConverter.GetBytes(c.ForceClipCount));
 
-                    // Both arms digest identically here — on the curved arm these are POST-subdivision
-                    // columns, still digested for the FULL-column determinism claim (assertion 1), never
-                    // compared to any golden (assertion 2's format excludes them). `curved` only matters at
-                    // the golden-format branch below.
+                    // Both arms digest the full columns here for the determinism claim; `curved` matters only
+                    // in the golden-format branch below.
                     int ic = output.TriangleIndices.Length;
 
-                    // Assertion 2's golden format digests the INTERIOR PREFIX only, exactly as
-                    // FillMeshGraphParityTests does — the boundary band appends to these same columns and its
-                    // bytes were never in the frozen capture. Assertion 1's determinism claim keeps the FULL
-                    // column set: everything the band added goes into bandBytes below, which is appended to
-                    // the full-column digest and to nothing else.
+                    // The golden digests the INTERIOR PREFIX only, as FillMeshGraphParityTests does; the band's
+                    // bytes go into bandBytes, appended to the full-column digest only.
                     int interiorCount = vc - c.BandVertexCount;
                     for (int i = interiorCount; i < vc; i++)
                     {
@@ -1467,9 +1353,8 @@ namespace MapRenderer.Tests.Jobs
             }
             finally
             {
-                // Unconditional restore, before any assertion that could throw — JobGraphInstrumentTests.cs's
-                // own idiom: an AssertionException thrown while JobWorkerCount is still pinned to 0 would leave
-                // every later test in this run starved of workers, a worse failure than the one under test.
+                // Restore before any assertion can throw: a JobWorkerCount left at 0 starves every later test
+                // in the run.
                 JobsUtility.JobWorkerCount = original;
             }
 
@@ -1479,19 +1364,15 @@ namespace MapRenderer.Tests.Jobs
                 $"[proj={projection.GetType().Name}] precondition: at least one corpus/synthetic case must " +
                 "produce a non-empty FillGraphOutput, or the digests below compare two empty hashes");
 
-            // Contention guard — sized to the machine, not to "> 1": at max(8, JobWorkerCount) batches no
-            // worker contends twice, so fewer batches would make the two-pass equality below run uncontended
-            // and prove nothing. The corpus measurement (fill: maxTileVertices=228276, maxPolygonCount=3218)
-            // clears this by a wide margin at JobWorkerCount=14 — see the design doc's dated row.
+            // Contention guard sized to the machine: with fewer than max(8, JobWorkerCount) batches the
+            // two-pass equality below could run uncontended and prove nothing.
             int minBatches = math.max(8, JobsUtility.JobWorkerCount);
             Assert.GreaterOrEqual(defaultPass.MaxPolygonCount, minBatches,
                 $"[proj={projection.GetType().Name}] the corpus's largest case must offer >= {minBatches} " +
                 "polygons or the earcut node (once parallel) never has more than one worker contending — a " +
                 "corpus question, not a lowered guard.");
-            // Flat arm only — on the curved arm FillMeshGraph.Schedule schedules NEITHER TileToGeoJob nor
-            // ProjectionDispatch (that block is inside `if (!curved)`), and MaxVertexCount there is the
-            // POST-subdivision count from an unrelated node, not a measure of contention on nodes that never
-            // ran. Asserting it on that arm would be checking a quantity against a claim it cannot support.
+            // Flat arm only: the curved arm schedules neither TileToGeoJob nor ProjectionDispatch, and its
+            // MaxVertexCount is a post-subdivision count.
             if (!curved)
                 Assert.GreaterOrEqual(defaultPass.MaxVertexCount, minBatches * FillMeshGraph.VertexBatch,
                     $"[proj={projection.GetType().Name}] the corpus's largest case must offer >= {minBatches} * " +
@@ -1516,11 +1397,8 @@ namespace MapRenderer.Tests.Jobs
                 "was captured against.");
         }
 
-        // ── E.4 — extend the determinism tooth to the line graph. Same corpus, same worker-0-vs-default
-        // self-comparison, over LineGraphOutput's own columns (Vertices/VertexFeatureIdx/Indices + Error).
-        // No golden reference here — the four committed line graph-write goldens
-        // (line-graphwrite-golden-z{6,9}-{Spherical,WebMercator}.json) already pin exact bytes; this tooth's
-        // own job is the self-comparison, not a second pin on the same quantity. ─────────────────────────────
+        // ── Line graph determinism: the same worker-0-vs-default self-comparison over LineGraphOutput ─────
+        // No golden here: the committed line-graphwrite goldens already pin the exact bytes.
 
         private static (string Digest, int MaxRingCount, bool AnyNonEmpty) RunOneLinePass(IProjection projection)
         {
@@ -1635,9 +1513,8 @@ namespace MapRenderer.Tests.Jobs
                 "batching difference.");
         }
 
-        // ── B.6 — fan-out: each batch constant, read from ITS OWN declaration, offers >= 2 batches over the
-        // real corpus. Failure message states the discriminator up front so a developer tempted to lower a
-        // constant sees why that is wrong before doing it. ─────────────────────────────────────────────────
+        // ── B.6 — fan-out: each batch constant, read from ITS OWN declaration, gives >= 2 batches on the corpus ─
+        // The failure message says why lowering a constant is wrong.
 
         private const string RefusalMessage =
             "red here means the corpus changed or a constant was restored — do not lower the constant; see " +
@@ -1653,9 +1530,8 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_Project()
         {
-            // ProjectionDispatch.VertexBatch is shared by all three graphs — the fill graph's flat-arm vertex
-            // count is the same quantity ProjectPointsJob processes for that arm (the fill node's tile→geo
-            // and project nodes share the exact same TileVertices-derived point list).
+            // ProjectionDispatch.VertexBatch is shared by all three graphs; the fill flat-arm vertex count is what
+            // ProjectPointsJob processes.
             int maxVertices = LargestFillVertexCount(new WebMercatorProjection());
             Assert.GreaterOrEqual(maxVertices / ProjectionDispatch.VertexBatch, 2, RefusalMessage);
         }
@@ -1670,12 +1546,8 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_ExtrusionTileToGeo()
         {
-            // The extrusion wall chain's flat-ring vertex count is exactly the fill graph's own pre-earcut
-            // totalVerts pre-pass (both sum RingOffsets over the SAME visit order over the SAME geometry) —
-            // FillExtrusionMeshGraph.cs:111-116 and FillMeshGraph.cs:97-105 are the same formula. Measuring
-            // it directly here (rather than scheduling the whole wall chain, which needs featureColors/
-            // featureBake inputs this tooth has no use for) reads the identical quantity
-            // FillExtrusionMeshGraph.VertexBatch's own TileToGeoJob call processes.
+            // The wall chain's TileToGeoJob processes the fill pre-pass's totalVerts (RingOffsets summed over the
+            // same visit order), so measure that directly instead of scheduling the whole wall chain.
             int maxVertices = LargestRawVisitedRingVertexCount();
             Assert.GreaterOrEqual(maxVertices / MapRenderer.Unity.Rendering.Meshing.FillExtrusionMeshGraph.VertexBatch, 2, RefusalMessage);
         }
@@ -1683,7 +1555,7 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_Earcut()
         {
-            // EarcutPolygonBatch == 1, so count/batch >= 2 reduces to "at least 2 polygons" — A.4's measured
+            // EarcutPolygonBatch == 1, so count/batch >= 2 reduces to "at least 2 polygons" — the measured
             // corpus (maxPolygonCount=3218) clears this by three orders of magnitude.
             int maxPolygonCount = LargestFillPolygonCount(new WebMercatorProjection());
             Assert.GreaterOrEqual(maxPolygonCount / FillMeshGraph.EarcutPolygonBatch, 2, RefusalMessage);
@@ -1773,17 +1645,10 @@ namespace MapRenderer.Tests.Jobs
             return max;
         }
 
-        /// <summary>Reconstructs <see cref="LineMeshGraph.ScheduleTyped{TProj}"/>'s gather→tile-geo→project→
-        /// subdivide sub-chain far enough to read the SUBDIVIDED centerline point count — the exact quantity
-        /// the graph's SECOND <c>TileToGeoJob</c> call processes (job-scheduling-design.md).
-        /// A raw pre-subdivision count would be a valid but weaker lower bound (subdivision only inserts
-        /// points); this measures the real quantity instead of a proxy for it.
-        ///
-        /// <para>Walks the corpus directly (NOT <c>WalkCorpusAndSynthetic</c>, which filters on
-        /// <see cref="MapRenderer.Core.Tiles.TileGeometryType.Polygon"/> — the fill graph's own corpus arm.
-        /// LineString-bearing layers are mostly disjoint from polygon-bearing ones in this fixture set,
-        /// confirmed empirically: routing the line row through the polygon-filtered walk measured 0 across
-        /// every case).</para></summary>
+        /// <summary>Runs <see cref="LineMeshGraph.ScheduleTyped{TProj}"/>'s gather→tile-geo→project→subdivide
+        /// sub-chain to read the SUBDIVIDED centerline point count, which the graph's second
+        /// <c>TileToGeoJob</c> processes. It walks the corpus directly, because <c>WalkCorpusAndSynthetic</c>
+        /// keeps only Polygon layers, which hold almost no LineStrings here.</summary>
         private static int LargestLineSubdividedPointCount()
         {
             string fixturesDir = System.IO.Path.Combine(UnityEngine.Application.dataPath, "Fixtures");
@@ -1910,18 +1775,10 @@ namespace MapRenderer.Tests.Jobs
             public void Execute() => Out[0] = 42;
         }
 
-        // ── The zero-worker-count finding, kept as a PASSING test — job-scheduling-design.md's original
-        // assumption for the delay instrument. Originally written expecting IsCompleted == false (a RED,
-        // correctly reporting a false premise); renamed and inverted to assert what is actually true, so the
-        // gate is green and the knowledge survives (docs/lessons-learned.md doesn't have a slot for "a probe
-        // that disproves its own premise" — this is that slot). The instrument is the deps-parameter delay
-        // job below, not this knob — this test exists only to record why that knob was rejected. ──────────
-        //
-        // Complete() and Dispose() run UNCONDITIONALLY, before any assertion that could throw — an
-        // AssertionException thrown while a container is still registered to a live job would be masked by
-        // the finally block's own dispose-time InvalidOperationException (docs/lessons-learned.md: "an
-        // exception unwinding through a using whose Dispose() also throws is silently replaced"). This bit
-        // twice while this test was being written; both are fixed by completing first, unconditionally.
+        // ── JobWorkerCount = 0 does NOT hold a scheduled job incomplete ───────────────────────────────────
+        // Non-obvious why: this test records why the delay instrument below uses a deps job, not this knob.
+        // Complete() and Dispose() run before any assertion, or a dispose-time exception in finally replaces
+        // the assertion failure (docs/lessons-learned.md).
         [Test]
         public void ZeroWorkerCount_DoesNotHoldAScheduledJobIncomplete()
         {
@@ -1984,21 +1841,10 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(new Vector3(i, i, i), verts[i], $"vertex {i}");
         }
 
-        // ── The deps-seam delay instrument — job-scheduling-design.md. ───────────────────────────────────────
-        //
-        // FillMeshGraph.Schedule already takes `JobHandle deps = default` and threads it into its first node
-        // (a production parameter, not test surface — every node in the design takes `deps`). A test can
-        // schedule its own delay job and pass its handle as `deps`, holding the whole downstream chain
-        // genuinely incomplete. Calibrated here under the DEFAULT worker count — the finding above is why
-        // JobWorkerCount is never touched for this instrument.
-        //
-        // Two failure modes this calibration exists to catch (both already bit this suite once, per the design doc’s
-        // brief): a spin that Burst folds to a closed form (silently-instant "delay" — teeth would pass while
-        // proving nothing), and a loop-invariant hoist of the gate read (spins forever, or never spins at
-        // all, depending on what gets hoisted). SpinUntilGateJob and WaitForStart now live in
-        // MapRenderer.Tests.Shared's SpinUntilGateJob.cs (enclosing-namespace lookup resolves them here
-        // unqualified) — promoted once TileManagerBackgroundRegistrationTests needed the same instrument, so
-        // there is exactly one copy rather than two maintained in parallel.
+        // ── The deps-seam delay instrument ─────────────────────────────────────────────────────────────────
+        // A test passes its own delay job as FillMeshGraph.Schedule's production `deps`, holding the chain
+        // incomplete. The calibration catches a spin Burst folds to a closed form and a hoisted gate read.
+        // Non-obvious why: either one makes the delay instant or endless, so tests pass while proving nothing.
 
         [Test]
         public void DelayJob_HeldByGate_IsGenuinelyInFlight_UnderDefaultWorkerCount()
@@ -2035,15 +1881,10 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <summary>Proves the mechanism end-to-end over the real production entry point: a
-        /// <see cref="FillMeshGraph"/> scheduled with <c>deps</c> set to a still-spinning
-        /// delay job's handle stays genuinely incomplete — the shape <c>TileBuildGraph.ScheduleMeasure</c>
-        /// uses.
-        ///
-        /// <para>Drives the SPHERICAL (curved) arm with clip ENABLED — production's actual configuration
-        /// (the shipped demo scene runs globe; <c>MapViewConfig.FillTileBufferClip = 0.0</c> decodes to
-        /// <c>KeepTileUnits(0.0)</c>, not <c>Disabled</c>). An unset <c>Clip</c> would silently drive the
-        /// disabled arm production never takes — the defect class this repo's 2026-09-02 audit catalogued.</para></summary>
+        /// <summary>A <see cref="FillMeshGraph"/> scheduled with <c>deps</c> set to a spinning delay job stays
+        /// incomplete, as <c>TileBuildGraph.ScheduleMeasure</c> uses it. It drives the production arm: SPHERICAL
+        /// with the clip ENABLED (<c>FillTileBufferClip = 0.0</c> is <c>KeepTileUnits(0.0)</c>); an unset
+        /// <c>Clip</c> would drive the disabled arm production never takes.</summary>
         [Test]
         public void DelayJobAsDeps_HoldsAFillMeshGraph_GenuinelyIncomplete()
         {
@@ -2113,31 +1954,10 @@ namespace MapRenderer.Tests.Jobs
     [TestFixture]
     public class LineRibbonSizingJobTests
     {
-        /// <summary>The arm that catches the line side's counterpart of the fill bug: the real
-        /// <see cref="RibbonAggregateJob"/> over a <see cref="RibbonBuffers"/> already at the
-        /// post-early-return shape (every column length 0), with a real <c>RingFeature</c> holding the
-        /// borrowed ring count that a loop bounded by a borrowed column, not its own, would read.
-        ///
-        /// <para><b>Constructed, not driven — the one way it differs from the real early-return state, stated
-        /// plainly (not "byte-for-byte", which would be false):</b> <see cref="RibbonSizingJob"/>
-        /// (<c>:62-73</c>) fills <c>RingVertexOffsets</c>/<c>RingIndexOffsets</c> with <c>ringCount + 1</c>
-        /// entries BEFORE its monotonicity return (<c>:75-82</c>), whereas <see cref="RibbonBuffers.Allocate"/>
-        /// leaves both at length 0. That delta cannot change what this arm observes:
-        /// <see cref="RibbonAggregateJob"/> reads <c>perRingVertexCount[r]</c> before it ever touches
-        /// either offset table, and that column is length 0 in BOTH states, so the loop this arm is about
-        /// never runs in either. Driving it through sizing to reach the state exactly would require an
-        /// impossible non-monotonic table (sizing's growth floor at 1 makes disjointness structural) — not a
-        /// degenerate <c>m &lt; 2</c> ring either, since <c>RingGatherJob.cs:101</c> filters those out
-        /// before sizing ever sees them.</para>
-        ///
-        /// <para><b>RED recipe — hand-written (RibbonAggregateJob has only ever existed in its fixed
-        /// form; <c>git log -- RibbonAggregateJob.cs</c> returns one commit), executed once by the
-        /// developer, reverted immediately.</b> Add <c>[ReadOnly] public NativeList&lt;int&gt; RingSubOffsets;</c>
-        /// to the job, replace <c>int ringCount = perRingVertexCount.Length;</c> with
-        /// <c>int ringCount = RingSubOffsets.Length - 1;</c>, and hand the tooth a length-3
-        /// <c>RingSubOffsets</c>. Observed: RED at <c>perRingVertexCount[r]</c> — recorded in the stage
-        /// report, not here (a documented recipe nobody has run is fiction).</para>
-        /// </summary>
+        /// <summary>The real <see cref="RibbonAggregateJob"/> over a <see cref="RibbonBuffers"/> with every column
+        /// at length 0, while a real <c>RingFeature</c> still holds 2 rings: it must bound its loop by its own
+        /// column, not a borrowed one. The state is constructed, not driven through sizing, but the aggregate
+        /// reads <c>perRingVertexCount[r]</c> first, and that column is empty either way.</summary>
         [Test]
         public void AggregateOverUnsizedBuffers_ProducesEmptyOutput_AndDoesNotIndexPastThem()
         {
@@ -2172,9 +1992,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, outVertexFeatureIdx.Length);
                 Assert.AreEqual(0, outIndices.Length, "no ring to append means no output indices");
 
-                // Non-vacuity witness: the borrowed ring count a borrowed-column bound would read is still 2 —
-                // without this the test would pass identically on an input where there was nothing to
-                // iterate in the first place.
+                // Non-vacuity: a borrowed-column bound would still read 2 rings here.
                 Assert.AreEqual(2, ringFeature.Length);
             }
             finally
@@ -2186,21 +2004,11 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <summary>The parity arm for the C.2-equivalent monotonicity gap — <c>FillSizingJobTests
-        /// .TwoValidPolygons_ProduceStrictlyIncreasingOffsetTables_NoErrorFlag</c>'s shape, one for one. Two
-        /// real rings within capacity produce four strictly-increasing offset tables and
-        /// <see cref="LineGraphCounts.Ok"/>.
-        ///
-        /// <para><b>RED recipe, mirroring the fill arm's word for word — executed once, observed, reverted.</b>
-        /// Temporarily change <c>RibbonSizingJob.cs:71</c>'s <c>ringVertexOffsets.Add(ringVertexOffsets[r]
-        /// + maxV);</c> to <c>ringVertexOffsets.Add(r &gt; 0 ? ringVertexOffsets[r] : ringVertexOffsets[r] +
-        /// maxV);</c> — ring 1's entry then equals ring 0's (a zero-length slice) — and this test flips from
-        /// <see cref="LineGraphCounts.Ok"/> to <see cref="LineGraphCounts.ErrorOffsetTableNotDisjoint"/>.
-        /// Revert immediately after observing it.</para>
-        ///
-        /// <para><b>Claim honestly:</b> this arm catches a non-monotonic offset table. It would NOT have
-        /// caught the out-of-bounds read — fill's identical arm did not catch fill's identical bug. Arm A
-        /// above is the one that would.</para>
+        /// <summary>The line twin of <c>TwoValidPolygons_ProduceStrictlyIncreasingOffsetTables_NoErrorFlag</c>: two
+        /// real rings within capacity give four strictly increasing offset tables and
+        /// <see cref="LineGraphCounts.Ok"/>; a zero-length ring slice gives
+        /// <see cref="LineGraphCounts.ErrorOffsetTableNotDisjoint"/>. It cannot catch an out-of-bounds
+        /// read; <see cref="AggregateOverUnsizedBuffers_ProducesEmptyOutput_AndDoesNotIndexPastThem"/> does.
         /// </summary>
         [Test]
         public void TwoValidRings_ProduceStrictlyIncreasingOffsetTables_NoErrorFlag()
@@ -2317,14 +2125,8 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the
-    /// buffer, and who owns the buffer afterwards.
-    ///
-    /// <para><c>RingCapacity</c> is exercised here rather than beside the other
-    /// <c>TileGeometryBuffers</c> cases because it exists for this seam: once the sizing pre-pass moved into
-    /// the materializer, the capacity a fill mesher's own sizing stage needs (<c>SizingJob</c>, on the
-    /// graph now; there is no synchronous <c>FillMeshPipeline.Schedule</c> sizing it) has to come back
-    /// off the buffer.</para>
+    /// The MVT end of Waist 1's producer seam: what the materializer puts in the buffer, and who owns it.
+    /// <c>RingCapacity</c> is the producer's sized bound; test harnesses size <c>SizingJob</c> from it.
     /// </summary>
     [TestFixture]
     public class MvtGeometryMaterializerTests
@@ -2391,9 +2193,7 @@ namespace MapRenderer.Tests.Jobs
             uint[] stream = MvtCommandStream.Feature(
                 MvtCommandStream.Ring(100, 100, 200, 100, 200, 200, 100, 200));
 
-            // The flattened INPUT buffers are borrowed, not owned by the materializer, so this
-            // still works — a materializer that consumed/disposed its input on the first call would fault
-            // reading it on the second. `flat` outlives both `Materialize()` calls, disposed once at the end.
+            // The materializer borrows `flat`, so a second call still works; `flat` is disposed once at the end.
             var materializer = MakeMaterializer(
                 SampleTile, SampleExtent, out var flat, Carrier(TileGeometryType.Polygon, stream));
             try
@@ -2512,26 +2312,18 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// The MVT materializer reads bytes off <see cref="IMvtGeometryCarrier"/>, MVT's own
-        /// contract, not off the neutral feature interface. A feature that is an <see cref="IFeature"/>
-        /// but not a carrier is a <b>wiring error</b> — some other format's feature routed to the MVT
-        /// producer — and must fail loudly, naming the index, rather than materialize as an empty layer that
-        /// renders nothing and reports success.
-        ///
-        /// <para>The other half of the same contract, asserted here so the two cannot drift apart: a real
-        /// carrier whose <c>Geometry</c> is <c>null</c> is <b>not</b> an error — it is zero commands. Line
-        /// and symbol depend on that, since they hand the materializer every selected feature, geometry or
-        /// not.</para>
+        /// The MVT materializer reads <see cref="IMvtGeometryCarrier"/>. A kind column whose length does not match
+        /// the command column is a <b>wiring error</b> and throws before anything is allocated. A carrier whose
+        /// <c>Geometry</c> is <c>null</c> is NOT an error but zero commands: line and symbol hand the
+        /// materializer every selected feature, geometry or not.
         /// </summary>
         [Test]
         public void Materialize_KindColumnLengthMismatch_ThrowsBeforeAllocating_ButANullStreamIsZeroCommands()
         {
             uint[] stream = MvtCommandStream.Feature(MvtCommandStream.Ring(10, 10, 20, 10, 20, 20));
 
-            // The two-list input's hazard: the kind column and the command column are joined by POSITION, so a
-            // length mismatch would mis-classify every ring. It must throw BEFORE Allocate (the same standard
-            // PathGeometryMaterializer is held to), or four Allocator.Persistent arrays are stranded with no
-            // caller able to free them.
+            // The kind and command columns join by POSITION. A length mismatch must throw BEFORE Allocate, or
+            // four Persistent arrays strand with no owner.
             using (var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { stream, stream })) // 2 command streams
             {
                 var ex = Assert.Throws<ArgumentException>(
@@ -2604,32 +2396,15 @@ namespace MapRenderer.Tests.Jobs
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // OrdinalDomainTests — tooth B's missing half — the selection/buffer relation
+    // OrdinalDomainTests — the selection/buffer relation
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Tooth <b>B</b>'s missing half: the <b>selection</b>/buffer relation, where B closed only the
-    /// <b>TileId</b>/buffer one.
-    ///
-    /// <para><b>The hazard as recorded.</b> Three consumers size a per-feature array and index it by
-    /// <see cref="SelectedTileFeature.Ordinal"/> — fill and line by <c>geometry.FeatureCount</c>, symbol by
-    /// <c>tileLayer.Features.Count</c> — and nothing checks <c>max(Ordinal) &lt; FeatureCount</c>. Two
-    /// different notions of "how many features", addressed by one ordinal.</para>
-    ///
-    /// <para><b>They are the same number, and this fixture pins WHY rather than that they happen to match.</b>
-    /// Production has exactly one <see cref="ITileLayer"/> — <see cref="MvtLayer"/> — and
-    /// <c>MvtDecoder.DecodeLayer</c> appends to <c>layer.Features</c> and to the command list it hands
-    /// <see cref="MvtGeometryMaterializer"/> in the <i>same</i> switch arm, once per feature message. The
-    /// materializer then sizes <c>FeatureGeometryType</c> to that command count. The lockstep is the
-    /// invariant; the bound is only its consequence, which is why a bound check would be the wrong
-    /// instrument — a selection borrowed from a SHORTER sibling layer yields in-range ordinals and would sail
-    /// straight through one while mis-attributing every colour.</para>
-    ///
-    /// <para><b>The load-bearing case is the feature that contributes NO rings</b> (clause A): it is the only
-    /// input shape under which "one slot per feature" and "one slot per feature that has geometry" differ, so
-    /// a decoder that ever compacted such features out would break the ordinal domain and nothing over the
-    /// committed corpus need notice — measured, not assumed (see clause A). Clause B is the same invariant
-    /// over real multi-layer fixtures; clause C is the pairing itself, at the mesh-path consumer.</para>
+    /// The selection/buffer relation. Fill and line size per-feature arrays by <c>geometry.FeatureCount</c>,
+    /// symbol by <c>tileLayer.Features.Count</c>, and all index by <see cref="SelectedTileFeature.Ordinal"/>.
+    /// Non-local invariant: <c>MvtDecoder.DecodeLayer</c> appends a feature and its command stream in the
+    /// same arm, so the counts move in lockstep; a bound check alone would pass a shorter sibling layer's
+    /// selection. A feature with NO rings is the case that tells the two counts apart.
     /// </summary>
     [TestFixture]
     public class OrdinalDomainTests
@@ -2639,32 +2414,11 @@ namespace MapRenderer.Tests.Jobs
         // ── A — a feature that contributes no rings still OWNS its ordinal ─────────────────────────────
 
         /// <summary>
-        /// A hand-encoded MVT layer of four features, the first TWO of which produce no rings, decoded by the
-        /// real <see cref="MvtDecoder"/>.
-        ///
-        /// <para><b>Two ring-less shapes, because they are not equally defensible.</b>
-        /// Ordinal 1 carries a <c>geometry</c> field that is <b>present and empty</b> — unambiguously
-        /// spec-conformant (MVT 2.1 §4.2 requires the field; it says nothing about a minimum length), and it
-        /// reaches the materializer as <c>new uint[0]</c>. Ordinal 0 <b>omits the field entirely</b>, which
-        /// the spec does <i>not</i> sanction: it is input this decoder <i>accepts</i> (<c>DecodeFeature</c>
-        /// returns a <c>null</c> stream for it) rather than input it is required to handle, and it reaches
-        /// the materializer as <c>null</c>. Both are here because the two travel different paths through
-        /// <c>MvtGeometryMaterializer</c>'s <c>?.Length ?? 0</c> arithmetic, so a compaction keyed on one is
-        /// invisible to the other — see the RED note below. The load-bearing claim rests on the
-        /// <b>spec-conformant</b> one; the out-of-spec one only pins that a decoder must not compact away
-        /// what it already chose to accept.</para>
-        ///
-        /// <para><b>Production configuration:</b> the bytes are synthetic, everything that reads them is not
-        /// — real decoder, real <see cref="MvtGeometryMaterializer"/>, real <see cref="MvtLayer"/>, real
-        /// <see cref="FeatureSelector"/>. Neither ring-less shape appears in any committed fixture, which is
-        /// not an accident of the corpus but the reason this clause has to hand-encode its own input: RED row
-        /// Every ring-less feature is compacted out of the decoder and clause B, over two real multi-layer
-        /// tiles, stayed GREEN.</para>
-        ///
-        /// <para><b>Catches</b> any future "skip the features with nothing to draw" compaction in the decoder
-        /// or the materializer: it would leave <c>FeatureCount</c> short of <c>Features.Count</c> and — worse,
-        /// because it is silent — slide every later feature's rings onto a lower ordinal, so a style layer's
-        /// baked colours and widths would land on its neighbours' geometry.</para>
+        /// A hand-encoded MVT layer of four features, the first TWO ring-less, through the real decoder,
+        /// materializer, layer and selector. Ordinal 1 has a present, empty <c>geometry</c> (MVT 2.1 §4.2
+        /// conformant); ordinal 0 omits it (accepted, not conformant) and reaches the materializer as null. Each
+        /// takes its own path through <c>?.Length ?? 0</c>. A compaction of ring-less features would slide
+        /// later rings onto lower ordinals; no committed fixture has either shape.
         /// </summary>
         [Test]
         public void AFeatureWithNoGeometry_StillOccupiesItsOrdinalSlot()
@@ -2723,14 +2477,9 @@ namespace MapRenderer.Tests.Jobs
         // ── B — the invariant over the real corpus ─────────────────────────────────────────────────────
 
         /// <summary>
-        /// <c>Geometry.FeatureCount == Features.Count</c> for <b>every</b> layer of two real multi-layer
-        /// fixtures — unconditionally, with no "or the buffer is uncreated" escape clause, because the one
-        /// early-out in <see cref="MvtGeometryMaterializer"/> (<c>featureCount == 0 ⇒ default</c>) fires
-        /// exactly when the feature list is empty too, and <c>default.FeatureCount</c> is 0.
-        ///
-        /// <para>Clause A proves the rule on the input shape that discriminates; this proves the decoder
-        /// applies it across a real corpus — dozens of layers, mixed kinds, real extents — rather than only
-        /// on a three-feature tile a test wrote.</para>
+        /// <c>Geometry.FeatureCount == Features.Count</c> for <b>every</b> layer of two real multi-layer fixtures,
+        /// with no escape for an uncreated buffer: <see cref="MvtGeometryMaterializer"/>'s only early-out is
+        /// <c>featureCount == 0 ⇒ default</c>, whose <c>FeatureCount</c> is 0 too.
         /// </summary>
         [Test]
         public void EveryRealDecodedLayer_HasOneOrdinalSlotPerFeature()
@@ -2774,26 +2523,11 @@ namespace MapRenderer.Tests.Jobs
         // ── C — the pairing, at the production consumer ────────────────────────────────────────────────
 
         /// <summary>
-        /// The buffer a mesh layer is handed belongs to the <b>same</b> source-layer its ordinals came from.
-        ///
-        /// <para><b>Why a two-layer fixture with DIFFERENT feature counts.</b> The mispairing this closes is
-        /// "layer A's selection meets layer B's buffer", and it is invisible on a tile whose layers are the
-        /// same length: the ordinals stay in range and only the attribution is wrong. Here "roads" has two
-        /// features and "places" has five, so a buffer from the wrong layer is a different
-        /// <c>FeatureCount</c> — a number the tooth can read.</para>
-        ///
-        /// <para><b>Production configuration:</b> the real <see cref="TileMeshLayerProcessor"/>, which is the
-        /// only production caller of <c>ITileMeshRenderLayer.BuildGraphRequest</c> and therefore the one site
-        /// <i>on the mesh path</i> where the selection and the buffer are chosen. It resolves the
-        /// source-layer once and takes both off that single local; this tooth is what makes that structural,
-        /// rather than a comment.</para>
-        ///
-        /// <para><b>Scope, stated so it is not over-read:</b> the mesh path is not the only production site
-        /// that chooses both. <c>SymbolFeatureExtractor.Extract</c> does too, and it is the consumer that
-        /// sizes by <c>Features.Count</c> rather than <c>FeatureCount</c>. Its pairing is the same
-        /// resolve-once shape and is equally safe today, but it is <b>not covered here</b> — a clause over
-        /// the extractor would be a near-copy of this one. Its distinctive hazard (the two counts
-        /// disagreeing) IS covered, by clause B.</para>
+        /// The real <see cref="TileMeshLayerProcessor"/>, the mesh path's only caller of
+        /// <c>BuildGraphRequest</c>, hands a layer the buffer of the <b>same</b> source-layer its ordinals came
+        /// from. "roads" has 2 features and "places" 5, so a wrong buffer shows as a different
+        /// <c>FeatureCount</c>. Limitation: <c>SymbolFeatureExtractor.Extract</c> pairs the two as well and is
+        /// not covered here.
         /// </summary>
         [Test]
         public void TheMeshProcessor_PairsASelectionWithItsOwnLayersBuffer()
@@ -2956,9 +2690,8 @@ namespace MapRenderer.Tests.Jobs
             new SphericalProjection(),
         };
 
-        // ── The Burst precondition — job-scheduling-design.md's own register, FillMeshGraphStructureTests'
-        // JobDebugger_IsEnabled_… precedent. No injection of its own: RED-verify by hand, toggling
-        // Jobs ▸ Burst ▸ Enable Compilation off. ─────────────────────────────────────────────────────────
+        // ── The Burst precondition: with compilation off, the projection probes compare managed to managed ──
+        // RED by hand: toggle Jobs ▸ Burst ▸ Enable Compilation off.
         [Test]
         public void Burst_IsEnabled_OrTheProjectionProbesAreVacuous()
         {
@@ -3021,11 +2754,8 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        // ── (ii) IProjection.ProjectPoint vs ProjectPointsJob<TProj>. Compared as double3, NO float3 cast — ─
-        // ── a managed↔Burst difference below a float ulp would otherwise compare equal and this probe would ─
-        // ── report green while measuring nothing. This is the ONE sanctioned .Schedule in the wall stage: ──
-        // ── this [Test] body runs on the main thread, where scheduling is legal ────────────────────────────
-        // ── reinstates the off-main .Run() entry point this probe's own subject does not need yet. ────────
+        // ── (ii) IProjection.ProjectPoint vs ProjectPointsJob<TProj>, compared as double3 ──────────────────
+        // A float3 cast would hide a managed↔Burst difference below a float ulp. It schedules on the main thread.
         [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
         [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
         public void ProjectPoint_Managed_MatchesProjectPointsJob(string fixture, int z, int x, int y)
@@ -3117,10 +2847,8 @@ namespace MapRenderer.Tests.Jobs
                 $"managed=0x{m:X16} ({managed:R}) burst=0x{b:X16} ({burst:R})");
         }
 
-        // ── Per-field ULP-distance bound, using the standard IEEE-754 total-order mapping (never a raw bit- ─
-        // ── pattern subtraction, which is wrong across zero and across sign) — Bruce Dawson's AlmostEqualUlps
-        // ── idiom: push positive doubles into the upper half of the ulong range, negative ones (bit-inverted)
-        // ── into the lower half, so |orderedA - orderedB| is the true ULP distance regardless of sign. ──────
+        // ── ULP distance via the IEEE-754 total-order mapping (a raw bit subtraction is wrong across zero) ──
+        // Positives map to the upper half of ulong, bit-inverted negatives to the lower, so |a - b| is the ULP gap.
         private static ulong ToUlpOrder(double d)
         {
             long bits = System.BitConverter.DoubleToInt64Bits(d);
@@ -3224,26 +2952,11 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The property the whole byte-identity argument for earcut's <b>hole-bridge order</b> rests
-    /// on: <b>every hole belongs to the same source-layer feature as its polygon's outer ring</b>.
-    ///
-    /// <para><b>Why it matters.</b> The shared buffer replaces "the materializer receives exactly this layer's features" with
-    /// "the buffer is shared and each consumer walks a ring <i>visit order</i>". Fill's visit order groups by
-    /// feature and keeps decode order <i>within</i> a feature. The hole sort — <c>FillMeshPipeline.HoleRingComparer</c>,
-    /// run from <c>FillGatherJob</c> on the graph — tiebreaks on <b>ring
-    /// index</b>, so bridge order is preserved iff the
-    /// holes being compared are always rings whose relative order the derive did not disturb — which is true
-    /// exactly when a polygon's holes share its outer ring's feature.</para>
-    ///
-    /// <para><b>The mechanism</b> (read <c>RingAssemblyJob.Execute</c>): <c>exteriorSign</c> is reset to 0
-    /// whenever <c>RingFeatureIdx[ri] != prevFeature</c>, and <c>prevFeature</c> is updated <i>before</i> the
-    /// area test — so the first area-surviving ring of a feature always takes the "first valid ring" branch,
-    /// becomes an outer, and re-points <c>currentPolyIdx</c> into that feature. A hole can therefore only ever
-    /// be attached to an outer of its own feature.</para>
-    ///
-    /// <para>This test is the <b>positive</b> check of that argument, run over real data rather than argued.
-    /// It was run at baseline; it is kept because the property is cheap to state and
-    /// expensive to rediscover.</para>
+    /// <b>Every hole belongs to the same source-layer feature as its polygon's outer ring</b>, checked over real
+    /// data. Non-local invariant: <c>FillMeshPipeline.HoleRingComparer</c> tiebreaks on ring index, so earcut's
+    /// hole-bridge order is byte-identical only while a polygon's holes share its outer's feature.
+    /// <c>RingAssemblyJob.Execute</c> resets <c>exteriorSign</c> on each new feature before the area test, so
+    /// a feature's first surviving ring is always an outer.
     /// </summary>
     [TestFixture]
     public class RingAssemblyHoleAttributionTests
@@ -3270,12 +2983,8 @@ namespace MapRenderer.Tests.Jobs
                     ITileLayer layer = tile.GetLayer(layerName);
                     if (layer == null) continue;
 
-                    // Exactly the feature set fill hands the materializer today, and exactly the set the shared buffer’s
-                    // ring visit order will name: the layer's Polygon features, in layer order.
-                    // The LAYER's own buffer — the whole layer, exactly what every consumer
-                    // borrows. The ring→feature attribution this tooth measures is per-feature and
-                    // unaffected by the wider feature set: the kind column keeps the non-polygon
-                    // features out of the ring assembly.
+                    // The layer's whole buffer, as every consumer borrows it; the kind column keeps non-polygon
+                    // features out of ring assembly, so per-feature attribution is unaffected.
                     bool anyPolygon = false;
                     foreach (IFeature f in layer.Features)
                         if (f.GeometryType == TileGeometryType.Polygon) { anyPolygon = true; break; }
@@ -3299,9 +3008,7 @@ namespace MapRenderer.Tests.Jobs
             }
 
             // ── Anti-vacuity: the claim above must be about a NON-EMPTY set. ──────────────────────────
-            // Without these three, a corpus that produced no polygons at all — or polygons but no holes —
-            // would pass this test while saying nothing whatsoever about hole attribution (the
-            // inert-injection shape: the fixture cannot express the defect).
+            // A corpus with no polygons, or no holes, would pass while saying nothing about attribution.
             Assert.Greater(layersExamined, 0, "anti-vacuity: no layer in the corpus materialized any rings");
             Assert.Greater(totalPolygons, 0, "anti-vacuity: the corpus assembled zero polygons");
             Assert.Greater(totalPolygonsWithHoles, 0,
@@ -3404,17 +3111,10 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="RingAssemblyJob"/>'s <b>kind gate</b>: a ring whose feature is not a Polygon is
-    /// never classified, whatever its area.
-    ///
-    /// <para><b>Why the job needs its own gate.</b> The assembler classifies purely by signed area, and a
-    /// LineString ring is the same shape of data as a polygon ring — so an ungated job reads a road as a
-    /// spurious exterior (or, worse, as a hole of the polygon before it) and corrupts the triangulation
-    /// silently. A caller-side filter is the other guard: because the geometry buffer is shared across
-    /// consumers, it decides which ring INDICES go into an int array — bookkeeping-shaped code in a
-    /// loop whose obvious purpose is "compute a draw order", and therefore much easier to lose than a
-    /// filter that reads "select my features". Two independent guards; this file observes the Burst
-    /// one in isolation.</para>
+    /// <see cref="RingAssemblyJob"/>'s <b>kind gate</b>: a ring whose feature is not a Polygon is never
+    /// classified, whatever its area. Non-obvious why: the job has its own gate because it classifies by
+    /// signed area alone, so an ungated road ring becomes a spurious exterior or hole. The caller's
+    /// visit-order filter is a second guard, and it is easy to lose.
     /// </summary>
     [TestFixture]
     public class RingAssemblyKindGateTests
@@ -3442,20 +3142,14 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// Placement, not merely presence: a LineString feature's ring appearing BEFORE a polygon feature's
-        /// must leave the classifier state untouched, so the polygon still becomes an outer and its hole is
-        /// still attached to it.
-        ///
-        /// <para>A gate placed after the sign/area work would let the LineString establish an exterior sign
-        /// first; the polygon's outer would then be read as an opposite-sign candidate hole of a polygon that
-        /// does not exist, and the real hole would flip to an outer. That is a 2-polygon / 0-hole answer here
-        /// versus the correct 1 / 1.</para>
+        /// A LineString ring BEFORE a polygon's must leave the classifier state untouched, so the polygon is still
+        /// an outer with its hole. A gate placed after the sign/area work lets the LineString set the exterior
+        /// sign and gives 2 polygons / 0 holes instead of 1 / 1.
         /// </summary>
         [Test]
         public void KindGate_ALineStringBeforeAPolygon_DoesNotDisturbTheClassifierState()
         {
-            // Feature 0: a LineString ring wound the SAME way as the polygon's outer (so, if it were let
-            // through, it would establish the same exterior sign and steal `currentPolyIdx`).
+            // Feature 0: a LineString ring wound like the outer, so if let through it steals `currentPolyIdx`.
             // Feature 1: a polygon outer + its hole, wound oppositely as the format requires.
             double2[][] rings =
             {

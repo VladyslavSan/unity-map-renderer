@@ -1,11 +1,5 @@
-// Unity EditMode only — reads a rendered frame produced by OffLookAtSymbolScene. NOT registered in
-// Tools/core-tests/core-tests.csproj.
-//
-// The ink-run segmenter shared by the map-pitch ink teeth, so a second consumer does not fork a third ink
-// probe across these suites.
-//
-// It lives here rather than in WorldSymbolInkAnalysis: frozen snapshot teeth depend on that analyser, and
-// moving these helpers into it would put new code under all of them.
+// Unity EditMode only (not in Tools/core-tests) — the ink-run segmenter the map-pitch ink teeth share. It is
+// not in WorldSymbolInkAnalysis, because frozen snapshot teeth depend on that analyser.
 
 #if UNITY_EDITOR
 using System.Collections.Generic;

@@ -11,18 +11,11 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// A synthetic <see cref="ITileLayer"/> shaped exactly like a decoded one: it <b>owns</b> its
+    /// A synthetic <see cref="ITileLayer"/> shaped like a decoded one: it <b>owns</b> its
     /// <see cref="TileGeometryBuffers"/>, materialized ONCE at construction through the real
-    /// <see cref="MvtGeometryMaterializer"/> from its features' command streams.
-    ///
-    /// <para><b>Why eager-at-construction and not a lazy property.</b> The production layer's buffer is minted
-    /// inside <c>MvtDecoder.Decode</c>, so it exists before anything can read it and there is exactly one of
-    /// it. A lazy fixture property would be a different shape from the thing under test — and, worse, would
-    /// make the buffer-identity assertions in <c>SourceLayerBufferSharingTests</c> pass for a reason
-    /// production does not have.</para>
-    ///
-    /// <para>Disposable, and callers should dispose (via <see cref="InMemoryDecodedTile"/>, which owns its
-    /// layers): the buffer is <c>Allocator.Persistent</c>.</para>
+    /// <see cref="MvtGeometryMaterializer"/>. Non-obvious why: <c>MvtDecoder.Decode</c> mints one buffer
+    /// before any read, and a lazy property would let <c>SourceLayerBufferSharingTests</c> pass for a
+    /// reason production lacks. Dispose it via <see cref="InMemoryDecodedTile"/>; the buffer is Persistent.
     /// </summary>
     public sealed class InMemoryTileLayer : ITileLayer, IDisposable
     {

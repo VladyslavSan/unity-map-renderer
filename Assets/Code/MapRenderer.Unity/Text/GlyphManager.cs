@@ -1,12 +1,5 @@
-// Engine-free by design (mirrors TileScheduler's decoupling from UnityWebRequestDataSource): this
-// file references only System/Cysharp.Threading.Tasks/
-// MapRenderer.Core.Text — NO UnityEngine using. It physically lives under MapRenderer.Unity (the
-// atlas/texture wiring it feeds is Unity-only) but stays compilable standalone so its logic runs in
-// BOTH the Unity EditMode runner and the fast Tools/core-tests project (the matching
-// <Compile Include> lives in Tools/core-tests/core-tests.csproj). Do NOT add a UnityEngine reference
-// here, and do NOT reference UnityWebRequestGlyphSource directly (that WOULD drag UnityEngine.Networking
-// into this file's compile unit) — the caller builds the concrete IGlyphSource from
-// StyleDocument.Glyphs and injects it (mirrors TileDataSourceFactory feeding TileScheduler).
+// Non-local invariant: Tools/core-tests/core-tests.csproj compiles this file, so it must not reference
+// UnityEngine or UnityWebRequestGlyphSource; the caller injects the concrete IGlyphSource.
 
 using System;
 using System.Collections.Generic;
@@ -20,34 +13,11 @@ namespace MapRenderer.Unity.Text
     /// <summary>
     /// Ties <see cref="IGlyphSource"/> + <see cref="GlyphPbfDecoder"/> +
     /// <see cref="GlyphCache"/> + <see cref="GlyphAtlas"/> + <see cref="FontStackResolver"/> into the
-    /// fetch/decode/cache/atlas pipeline a <c>text-font</c> stack needs.
-    ///
-    /// <para>
-    /// <b>Fetch model:</b>
-    /// fetches happen PER INDIVIDUAL FONT NAME in a <see cref="FontStack"/>'s <see cref="FontStack.Names"/>
-    /// — not the joined <see cref="FontStack.RequestToken"/>. For each font name: <see cref="IGlyphSource.FetchAsync"/>
-    /// → <see cref="GlyphPbfDecoder.Decode"/> → store under <c>(fontName, rangeStart)</c> in
-    /// <see cref="GlyphCache"/> → append every decoded glyph to the shared <see cref="Atlas"/>. A
-    /// <see cref="FontStackResolver"/> (constructed by <see cref="CreateResolver"/>) then resolves a
-    /// codepoint against the per-font-name cache entries in stack order, giving correct fallback.
-    /// A single-entry stack (e.g. the demotiles composite "Noto Sans Regular") is simply the degenerate
-    /// one-name case of this same loop.
-    /// </para>
-    ///
-    /// <para>
-    /// The <see cref="IGlyphSource"/> passed to the constructor is normally built from the style's root
-    /// <see cref="MapRenderer.Core.Style.StyleDocument.Glyphs"/> URL template — e.g.
-    /// <c>new GlyphManager(new UnityWebRequestGlyphSource(style.Glyphs))</c> — the caller's job, mirroring
-    /// how <c>TileDataSourceFactory</c> builds a tile <c>IDataSource</c> outside <c>TileScheduler</c>. That
-    /// keeps this class decoupled from any concrete transport and fully testable with an in-memory fake.
-    /// </para>
-    ///
-    /// <para>
-    /// Main-thread-only for atlas mutation: <see cref="EnsureFontRangeAsync"/>'s only <c>await</c> is the
-    /// fetch itself; the decode/cache/atlas-append steps that follow run synchronously on whatever
-    /// context the fetch resumed on (Unity's <c>UnityWebRequest</c>-backed source resumes on the main
-    /// thread via its PlayerLoop-bound <c>.ToUniTask()</c>, exactly like <c>UnityWebRequestDataSource</c>).
-    /// </para>
+    /// fetch/decode/cache/atlas pipeline a <c>text-font</c> stack needs. It fetches per font NAME, not per
+    /// joined <see cref="FontStack.RequestToken"/>, so <see cref="FontStackResolver"/> can fall back in
+    /// stack order. Non-local invariant: the decode/cache/atlas steps run on the context the fetch resumes
+    /// on, so the <see cref="IGlyphSource"/> must resume on the main thread (the
+    /// <c>UnityWebRequest</c> source does).
     /// </summary>
     public sealed class GlyphManager : VerifiedDisposable
     {
@@ -134,16 +104,13 @@ namespace MapRenderer.Unity.Text
             };
         }
 
-        /// <param name="fontName">The REQUESTED name, not <see cref="FontStackGlyphs.Name"/>. The two
-        /// differ: the decoder fills Name from the name embedded IN the PBF, while the cache and
-        /// <see cref="FontStackResolver"/> both key on what the style asked for. Interning the embedded one
-        /// files every glyph under an id no lookup ever asks for, and the map renders no text at all.</param>
+        /// <param name="fontName">The REQUESTED name, not the PBF-embedded <see cref="FontStackGlyphs.Name"/>:
+        /// the cache and <see cref="FontStackResolver"/> key on the requested name.</param>
         private void AppendToAtlas(string fontName, FontStackGlyphs glyphs)
         {
             if (glyphs.Glyphs == null) return;
-            // The id is per FONT, so it is taken once per decoded range, not per glyph. Without it the
-            // "already present" skip below reads as "some other face already has this codepoint" and drops
-            // this face's glyph — which is how a whole map ends up rendering in one arbitrary face.
+            // The skip below is per font id; a skip by codepoint alone drops this face's glyph when
+            // another face already has that codepoint.
             int fontId = _atlas.FontId(fontName);
             foreach (var kv in glyphs.Glyphs)
             {

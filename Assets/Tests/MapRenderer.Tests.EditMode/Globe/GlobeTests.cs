@@ -1,9 +1,5 @@
-// Globe/GlobeTests.cs — globe fill/line subdivision, winding, tangent and placement teeth (EditMode).
-//
-// GlobeTileSelectorTests.cs stays its own file (fast lane, csproj-registered). No using/alias
-// collision across these nine: the two files that alias Fill = MapRenderer.Core.Style.Fill
-// (GlobeFillTangentTests, GlobeFillWindingTests) are the only ones that use it bare; the two files that
-// only import the MapRenderer.Jobs.Fill namespace never write a bare Fill.X.
+// Globe fill/line subdivision, winding, tangent and placement tests (EditMode). GlobeTileSelectorTests.cs
+// is separate because Tools/core-tests compiles it.
 //
 // Contents:
 //   GlobeCameraInteractionTests              — SphericalProjection ScreenToGround/GroundToScreen against Unity's own camera, plus the anchored-pan pin over a simulated drag.
@@ -147,9 +143,8 @@ namespace MapRenderer.Tests.Globe
             var proj = new SphericalProjection();
             var c    = Cam(12, 20, 3.0);
 
-            // Grab an off-centre point, then request it be dragged to a different cursor position. The Controller
-            // captures the grabbed ground ONCE and calls ApplyPan every frame — a fixed-point iteration that
-            // converges to the exact pin. Simulate that here.
+            // Drag an off-centre point to a new cursor. The controller grabs the ground ONCE and calls ApplyPan
+            // every frame, a fixed-point iteration that converges to the pin; this simulates it.
             var pStart = new double2(360, 260);
             var pTarget = new double2(470, 350);
             GeoCoordinate3D grabbed = proj.ScreenToGround(pStart, Vp, c);
@@ -170,12 +165,8 @@ namespace MapRenderer.Tests.Globe
         [Test]
         public void GlobePin_UnderDpr2_HoldsWithLogicalSeam_DriftsWithPhysical()
         {
-            // T-GLOBE-PIN-DPI: under DPR=2 the render camera frames the LOGICAL viewport (vp ÷ DPR), so
-            // GroundToScreen(·, vpLogical) IS the render (pinned against Unity's own camera by
-            // GroundToScreen_MatchesUnityCameraProjection). The interaction seam divides BOTH cursor and
-            // viewport by DPR before calling the projection, so the grabbed point re-renders under the cursor.
-            // Reconstructing with the PHYSICAL viewport (skipping the ÷DPR) puts the camera at 2× the render
-            // altitude → the point drifts off.
+            // Under DPR=2 the render frames the LOGICAL viewport, so the seam divides cursor and viewport by DPR
+            // and the grabbed point re-renders under the cursor. The PHYSICAL viewport doubles the altitude.
             const double dpr = 2.0;
             double2 vpPhysical = new double2(800, 600);
             double2 vpLogical  = vpPhysical / dpr; // 400×300 — what the render frames and the seam uses
@@ -193,9 +184,8 @@ namespace MapRenderer.Tests.Globe
             Assert.AreEqual(cursorPhysical.x, rendered.x, 1.0, "pin holds under DPR=2 with the logical seam (x)");
             Assert.AreEqual(cursorPhysical.y, rendered.y, 1.0, "pin holds under DPR=2 with the logical seam (y)");
 
-            // BUG: feed the PHYSICAL cursor + viewport to the projection while the render stays logical. Same
-            // NDC ray, but the reconstructed altitude (from vpPhysical.y) is 2× the render's → the grabbed
-            // point, re-rendered, drifts off the cursor. This is the interaction the stage says not to skip.
+            // The defect: the PHYSICAL cursor and viewport give the same ray at 2× the render's altitude, so the
+            // grabbed point drifts off the cursor.
             GeoCoordinate3D grabbedBug  = proj.ScreenToGround(cursorPhysical, vpPhysical, c);
             double2         renderedBug = proj.GroundToScreen(grabbedBug, vpLogical, c) * dpr;
             double          drift       = math.length(renderedBug - cursorPhysical);
@@ -315,9 +305,8 @@ namespace MapRenderer.Tests.Globe
         [Test]
         public void GlobePan_CursorDraggedOffGlobe_FreezesAndNeverSpins()
         {
-            // The reported second case: click ON the earth, drag the cursor OFF it, and hold. There is no ground
-            // point under an off-globe cursor, so the pan must FREEZE (hold the look-at) — not chase the clamped
-            // silhouette forever. At zoom 0 the globe is a tiny disc, so a far-corner cursor is well off it.
+            // Grab ON the earth, drag OFF it and hold: with no ground under the cursor the pan must FREEZE, not
+            // chase the silhouette. At zoom 0 a far-corner cursor is well off the disc.
             var proj = new SphericalProjection();
             var c    = Cam(12, 20, 0.0);
             GeoCoordinate3D grabbed = proj.ScreenToGround(new double2(400, 300), Vp, c); // dead-centre → a real hit
@@ -341,10 +330,8 @@ namespace MapRenderer.Tests.Globe
         [Test]
         public void GlobePan_SlowDragThroughTheLimb_DoesNotSpin()
         {
-            // The reported corner case: slowly drag the cursor from inside the earth, through the edge, and out.
-            // Right at the limb the surface is edge-on and the pin is singular; the grazing guard must freeze the
-            // pan there rather than churn the look-at. A legitimate pan from centre toward the limb rotates the
-            // globe at most ~one hemisphere; a spin would blow far past a single turn.
+            // Drag slowly from the centre out through the limb, where the pin is singular: the grazing guard must
+            // freeze the pan. A real pan turns at most ~one hemisphere; a spin goes far past a turn.
             var proj = new SphericalProjection();
             var c    = Cam(12, 20, 0.0); // zoom 0 → the whole limb is on screen
             GeoCoordinate3D grabbed = proj.ScreenToGround(new double2(400, 300), Vp, c); // centre → a real hit
@@ -471,14 +458,10 @@ namespace MapRenderer.Tests.Globe
         // ── The refusal gate: the interior is untouched, and the band conforms to it ────────────────────
 
         /// <summary>
-        /// Subdividing the interior triangle produces bit-identical output whether or not band quads are in
-        /// the same input — the band appends, it never perturbs. And the band's own share of the output
-        /// splits the shared edge at exactly the same tile coordinates the interior does, which is the
-        /// conformance claim that lets the band ride through subdivision at all.
-        ///
-        /// <para>RED-verify: reverse the band quad's two triangles into non-degenerate tile positions (give
-        /// the outer vertices a real tile offset) and the shared-edge sets diverge; the split points stop
-        /// agreeing because the marks stop being computed from the same endpoints.</para>
+        /// The interior triangle subdivides bit-identically with or without band quads in the input: the band
+        /// appends and never perturbs. The band splits the shared edge at the same tile coordinates as the
+        /// interior, which lets it ride through subdivision. RED: give the band's outer vertices a real tile
+        /// offset, and the split points diverge.
         /// </summary>
         [Test]
         public void ABandQuadSplitsTheSharedEdgeExactlyWhereTheInteriorDoes()
@@ -534,14 +517,10 @@ namespace MapRenderer.Tests.Globe
 
         // ── The band does not perturb the interior's subdivision ───────────────────────────────────────
 
-        /// <summary>Builds the z0 countries fixture on the sphere, with or without the boundary band, and
-        /// returns the vertices of its INTERIOR triangles only, in triangle order.
-        ///
-        /// <para><b>The interior/band discriminator is per-TRIANGLE, and it is exact.</b> A band leaf
-        /// triangle always retains at least one vertex with <c>side &gt; 0</c>: <c>side</c> is affine over a
-        /// source triangle, so its zero set is a LINE (the band's inner edge), and a sub-triangle with all
-        /// three vertices on a line would be degenerate — subdivision produces none. So "all three vertices
-        /// carry side 0" identifies interior triangles with no false positives.</para></summary>
+        /// <summary>Builds the z0 countries fixture on the sphere, with or without the band, and returns the
+        /// vertices of its INTERIOR triangles in order. "All three vertices have side 0" is exact: <c>side</c>
+        /// is affine over a source triangle, so its zero set is a line, and a band sub-triangle with all three
+        /// vertices on it would be degenerate.</summary>
         /// <param name="suppressBand">True to build with no band geometry at all.</param>
         /// <param name="interior">Vertices of the interior triangles, in triangle order.</param>
         /// <param name="totalVertices">The whole mesh's vertex count, band included.</param>
@@ -576,27 +555,11 @@ namespace MapRenderer.Tests.Globe
         }
 
         /// <summary>
-        /// The band changes nothing about the interior, on the real z0 countries fixture: the interior
-        /// triangles' vertex stream is IDENTICAL, element for element, with and without the band.
-        ///
-        /// <para><b>Why this compares interior-to-interior and not stream-to-stream.</b> Subdivision
-        /// re-emits every vertex in traversal order and <c>FillBandJob</c> interleaves each feature's band
-        /// triangles after that feature's own interior triangles, so the two whole streams are interleaved,
-        /// not nested. An in-order positional match over the raw streams would be a SUBSEQUENCE test, and a
-        /// band vertex sits on a ring vertex — a position the interior also carries — so it could advance
-        /// the match pointer and pass for the wrong reason. Filtering to interior triangles first (see
-        /// <see cref="BuildGlobeFixture"/> for why that discriminator is exact) makes this a plain equality.
-        /// Do not restore the subsequence form.</para>
-        ///
-        /// <para><b>Why this is stronger than a budget check.</b> The subdivider's only cross-triangle
-        /// coupling is its budget test, so this property is what a correct budget split BUYS; asserting it
-        /// directly holds no matter where any ceiling later sits. It is also the property the rendered
-        /// six-pixel failure violated: a shared budget let band vertices starve the interior, triangles past
-        /// the cutoff emitted flat, and a thin feature moved off the pixels it had covered.</para>
-        ///
-        /// <para>RED-verify: point <c>GlobeFillSubdivideJob</c>'s <c>overBudget</c> back at
-        /// <c>OutVerts.Length &gt;= InteriorBudget</c> (the shared budget this replaced) and it fails,
-        /// naming the first interior vertex that moved.</para>
+        /// On the z0 countries fixture the interior triangles' vertex stream is IDENTICAL with and without the
+        /// band. Non-obvious why: it filters to interior triangles first, because band triangles interleave
+        /// with the interior and a band vertex on a ring vertex would let a subsequence match pass. A shared
+        /// budget would let band vertices starve the interior into flat triangles. RED: point
+        /// <c>overBudget</c> at <c>OutVerts.Length &gt;= InteriorBudget</c>.
         /// </summary>
         [Test]
         public void TheBandLeavesTheCurvedArmsInteriorAndBoundsAlone()
@@ -618,10 +581,8 @@ namespace MapRenderer.Tests.Globe
                 "is a backstop, not a working limit; hitting it on the shipped fixture means it is sized " +
                 "wrong or the arm's cost has changed.");
 
-            // The band's one-pixel displacement happens in the VERTEX SHADER, so a band vertex sits on its
-            // ring vertex CPU-side and the mesh bounds cannot legitimately grow. If they do, the displacement
-            // has moved out of the shader and the mechanism has changed underneath us — and any fixture that
-            // fits a camera per mesh is then measuring the transform rather than the band.
+            // The band's displacement is in the VERTEX SHADER, so CPU-side bounds must not grow; if they do, the
+            // displacement has left the shader and per-mesh camera fits measure the transform.
             Assert.AreEqual(hardBounds, bandedBounds,
                 $"the two builds' bounds differ (hard={hardBounds}, banded={bandedBounds}).");
 
@@ -638,23 +599,10 @@ namespace MapRenderer.Tests.Globe
         }
 
         /// <summary>
-        /// The curved arm's INTERIOR keeps real headroom under its own subdivision budget on the shipped
-        /// fixture. Past that budget the subdivider forces triangles to emit flat regardless of their marks,
-        /// so exhausting it is a silent quality regression — the globe's fills facet — with no error and no
-        /// failing test anywhere else.
-        ///
-        /// <para><b>The fence is 95%, and here is the whole trade.</b> Measured when it was written:
-        /// 164 535 of 200 000, or 82.3%. It is not set at the measurement, because a fence at the
-        /// measurement is one no regression fails. It is not set at 100% either, because past the budget the
-        /// subdivider emits flat regardless of marks and the globe facets SILENTLY — the fence has to fire
-        /// while there is still something to do about it.
-        /// <b>What it will NOT catch: interior growth under ~25 500 vertices passes silently.</b> That is the
-        /// cost of 95% over a tighter 90%, stated so the number does not read as arbitrary and so the next
-        /// reader moves it knowingly or not at all.</para>
-        ///
-        /// <para>Getting 164 535 down is separate work — this fence only stops it
-        /// getting worse. <c>DefaultMaxInteriorVertices</c>' own doc cites this tooth as what keeps the
-        /// headroom claim visible.</para>
+        /// The curved arm's INTERIOR keeps headroom under its subdivision budget on the shipped fixture. Past
+        /// the budget, triangles emit flat and the globe's fills facet with no error anywhere. The fence is
+        /// 95%, not 100%, so it fires while there is still room to act. Limitation: interior growth that
+        /// stays under 95% passes silently.
         /// </summary>
         [Test]
         public void TheCurvedArmsInteriorKeepsHeadroomUnderItsBudget()
@@ -676,20 +624,10 @@ namespace MapRenderer.Tests.Globe
         // ── The attribute survives the lerp, and stays a displacement times a coverage coordinate ──────
 
         /// <summary>
-        /// Across every subdivided band vertex the two halves of the attribute stay consistent:
-        /// <c>|band.xy| == side</c> (these fixtures use a unit miter), <c>side</c> stays inside
-        /// <c>[0,1]</c>, and at least one vertex lands STRICTLY between the two — the midpoint of a split
-        /// inner→outer edge, which is what proves the subdivider interpolates the attribute rather than
-        /// dropping or duplicating it.
-        ///
-        /// <para>The three assertions are not redundant. Dropping the band from the midpoint construction
-        /// entirely leaves every vertex at <c>side</c> 0 or 1 with <c>|xy|</c> to match, so the ratio
-        /// assertion stays GREEN and only the strictly-between one reds. Interpolating only one half reds
-        /// the ratio.</para>
-        ///
-        /// <para>RED-verify: make the midpoint take one endpoint's band instead of their average (only the
-        /// strictly-between assertion reds), then make it average only <c>xy</c> and take <c>z</c> from an
-        /// endpoint (the ratio assertion reds).</para>
+        /// Across every subdivided band vertex, <c>|band.xy| == side</c> (unit miter), <c>side</c> stays in
+        /// <c>[0,1]</c>, and at least one vertex lies STRICTLY between: a split inner→outer edge's midpoint.
+        /// A midpoint that copies one endpoint's band passes the ratio check and fails only the
+        /// strictly-between one; averaging only <c>xy</c> fails the ratio.
         /// </summary>
         [Test]
         public void SubdividingABandEdgeInterpolatesBothHalvesOfTheAttribute()
@@ -759,10 +697,8 @@ namespace MapRenderer.Tests.Globe
             try
             {
                 Assert.Greater(v.Length, 3, "a 45° globe triangle must subdivide past the single flat triangle");
-                // vertex sharing: OutVerts (v) is now the UNIQUE count and OutIndices
-                // (idx) the EMITTED count — every 1→4 split's 3 midpoints are each shared by 3 of its 4
-                // children (GlobeFillVertexKey), so a single-triangle subdivision this deep MUST show real
-                // sharing, not just "no more than" the emitted count.
+                // OutVerts holds UNIQUE vertices and OutIndices EMITTED ones; a 1→4 split shares each midpoint
+                // (GlobeFillVertexKey), so a split this deep must show real sharing.
                 Assert.Less(v.Length, idx.Length, "a multi-level split must produce SOME shared split-edge vertices");
                 Assert.AreEqual(0, idx.Length % 3, "indices form whole triangles");
 
@@ -796,10 +732,8 @@ namespace MapRenderer.Tests.Globe
             Run(new SphericalProjection(), new TileId { Z = 0, X = 0, Y = 0 }, 8, 2000, out var v, out var idx);
             try
             {
-                // vertex sharing: the budget counts EMITTED vertices (idx.Length, one
-                // OutIndices.Add per Emit call) — v (OutVerts, the unique count) is always <= idx.Length, so
-                // asserting on v does not pin the bound that actually exists: sharing makes it strictly
-                // easier to pass without the budget doing any more work. Assert on idx.Length instead.
+                // The budget counts EMITTED vertices (idx.Length); the unique count v is smaller, so asserting
+                // on v would not pin the budget.
                 Assert.Less(idx.Length, 20000, "the vertex budget must prevent the low-zoom subdivision explosion");
             }
             finally { v.Dispose(); idx.Dispose(); }
@@ -883,12 +817,8 @@ namespace MapRenderer.Tests.Globe
                 layer, selection, paint, 0.0, FixtureTile, new SphericalProjection(), suppressBoundaryBand: true));
             Assert.IsNotNull(flat); Assert.IsNotNull(globe);
 
-            // Subdivision refines flat earcut triangles onto the sphere → strictly more TRIANGLES than the flat
-            // build, while Mercator stays exactly the un-subdivided earcut output.
-            // vertex sharing: was asserted on vertexCount, which sharing now shrinks
-            // (fewer unique vertices for the same triangle set) — triangle/index count is what subdivision
-            // actually grows, and sharing never touches it (every leaf triangle still emits exactly 3 indices,
-            // shared storage or not), so it stays the right, sharing-invariant signal for "did it subdivide".
+            // The globe build has far more TRIANGLES than flat Mercator. Triangle count, unlike vertex count,
+            // is unaffected by vertex sharing.
             Assert.Greater(globe.triangles.Length, flat.triangles.Length * 2,
                 "globe fill must subdivide for curvature (many more triangles than the flat Mercator build)");
         }
@@ -943,12 +873,9 @@ namespace MapRenderer.Tests.Globe
             return (mvtLayer, selected, paint);
         }
 
-        /// <summary>Tally the sign of the angle between each triangle's geometric face normal
-        /// (cross(b-a, c-a)) and its outward surface normal; returns (dominantSign, uniformity ∈ [0.5,1]).
-        /// Skips edge-on slivers: the 1→4 midpoint subdivision on the globe produces thin triangles whose
-        /// face normal is numerical noise (≈⊥ the surface). A well-formed sub-triangle spans ≤3° of curvature,
-        /// so its face normal is within a few degrees of the surface normal (cosine≈+1); a genuinely BACK-facing
-        /// triangle reads cosine≈−1 — both survive the |cosine|>0.5 gate, only the noise is dropped.</summary>
+        /// <summary>Tallies the sign of the angle between each triangle's face normal and its outward surface
+        /// normal; returns (dominantSign, uniformity ∈ [0.5,1]). The |cosine| &gt; 0.5 gate drops edge-on
+        /// subdivision slivers, whose face normal is noise, and keeps both front (≈+1) and back (≈−1) faces.</summary>
         private static (int sign, double uniformity, int counted) WindingSign(Mesh mesh)
         {
             Vector3[] v = mesh.vertices;
@@ -964,13 +891,8 @@ namespace MapRenderer.Tests.Globe
                 float3 nn = n[t[i]];
                 float gm = math.length(g), nm = math.length(nn);
                 if (gm <= 0f || nm <= 0f) continue;
-                // Skip near-degenerate NEEDLE slivers (high aspect ratio): the globe fill's edge-conforming
-                // subdivision leaves antimeridian-spanning earcut slivers (an earcut concern, not a winding
-                // one — ~0.08% of z0 fill area) whose geometric face normal is likewise numerical noise, but
-                // not edge-on enough to trip the |cos|<0.5 gate below. thinness = 2·area/longestEdge² =
-                // gm/longestEdge²; well-formed ≈0.4+, a needle ≈<0.02. This keeps the check measuring
-                // MVT/earcut orientation consistency on WELL-FORMED triangles (its stated intent) — it does
-                // NOT lower the 0.99 uniformity bar.
+                // Skip NEEDLE slivers (thinness gm/longestEdge² < 0.02): antimeridian earcut slivers have a noisy
+                // face normal that the |cos| gate misses. The 0.99 uniformity bar is unchanged.
                 float longestSq = math.max(math.lengthsq(vb - va), math.max(math.lengthsq(vc - vb), math.lengthsq(va - vc)));
                 if (longestSq > 0f && gm / longestSq < 0.02f) continue; // needle sliver — face-normal noise
                 float cos = math.dot(g, nn) / (gm * nm);  // angle between face normal and surface up
@@ -1006,15 +928,8 @@ namespace MapRenderer.Tests.Globe
             Assert.Greater(mUnif, 0.99, "Mercator fill winding is not uniform (mixed-orientation triangles)");
             Assert.Greater(gUnif, 0.99, "globe fill winding is not uniform (mixed-orientation triangles)");
 
-            // ABSOLUTE invariant (post the GPU-boundary winding reversal in StyledFillTileBuilder): each emitted
-            // triangle's right-handed face normal must ALIGN with the outward surface normal (sign +1) — the
-            // front face genuinely points OUT of the surface. That is exactly the orientation stock Cull Back
-            // (shipped MapFill.mat _Cull:2) keeps for the camera-facing surface. Same convention as the
-            // LayerOrderSnapshotTests fill quad: {0,2,1,0,3,2} with a +Y normal ⇒ dot(cross_RH, up) = +1, which
-            // renders under Cull Back; the old {0,1,2} gave −1 and needed the compensating Cull Front. A sign of
-            // −1 here means the reversal was dropped and the render is inverted (front-renders-as-back). This
-            // catches the inversion that the earlier relative-only guard could not — it stayed green while both
-            // sides flipped together.
+            // ABSOLUTE: after StyledFillTileBuilder's winding reversal, each face normal points OUT of the surface
+            // (sign +1), as stock Cull Back needs. A relative-only check misses both sides flipping together.
             Assert.AreEqual(1, mSign, "Mercator fill front face must point OUT of the surface (Unity-front under stock Cull Back)");
             Assert.AreEqual(1, gSign, "globe fill front face must point OUT of the surface (Unity-front under stock Cull Back)");
             // Consistency: globe must wind the SAME as Mercator relative to its outward normal, so one cull mode
@@ -1131,11 +1046,8 @@ namespace MapRenderer.Tests.Globe
 
             Assert.Greater(mUnif, 0.99, "Mercator ribbon winding is not uniform");
             Assert.Greater(gUnif, 0.99, "globe ribbon winding is not uniform");
-            // ABSOLUTE invariant (post the GPU-boundary winding reversal in StyledLineTileBuilder): the extruded
-            // ribbon's front face points OUT of the surface (sign +1), the orientation stock Cull Back (shipped
-            // MapLine.mat _Cull:2) keeps for the camera-facing side. Sign −1 means the reversal was dropped and
-            // the ribbon renders inverted. Closes the hole the relative-only check left (both sides could flip
-            // together and stay green).
+            // ABSOLUTE: after StyledLineTileBuilder's winding reversal, the ribbon's front face points OUT (sign
+            // +1), as stock Cull Back needs. A relative-only check misses both sides flipping together.
             Assert.AreEqual(1, mSign, $"{fixture}: Mercator ribbon front face must point OUT (Unity-front under stock Cull Back)");
             Assert.AreEqual(1, gSign, $"{fixture}: globe ribbon front face must point OUT (Unity-front under stock Cull Back)");
             Assert.AreEqual(mSign, gSign,
@@ -1143,13 +1055,10 @@ namespace MapRenderer.Tests.Globe
                 "back-face culling that shows Mercator would hide the near hemisphere on the globe.");
         }
 
-        /// <summary>Reconstruct the shader-extruded ribbon (pos + across·W — the shader bakes the per-side sign
-        /// INTO `across`/extrudeN, so there is NO ·side here; `side` is AA-only) and tally the sign of the angle
-        /// between each triangle's face normal and its surface normal. W is adaptive PER TRIANGLE — a small
-        /// fraction of the local centerline edge — so the ribbon stays locally thin and never folds at a sharp
-        /// turn (a fixed absolute W folds, and folds the globe's subdivided-shorter segments differently). This
-        /// is index-order-sensitive (the reversed winding is exactly what the flip fixes). Join/cap fans, whose
-        /// three verts share one centerline point (edge≈0), are skipped — their winding is ambiguous.</summary>
+        /// <summary>Rebuilds the shader-extruded ribbon as pos + across·W (<c>across</c> carries the side sign)
+        /// and tallies each triangle's face-normal sign against the surface normal. W is a small fraction of the
+        /// local centerline edge, so the ribbon never folds at a sharp turn. Join/cap fans, whose three vertices
+        /// share one centerline point, are skipped as ambiguous.</summary>
         internal static (int sign, double uniformity, int counted) RibbonWindingSign(Mesh mesh)
         {
             Vector3[] p   = mesh.vertices;
@@ -1222,9 +1131,7 @@ namespace MapRenderer.Tests.Globe
         }
 
         // ── The handedness tooth: rebase maps the ENU axes to the scene axes ───────────────────────
-        // This is what det/orthonormality CANNOT give. rebase = Bᵀ must send the render-space East vector
-        // (B.c0) to +X, Up (B.c1) to +Y, North (B.c2) to +Z. If someone used B instead of Bᵀ (the single
-        // most likely bug), rebase·East ≠ +X and this fails.
+        // rebase = Bᵀ sends East to +X, Up to +Y, North to +Z; using B instead of Bᵀ passes det checks but fails here.
 
         [Test]
         public void Rebase_MapsEnuAxesToSceneAxes()
@@ -1242,10 +1149,7 @@ namespace MapRenderer.Tests.Globe
         }
 
         // ── End-to-end handedness through the REAL camera pose ─────────────────────────────────────
-        // Project a point EAST of the look-at and one NORTH, rebase both into the scene frame, and push them
-        // through the camera built from CameraPoseMath.ComputeRelativePose. In Unity view space (worldToCameraMatrix:
-        // camera looks down −Z, +X right, +Y up) east must land +X and north must land +Y. Uses the camera's
-        // view matrix only (no GPU) so it is deterministic in headless batch mode.
+        // Through the ComputeRelativePose camera's view matrix, a point EAST of the look-at lands +X, NORTH +Y.
 
         [Test]
         public void GlobeCamera_EastIsScreenRight_NorthIsScreenUp()
@@ -1308,9 +1212,7 @@ namespace MapRenderer.Tests.Globe
         }
 
         // ── The tile containing the look-at places its look-at vertex at the scene origin ──────────
-        // Since a mesh vertex renders at rebase·(project(v) − sceneOrigin), a vertex AT the look-at renders
-        // at the origin. Verified via the transform composition: rebase·(project(v) − tileOrigin) [mesh-local]
-        // + position [TileToSceneRebased] == 0 when v == lookAt.
+        // Mesh-local rebase·(project(v) − tileOrigin) plus the TileToSceneRebased position is 0 at v == lookAt.
 
         [Test]
         public void TileToSceneRebased_LookAtVertex_RendersAtSceneOrigin()
@@ -1465,9 +1367,8 @@ namespace MapRenderer.Tests.Globe
             var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
             Assert.Greater(selected.Count, 0, "expected boundary_3 line features in this tile");
 
-            // These two struct literals bind to BuildLineFromLayer<TProj>, not the IProjection-typed
-            // overload (this is tooth (g)'s own point for the second: RightHandedSphereProjection is never
-            // registered with Burst) — see that overload's own doc note.
+            // Both struct literals bind to BuildLineFromLayer<TProj>, not the IProjection-typed overload;
+            // RightHandedSphereProjection is never registered with Burst (see that overload's doc).
             Mesh flat  = Track(TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, layer.Paint, layer.Layout, z, id, new WebMercatorProjection()));
             Mesh rh    = Track(TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, layer.Paint, layer.Layout, z, id, new RightHandedSphereProjection()));
             Assert.IsNotNull(flat, "Mercator line must produce geometry");

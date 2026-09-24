@@ -5,25 +5,14 @@ using System.Threading;
 namespace MapRenderer.Core.Lifetime
 {
     /// <summary>
-    /// A reference count over a single <typeparamref name="T"/> shared by several independent owners: the
-    /// value is disposed EXACTLY ONCE, by the last <see cref="Release"/>. The creator's reference is born with
-    /// the wrapper (<c>_refs == 1</c>), so the value is never ownerless; every further owner takes one with
-    /// <see cref="Acquire"/> and drops it with <see cref="Release"/>.
-    ///
-    /// <para><b>The reference you hold is the guarantee.</b> While you hold a reference the count is ≥ 1, so
-    /// the value is alive — that is why <see cref="Value"/> hands it back with no check and no lock. The only
-    /// synchronised state is the counter itself (<see cref="Acquire"/>/<see cref="Release"/> run from different
-    /// threads — the decode pool thread mints it, main-thread consumers and a job <c>finally</c> drop it), and
-    /// it is kept atomic with <see cref="Interlocked"/>, not a lock.</para>
-    ///
-    /// <para><b>No per-acquire token.</b> Each reference must reach EXACTLY ONE <see cref="Release"/>: dispose
-    /// fires on the single transition to zero, so an extra release is inert in release builds, while an
-    /// <see cref="Acquire"/> after the count has hit zero resurrects a freed value. Both are contract
-    /// violations, caught by <see cref="Debug"/> assertions in DEBUG/Editor builds and prevented in production
-    /// by a single-release-site discipline. Not <see cref="IDisposable"/>: the operation is
-    /// <see cref="Release"/>, so <c>using</c> can not single-owner-free a shared value. Sibling of
-    /// <see cref="VerifiedDisposable"/> — a refcount instead of a one-shot bool — sharing its
-    /// <see cref="VerifiedDisposable.LeakReporter"/> channel.</para>
+    /// A reference count over one <typeparamref name="T"/> shared by several owners: the last
+    /// <see cref="Release"/> disposes the value once. The creator's reference is born with the wrapper
+    /// (<c>_refs == 1</c>); each further owner pairs <see cref="Acquire"/> with <see cref="Release"/>, from any
+    /// thread. Only the counter is synchronised (<see cref="Interlocked"/>), so the reference you hold is what
+    /// keeps <see cref="Value"/> alive. Non-local invariant: each reference reaches exactly one
+    /// <see cref="Release"/>; an extra release is inert, and an <see cref="Acquire"/> after zero resurrects a
+    /// freed value, both caught by <see cref="Debug"/> assertions in DEBUG/Editor builds. Not
+    /// <see cref="IDisposable"/>, so <c>using</c> cannot free a shared value.
     /// </summary>
     /// <typeparam name="T">The shared, disposable value.</typeparam>
     public sealed class SharedDisposable<T> where T : class, IDisposable

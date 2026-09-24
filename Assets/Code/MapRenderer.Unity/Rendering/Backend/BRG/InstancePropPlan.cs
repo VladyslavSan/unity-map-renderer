@@ -1,6 +1,5 @@
-// Reflected-once packing plan for BrgTileRenderer.
-// Built at construction from MapInstanceData via System.Reflection + Marshal.OffsetOf;
-// never touched per-frame — per-frame pack indexes MaterialEntries[] by index only (no boxing, no LINQ).
+// Packing plan for the BRG TileRenderer, reflected once from MapInstanceData at construction.
+// The per-frame pack indexes MaterialEntries[] by index only (no reflection, no boxing, no LINQ).
 
 using System;
 using System.Collections.Generic;
@@ -115,21 +114,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         }
 
         /// <summary>
-        /// Builds a plan by reflecting <typeparamref name="T"/> once.
-        ///
-        /// <para>Requirements for <typeparamref name="T"/>:
-        /// <list type="bullet">
-        ///   <item><c>[StructLayout(LayoutKind.Sequential)]</c> — layout must be blittable and float-aligned.</item>
-        ///   <item>Exactly two fields named <c>unity_ObjectToWorld</c> and <c>unity_WorldToObject</c> (both
-        ///         <c>float3x4</c>). They are excluded from material entries.</item>
-        ///   <item>All remaining fields are material props; each carries an <see cref="InstancedPropAttribute"/>
-        ///         declaring kind + default. Field names literally equal their shader property names.</item>
-        ///   <item>All field types are <c>float</c>, <c>float4</c>, or <c>float3x4</c> — byte-aligned at 4.</item>
-        /// </list>
-        /// </para>
-        ///
-        /// <para>Fields are sorted by <c>Marshal.OffsetOf</c> to bind to the physical
-        /// <c>[StructLayout(Sequential)]</c> order (reflection field order is not CLR-guaranteed).</para>
+        /// Builds a plan by reflecting <typeparamref name="T"/> once, in <c>Marshal.OffsetOf</c> order.
+        /// <typeparamref name="T"/> is <c>[StructLayout(Sequential)]</c> with only <c>float</c>, <c>float4</c> and
+        /// <c>float3x4</c> fields. The two transforms <c>unity_ObjectToWorld</c>/<c>unity_WorldToObject</c> are
+        /// not material entries. Every other field carries an <see cref="InstancedPropAttribute"/> and is
+        /// named for its shader property.
         /// </summary>
         internal static InstancePropPlan BuildFromStruct<T>() where T : struct
         {

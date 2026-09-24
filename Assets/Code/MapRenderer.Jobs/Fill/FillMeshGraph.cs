@@ -11,22 +11,11 @@ namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
     /// Schedules the fill measure graph over one <see cref="FillMeshPipeline.LayerInput"/>, and returns an
-    /// UNCOMPLETED <see cref="FillGraphOutput"/>. Nothing in this file calls <c>Complete()</c>.
-    ///
-    /// <para><b>The <c>.AsArray()</c> rule — obeyed everywhere in this file.</b> No <c>.AsArray()</c> at
-    /// schedule time on any list a graph node resizes: a view captured before the resize has the stale
-    /// length. Every node here either holds the <see cref="NativeList{T}"/> itself and resolves it inside
-    /// <c>Execute</c>, or takes <c>AsDeferredJobArray()</c>, which resolves to the list's EXECUTE-time
-    /// state.</para>
-    ///
-    /// <para><b>Input lifetime is a contract.</b> The borrowed <c>input.Geometry</c> and
-    /// <c>input.RingVisitOrder</c> stay live <c>[ReadOnly]</c> job inputs until <c>Handle.Complete()</c>.
-    /// The caller must not dispose either before it completes the returned
-    /// <see cref="FillGraphOutput"/>.</para>
-    ///
-    /// <para><b>The capacity error flags are never-fired backstops here.</b> A trip leaves every later node
-    /// with nothing to do, not with garbage-length flat lists: each node bounds its own loop — or its
-    /// deferred count — by a column its sizing job resizes, never by a borrowed count.</para>
+    /// UNCOMPLETED <see cref="FillGraphOutput"/>. Non-local invariant: no node takes <c>.AsArray()</c> at
+    /// schedule time on a list a node resizes (it holds the list or takes <c>AsDeferredJobArray()</c>); the
+    /// caller keeps <c>input.Geometry</c> and <c>input.RingVisitOrder</c> alive until <c>Handle.Complete()</c>;
+    /// and each node bounds its loop by a column its sizing job resizes, so a capacity trip leaves later
+    /// nodes with nothing to do.
     /// </summary>
     public static class FillMeshGraph
     {
@@ -216,12 +205,9 @@ namespace MapRenderer.Jobs.Fill
                 Counts = counts, Error = error,
             }.Schedule(triangulated);
 
-            // ── The boundary band, BOTH ARMS. It appends outward-band quads to the aggregate's own columns,
-            // so it runs after the node that owns the interior vertex count, and after the clip/select and
-            // ring assembly it reads. On the curved arm it runs HERE, upstream of subdivision: a band quad is
-            // degenerate in tile space, so its long edges share endpoints with the interior boundary edge
-            // they abut and take the identical mark. After subdivision the band's inner ring would stay on
-            // the flat chord while the interior bulges onto the sphere — a visible gap at low zoom.
+            // ── The boundary band, BOTH ARMS, appended to the aggregate's columns. Non-obvious why: it runs
+            // before subdivision, so its degenerate quads share edges with the interior and subdivide with it;
+            // after subdivision its inner ring would stay on the flat chord and leave a gap at low zoom.
             JobHandle banded = aggregated;
             if (!input.SuppressBoundaryBand)
             {
@@ -240,10 +226,8 @@ namespace MapRenderer.Jobs.Fill
                 }.Schedule(aggregated);
             }
 
-            // Every derived list, and the earcut / polygon-descriptor groups, are dead after aggregate. Each
-            // group disposes its own containers through its own DisposeAfter. The three ring columns and the
-            // polygon descriptors outlive the aggregate by one node on both arms: FillBandJob reads both.
-            // The triangulation buffers are NOT re-pointed — the band node reads none of them.
+            // The ring columns and polygon descriptors die after the band node, which reads them; the
+            // triangulation buffers die after aggregate, because the band node reads none of them.
             JobHandle disposeListsAfterAggregate = ScheduleDispose(outVerts, banded);
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outOffsets, banded));
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outFeatIdx, banded));

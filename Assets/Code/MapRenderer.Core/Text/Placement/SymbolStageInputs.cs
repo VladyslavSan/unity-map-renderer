@@ -1,7 +1,5 @@
-// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2/4 — this file lives in
-// MapRenderer.Core.Text.Placement (see SymbolScreenProjection for the namespace-collision trap).
-// BLITTABLE: value-only fields so a producer can store these as SoA and a Burst job reads them
-// directly — mirrors the SymbolBox / PlacedQuad / SymbolCandidate blittable-struct pattern.
+// TOP-LEVEL `using Unity.Mathematics;` (see SymbolScreenProjection for the namespace-collision trap).
+// BLITTABLE: value-only fields, so a producer stores these as SoA and a Burst job reads them directly.
 
 using Unity.Mathematics;
 
@@ -50,11 +48,8 @@ namespace MapRenderer.Core.Text.Placement
         public TextTranslateAnchor TranslateAnchor;
         public AlignmentMode       RotationAlignment;
         public float4 Color;                        // pre-linearized × opacity
-        // text-halo-*, straight off SymbolPaint (SymbolFeatureExtractor evaluates all three PER FEATURE).
-        // HaloColor is pre-linearized like Color, but its .w is the halo colour's OWN alpha only — the
-        // emit multiplies it onto the text opacity, which is where text-opacity already lives.
-        // Width/blur stay LOGICAL px; they are scaled to device px together at emit, against the
-        // live ratio, so a dpr change needs no re-bake.
+        // text-halo-*, per feature. HaloColor is pre-linearized; .w is the halo's own alpha (emit applies
+        // text-opacity). Width/blur stay LOGICAL px and scale at emit, so a dpr change needs no re-bake.
         public float4 HaloColor;
         public float  HaloWidthPx;
         public float  HaloBlurPx;
@@ -88,14 +83,9 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The per-symbol staging input for a CURVED along-line symbol — the scalars
     /// <see cref="SymbolStagingMath.StageCurved"/> needs beyond this frame's projected path, its glyphs/anchors,
-    /// and the pre-resolved per-anchor fade id + incumbency spans. <see cref="Color"/> and <see cref="Slot"/> are
-    /// pre-resolved by the caller (managed sRGB→linear / slot clamp).
-    ///
-    /// <para>Stable per symbol EXCEPT <see cref="MetresPerLogicalPixel"/>, which is this frame's camera ruler
-    /// and is PER-FRAME PATCHED by <see cref="StageJob"/> — the curved analogue of
-    /// <see cref="PointStageInput.ScreenPx"/>/<see cref="PointStageInput.Depth"/>/
-    /// <see cref="PointStageInput.Projected"/>/<see cref="PointStageInput.SurfaceUp"/>. The baker never sets
-    /// it.</para>
+    /// and the pre-resolved per-anchor fade id + incumbency spans; the caller pre-resolves <see cref="Color"/>
+    /// and <see cref="Slot"/>. Stable per symbol except <see cref="MetresPerLogicalPixel"/>, which
+    /// <see cref="StageJob"/> patches per frame, as it does <see cref="PointStageInput.ScreenPx"/>.
     /// </summary>
     public struct CurvedStageInput
     {
@@ -109,11 +99,8 @@ namespace MapRenderer.Core.Text.Placement
         public float  MaxAngleDeg;                  // text-max-angle
         public bool   KeepUpright;                  // text-keep-upright
         public float4 Color;                        // pre-linearized × opacity
-        // text-halo-*, straight off SymbolPaint (SymbolFeatureExtractor evaluates all three PER FEATURE).
-        // HaloColor is pre-linearized like Color, but its .w is the halo colour's OWN alpha only — the
-        // emit multiplies it onto the text opacity, which is where text-opacity already lives.
-        // Width/blur stay LOGICAL px; they are scaled to device px together at emit, against the
-        // live ratio, so a dpr change needs no re-bake.
+        // text-halo-*, per feature. HaloColor is pre-linearized; .w is the halo's own alpha (emit applies
+        // text-opacity). Width/blur stay LOGICAL px and scale at emit, so a dpr change needs no re-bake.
         public float4 HaloColor;
         public float  HaloWidthPx;
         public float  HaloBlurPx;
@@ -130,40 +117,26 @@ namespace MapRenderer.Core.Text.Placement
         /// <see cref="SymbolKind.Icon"/> and routes to the sprite sheet instead of the glyph atlas.</summary>
         public SymbolKind AtlasKind;
 
-        /// <summary><c>icon-rotate</c> in radians, in MapLibre's own sense (positive = clockwise on
-        /// screen) — the same carrier convention as <see cref="PointStageInput.IconRotateRadians"/>, converted
-        /// by the same <see cref="SymbolBearing.IconRotationRadians"/>. The along-line path cannot use
-        /// <see cref="PlacedQuad.RotationRadians"/> for it (the renderer forces that to 0 and lets the shader
-        /// rotate by the projected tangent instead), so the converted value rides out on
-        /// <see cref="CandidateEmit.ExtraRotationRadians"/>. Default 0 for curved text.</summary>
+        /// <summary><c>icon-rotate</c> in radians, positive = clockwise on screen, converted like
+        /// <see cref="PointStageInput.IconRotateRadians"/>. It rides out on
+        /// <see cref="CandidateEmit.ExtraRotationRadians"/>, because the renderer forces the along-line
+        /// <see cref="PlacedQuad.RotationRadians"/> to 0. 0 for curved text.</summary>
         public float IconRotateRadians;
 
         /// <summary>
-        /// The RESOLVED <c>*-pitch-alignment</c> (<see cref="AlignmentResolution.ResolvePitch"/>), the
-        /// predicate that selects <see cref="SymbolStagingMath.StageCurved"/>'s WORLD arc walk:
-        /// <see cref="AlignmentMode.Map"/> lays the symbol out in world metres, anything else takes the
-        /// screen-px walk.
-        ///
-        /// <para><see cref="AlignmentMode.Auto"/> here means the screen walk. In production this field is
-        /// never <c>Auto</c> — <see cref="AlignmentResolution.ResolvePitch"/>'s contract is a resolved value
-        /// and every producer stamps its output here. <c>Auto</c> is reachable only from a HAND-BUILT
-        /// fixture that never sets the field, where the enum's zero value gives it the screen walk.</para>
+        /// The RESOLVED <c>*-pitch-alignment</c> (<see cref="AlignmentResolution.ResolvePitch"/>):
+        /// <see cref="AlignmentMode.Map"/> selects <see cref="SymbolStagingMath.StageCurved"/>'s world-metre arc
+        /// walk, anything else the screen-px walk. Production never stores <c>Auto</c>; a hand-built fixture
+        /// that leaves the zero value gets the screen walk.
         /// </summary>
         public AlignmentMode PitchAlignment;
 
         /// <summary>
-        /// This frame's world ruler: how many METRES one LOGICAL screen pixel spans at the camera's
-        /// reference depth (<c>MapCamera.MetresPerDevicePixel × MapCamera.DevicePixelRatio</c>). LOGICAL, not
-        /// device: <c>SymbolProjectionJob.OutScreen</c>, <see cref="TextSizePx"/> and
-        /// <see cref="CurvedGlyph.ArcCenter"/> all live in the logical-px domain, so this is the one
-        /// conversion that lands the arc walk in metres. The recombination happens ONCE, at
-        /// <c>SymbolPlacementSystem.Tick</c>; the value that travels from there is already per-logical-px and
-        /// the name never changes at any hop.
-        ///
-        /// <para><b>PER-FRAME PATCHED</b> by <see cref="StageJob"/> — never baked. Read ONLY inside
-        /// <see cref="SymbolStagingMath.StageCurved"/>'s <see cref="AlignmentMode.Map"/> branch, so a
-        /// non-map-pitched symbol cannot observe it. A value of 0 (never patched) degrades that branch to
-        /// the screen walk rather than collapsing the symbol.</para>
+        /// This frame's world ruler: METRES per LOGICAL screen pixel at the camera's reference depth
+        /// (<c>MapCamera.MetresPerDevicePixel × MapCamera.DevicePixelRatio</c>, combined once in
+        /// <c>SymbolPlacementSystem.Tick</c>), because screen positions, <see cref="TextSizePx"/> and
+        /// <see cref="CurvedGlyph.ArcCenter"/> are logical px. <see cref="StageJob"/> patches it per frame; only
+        /// the <see cref="AlignmentMode.Map"/> branch reads it, and 0 degrades that branch to the screen walk.
         /// </summary>
         public float MetresPerLogicalPixel;
     }

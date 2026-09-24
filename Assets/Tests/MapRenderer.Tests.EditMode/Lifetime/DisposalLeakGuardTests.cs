@@ -1,23 +1,5 @@
-// Disposal/leak guard (DECISIVE).
-//
-// Drives load→release of N tiles including the race (release a tile whose mesh build
-// completed but wasn't consumed) and asserts zero orphaned Mesh objects.
-//
-// A tile's mesh build settles into a dense MeshDataPayload[], each slot a
-// NativeArray-backed payload.
-// The NativeArray leak guard is NON-VACUOUS:
-//   - MeshDataPayload.DebugLiveAllocCount tracks live allocations.
-//   - A positive counter after a full cycle means NativeArrays were produced but not Disposed.
-//   - An intentionally-leaked NativeArray MUST produce a non-zero counter (positive control).
-//
-// Meaningful assertions:
-//   - Mesh delta: zero orphaned Mesh after load+release.
-//   - NativeArray balance: DebugLiveAllocCount == 0 after every load+release cycle.
-//   - Positive control: an intentionally-leaked LayerMeshData produces DebugLiveAllocCount > 0.
-//   - Race path: mid-flight-released tile's NativeArrays are disposed via PendingDisposalQueue.
-//
-// This test is Unity-only (uses MonoBehaviour, Object.FindObjectsOfTypeAll, Mesh creation,
-// NativeArray). It does NOT compile in the headless dotnet-test path (excluded from core-tests.csproj).
+// Load→release of N tiles, including release of a built-but-unconsumed tile: zero orphaned Meshes, and
+// MeshDataPayload.DebugLiveAllocCount back to baseline, with a deliberate leak as the positive control.
 
 using System.Collections.Generic;
 using System.IO;
@@ -46,14 +28,9 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>
-    /// Disposal/leak guard for the load→release race.
-    ///
-    /// Tests that:
-    ///   (a) A tile built normally (fetch + build + consume) and then released destroys its Mesh.
-    ///   (b) A tile released mid-flight (mesh build started, not yet consumed) leaves zero orphaned Mesh
-    ///       after the mesh build UniTask completes.
-    ///   (c) Zero net Mesh objects after the full cycle (meshCountBefore == meshCountAfter for the
-    ///       tile-owned Meshes).
+    /// Disposal/leak guard for the load→release race: a released built tile destroys its Mesh, a tile
+    /// released mid-flight leaves no orphaned Mesh once its build completes, and the full cycle nets zero
+    /// tile-owned Meshes.
     /// </summary>
     [TestFixture]
     public class DisposalLeakGuardTests : BaseTestFixture
@@ -106,14 +83,13 @@ namespace MapRenderer.Tests.Lifetime
             return Resources.FindObjectsOfTypeAll<Mesh>().Length;
         }
 
-        // ── Tooth 5a: Build then release — no orphaned Mesh ───────────────────────────────────
+        // ── Build then release — no orphaned Mesh ───────────────────────────────────
 
         /// <summary>
         /// Build N tiles to completion, record Mesh count delta, then destroy the MapView.
         /// After destruction, mesh count must not have increased (all Meshes disposed by OnDestroy).
         ///
-        /// This is a real load then a real release (tooth 5 requirement: "must exercise a real
-        /// load then a real release").
+        /// This is a real load then a real release.
         /// </summary>
         [Test]
         public void BuildAndRelease_NoOrphanedMesh()
@@ -145,21 +121,14 @@ namespace MapRenderer.Tests.Lifetime
                 "At least one Mesh must have been created during tile load " +
                 "(otherwise the test doesn't exercise real geometry and the leak check is vacuous).");
 
-            // Release: teardown must destroy all tile Meshes, then destroy the GameObject.
-            //
-            // NOTE: In Unity EditMode (no [ExecuteAlways] attribute on MapView), MonoBehaviour.OnDestroy
-            // is NOT triggered when Object.DestroyImmediate(go) is called from a headless test.
-            // The production cleanup contract lives in MapView.Teardown(), which OnDestroy delegates to
-            // in Play mode. Here we call Teardown() explicitly before DestroyImmediate so the test
-            // exercises the real cleanup path that production code relies on.
+            // Headless DestroyImmediate does not fire OnDestroy, so call Teardown() (what OnDestroy delegates
+            // to) explicitly; it must destroy all tile Meshes.
             view.Teardown();
             Object.DestroyImmediate(go);
 
             int meshAfterDestroy = CountMeshObjects();
 
-            // After Teardown, mesh count must return to (at most) the baseline.
-            // We allow meshAfterDestroy == meshBefore (all created Meshes destroyed).
-            // The assertion is: no Meshes orphaned — count must not exceed baseline.
+            // After Teardown no Mesh is orphaned: the count must not exceed the baseline.
             Assert.LessOrEqual(meshAfterDestroy, meshBefore,
                 $"Orphaned Meshes detected after MapView.Teardown. " +
                 $"Baseline: {meshBefore}, After load: {meshAfterLoad} (+{createdCount}), " +
@@ -169,23 +138,10 @@ namespace MapRenderer.Tests.Lifetime
         }
 
         // ── Play-mode Stop race: teardown after the Entities World was disposed first ─────────
-        //
-        // The real MapDemo Stop leak. On Play-mode Stop, Unity disposes the Entities World (this backend's
-        // MapEntitiesWorld) BEFORE MapViewComponent.OnDestroy runs. The record-teardown loop then called into
-        // the backend's RemoveItems, which touched the deallocated EntityManager and threw straight out of
-        // DoDispose — stranding _prepared, the backend, the pipelines, and (via MapView.Teardown)
-        // Layers/SymbolPlacementSystem/Symbols: the whole-graph "finalized without Dispose()" flood, independent of whether
-        // any tile was still loading (which is why an idle Stop leaked too). This drives the exact ordering by
-        // disposing the World out from under the live map, then asserts Teardown runs to completion.
-        //
-        // Unlike the mid-flight teardown tooth (which cannot reproduce the symptom headlessly — Teardown
-        // always ran to completion there), this one DOES: the trigger is a dead World, reproducible directly.
-        // RED-verify: (1) delete RemoveItems' _world.IsCreated guard, keep MapView.Teardown's per-subsystem
-        // catch → DoDispose dies at RemoveItems before DestroyTrackedMeshes / _prepared / _instanced /
-        // pipelines; the catch swallows the throw so DoesNotThrow still passes, but the Mesh-baseline and the
-        // VerifiedDisposable-leak assertions go RED (tile meshes stranded; PreparedTileCache, the backend, the
-        // scheduler and pipelines never disposed). (2) additionally delete MapView.Teardown's catch → Teardown
-        // itself throws and DoesNotThrow goes RED (Layers/SymbolPlacementSystem/Symbols strand too — the original flood).
+        // Non-local invariant: on Play-mode Stop Unity disposes the Entities World BEFORE OnDestroy, so a
+        // backend RemoveItems that touched the dead EntityManager would throw out of DoDispose and strand the
+        // whole graph. This disposes the World under the live map; Teardown must still complete. RED: drop
+        // RemoveItems' _world.IsCreated guard (leak assertions red), then also Teardown's catch (it throws).
 
         /// <summary>
         /// Teardown must complete — no throw, tile Meshes released to baseline, zero VerifiedDisposable
@@ -264,26 +220,13 @@ namespace MapRenderer.Tests.Lifetime
             }
         }
 
-        // ── Tooth 5b: Release mid-flight — no orphaned Mesh ──────────────────────────────────
+        // ── Release mid-flight — no orphaned Mesh ──────────────────────────────────
 
         /// <summary>
-        /// The race: request tiles, hold their mesh build's measure step genuinely in-flight on a gated
-        /// delay job, then pan far away so tiles are released while still held. After the delay job is
-        /// released, no Meshes must be created for the evicted tiles.
-        ///
-        /// This is the "race": "release a tile whose mesh build
-        /// result completed but wasn't consumed". ReleaseTile removes the tile from _loaded; the next
-        /// PumpPending snapshot (foreach over _loaded) excludes the released tile, so
-        /// ConsumeMeshBuild is never called for it — no Mesh is created.
-        ///
-        /// <para><b>The race is driven deterministically.</b> Source tiles reach the graph's MEASURE
-        /// step too (via the prologue-complete hand-off), so <see cref="TileManager.GraphDepsForTest"/>
-        /// — the same production-legitimate deps-parameter seam for background tiles — can hold a
-        /// SOURCE tile's measure step genuinely in-flight. The drive pumps <c>LateUpdate()</c> ONLY (no
-        /// <c>Await</c> — it would <c>Complete()</c> the held graph and burn the whole spin bound, NIT 3)
-        /// until <c>GraphMeasureInFlight &gt;= 1</c>, asserted as the drive precondition, THEN pans. Because
-        /// the gate is still closed at that point, the graph provably cannot have completed — the positive
-        /// control below is guaranteed, not a coin flip against machine speed.</para>
+        /// Holds the tiles' measure step in flight on a gated delay job (<see cref="TileManager.GraphDepsForTest"/>),
+        /// pans away so they are released while held, then opens the gate: no Mesh may be created for them,
+        /// because ReleaseTile removes them from <c>_loaded</c> and ConsumeMeshBuild never sees them. The pan
+        /// waits for <c>GraphMeasureInFlight &gt;= 1</c> with the gate closed, so the race is deterministic.
         /// </summary>
         [Test]
         public void ReleaseMidFlight_NoOrphanedMesh()
@@ -307,9 +250,7 @@ namespace MapRenderer.Tests.Lifetime
             var gate    = new NativeArray<int>(1, Allocator.Persistent);
             var started = new NativeArray<int>(1, Allocator.Persistent);
             var outVals = new NativeArray<int>(2, Allocator.Persistent);
-            // Declared here, not inside try — an early failure must still be able to Complete() this in
-            // finally, unconditionally, before disposing gate/started/outVals (mirrors
-            // TileManagerBackgroundRegistrationTests' own delay-job discipline).
+            // Outside the try, so finally can Complete() it before disposing gate/started/outVals.
             JobHandle delayHandle = default;
 
             try
@@ -322,9 +263,8 @@ namespace MapRenderer.Tests.Lifetime
                 // Load initial cover at lon=0, z=5.
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
-                // Pump LateUpdate ONLY — no Await, which would Complete() the held graph. The tile's own
-                // prologue (a managed IWorkScheduler body, not a job) still runs and hands off to
-                // ScheduleMeasure; from there the delay job's Gate blocks every downstream measure job.
+                // LateUpdate ONLY: an Await would Complete() the held graph. The prologue still runs and
+                // hands off to ScheduleMeasure, where the delay job's Gate blocks the measure jobs.
                 for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
                     view.LateUpdate();
                 DelayGateJobInstrument.WaitForStart(started);
@@ -337,8 +277,7 @@ namespace MapRenderer.Tests.Lifetime
                 view.LateUpdate(); // cover recompute → evicts original tiles while genuinely in-flight
 
                 // ── Positive control: at least one tile must have been released mid-flight ──────
-                // Deterministic now: the gate is still closed, so the released tile's graph provably
-                // cannot have completed — ReleasedMidFlightCount() > 0 is guaranteed, not raced.
+                // The gate is still closed, so the released tile's graph cannot have completed.
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
                     "Positive control: at least one tile must have been released while its measure step " +
                     "was still genuinely in-flight (the held delay job guarantees !IsStepComplete at " +
@@ -351,11 +290,8 @@ namespace MapRenderer.Tests.Lifetime
 
                 PumpUntilSettled(view, maxFrames: 500);
 
-                // The original tiles were evicted before mesh build was consumed.
-                // ReleaseTile removed them from _loaded. PumpPending iterates _loaded each Tick,
-                // so the evicted tiles are absent from every subsequent snapshot — ConsumeMeshBuild
-                // is never called for them. → No Mesh was created for the evicted tiles.
-                // → Only the new cover tiles (if any) created Meshes.
+                // The evicted tiles left _loaded, so ConsumeMeshBuild never ran for them; only the new
+                // cover tiles can have created Meshes.
                 int meshAfterSettle = CountMeshObjects();
 
                 // Release the new cover by running Teardown then destroying the MapView.
@@ -392,7 +328,7 @@ namespace MapRenderer.Tests.Lifetime
             }
         }
 
-        // ── Tooth 5-NativeArray-Positive: deliberate leak produces non-zero counter ─────────────
+        // ── NativeArray positive control: a deliberate leak produces non-zero counter ─────────────
 
         /// <summary>
         /// Non-vacuous positive control: allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
@@ -457,12 +393,9 @@ namespace MapRenderer.Tests.Lifetime
         // ── Pooling MeshDataPayload must not make this counter lie ───────────────────────────────
 
         /// <summary>
-        /// Leak-guard regression for pooling the payload WRAPPER:
-        /// <see cref="MeshDataPayload.DebugLiveAllocCount"/> counts live NATIVE <c>MeshDataArray</c>s, not
-        /// live wrapper instances — pooling the wrapper must not change that. Runs several rent→reset→dispose
-        /// cycles (through <see cref="MeshDataPayloadPool"/> directly, so a reused — not freshly-minted —
-        /// instance is exercised on the later iterations) and asserts the counter returns to baseline after
-        /// every one.
+        /// <see cref="MeshDataPayload.DebugLiveAllocCount"/> counts live NATIVE <c>MeshDataArray</c>s, not pooled
+        /// wrappers. Several rent→reset→dispose cycles through <see cref="MeshDataPayloadPool"/> reuse an
+        /// instance, and the counter returns to baseline after every one.
         /// </summary>
         [Test]
         public void PooledCycle_LiveAllocCounter_ReturnsToBaseline_AfterEveryDispose()
@@ -539,25 +472,11 @@ namespace MapRenderer.Tests.Lifetime
         }");
 
         /// <summary>
-        /// The deterministic, single-threaded regression tooth for the <c>TileManager.cs</c> fix found
-        /// while pooling <see cref="MeshDataPayload"/>. Pooling means <see cref="MeshDataPayload.Dispose"/>
-        /// hands its instance back to a shared <see cref="MeshDataPayloadPool"/> the moment it runs — so once
-        /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
-        /// safe for anything to touch again: a subsequent <c>Rent()</c> (by this test, standing in for a
-        /// concurrent build) can receive and <c>Reset()</c> it before <c>DisposeWholePayloads</c>'s later
-        /// unconditional sweep — over the SAME dense payload array (job-scheduling-design.md: the
-        /// array <c>TileBuildGraph.CompleteWriteAndTakePayloads</c> hands back) — would otherwise reach
-        /// it a second time. <c>TileManager.ConsumeMeshBuild</c> now nulls each slot the instant it disposes
-        /// it, specifically so that sweep can never touch a recycled instance.
-        ///
-        /// <para>Drive: a single tile, two non-empty fill layers, consume throttled to exactly one mesh per
-        /// tick (<c>MaxConsumesPerTick = 1</c>) so the tile's OWN <c>LateUpdate()</c> stops mid-array —
-        /// after disposing payload 0 but before payload 1, i.e. strictly before the unconditional sweep
-        /// runs for this tile. At that exact point this test rents from the shared pool (standing in for a
-        /// concurrent build) and marks the rented instance as its own. The cover is then allowed to finish
-        /// settling. Pre-fix, the stale slot reference would let the finishing sweep silently free this
-        /// test's array out from under it; post-fix the slot is null and the sweep skips it — this test's
-        /// array survives until the test itself disposes it.</para>
+        /// <see cref="MeshDataPayload.Dispose"/> returns the instance to <see cref="MeshDataPayloadPool"/> at once,
+        /// so <c>ConsumeMeshBuild</c> nulls each slot as it disposes it; otherwise <c>DisposeWholePayloads</c>'s
+        /// later sweep would free a recycled instance. With one consume per tick, the test rents between
+        /// payload 0 and payload 1, standing in for a concurrent build, and its array must survive the
+        /// sweep until the test disposes it.
         /// </summary>
         [Test]
         public void PooledPayload_RentedDuringAPartialConsume_SurvivesUntilThisCallerDisposesIt()
@@ -578,9 +497,8 @@ namespace MapRenderer.Tests.Lifetime
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                // A single Await only completes whichever STEP is currently in flight — this tile needs its
-                // prologue-complete tick AND its write-kick tick before it is consumable, so the drive pumps
-                // until ConsumeBacklog (write complete, unconsumed) sees it, not just until it was started.
+                // One Await completes only the current STEP; pump until ConsumeBacklog (write complete,
+                // unconsumed) sees the tile.
                 int started = 0;
                 for (int f = 0; f < 3000; f++)
                 {
@@ -613,16 +531,11 @@ namespace MapRenderer.Tests.Lifetime
                 Assert.AreEqual(0, view.TilesConsumedLastTick(), "precondition: the tile must NOT be complete yet");
                 Assert.IsFalse(view.TryGetBuiltTile(tileId), "precondition: the tile must not be Built yet");
 
-                // The probe: rent from the shared pool right here, standing in for a concurrent build's
-                // Rent()+Reset(). Single-threaded + nothing else touches this pool during the tick above (the
-                // single-tile precondition rules out another tile's payload disposal interleaving), so this
-                // reliably receives the instance ConsumeMeshBuild's per-payload loop just disposed.
+                // The probe stands in for a concurrent build's Rent()+Reset(). With one tile and one thread, it
+                // receives the instance ConsumeMeshBuild just disposed.
                 MeshDataPayload probe = MeshDataPayloadPool.Rent();
-                // Non-vacuity: Dispose()/Upload() never clear VertexCount, so if this Rent() really did
-                // receive the instance ConsumeMeshBuild's per-payload loop just disposed (a real fill layer
-                // over the fixture), it still carries that layer's non-zero vertex count here — BEFORE this
-                // test's own Reset() below overwrites it. A zero here means the probe missed (an unrelated,
-                // freshly-minted or already-Reset stub), which would make the assertion below vacuous.
+                // Non-vacuity: Dispose()/Upload() keep VertexCount, so the recycled fill payload still reads
+                // non-zero before Reset(); a zero means the probe got an unrelated stub.
                 Assert.Greater(probe.VertexCount, 0,
                     "non-vacuity precondition: the rented instance must be the fill payload ConsumeMeshBuild " +
                     "just disposed, not an unrelated pooled stub — otherwise this tooth cannot discriminate " +
@@ -630,18 +543,12 @@ namespace MapRenderer.Tests.Lifetime
                 Mesh.MeshDataArray probeMda = MeshDataPayload.AllocateTracked(1);
                 probe.Reset(probeMda, 0, default, "pool-race-probe", -7);
 
-                // The remaining, still-pending layer (payload 1) has its OWN legitimate array, freed by its
-                // OWN Upload/Dispose when the resumed pump below consumes it — that decrement is expected
-                // and is NOT what this tooth is probing for. The discriminating expectation is relative to
-                // baseline, not to the count right after Reset(): once the resumed pump finishes, exactly
-                // TWO arrays should have been freed by production code (payload 0's, already counted above,
-                // and payload 1's, about to happen) and ONE should remain live — this probe's own, which
-                // nothing in production may touch until THIS test calls Dispose() on it.
+                // Relative to baseline: production frees payloads 0 and 1, and only this probe's own array
+                // stays live until the test disposes it.
                 long expectedAfterSettle = baseline + 1; // baseline (0 outstanding) + this probe's own array
 
-                // Resume: finish this tile's remaining payload and let the cover settle — the tick that
-                // completes the tile is exactly when a pre-fix TileManager would sweep the (still-referenced)
-                // first slot a second time via DisposeWholePayloads.
+                // Resume: the tick that completes the tile is when DisposeWholePayloads sweeps; a slot left
+                // non-null would free the probe here.
                 view.Config.MaxConsumesPerTick = 64;
                 for (int f = 0; f < 500; f++)
                 {
@@ -667,22 +574,13 @@ namespace MapRenderer.Tests.Lifetime
             }
         }
 
-        // ── Tooth 5-NativeArray-Race: mid-flight release disposes NativeArrays ─────────────────
+        // ── NativeArray race: mid-flight release disposes NativeArrays ─────────────────
 
         /// <summary>
-        /// DECISIVE race test: a tile released mid-flight (measure step genuinely held in-flight,
-        /// nothing consumed) must have every native resource it holds disposed via the pen after the held
-        /// step completes.
-        ///
-        /// <para><b>The race is driven deterministically,</b> via the same <c>GraphDepsForTest</c> gate as
-        /// <see cref="ReleaseMidFlight_NoOrphanedMesh"/> (see that tooth's doc for why source tiles can be
-        /// held this way). A single <c>MeshDataPayload.DebugLiveAllocCount</c> reading is not enough: a
-        /// fill layer allocates NO <c>MeshDataArray</c> at kick (it is the graph arm), so for a fill-only
-        /// style that counter alone sits at baseline throughout and an assertion on it would be vacuously
-        /// true for the wrong reason. The non-vacuity reading is the
-        /// SUM of three deltas — <c>MeshDataPayload.DebugLiveAllocCount</c>, <c>FillGraphOutput.DebugLiveCount</c>,
-        /// <c>TileBuildGraph.DebugLiveCount</c> — read causally (while the gate is still closed, not
-        /// hopefully after a race), and all three must return to baseline once the pen drains.</para>
+        /// A tile released while its measure step is held (the <see cref="ReleaseMidFlight_NoOrphanedMesh"/>
+        /// gate) has every native resource disposed through the pen once the step completes. A fill layer
+        /// allocates no <c>MeshDataArray</c> at kick, so non-vacuity reads the SUM of three live counters with
+        /// the gate closed, and all three must return to baseline.
         /// </summary>
         [Test]
         public void NativeArray_ReleaseMidFlight_NoLeakedNativeArray()
@@ -738,10 +636,8 @@ namespace MapRenderer.Tests.Lifetime
                     "was still genuinely in-flight (the held delay job guarantees !IsStepComplete). If this " +
                     "is 0, no tile reached the graph before the pan.");
 
-                // ── Non-vacuous holding-pen assertion (DECISIVE) ──────────────────────────────────
-                // Causal, not hopeful: read while the gate is STILL CLOSED, so the evicted tile's native
-                // resources provably cannot have been disposed yet — CRITICAL: do NOT call LateUpdate()
-                // here, it would drain the pen and defeat this assertion.
+                // ── Non-vacuous holding-pen assertion ─────────────────────────────────────────────
+                // Read with the gate CLOSED; do NOT call LateUpdate() here, because it drains the pen.
                 long payloadHeld = MeshDataPayload.DebugLiveAllocCount;
                 long graphOutputHeld = FillGraphOutput.DebugLiveCount;
                 long buildGraphHeld = TileBuildGraph.DebugLiveCount;
@@ -761,9 +657,8 @@ namespace MapRenderer.Tests.Lifetime
                 view.Config.MaxConsumesPerTick = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
 
-                // Let the released graph complete, then pump until the new cover settles.
-                // PendingDisposalQueue.DrainCompleted() is called inside each Tick — released tiles' native resources are
-                // disposed as their held step completes.
+                // Pump until the cover settles; each Tick's PendingDisposalQueue.DrainCompleted() disposes the
+                // released tiles' resources as their held step completes.
                 PumpUntilSettled(view, maxFrames: 500);
 
                 // Final drain: ensure all pending disposal tasks have been processed.
@@ -802,7 +697,7 @@ namespace MapRenderer.Tests.Lifetime
             }
         }
 
-        // ── Tooth 5-NativeArray-Consume: normal consume disposes NativeArrays ────────────────
+        // ── NativeArray consume: normal consume disposes NativeArrays ────────────────
 
         /// <summary>
         /// Consume-path NativeArray balance: build tiles to completion (normal consume path),
@@ -832,9 +727,8 @@ namespace MapRenderer.Tests.Lifetime
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built (real load required for meaningful leak test).");
 
-                // At this point: LayerMeshData NativeArrays were allocated (in BuildMeshData) and
-                // should have been disposed (in ConsumeMeshBuild's finally block after UploadMesh).
-                // Counter must already be at baseline (consume-path disposes immediately after upload).
+                // ConsumeMeshBuild disposes the LayerMeshData arrays right after UploadMesh, so the counter is
+                // already at baseline.
                 long countAfterConsume = MeshDataPayload.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfterConsume,
                     $"After normal consume (ConsumeMeshBuild), NativeArray counter must equal baseline. " +
@@ -860,7 +754,7 @@ namespace MapRenderer.Tests.Lifetime
             }
         }
 
-        // ── Tooth 5c: DrainMeshBuilds then release — no orphaned Mesh ──────────────────────
+        // ── Tooth 5c — DrainMeshBuilds then release — no orphaned Mesh ──────────────────────
 
         /// <summary>
         /// Use DrainMeshBuilds() to force settle, verify a Mesh was created (real load),
@@ -868,7 +762,7 @@ namespace MapRenderer.Tests.Lifetime
         ///
         /// Exercises the full pipeline: fetch → build → consume (via DrainMeshBuilds) →
         /// destroy (via OnDestroy). Both consumption paths (Tick/PumpPending and DrainMeshBuilds)
-        /// are covered by Tooth5a and Tooth5c respectively.
+        /// are covered by <see cref="BuildAndRelease_NoOrphanedMesh"/> and this test respectively.
         /// </summary>
         [Test]
         public void DrainThenDestroy_NoOrphanedMesh()

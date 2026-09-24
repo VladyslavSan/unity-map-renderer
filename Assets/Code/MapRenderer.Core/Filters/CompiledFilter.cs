@@ -6,23 +6,11 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Filters
 {
     /// <summary>
-    /// A compiled, ready-to-evaluate filter. Wraps a parsed <see cref="Expression"/> tree. Built
-    /// once per style layer via <see cref="Compile"/>; evaluated many times per feature via
-    /// <see cref="Matches"/>.
-    ///
-    /// Routing logic:
-    /// <list type="bullet">
-    ///   <item>Null or absent filter → match-all sentinel (every feature passes).</item>
-    ///   <item>Bare <c>true</c> → match-all.</item>
-    ///   <item>Bare <c>false</c> → match-none.</item>
-    ///   <item>Array whose dialect is expression → parse directly with <see cref="ExpressionParser"/>.</item>
-    ///   <item>Array whose dialect is legacy → translate with <see cref="LegacyFilterTranslator"/> first,
-    ///     then parse.</item>
-    /// </list>
-    ///
-    /// <see cref="Matches"/> uses <see cref="Expression.TryEvaluate"/> (the non-throwing boundary) and
-    /// maps both a spec error and a non-boolean-true result to <c>false</c>, so type errors in filter
-    /// expressions never crash the host — they simply exclude the feature.
+    /// A compiled filter wrapping a parsed <see cref="Expression"/> tree, built once per style layer by
+    /// <see cref="Compile"/> and evaluated per feature by <see cref="Matches"/>. A null filter or bare
+    /// <c>true</c> matches all and bare <c>false</c> matches none; a legacy-dialect array goes through
+    /// <see cref="LegacyFilterTranslator"/> before <see cref="ExpressionParser"/>. <see cref="Matches"/> maps a
+    /// spec error or a non-<c>true</c> result to <c>false</c>, so a filter type error only excludes the feature.
     /// </summary>
     public sealed class CompiledFilter
     {
@@ -32,13 +20,11 @@ namespace MapRenderer.Core.Filters
         private readonly bool _alwaysTrue;
 
         /// <summary>
-        /// The string→id key hoist's ordered constant-key <c>get</c>/<c>has</c> names for this filter's
-        /// expression — a bind site (<c>FeatureSelector</c>) resolves each name into a key index once per
-        /// layer, building the <see cref="Expressions.EvaluationContext.KeyBinding"/> array
-        /// <see cref="Matches(IFeature, double, int[])"/> evaluates against. Empty for the match-all/
-        /// match-none sentinels. Immutable after <see cref="Compile"/> returns — this instance is shared
-        /// cross-thread via <c>FeatureSelector</c>'s <c>ConditionalWeakTable</c> memo, so that immutability
-        /// is what makes concurrent binds against the same filter race-free.
+        /// The ordered constant-key <c>get</c>/<c>has</c> names of this filter. <c>FeatureSelector</c> resolves
+        /// them once per layer into the <see cref="Expressions.EvaluationContext.KeyBinding"/> that
+        /// <see cref="Matches(IFeature, double, int[])"/> reads. Empty for the match-all/match-none sentinels.
+        /// Immutable after <see cref="Compile"/>, so concurrent binds on this cross-thread-shared instance
+        /// are race-free.
         /// </summary>
         public IReadOnlyList<string> KeyLayout { get; }
 

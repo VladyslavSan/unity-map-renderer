@@ -14,13 +14,10 @@ namespace MapRenderer.Unity.Rendering.Style
     internal static class SurvivingLayerGate
     {
         /// <summary>
-        /// A key is listed only when it is BOTH bound to a uniform AND re-bound on restyle — NOT an iff:
-        /// <c>text-halo-width</c>/<c>-blur</c> are withheld, and could not be listed anyway —
-        /// they ride the vertex stream per feature, which the in-place path never re-bakes.
-        /// Every key here is free at any non-data-driven kind (<see cref="IsFreeAtKind"/>'s default arm)
-        /// EXCEPT the two symbol colours, whose arm defers to
-        /// <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/> — see that predicate for why
-        /// it is narrower.
+        /// A key is listed only when it is BOTH bound to a uniform AND re-bound on restyle.
+        /// <c>text-halo-width</c>/<c>-blur</c> ride the vertex stream, which the in-place path never re-bakes.
+        /// Every key is free at any non-data-driven kind EXCEPT the two symbol colours, which defer to the
+        /// narrower <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/>.
         /// </summary>
         private static readonly HashSet<string> TransitionablePaintKeys = new HashSet<string>
         {
@@ -51,16 +48,11 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// The paint keys this pair of layers may drop from their signature — a key is free only when it
-        /// is a known transitionable property, present in BOTH paint objects at this index (a presence
-        /// change alters the binding set itself, e.g. <c>fill-outline-color</c> is bound only when
-        /// explicit and non-fallback), non-data-driven on BOTH sides, and — the two symbol colours only —
-        /// equal in ALPHA on both sides (see <see cref="ConstantAlphaMatches"/>).
-        ///
-        /// Both sides must be non-data-driven. Two DIFFERENT <c>["get",…]</c> <c>fill-color</c>s both skip
-        /// the uniform bind, so without this a data-driven paint change would pass the gate and every tile
-        /// would keep the previous style's BAKED colour indefinitely — there is no uniform whose absence
-        /// would reveal it. A parse failure is treated as data-driven (fail closed).
+        /// The paint keys this pair may drop from its signature: a transitionable key, present in BOTH paints
+        /// (presence changes the binding set), non-data-driven on BOTH sides, and for the symbol colours equal
+        /// in alpha (<see cref="ConstantAlphaMatches"/>). Non-obvious why: a data-driven colour is baked, so a
+        /// change between two <c>["get",…]</c> colours that passed would leave every tile on the old colour.
+        /// A parse failure counts as data-driven (fail closed).
         /// </summary>
         private static HashSet<string> FreelyTransitionableKeys(StyleLayer oldLayer, StyleLayer newLayer)
         {
@@ -86,13 +78,11 @@ namespace MapRenderer.Unity.Rendering.Style
             => key == SymbolProperty.TextColor || key == SymbolProperty.TextHaloColor;
 
         /// <summary>
-        /// True iff two Constant symbol-colour expressions evaluate to the SAME alpha. Their RGB rides the
-        /// <c>_TextColor</c>/<c>_HaloColor</c> uniform (<see cref="SymbolTextColorCarrier"/>), but their
-        /// alpha travels by the vertex COLOR stream instead (<c>SymbolFeatureExtractor.StreamRgba</c>) — a
-        /// carrier the in-place path never re-bakes, so an alpha-only change must still refuse. For
-        /// <c>text-halo-color</c> the alpha also decides whether a halo run is emitted AT ALL
-        /// (<c>WorldSymbolRenderer.Emit</c>), which is the same refusal for a second reason. Both values are
-        /// already proven Constant by <see cref="IsFreeAtKind"/>, so <c>Evaluate</c> cannot throw.
+        /// True iff two Constant symbol-colour expressions have the SAME alpha. RGB rides a uniform, but
+        /// alpha rides the vertex COLOR stream (<c>SymbolFeatureExtractor.StreamRgba</c>), which the in-place
+        /// path never re-bakes. Halo alpha also decides whether a halo run is emitted
+        /// (<c>WorldSymbolRenderer.Emit</c>).
+        /// <see cref="IsFreeAtKind"/> has proven both Constant, so <c>Evaluate</c> cannot throw.
         /// </summary>
         private static bool ConstantAlphaMatches(JsonValue oldValue, JsonValue newValue)
         {
@@ -102,12 +92,10 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// A key is free only at the expression kinds whose value the in-place path can actually MOVE:
-        /// the default arm is <c>!DependsOnFeature</c> (the value rides a uniform the applier re-binds);
-        /// the two symbol colours defer to
-        /// <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/>, since at any other kind they
-        /// bake into the vertex COLOR stream instead, which the in-place path never re-bakes
-        /// (<c>MapView</c>'s <c>SymbolSubsystem.SetStyle</c> skip). A parse failure is not free (fail closed).
+        /// A key is free only at the kinds whose value the in-place path can MOVE: by default
+        /// <c>!DependsOnFeature</c> (a re-bound uniform). The symbol colours defer to
+        /// <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/>, because at other kinds they bake
+        /// into the vertex stream, which the in-place path never re-bakes. A parse failure is not free.
         /// </summary>
         private static bool IsFreeAtKind(string key, JsonValue expr)
         {

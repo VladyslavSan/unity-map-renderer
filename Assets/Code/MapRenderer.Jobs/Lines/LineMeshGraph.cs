@@ -11,19 +11,10 @@ namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
     /// Schedules the line measure graph over one <see cref="LayerInput"/>, and returns an UNCOMPLETED
-    /// <see cref="LineGraphOutput"/>. Chain: gather the layer's selected LineString rings
-    /// (<see cref="RingGatherJob"/>) → project the ORIGINAL centerline to per-point surface up, the
-    /// subdivision metric → curvature-subdivide in tile space (<see cref="SubdivideJob"/>) → project the
-    /// SUBDIVIDED centerline to origin-relative render space → build the 3D ribbon: size
-    /// (<see cref="RibbonSizingJob"/>) → per-ring parallel (<see cref="RibbonBatchJob"/>) → aggregate,
-    /// winding swap and rebase (<see cref="RibbonAggregateJob"/>).
-    ///
-    /// <para>The <c>.AsArray()</c>/deferred-list rule <see cref="FillMeshGraph"/>'s doc states applies here
-    /// too: every node either holds a <see cref="NativeList{T}"/> field and resolves it inside
-    /// <c>Execute</c>, or takes <c>AsDeferredJobArray()</c> resolved at execute time — never a schedule-time
-    /// <c>.AsArray()</c> snapshot of a list a later node resizes.</para>
-    ///
-    /// <b>No <c>Complete()</c> anywhere in this file.</b>
+    /// <see cref="LineGraphOutput"/>. Chain: gather rings → project the original centerline to surface up →
+    /// subdivide in tile space → project the subdivided centerline → ribbon size → per-ring ribbon →
+    /// aggregate. Non-local invariant: no node takes a schedule-time <c>.AsArray()</c> of a list a later node
+    /// resizes, as in <see cref="FillMeshGraph"/>, and nothing here calls <c>Complete()</c>.
     /// </summary>
     public static class LineMeshGraph
     {
@@ -157,9 +148,8 @@ namespace MapRenderer.Jobs.Lines
 
             JobHandle subGeoDisposed = ScheduleDispose(subGeo, subProjected);
 
-            // ── Build the 3D ribbon per ring — sizing (serial) → ribbon (IJobParallelForDefer over rings)
-            // → aggregate (serial). The earcut's shape: a ring's true vertex/index count is not
-            // analytically predictable, because it falls out of RibbonJob's join/cap decisions. ─────────
+            // ── Build the 3D ribbon per ring: sizing → parallel ribbon → aggregate, because a ring's true
+            // vertex/index count falls out of RibbonJob's join/cap decisions. ─────────────────────────────
             var vertices         = LineGraphOutput.AllocateOutputList<LineRibbonVertex>();
             var vertexFeatureIdx = LineGraphOutput.AllocateOutputList<int>();
             var indices          = LineGraphOutput.AllocateOutputList<int>();
@@ -167,11 +157,8 @@ namespace MapRenderer.Jobs.Lines
 
             RibbonBuffers ribbonBuffers = RibbonBuffers.Allocate();
 
-            // Sizing and aggregate SHARE `error`: AllocateError hands out a zero-initialised reference and
-            // neither node resets it, each only SETS it on its own failure. Aggregate cannot overwrite a
-            // sizing error, and not merely because it runs later: a sizing failure returns before its Resize
-            // calls, leaving PerRingVertexCount at length 0, and aggregate bounds its loop by that length,
-            // so its own error condition cannot evaluate true in the same run.
+            // Sizing and aggregate share `error`; each only sets it. A sizing failure leaves PerRingVertexCount
+            // at length 0, so aggregate's loop never runs and cannot overwrite that error.
             JobHandle sized = new RibbonSizingJob
             {
                 RingSubOffsets = ringSubOffsets, RoundSegments = input.RoundSegments,

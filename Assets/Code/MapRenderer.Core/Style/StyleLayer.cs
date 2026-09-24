@@ -57,12 +57,10 @@ namespace MapRenderer.Core.Style
         /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null.</summary>
         public JsonValue Filter;
 
-        /// <summary>The full original layer JSON object, retained so unknown/forward-compat keys survive
-        /// (including its <c>paint</c>/<c>layout</c> sub-trees, which are otherwise parsed and discarded).
-        /// Callers read the typed <c>Paint</c>/<c>Layout</c> views on the concrete subclass instead, except
-        /// the restyle survivor gate (<c>SurvivingLayerGate</c>, in <c>MapRenderer.Unity</c>), which must
-        /// compare the whole raw object — an unknown or forward-compat key must be inside that comparison,
-        /// and the typed views drop it.</summary>
+        /// <summary>The full original layer JSON object, retained so unknown/forward-compat keys survive.
+        /// Callers read the typed <c>Paint</c>/<c>Layout</c> views instead, except the restyle survivor gate
+        /// (<c>SurvivingLayerGate</c>), which compares the whole raw object because the typed views drop
+        /// unknown keys.</summary>
         public JsonValue Raw;
     }
 }

@@ -1,7 +1,5 @@
-// GeoJson/GeoJsonTests.cs — GeoJSON parsing, tiling, slicing and clipping teeth (fast lane).
-//
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// GeoJsonSourceTests.cs stays its own file — the folder's only engine-bound (non-fast) file.
+// GeoJSON parsing, tiling, slicing and clipping tests. Engine-free: Tools/core-tests also compiles this
+// file. GeoJsonSourceTests.cs is separate because it is the folder's only engine-bound file.
 //
 // Contents:
 //   GeoJsonForkNeutralityTests  — cloning a GeoJSON tile fork does not perturb the source.
@@ -30,18 +28,10 @@ namespace MapRenderer.Tests.GeoJsons
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A structural guard on where the GeoJSON stack is allowed to live.
-    ///
-    /// <para>The fence pins a live invariant, not the retired carrier fork it was written for:
-    /// <c>TileGeometryBuffers</c>, in <c>MapRenderer.Jobs/Tiles</c>, is a sanctioned decoder location.</para>
-    ///
-    /// <para><b>Core's GeoJSON stack — parse, project, slice — stays engine-free and therefore stays in the
-    /// 0.1 s <c>dotnet test</c> loop.</b> That is the whole reason it lives in <c>MapRenderer.Core</c>, and it
-    /// is exactly what the same token list enforces: a <c>NativeArray</c>, a Burst attribute or a
-    /// <c>TileGeometryBuffers</c> in any of these files would drag the parse/slice algorithms out of the fast
-    /// loop and into the multi-minute Unity gate. The carrier work belongs one layer out, in the decoder that
-    /// consumes <c>TileSlice</c>; the scanned set is unchanged and so is
-    /// <see cref="ForbiddenTokens"/>.</para>
+    /// A structural guard on where the GeoJSON stack may live. Core's parse/project/slice stack stays
+    /// engine-free, so it stays in the <c>dotnet test</c> loop: a <c>NativeArray</c>, a Burst attribute or a
+    /// <c>TileGeometryBuffers</c> in these files (see <see cref="ForbiddenTokens"/>) would drag it into the
+    /// Unity gate. Carrier work belongs in the decoder that consumes <c>TileSlice</c>.
     /// </summary>
     [TestFixture]
     public class GeoJsonForkNeutralityTests
@@ -134,13 +124,9 @@ namespace MapRenderer.Tests.GeoJsons
         // ── round trip through the independently-authored inverse ──────────────────────────────────
 
         /// <summary>
-        /// Quantized tile-local coordinates round-trip through <see cref="TileId.ToLonLat"/> — authored
-        /// years earlier, for a different purpose, which is what makes it an INDEPENDENT oracle rather than a
-        /// restatement of the forward formula. The residual is printed in Mercator metres alongside the
-        /// analytic bound <c>WorldExtent / (extent · 2^z)</c> (= half a tile unit).
-        ///
-        /// <para>The z0 and z14 rows are the non-vacuity clause: their bounds differ by 2¹⁴, so no single
-        /// slack constant can satisfy both.</para>
+        /// Quantized tile-local coordinates round-trip through <see cref="TileId.ToLonLat"/>, an independent
+        /// oracle, within the analytic bound <c>WorldExtent / (extent · 2^z)</c> (half a tile unit). The z0 and
+        /// z14 bounds differ by 2¹⁴, so no single slack constant satisfies both rows.
         /// </summary>
         [Test]
         public void QuantizedTileLocal_RoundTripsWithinHalfATileUnit()
@@ -574,14 +560,10 @@ namespace MapRenderer.Tests.GeoJsons
         // ── a polygon straddling a seam is PARTITIONED, not truncated ───────────────────────────────
 
         /// <summary>
-        /// A lon/lat rectangle spanning the z1 seam at longitude 0, sliced into both neighbouring tiles
-        /// with the buffer OFF (so the two windows partition the plane rather than overlap it). The pieces'
-        /// areas must sum to the input's, both must keep the input's shoelace sign, and both must be
-        /// implicitly closed.
-        ///
-        /// <para><b>Non-vacuity:</b> each piece must contain a vertex lying EXACTLY on the seam that was not
-        /// in the input — a genuine synthesised intersection. A "drop the out-of-bounds vertices" clipper
-        /// produces none of those and a strictly smaller total area.</para>
+        /// A rectangle across the z1 seam at longitude 0, sliced into both tiles with the buffer OFF: the
+        /// areas sum to the input's, and both pieces keep its shoelace sign and are implicitly closed. Each piece
+        /// must hold a synthesised vertex EXACTLY on the seam; a clipper that only drops out-of-bounds vertices
+        /// makes none and loses area.
         /// </summary>
         [Test]
         public void PolygonStraddlingATileSeam_PartitionsAcrossBothTiles()
@@ -718,14 +700,10 @@ namespace MapRenderer.Tests.GeoJsons
         // ── winding comes from ROLE, and rings stay implicitly closed ───────────────────────────────
 
         /// <summary>
-        /// RFC 7946 §3.1.6 gives ring role POSITIONALLY and tells parsers not to reject non-conforming
-        /// winding, so authored winding carries no information — role must be re-encoded as winding. A
-        /// polygon authored AGAINST the right-hand rule must therefore slice identically to its conforming
-        /// twin, with exterior positive / hole negative in tile space (the MVT convention the downstream
-        /// assembler classifies on).
-        ///
-        /// <para><b>Non-vacuity:</b> asserting the two twins are IDENTICAL is what proves normalisation ran,
-        /// rather than the input happening to be right already.</para>
+        /// RFC 7946 §3.1.6 gives ring role POSITIONALLY and tells parsers not to reject non-conforming winding,
+        /// so role must be re-encoded as winding. A polygon authored AGAINST the right-hand rule must slice
+        /// IDENTICALLY to its conforming twin: exterior positive, hole negative in tile space (the MVT
+        /// convention the assembler classifies on).
         /// </summary>
         [Test]
         public void RingWindingIsNormalisedFromRole_NotFromAuthoring()
@@ -776,14 +754,10 @@ namespace MapRenderer.Tests.GeoJsons
         // ── a polygon's holes leave with its exterior ───────────────────────────────────────────────
 
         /// <summary>
-        /// If a polygon's exterior clips away, its holes must go too: a surviving orphan would become
-        /// the feature's FIRST ring downstream, establish the exterior sign itself, and render as an
-        /// inverted patch. The fixture is MALFORMED — polygon 2's hole does not lie inside its
-        /// exterior — because that is the only way the case can arise, and the failure is silent-wrong.
-        ///
-        /// <para><b>Non-vacuity:</b> asserting the ring COUNT alone would pass an implementation that
-        /// dropped the exterior only if the hole also happened to clip away; here the orphan hole lies
-        /// squarely inside the tile, so dropping only the exterior leaves a visible sign-inverted ring.</para>
+        /// If a polygon's exterior clips away, its holes must go too: an orphan hole would become the feature's
+        /// FIRST ring downstream, set the exterior sign, and render as an inverted patch. The fixture is
+        /// MALFORMED (polygon 2's hole lies outside its exterior), the only way the case arises. The orphan
+        /// lies inside the tile, so dropping only the exterior leaves a visible inverted ring.
         /// </summary>
         [Test]
         public void ExteriorClippedAway_TakesItsHolesWithIt()
@@ -840,16 +814,10 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// The deferral is stated by the <b>validator</b>, so every source that retains options — a source that
-        /// keeps them for its whole life, not just a caller of <c>Slice</c> — rejects a non-zero tolerance
-        /// at the moment it accepts them. Calling <c>Validate</c> directly is the point: <c>Slice</c>'s own
-        /// guard runs first (<see cref="NonZeroSimplifyTolerance_ThrowsNotSupported"/> pins that), so a check
-        /// reachable only through <c>Slice</c> would leave the construction boundary admitting a tolerance it
-        /// cannot honour, and this test is what tells the two front lines apart.
-        ///
-        /// <para>NaN is an arm because <c>!= 0</c> catches it while the sign- or range-shaped rewrites of
-        /// this predicate (<c>&lt; 0</c>, <c>&gt; 0</c>) do not; the valid arm is what stops "reject
-        /// everything" from satisfying the rest.</para>
+        /// The <b>validator</b> rejects a non-zero tolerance, so a source that keeps options for its whole life
+        /// rejects it when it accepts them. It calls <c>Validate</c> directly because <c>Slice</c>'s own guard
+        /// (<see cref="NonZeroSimplifyTolerance_ThrowsNotSupported"/>) runs first. The NaN arm fails a
+        /// <c>&lt; 0</c> or <c>&gt; 0</c> rewrite of <c>!= 0</c>; the valid arm fails "reject everything".
         /// </summary>
         [Test]
         public void ANonZeroSimplifyTolerance_IsRejectedByTheValidator()
@@ -874,20 +842,10 @@ namespace MapRenderer.Tests.GeoJsons
         // ── the slicer's window IS the fill pipeline's window ───────────────────────────────────────
 
         /// <summary>
-        /// At the default buffer the slicer's window and <c>TileBufferClip</c>'s are EQUAL, not merely
-        /// nested — which makes the pipeline's clip a provable no-op on GeoJSON tiles. Several extents are
-        /// the non-vacuity clause: a single one would also pass on a formula that ignored the rescale.
-        ///
-        /// <para><b>Why the NON-power-of-two extents are in the list.</b> At 512/4096/8192 the rescaled
-        /// margin is a whole number (8/64/128), so those rows pass equally against a formula that rounds or
-        /// truncates it — the "close, not bit-equal" failure the window's own XML rules out. At 1000 and
-        /// 4095 it is 15.625 and 63.984375, and any such formula reds.</para>
-        ///
-        /// <para><i>What this tooth does NOT claim:</i> it cannot discriminate the ASSOCIATION
-        /// of the three factors, and no choice of extent would let it. <c>ReferenceExtent</c> is 4096, so
-        /// dividing by it is an exact binary scaling and <c>b·e/R</c>, <c>b·(e/R)</c> and <c>(b/R)·e</c> are
-        /// bit-identical for every finite input. That half of the bit-equality is structural, not
-        /// tooth-enforced — and it is what a future change to <c>ReferenceExtent</c> would spend.</para>
+        /// At the default buffer the slicer's window and <c>TileBufferClip</c>'s are EQUAL, so the pipeline's
+        /// clip is a no-op on GeoJSON tiles. The extents 1000 and 4095 give a fractional margin, so a formula
+        /// that ignores the rescale, rounds or truncates reds. Limitation: <c>ReferenceExtent</c> is 4096, so
+        /// every association of <c>b·e/R</c> is bit-identical and no extent can pin the order of the factors.
         /// </summary>
         [Test]
         public void DefaultBufferWindow_EqualsTheFillPipelineWindow()
@@ -951,12 +909,10 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// The consequence, live: a NaN margin must not clip the map away to nothing. Every comparison
-        /// against NaN is false, so an unguarded window makes <see cref="RingWindowClipper"/>'s inclusive
-        /// test reject EVERY vertex — the whole source renders blank with no error anywhere. This is the
-        /// failure <c>TileBufferClip</c> calls "the worst failure this type can produce";
-        /// <see cref="NegativeAndNaNBuffers_DegradeToTheTileBoundaryLikeTheFillPipeline"/> pins the window,
-        /// this pins what the window does.
+        /// A NaN margin must not clip the map away: every comparison against NaN is false, so an unguarded
+        /// window makes <see cref="RingWindowClipper"/> reject EVERY vertex and the source renders blank with no
+        /// error. <see cref="NegativeAndNaNBuffers_DegradeToTheTileBoundaryLikeTheFillPipeline"/> pins the
+        /// window; this pins what the window does.
         /// </summary>
         [Test]
         public void ANaNBufferDoesNotClipTheMapAway()
@@ -977,23 +933,11 @@ namespace MapRenderer.Tests.GeoJsons
         // ── the two tiles either side of a seam agree where the seam is ─────────────────────────────
 
         /// <summary>
-        /// <c>WindowClipperTests.OneLineClippedFromTwoAdjacentTiles_PutsTheSeamVertexExactlyOnTheSeam</c>
-        /// proves the boundary assignment in the clipper's own idealised frame; this proves it survives the
-        /// frames the slicer actually builds. The two tiles either side of a seam derive their local
-        /// coordinates independently — <c>(u·2^z − x)·extent</c> with a different <c>x</c> — so their
-        /// arithmetic does NOT round alike, and the only thing that can make them agree about where their
-        /// common edge is, is that each writes its own boundary LITERAL there.
-        ///
-        /// <para><b>The eastern tile is where this bites</b>, and the tooth says so rather than asserting
-        /// both sides and hoping. Its frame puts the crossing near ZERO, where the interpolation's absolute
-        /// error is enormous in ulps: <c>a + t·d</c> lands at <c>1.14e−13</c>, not on the seam. The western
-        /// tile's frame puts the same crossing near 4096, where that same absolute error is under half an
-        /// ulp and rounds away — the interpolation looks exact there purely by luck of magnitude, which is
-        /// the reason the seam coordinate cannot be left to it.</para>
-        ///
-        /// <para>Clipped, not sliced, on purpose: <see cref="GeoJsonTileSlicer"/> rounds to integers after
-        /// clipping, and that rounding currently masks a disagreement this size. The guarantee belongs to the
-        /// clipper, and it is what a consumer working at unquantized precision gets to rely on.</para>
+        /// The seam-vertex boundary assignment survives the frames the slicer builds, not only the clipper's
+        /// idealised one. Tiles either side of a seam compute <c>(u·2^z − x)·extent</c> with a different
+        /// <c>x</c>, so only a boundary LITERAL makes them agree. Non-obvious why: the eastern tile matters
+        /// because its crossing is near ZERO, where <c>a + t·d</c> lands at <c>1.14e−13</c>. It clips rather
+        /// than slices, because the slicer's integer rounding hides an error this small.
         /// </summary>
         [Test]
         public void AdjacentTilesPutTheirSharedSeamVertexOnTheirOwnBoundary()
@@ -1017,9 +961,8 @@ namespace MapRenderer.Tests.GeoJsons
             List<double2> inWest = SegmentInTile(from, to, westTile, extent);
             List<double2> inEast = SegmentInTile(from, to, eastTile, extent);
 
-            // The fixture must discriminate where it claims to: the eastern tile's interpolated crossing has
-            // to miss its western edge, or this tooth would pass against an implementation that never
-            // assigned the boundary at all.
+            // The eastern tile's interpolated crossing must miss its western edge, or the test passes an
+            // implementation that never assigns the boundary.
             double t = (0.0 - inEast[0].x) / (inEast[1].x - inEast[0].x);
             Assert.That(inEast[0].x + t * (inEast[1].x - inEast[0].x), Is.Not.EqualTo(0.0),
                 "fixture must discriminate: pick a seam where a + t·d misses in the eastern frame");
@@ -1125,16 +1068,10 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// A non-integral <c>Extent</c> is REJECTED, not silently rounded.
-        ///
-        /// <para>Tile-local coordinates are quantized to integers, and downstream the extent is read both as
-        /// this <c>double</c> and as the whole number a decoded tile layer reports — so 4096.5 would arrive as
-        /// both 4096.5 and 4096 and every consumer joining them would be off by a fraction of a tile with
-        /// nothing to notice. No authoring intent is expressed by a fractional extent, so rounding it would
-        /// substitute a value nobody asked for; the guard rejects it at the door instead.</para>
-        ///
-        /// <para>The valid arm is not decoration: without it "reject everything" satisfies the invalid ones.
-        /// </para>
+        /// A non-integral <c>Extent</c> is REJECTED, not rounded. Downstream reads the extent both as this
+        /// <c>double</c> and as the decoded layer's whole number, so 4096.5 would arrive as both values and
+        /// every consumer joining them would be off by a fraction of a tile. The valid arm fails "reject
+        /// everything".
         /// </summary>
         [Test]
         public void ANonIntegralExtent_IsRejected_RatherThanRounded()
@@ -1164,19 +1101,11 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// The extent's domain has an UPPER bound as well: a whole number above <c>uint.MaxValue</c>, and
-        /// <c>+∞</c>, are rejected.
-        ///
-        /// <para>Both are positive and both equal their own <c>floor</c>, so the integrality clause alone
-        /// admits them — and both then reproduce the very defect that clause exists to close: the decoded
-        /// layer narrows the extent to a <c>uint</c> by an UNCHECKED conversion while the materializer keeps
-        /// the <c>double</c>, so the layer reports one extent and its geometry another. <c>+∞</c> does not
-        /// even reach that far: <c>Window</c> computes <c>∞ − ∞</c>, every comparison against a NaN window
-        /// is false, and the tile keeps every feature and then slices away every vertex.</para>
-        ///
-        /// <para>The <c>uint.MaxValue</c> arm PASSES, and is the point of the pair: the bound is the
-        /// representable domain of the layer's <c>uint</c>, not a taste judgement about plausible extents.
-        /// Without it, "reject anything large" satisfies both rejecting arms.</para>
+        /// The extent has an UPPER bound: a whole number above <c>uint.MaxValue</c>, and <c>+∞</c>, are
+        /// rejected. Both pass the integrality check, but the layer narrows the extent to <c>uint</c> unchecked,
+        /// so layer and geometry disagree; <c>+∞</c> gives a NaN window that slices away every vertex. The
+        /// <c>uint.MaxValue</c> arm PASSES: the bound is the layer's <c>uint</c> domain, and the arm fails
+        /// "reject anything large".
         /// </summary>
         [Test]
         public void AnExtentOutsideTheRepresentableDomain_IsRejected()
@@ -1379,28 +1308,14 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         // ── the boundary ASSIGNMENT — the contract nothing above observes ───────────────────────────
-        //
-        // Every tooth above survives an implementation that writes the interpolated `a + t·d` instead of
-        // assigning the boundary literal, because their crossings all fall on coordinates where the two
-        // happen to agree. These two do not: their fixtures are chosen so `a + t·d` demonstrably misses.
+        // The tests above pass an interpolating `a + t·d`; these two pick fixtures where `a + t·d` misses.
 
         /// <summary>
-        /// One world-space line, clipped from the frames of two horizontally adjacent tiles, must place
-        /// the shared seam vertex EXACTLY on the seam in each frame — <c>x = Extent</c> for the western tile,
-        /// <c>x = 0</c> for its eastern neighbour. That is what makes the two tiles agree about where their
-        /// common edge is, and it is the property seam-matched stroke and symbol geometry will rest on.
-        ///
-        /// <para><b>Discriminating interpolation from assignment:</b> the test computes the interpolation the clipper
-        /// would otherwise emit and asserts it MISSES the boundary — here by one ulp, leaving the vertex just
-        /// inside the western tile and (in the eastern frame, where the same absolute error is enormous in
-        /// ulps) just outside the eastern one. A fixture where interpolation and assignment agree would make
-        /// the tooth vacuous, so that is asserted rather than assumed.</para>
-        ///
-        /// <para>The frames of two adjacent tiles differ by exactly one extent in x, and the fixture's
-        /// coordinates are integers, so the re-expression is exact and the FULL seam vertex — not just its
-        /// clipped axis — must match bit-for-bit. That clause is a corollary of the boundary assignment
-        /// here, not an independent check: with the assignment removed both frames drift by the same
-        /// amount, so it is the two boundary-literal assertions above it that carry the discrimination.</para>
+        /// One line clipped from two adjacent tiles' frames must put the shared seam vertex EXACTLY on the
+        /// seam: <c>x = Extent</c> in the western tile, <c>x = 0</c> in the eastern one, so both agree on their
+        /// common edge. The test asserts that the interpolation MISSES the boundary here, so the fixture is not
+        /// vacuous. The full-vertex bit-match is only a corollary; the two boundary-literal assertions carry
+        /// the discrimination.
         /// </summary>
         [Test]
         public void OneLineClippedFromTwoAdjacentTiles_PutsTheSeamVertexExactlyOnTheSeam()

@@ -10,19 +10,11 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Tests.Json
 {
     /// <summary>
-    /// <c>JsonCanonical.Write</c> — the serialization <c>TileManager.SourceKey</c> keys an inline
-    /// <c>data</c> document on. Its whole contract is comparability in BOTH directions, so every arm here
-    /// pins one of the two failures: <b>two authorings of one document must produce the same text</b> (or
-    /// every restyle rebuilds every geojson pipeline), and <b>two different documents must produce different
-    /// text</b> (or a restyle keeps the wrong dataset's pipeline and renders geometry the style no longer
-    /// declares).
-    ///
-    /// <para><b>The collision arms are the load-bearing half.</b> A writer that merely "looks like JSON"
-    /// passes the agreement arms trivially — <see cref="JsonValue.ToString"/> does, and it renders every
-    /// two-member object as <c>"{2 members}"</c>. That is why the arms below name the specific DOM pairs a
-    /// sloppy writer merges: a number against its string spelling, a null node against the string
-    /// <c>"null"</c>, a string carrying the delimiters against the structure it would forge, and a literal
-    /// backslash against the control character it would otherwise be spelled as.</para>
+    /// <c>JsonCanonical.Write</c> — the text <c>TileManager.SourceKey</c> keys an inline <c>data</c> document
+    /// on. Two authorings of one document must give the same text (or every restyle rebuilds every geojson
+    /// pipeline); two different documents must give different text (or a restyle keeps the wrong dataset).
+    /// The collision arms carry the weight: each names a DOM pair a sloppy writer merges, such as a number
+    /// and its string spelling, or <c>null</c> and <c>"null"</c>.
     /// </summary>
     [TestFixture]
     public class JsonCanonicalTests
@@ -139,24 +131,11 @@ namespace MapRenderer.Tests.Json
         }
 
         /// <summary>
-        /// A string carrying the delimiters must not be able to forge structure, on <b>three of the eight
-        /// independent escape arms</b> the writer has — quote, backslash, and the <c>&lt; 0x20</c> default.
-        ///
-        /// <para><b>Why these three, and why the other five need no arm.</b> <c>JsonCanonical.WriteString</c>
-        /// has eight cases: <c>"</c>, <c>\</c>, <c>\b</c>, <c>\f</c>, <c>\n</c>, <c>\r</c>, <c>\t</c> and
-        /// the control-character default. Only the first two can forge a COLLISION — the quote closes a
-        /// string and the backslash re-spells one — and the default is the only arm reached by a character
-        /// with no case of its own. The five named control escapes are convenience spellings: emitted raw,
-        /// a real newline is still a different text from the two characters <c>\</c> and <c>n</c> (which the
-        /// backslash arm doubles), so no two distinct DOM values can be made to canonicalise alike through
-        /// them. Coverage here is deliberate, not partial.</para>
-        ///
-        /// <para><b>Why three and not one.</b> The arms are separate <c>switch</c> cases, so an injection
-        /// into any one of them leaves the others intact: a fixture exercising only the quote is BLIND to a
-        /// backslash writer that stopped doubling, under which <c>"\\n"</c> (backslash, 'n') and a real
-        /// newline canonicalise to the same text — two distinct DOM values, one source key, which is exactly
-        /// the failure this writer exists to prevent. Measured, not reasoned: that injection left a
-        /// quote-only arm green.</para>
+        /// A string carrying the delimiters must not forge structure, on three of the writer's eight escape
+        /// arms: quote, backslash, and the <c>&lt; 0x20</c> default. Non-obvious why: only these three, because
+        /// only the quote and backslash can forge a collision, the default is the only arm for an unnamed control
+        /// character, and the five named escapes cannot make two DOM values alike. Each arm is its own
+        /// <c>switch</c> case, so one arm's test is blind to a defect in another.
         /// </summary>
         [Test]
         public void StringsCarryingDelimiters_AreEscaped_SoTheyCannotForgeStructure()
@@ -189,13 +168,9 @@ namespace MapRenderer.Tests.Json
         }
 
         /// <summary>
-        /// The reason this type exists rather than <see cref="JsonValue.ToString"/>: that method renders any
-        /// two-member object as <c>"{2 members}"</c>, so two entirely different inline datasets stringify
-        /// identically.
-        ///
-        /// <para>The <b>precondition</b> is asserted, not assumed. Without it, a future <c>ToString</c> that
-        /// started emitting real JSON would turn this test into a tautology that still passed while proving
-        /// nothing.</para>
+        /// Why this type exists: <see cref="JsonValue.ToString"/> renders any two-member object as
+        /// <c>"{2 members}"</c>, so two different inline datasets stringify alike. The test asserts that
+        /// precondition, so a <c>ToString</c> that emits real JSON cannot turn it into a tautology.
         /// </summary>
         [Test]
         public void ToString_CollidesOnDifferentObjects_WhereCanonicalDoesNot()

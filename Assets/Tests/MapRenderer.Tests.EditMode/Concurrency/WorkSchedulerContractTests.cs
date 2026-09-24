@@ -1,10 +1,5 @@
-// Stage-2 acceptance: pure IWorkScheduler/WorkHandle<T> contract teeth — no MapView, no TileManager. These
-// pin the properties the mesh-build kick migration and the symbol dispatch migration (SymbolSubsystem.cs
-// :643/:899) lean on: I-3 (a body throw never propagates out of Schedule, which is what keeps
-// KickMeshBuild's single ownership-guard catch exactly-once under both policies), repeatable-GetResult (why
-// the migration drops .Preserve() rather than replacing it), and never-skips-on-token (poll, not push — why
-// SymbolSubsystem's parked-drain dispatch needs no cancellationToken:-style skip guard the way
-// UniTask.RunOnThreadPool did).
+// Pure IWorkScheduler/WorkHandle<T> contract tests — no MapView, no TileManager. They pin what the mesh-build
+// kick and the symbol dispatch rely on: no body throw escapes, repeatable GetResult, never skip on a token.
 
 using System;
 using System.Threading;
@@ -17,19 +12,11 @@ namespace MapRenderer.Tests.Concurrency
     [TestFixture]
     public class WorkSchedulerContractTests
     {
-        /// <summary>I-3: <c>IWorkScheduler.Schedule</c> never propagates a body exception — both shipped
-        /// schedulers wrap the body in their own try/catch and route a throw to
-        /// <c>TrySetException</c>, so <c>Schedule</c> itself can only throw for a dispatch failure. This is
-        /// what lets <c>TileManager.KickMeshBuild</c>'s single <c>catch { decode.Release(); throw; }</c>
-        /// stay an exactly-once release under EITHER policy — a scheduler that let
-        /// a body throw escape would double-release (the body's own <c>finally</c> plus the kick's outer
-        /// catch), silently disposing a decoded tile's buffers under a live owner.
-        ///
-        /// <para><b>RED injection:</b> delete the <c>catch (Exception ex) { utcs.TrySetException(ex); }</c>
-        /// from <see cref="InlineWorkScheduler.Schedule{T}"/> — <c>Assert.DoesNotThrow</c> fails because the
-        /// body's throw now propagates out of <c>Schedule</c> uncaught. Inline is the right injection target:
-        /// it is the policy where the body runs INSIDE <c>Schedule</c>, on the calling thread, so it is the
-        /// one where a missing catch actually escapes to the caller.</para></summary>
+        /// <summary><c>IWorkScheduler.Schedule</c> never propagates a body exception: both schedulers route a
+        /// throw to <c>TrySetException</c>. Non-local invariant: this keeps <c>TileManager.KickMeshBuild</c>'s
+        /// single <c>catch { decode.Release(); throw; }</c> an exactly-once release; an escaping throw would
+        /// double-release a decoded tile's buffers under a live owner. RED: delete the catch in
+        /// <see cref="InlineWorkScheduler.Schedule{T}"/>, where the body runs on the calling thread.</summary>
         [TestCase(false, TestName = "Scheduler_CapturesABodyThrow_AndNeverPropagatesIt_Inline")]
         [TestCase(true,  TestName = "Scheduler_CapturesABodyThrow_AndNeverPropagatesIt_ThreadPool")]
         public void Scheduler_CapturesABodyThrow_AndNeverPropagatesIt(bool useThreadPool)
@@ -53,16 +40,10 @@ namespace MapRenderer.Tests.Concurrency
                 "GetResult() on a faulted handle must surface the body's own exception, unwrapped.");
         }
 
-        /// <summary>Repeatable-GetResult: once terminal, <see cref="WorkHandle{T}.GetResult"/> is callable
-        /// any number of times with the same outcome — no version-token invalidation, no
-        /// <c>.Preserve()</c> needed. This is the property the migration relies on instead of the
-        /// <c>.Preserve()</c> wrapper it removes: <c>TileManager.ConsumeMeshBuild</c> re-fetches the result on
-        /// every call across a resumable multi-frame consume.
-        ///
-        /// <para><b>RED injection:</b> in <see cref="InlineWorkScheduler"/>, swap
-        /// <c>UniTaskCompletionSource&lt;T&gt;</c> for the pooled, version-tokened
-        /// <c>AutoResetUniTaskCompletionSource&lt;T&gt;</c> — the second <c>GetResult()</c> then throws on a
-        /// token-version mismatch instead of repeating the value.</para></summary>
+        /// <summary>Once terminal, <see cref="WorkHandle{T}.GetResult"/> returns the same outcome on every call,
+        /// with no <c>.Preserve()</c> wrapper. <c>TileManager.ConsumeMeshBuild</c> re-fetches the result on every
+        /// call of a multi-frame consume. RED: swap <see cref="InlineWorkScheduler"/>'s source for the pooled,
+        /// version-tokened <c>AutoResetUniTaskCompletionSource&lt;T&gt;</c>; the second call then throws.</summary>
         [Test]
         public void WorkHandle_GetResultIsRepeatableOnceTerminal()
         {
@@ -87,17 +68,11 @@ namespace MapRenderer.Tests.Concurrency
                 "throw once and then report something else (e.g. a version-mismatch error).");
         }
 
-        /// <summary>Never-skips-on-token: unlike <c>UniTask.RunOnThreadPool(cancellationToken:)</c>, which
-        /// skips the delegate entirely when the token is already cancelled at dispatch time,
-        /// <c>IWorkScheduler.Schedule</c> ALWAYS runs the body — the token is handed to the body to poll at
-        /// its own safe points ("poll, not push" — <see cref="IWorkScheduler.Schedule{T}"/>'s own doc). This
-        /// is the property <c>SymbolSubsystem</c>'s parked-drain dispatch (<c>PumpBuilds</c>) depends on: the
-        /// dispatched body is the ONLY release for its decode reference, so a scheduler that skipped it on a
-        /// pre-cancelled token would leak exactly as the old <c>cancellationToken:</c> argument would have.
-        ///
-        /// <para><b>RED injection:</b> add an early-return-without-running-body guard on a cancelled
-        /// <paramref name="ct"/> to either scheduler's <c>Schedule</c> (mirroring
-        /// <c>UniTask.RunOnThreadPool</c>'s skip) — <c>bodyRan</c> stays false.</para></summary>
+        /// <summary>Unlike <c>UniTask.RunOnThreadPool(cancellationToken:)</c>, <c>IWorkScheduler.Schedule</c> runs
+        /// the body even on a pre-cancelled token; the body polls the token. Non-local invariant: in
+        /// <c>SymbolSubsystem</c>'s <c>PumpBuilds</c> dispatch the body is the ONLY release of its decode
+        /// reference, so a skip leaks it. RED: add an early return on a cancelled <paramref name="ct"/> to
+        /// either scheduler's <c>Schedule</c>; <c>bodyRan</c> stays false.</summary>
         [TestCase(false, TestName = "Scheduler_RunsTheBody_EvenWithAnAlreadyCancelledToken_Inline")]
         [TestCase(true,  TestName = "Scheduler_RunsTheBody_EvenWithAnAlreadyCancelledToken_ThreadPool")]
         public void Scheduler_RunsTheBody_EvenWithAnAlreadyCancelledToken(bool useThreadPool)

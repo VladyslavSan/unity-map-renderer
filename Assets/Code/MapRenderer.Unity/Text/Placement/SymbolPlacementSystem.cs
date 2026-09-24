@@ -1,6 +1,5 @@
-// Namespace-collision guard: this file uses Unity.Mathematics types (float2/float4/float4x4/double2/
-// double3) — TOP-LEVEL `using Unity.Mathematics;` with unqualified types, never an inline
-// `Unity.Mathematics.X` (binds to the nonexistent `...Placement.Unity.Mathematics`, CS0234).
+// Namespace-collision guard: TOP-LEVEL `using Unity.Mathematics;` with unqualified types, never an inline
+// `Unity.Mathematics.X` (it binds to the nonexistent `...Placement.Unity.Mathematics`, CS0234).
 
 using System;
 using System.Collections.Generic;
@@ -751,10 +750,8 @@ namespace MapRenderer.Unity.Text.Placement
             _pendingCandidateCount = candidateCount;
         }
 
-        // Debug-only. FadeId is the display key, so SymbolCandidate.FadeId's per-frame uniqueness is load-bearing
-        // for what the user sees — two candidates sharing an id would both show when one wins. This checks only
-        // one frame's candidates; it can't see sequential reuse across frames (see SymbolDeferredCollisionTests
-        // for the known hazard this doesn't catch).
+        // Debug-only. FadeId is the display key: two candidates sharing an id would both show when one wins.
+        // Limitation: it checks one frame only, not reuse across frames (see SymbolDeferredCollisionTests).
         [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
         private void AssertFadeIdsUnique(NativeArray<SymbolCandidate> candidates, int candidateCount)
         {

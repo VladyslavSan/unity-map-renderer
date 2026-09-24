@@ -23,21 +23,15 @@ using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Test-only accessors that peek at <see cref="MapView"/> internals (granted via
-    /// <c>InternalsVisibleTo</c> on MapRenderer.Unity) WITHOUT adding test-support members to MapView's
-    /// production API. The test-support surface lives here, in the test assembly, where it belongs.
-    ///
-    /// Most accessors forward through <see cref="MapView.TileManager"/> (the lifecycle owner) — MapView no
-    /// longer mirrors them. Members that were properties on MapView are methods here (extension members
-    /// cannot be properties), so the call sites read <c>view.LoadedTileCount()</c> etc.
+    /// Test-only accessors over <see cref="MapView"/> internals (via <c>InternalsVisibleTo</c>), so MapView's
+    /// production API carries no test-support members. Most forward through <see cref="MapView.TileManager"/>,
+    /// the lifecycle owner. Extension members cannot be properties, so call sites read
+    /// <c>view.LoadedTileCount()</c> etc.
     /// </summary>
     internal static class MapViewTestExtensions
     {
         // ── Test camera rig ─────────────────────────────────────────────────────────────────────
-        // MapCamera wraps a NON-NULL UnityEngine.Camera and the camera IS the viewport, so a headless
-        // MapView test needs a real camera with a deterministic pixel size. This wires an offscreen,
-        // never-rendered camera whose square RenderTexture gives ViewportPx = (px, px). The camera is
-        // parented to the view (destroyed with it); the RenderTexture is shared (the camera never renders).
+        // MapCamera's NON-NULL Camera IS the viewport: a never-rendered one on this shared RT gives (px, px).
         private static RenderTexture _testViewportRt;
 
         // Off-main, matching production's desktop policy — LoadTestStyle exercises the source's own
@@ -74,14 +68,10 @@ namespace MapRenderer.Tests
         /// <param name="source">The byte source every rendered source-id is pointed at.</param>
         /// <param name="initialView">Camera properties to seed before the first tick.</param>
         /// <param name="style">Style document to build layers from; a default is used when null.</param>
-        /// <param name="decodeScheduler">Overrides the decode hop's scheduler. Defaults to the off-main
-        /// desktop policy. Pass an <c>InlineWorkScheduler</c> when a fixture's assertion depends on EVERY
-        /// admitted tile being decode-ready within the tick that completes its fetch — under the default,
-        /// decodes land across an unpredictable number of ticks, so a per-tick budget sees a partial
-        /// ready-set.</param>
-        /// <param name="symbolsIntentionallyUnwired">This helper never wires <c>SymbolSubsystem</c>, so a
-        /// symbol layer's source loads but never places. Pass <c>true</c> only when a test needs the source
-        /// wired and genuinely does not need placement; otherwise a symbol layer here throws.</param>
+        /// <param name="decodeScheduler">Decode-hop scheduler; off-main by default, so decodes land over an
+        /// unpredictable number of ticks. <c>InlineWorkScheduler</c> makes a fetched tile decode-ready that tick.</param>
+        /// <param name="symbolsIntentionallyUnwired">This helper never wires <c>SymbolSubsystem</c>, so a symbol
+        /// layer throws here unless this is <c>true</c>; then its source loads but never places.</param>
         internal static void LoadTestStyle(this MapViewComponent view, IDataSource source,
             CameraProperties initialView, StyleDocument style = null, IWorkScheduler decodeScheduler = null,
             bool symbolsIntentionallyUnwired = false)
@@ -92,9 +82,8 @@ namespace MapRenderer.Tests
             mv.Camera.SyncToCamera(); // production commits in LateUpdate; tests drive it explicitly at the seed
             mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
 
-            // One SourceSpec per distinct rendered (fill/line/symbol) source-id, each creating the injected
-            // source. Zoom range left wide-open (cover is already zoom-clamped by the selector). Key is
-            // irrelevant — tests wire once, never restyle-diff.
+            // One SourceSpec per distinct rendered source-id, each creating the injected source. The zoom range
+            // stays wide-open (the selector clamps cover), and the key is irrelevant: tests never restyle-diff.
             var specs = new List<TileManager.SourceSpec>();
             var seen  = new HashSet<string>();
             var layers = mv.Layers.Layers;
@@ -279,9 +268,8 @@ namespace MapRenderer.Tests
         /// and <see cref="RenderLayerSet"/> builds zero layers. Returns the view for chaining:
         /// <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
         /// </summary>
-        /// <param name="mode">Which committed set to assign, and therefore whether the view renders lit or
-        /// unlit — render mode is a property of the SET, not a separate flag. Defaults to <c>Lit</c>, the
-        /// product default.</param>
+        /// <param name="mode">Which committed set to assign; render mode is a property of the SET, so this picks
+        /// lit or unlit. Defaults to <c>Lit</c>, the product default.</param>
         public static MapViewComponent WithTestMaterials(
             this MapViewComponent view, RenderMode mode = RenderMode.Lit)
         {

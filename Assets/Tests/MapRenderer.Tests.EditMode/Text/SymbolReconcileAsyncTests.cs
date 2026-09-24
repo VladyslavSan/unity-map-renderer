@@ -75,12 +75,8 @@ namespace MapRenderer.Tests.Text
     public class GlyphAtlasAllocTests
     {
         // =========================================================================================
-        // (a) Append an already-decoded glyph. Deterministic zero-alloc setup: a WIDE atlas (so many
-        //     same-size cells fit on one shelf, never wrapping to a new -- taller-usedHeight -- row)
-        //     plus re-appending the SAME codepoint (so the entries-dictionary write is an in-place
-        //     overwrite of an EXISTING key, which can never trigger a Dictionary capacity resize).
-        //     With both variables pinned, GrowToFit's buffer realloc genuinely never fires after the
-        //     first (unmeasured) warm-up append -- no reliance on guessing CLR dictionary growth points.
+        // (a) Append an already-decoded glyph. A WIDE atlas never wraps to a taller shelf, and the SAME
+        //     codepoint overwrites an existing dictionary key, so no buffer or capacity growth follows warm-up.
         // =========================================================================================
         [Test]
         public void Append_AlreadyDecodedGlyph_AllocatesNoGCMemory()
@@ -92,9 +88,8 @@ namespace MapRenderer.Tests.Text
             // backing arrays initialized on the first Add).
             atlas.Append(glyph, 0);
 
-            // Block-bodied lambda (not an expression lambda): Append returns a value (GlyphAtlasEntry),
-            // and Assert.That needs a void TestDelegate here — an expression lambda binds to the wrong
-            // overload and fails with "actual value must be a TestDelegate" (see TileLoadMeasurementTests).
+            // Block-bodied lambda: Append returns a value, so an expression lambda binds to the wrong
+            // Assert.That overload and fails with "actual value must be a TestDelegate".
             Assert.That(() => { atlas.Append(glyph, 0); }, Is.Not.AllocatingGCMemory(),
                 "re-appending an already-decoded glyph (same codepoint, same cell height, same open shelf) " +
                 "must not allocate: GrowToFit no-ops once the shelf's used height stops increasing, and " +
@@ -118,10 +113,7 @@ namespace MapRenderer.Tests.Text
 
         // =========================================================================================
         // (b) Shape a cached run (steady LTR path) into a caller-owned List<PositionedGlyph> buffer.
-        //     Warm-up call lets the List's backing array reach its stable capacity; the measured call
-        //     reuses it -- CodepointTextShaper.Shape(in request, output) writes PositionedGlyph VALUE
-        //     structs directly into `output`, with no intermediate codepoint/cluster lists and no
-        //     ShapedRun class allocation on this path (see its doc comment).
+        //     The warm-up call stabilizes the List's capacity; the measured call reuses it.
         // =========================================================================================
         [Test]
         public void Shape_CachedLatinRun_IntoCallerBuffer_AllocatesNoGCMemory()
@@ -157,12 +149,10 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Texel-from-texture: uploads a decoded glyph's atlas region via
-    /// <see cref="GlyphAtlasTexture"/> and reads a texel on the glyph's edge back from the uploaded
-    /// <see cref="Texture2DArray"/>'s CPU-side buffer, confirming it matches the source
-    /// <see cref="GlyphAtlas.Pixels"/> byte exactly AND is graded (mid-range), not flat 0/255 — the
-    /// same "real SDF, not a coverage bitmap" guard <c>SdfDistanceFieldTests</c> applies to the raw
-    /// decoded bitmap, applied end-to-end through the GPU-texture upload.
+    /// Texel-from-texture: uploads a decoded glyph's atlas region via <see cref="GlyphAtlasTexture"/> and
+    /// reads an edge texel back from the <see cref="Texture2DArray"/>'s CPU-side buffer. It must match the
+    /// source <see cref="GlyphAtlas.Pixels"/> byte AND be graded (mid-range), not flat 0/255 — the
+    /// <c>SdfDistanceFieldTests</c> "real SDF, not a coverage bitmap" guard, end-to-end through the upload.
     /// </summary>
     [TestFixture]
     public class GlyphAtlasTextureTests
@@ -216,9 +206,8 @@ namespace MapRenderer.Tests.Text
                 int2 local = FindGradedTexelLocal(a.Bitmap, entry.CellSize);
                 byte expected = a.Bitmap[local.y * entry.CellSize.x + local.x];
 
-                // GetPixelData<byte> reads the texture's CPU-side buffer directly (1 byte/texel for
-                // No float round-trip, no channel ambiguity if the format ever falls back to
-                // Alpha8 — unlike GetPixel().r, which would silently read 0 from an Alpha8 texture).
+                // GetPixelData<byte> reads the CPU-side buffer directly: no float round-trip, and no silent
+                // 0 on an Alpha8 fallback, which GetPixel().r would read.
                 var raw = texture.GetPixelData<byte>(0, entry.Page);
                 int px = entry.AtlasOrigin.x + local.x;
                 int py = entry.AtlasOrigin.y + local.y;
@@ -274,10 +263,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Multi-page, texture half: a fixed atlas forced to page (a small page + enough glyphs to overflow it)
-        // uploads a Texture2DArray with ONE LAYER PER PAGE, and page 1's uploaded bytes match the SOURCE
-        // glyph's bitmap at its page-1 origin — proving the second array layer actually carries the
-        // overflowed glyph's pixels, not empty/garbage data.
+        // Multi-page, texture half: a fixed atlas forced to page uploads ONE ARRAY LAYER PER PAGE, and
+        // page 1's bytes match the overflowed glyph's SOURCE bitmap, not empty or garbage data.
         // =========================================================================================
         [Test]
         public void Upload_FixedAtlasForcedToPage_UploadsOneArrayLayerPerPage()
@@ -347,18 +334,10 @@ namespace MapRenderer.Tests.Text
 
     /// <summary>
     /// Glyph-fetch hoist: a build fetches every glyph range before it shapes, and shaping is synchronous.
-    /// The tail's structural teeth (<c>RunTailAsync_AwaitsOnlyTheGlyphPrepare_BeforeTheShapeLoop</c>,
-    /// <c>CollectRequiredRanges_RunsOnlyInsideRunTailAsync_NeverOnTheWorker</c>,
-    /// <c>ReadySymbolTail_NeverCarriesADecodeReference</c>) live in <see cref="SymbolTailPumpTests"/>, because
-    /// they need SOURCE FILES this fixture-driven suite has no reason to touch. Its behavioural tooth
-    /// (<c>CancelDuringGlyphPrepare_UnwindsBeforeShapeOrCommit_ReleasesTheDecodeExactlyOnce</c>) lives in
-    /// <c>SymbolSubsystemWorkSchedulerTests</c>, which has the subsystem harness it needs.
-    ///
-    /// <para><b>Every tooth here needs ≥ 2 distinct <c>(fontName, rangeStart)</c> keys</b>
-    /// — a fixture that lacks the keys an oracle reads makes it vacuous. Every OTHER symbol fixture in this repo
-    /// is single-font/single-range, so it cannot observe either a fetch/shape interleave or a
-    /// collect-order shuffle. The first two tests below use two font names or two distinct ranges
-    /// so the tooth is falsifiable, not just green.</para>
+    /// The tail's source-file teeth live in <see cref="SymbolTailPumpTests"/>; its cancellation tooth lives in
+    /// <c>SymbolSubsystemWorkSchedulerTests</c>, which has the subsystem harness.
+    /// Non-obvious why: the first two tests need ≥ 2 distinct <c>(fontName, rangeStart)</c> keys, because a
+    /// single-font/single-range fixture cannot observe a fetch/shape interleave or a collect-order shuffle.
     /// </summary>
     [TestFixture]
     public class GlyphPrepareBeforeShapeTests
@@ -400,13 +379,10 @@ namespace MapRenderer.Tests.Text
 
         // ── the fetch happens once per tile, before any shaping ───────────────────────────────────────
 
-        /// <summary>The primary behavioural tooth: every glyph-range fetch for a build completes before
-        /// that build shapes its first symbol. Two style layers over the SAME source-layer with DIFFERENT
-        /// <c>text-font</c> names ("FontA"/"FontB") give two distinct <c>(fontName, rangeStart)</c> keys from
-        /// Latin fixture text alone — a single-font fixture cannot see a fetch/shape interleave.
-        /// <para><b>RED injection:</b> interleave them — move the collect+ensure inside a
-        /// per-layer loop (fetch and shape one layer at a time) — layer B's fetch then
-        /// records a non-zero <c>Symbols.Count</c>.</para></summary>
+        /// <summary>Every glyph-range fetch for a build completes before that build shapes its first symbol.
+        /// Two layers over the SAME source-layer with DIFFERENT <c>text-font</c> names give two distinct
+        /// <c>(fontName, rangeStart)</c> keys from Latin text alone. A per-layer fetch-then-shape loop
+        /// makes layer B's fetch record a non-zero <c>Symbols.Count</c>.</summary>
         [Test]
         public async Task EveryGlyphFetchPrecedesTheFirstShapedSymbol()
         {
@@ -447,15 +423,9 @@ namespace MapRenderer.Tests.Text
 
         /// <summary><see cref="GlyphAtlas"/> is an insertion-order shelf packer, so the order
         /// <see cref="StyledSymbolTileBuilder.CollectRequiredRanges"/> emits ranges in IS the fetch order IS
-        /// the atlas layout IS every baked glyph's UV. One layer's text spans TWO distinct rangeStarts (Latin
-        /// + Arabic) over a TWO-name stack, so the code-unit-outer/name-inner nesting is genuinely
-        /// falsifiable — a text that collapses to one shared rangeStart (e.g. all-ASCII) would produce the
-        /// SAME emitted order under either nesting and prove nothing.
-        /// <para><b>RED injection:</b> swap the stack-name loop above the code-unit loop — the emitted order
-        /// becomes name-major instead of code-unit-major and reddens this test. (Emitting from the dedup set
-        /// instead of the ordered list is the plan's other named injection; left to the developer's own
-        /// RED-verify run since <c>HashSet&lt;T&gt;</c> enumeration order is an implementation detail this
-        /// fixture does not need to pin down to falsify the nesting order.)</para></summary>
+        /// the atlas layout IS every baked glyph's UV. One layer's text spans TWO rangeStarts (Latin + Arabic)
+        /// over a TWO-name stack, so a name-major nesting emits a different order and reddens this test;
+        /// all-ASCII text would emit the same order under either nesting.</summary>
         [Test]
         public void CollectedRangesAreInFirstEncounterOrder()
         {
@@ -487,12 +457,9 @@ namespace MapRenderer.Tests.Text
 
         // ── Shape mutates no glyph atlas ───────────────────────────────────────────────────────────────
 
-        /// <summary>The invariant that dispatching Shape off-main rests on — its own tooth, not an
-        /// inference from "no ensure during shaping". Builds extracted layers with non-empty text, DELIBERATELY
-        /// skips the ensure step, and asserts <see cref="StyledSymbolTileBuilder.Shape"/> neither grows the
-        /// atlas nor fetches anything.
-        /// <para><b>RED injection:</b> add a glyph-range fetch loop inside <c>Shape</c> (making it
-        /// <c>async</c>) — the atlas then grows during shaping.</para></summary>
+        /// <summary>The invariant that dispatching Shape off-main rests on: with the ensure step skipped,
+        /// <see cref="StyledSymbolTileBuilder.Shape"/> neither grows the atlas nor fetches anything.
+        /// A glyph-range fetch inside <c>Shape</c> grows the atlas during shaping and reddens this test.</summary>
         [Test]
         public void ShapeDoesNotAppendToTheAtlas()
         {
@@ -523,12 +490,9 @@ namespace MapRenderer.Tests.Text
 
         /// <summary>Reflection half: neither the interface contract nor its concrete implementors are an
         /// async method in disguise. The compiler emits <see cref="AsyncStateMachineAttribute"/> on every
-        /// <c>async</c> method — including <c>async void</c> — so this catches a form a bare <c>void</c>
-        /// return type does not. Complements <c>SymbolTailPumpTests.RunTailAsync_AwaitsOnlyTheGlyphPrepare_BeforeTheShapeLoop</c>'s
-        /// structural half — a different instrument reading a different thing
-        /// — one instrument's blind spot does not transfer to another.
-        /// <para><b>RED injection:</b> mark <c>StyledSymbolTileBuilder.Shape</c> <c>async void</c> with any
-        /// <c>await</c> in it.</para></summary>
+        /// <c>async</c> method, including <c>async void</c>, which a bare <c>void</c> return type does not catch.
+        /// The source-file half is <c>SymbolTailPumpTests.RunTailAsync_AwaitsOnlyTheGlyphPrepare_BeforeTheShapeLoop</c>.
+        /// </summary>
         [Test]
         public void TheMainTailHasNoSuspensionPoint()
         {
@@ -559,13 +523,8 @@ namespace MapRenderer.Tests.Text
     /// <summary>
     /// <b>The symbol consumer reads its tile address, its extent and its feature
     /// count off the BUFFER</b>, not off a caller-supplied argument and not off the layer's feature list.
-    ///
-    /// <para>The second address copy is gone from the mesh consumers —
-    /// <c>ITileMeshRenderLayer.WriteInto</c> lost its <c>TileId</c> parameter and fill/line read
-    /// <c>geometry.Tile</c> — but symbol kept taking one, so <c>MvtDecoder</c>'s claim that the address
-    /// "enters the pipeline exactly ONCE, at the fetch" was false for exactly one consumer. These are the
-    /// teeth for closing it; each one moves ONE of the three quantities and pins that the output follows the
-    /// buffer.</para>
+    /// This keeps <c>MvtDecoder</c>'s rule that the address enters the pipeline once, in <c>Decode</c>.
+    /// Each test moves ONE of the three quantities and pins that the output follows the buffer.
     /// </summary>
     [TestFixture]
     public class SymbolBufferAddressTests
@@ -626,10 +585,8 @@ namespace MapRenderer.Tests.Text
             List<SymbolStyle.SymbolFeature> fromHere  = Extract(CentroidsLayer(), decodedHere,  DecodedAt);
             List<SymbolStyle.SymbolFeature> fromThere = Extract(CentroidsLayer(), decodedThere, WrongTile);
 
-            // Anti-vacuity, and it is the whole tooth: if the address did not move the output, corrupting it
-            // below would prove nothing. Assert BOTH observable consequences separately — the projected
-            // anchor and the packed TileKey — so a change that stops one from depending on the address
-            // cannot hide behind the other.
+            // Anti-vacuity: the address must move BOTH the projected anchor and the packed TileKey, asserted
+            // separately so one that stops depending on the address cannot hide behind the other.
             Assert.Greater(fromHere.Count, 0, "precondition: the fixture must yield symbols at all");
             Assert.AreEqual(fromHere.Count, fromThere.Count, "precondition: the same features are selected either way");
             Assert.AreNotEqual(fromHere[0].AnchorRender.x, fromThere[0].AnchorRender.x,
@@ -693,9 +650,8 @@ namespace MapRenderer.Tests.Text
             const uint bufferExtent      = 4096;
             const uint misreportedExtent = 2048;
 
-            // One point at (2048, 2048) — dead centre of a 4096 tile, and exactly ON the upper bound of a
-            // 2048 one. EmitAtAnchor's single-world clip is `[0, extent)`, so reading the misreported extent
-            // does not merely shift the anchor, it DROPS the symbol: a discriminator with no tolerance in it.
+            // One point at (2048, 2048): mid-tile at 4096, ON the upper bound at 2048. EmitAtAnchor clips to
+            // `[0, extent)`, so the misreported extent DROPS the symbol — a discriminator with no tolerance.
             var point = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Point, hasId: false, geometry: new uint[] { (1u) | (1u << 3), ZigZagEncode(2048), ZigZagEncode(2048) });
 
             InMemoryDecodedTile real = TestDecodedTiles.Of("pts", DecodedAt, new List<IFeature> { point }, bufferExtent);
@@ -784,9 +740,8 @@ namespace MapRenderer.Tests.Text
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"X\"}"),
             };
 
-            // Asserted, not merely observed by the runner catching a throw: the defect's manifestation IS an
-            // out-of-range index, so wrapping it makes the failing ASSERTION the one that names the property,
-            // rather than a bare stack trace that could be read as an unrelated crash.
+            // The defect shows as an out-of-range index; DoesNotThrow makes the failure name the property
+            // instead of a bare stack trace.
             List<SymbolStyle.SymbolFeature> symbols = null;
             Assert.DoesNotThrow(() => symbols = Extract(layer, truncated, DecodedAt),
                 "the counting sort must be sized from geometry.FeatureCount — RingFeatureIdx's values index " +
@@ -804,23 +759,13 @@ namespace MapRenderer.Tests.Text
     /// <summary>
     /// The teeth on <c>SymbolFeatureExtractor</c> reading its paths from the shared
     /// <see cref="TileGeometryBuffers"/> rather than from its own managed <c>MvtGeometry.Decode</c>.
-    ///
-    /// <para><b>Why a differential oracle, and why NOT <c>SymbolProcessorParityTests</c>.</b> That suite's two
-    /// arms BOTH run through <c>StyledSymbolTileBuilder.ExtractLayers</c> → <c>SymbolFeatureExtractor.Extract</c>
-    /// — the code that reads the shared buffer — so a defect there lands identically in both and
-    /// the tooth cannot disagree about it. It is a valuable REGRESSION tooth, but it is not the acceptance
-    /// tooth. <see cref="SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle"/> is:
-    /// arm A is <c>MvtGeometry.Decode</c>, running live, and arm B is the materializer plus a span read.
-    /// The two arms share no helper, so the oracle can
-    /// genuinely disagree: at feature f, path p, point i.</para>
-    ///
-    /// <para><b>Symbol is the consumer that OBSERVES the unfiltered buffer.</b> A short-ring filter in the
-    /// shared decode stage reds NOTHING for fill (ring assembly
-    /// re-filters); the same holds for line (<c>RibbonJob</c> returns early below 2 points). Symbol's
-    /// point branch has <b>no length filter at all</b>, so a 1-point path is a real, rendered symbol —
-    /// <see cref="SymbolPointFeature_OnePointPath_StillEmitsOneSymbol"/> is the instrument those two stages
-    /// could not build.</para>
+    /// <see cref="SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle"/> is a differential oracle whose
+    /// arms share no helper. Symbol's point branch has no length filter, so only symbol observes a 1-point path.
     /// </summary>
+    /// <remarks>Non-obvious why: <c>SymbolProcessorParityTests</c> runs BOTH arms through
+    /// <c>SymbolFeatureExtractor.Extract</c>, so a defect in the buffer read lands in both and cannot disagree.
+    /// A short-ring filter in the shared decode stage reds nothing for fill (ring assembly re-filters) or line
+    /// (<c>RibbonJob</c> returns early below 2 points).</remarks>
     [TestFixture]
     public class SymbolBufferParityTests
     {
@@ -842,29 +787,16 @@ namespace MapRenderer.Tests.Text
         // ── the differential oracle ─────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The per-feature path list the extractor iterates, read out of the shared buffer, is
-        /// element-wise identical to the one the managed decoder produces for the same selected features,
-        /// running live in the same process. Everything downstream of that path list
-        /// (<c>LineCurvatureSubdivision.Subdivide</c>, <c>LineAnchorPlacement.Compute</c>,
-        /// <c>KeepAnchorsInsideTile</c>, <c>ProjectPath</c>, every emit and every style evaluation) does not
-        /// depend on where the path list came from, so path-level equality is symbol-level equality; the
-        /// symbol extraction suites are the end-to-end confirmation of that implication.
-        /// <para>Run over BOTH fixture layers: <c>centroids</c> is the only one carrying 1-point paths (the
-        /// case line's oracle could not have) and <c>geolines</c> the only one carrying a feature with more
-        /// than one path.</para>
-        /// <para>Exact comparison, no tolerance: both decoders accumulate <c>long</c> deltas and emit
-        /// <c>(double)</c> of integer magnitudes far inside <c>double</c>'s exact range, so the vertices are
-        /// bit-identical. A tolerance here would be a weakened tooth.</para>
-        /// <para><b>What this tooth does NOT observe, measured not assumed.</b> Arm B <i>transcribes</i> the
-        /// production bucketing and span read rather than calling them, so a defect injected into
-        /// <c>Extract</c>'s own <c>ringStart</c>/<c>ringOrder</c>/<c>CopyRing</c> leaves this test green —
-        /// RED-verification shows exactly that (reversed within-feature order, an off-by-one path count, and a
-        /// zero-length ring copy all reddened dozens of symbol suites and none of them reddened this test).
-        /// The claim here is therefore about the DECODERS — that the Burst job and the managed decoder agree
-        /// bit-for-bit, in order, unfiltered — which is the substance of the shared-buffer read, and for which
-        /// this tooth IS armed (a short-ring filter in the shared stage reds it). Production's own path
-        /// ordering is observed by <see cref="SymbolOrder_WithinAFeature_FollowsDecodeOrder"/> below.</para>
+        /// The per-feature path list read out of the shared buffer is element-wise identical to the one the
+        /// managed decoder produces live for the same features. Everything downstream ignores where the path
+        /// list came from, so path-level equality is symbol-level equality. <c>centroids</c> carries the 1-point
+        /// paths and <c>geolines</c> the multi-path feature. Exact comparison: both decoders emit
+        /// <c>(double)</c> of integer <c>long</c> sums, so the vertices are bit-identical.
         /// </summary>
+        /// <remarks>Limitation: arm B transcribes the production bucketing and span read rather than calling
+        /// them, so a defect in <c>Extract</c>'s own <c>ringStart</c>/<c>ringOrder</c>/<c>CopyRing</c> leaves this
+        /// test green. It pins the DECODERS (Burst job and managed decoder agree in order, unfiltered);
+        /// <see cref="SymbolOrder_WithinAFeature_FollowsDecodeOrder"/> pins production's path order.</remarks>
         [Test]
         public void SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle()
         {
@@ -897,9 +829,8 @@ namespace MapRenderer.Tests.Text
                         oracle.Add((fi, path.ToArray()));
                 }
 
-                // ── Arm B — the production path: the DECODED LAYER's own buffer (the object a
-                //    real consumer borrows), the production bucketing, and a span read. Borrowed, so nothing
-                //    is disposed here.
+                // ── Arm B — the DECODED LAYER's own buffer, the production bucketing, and a span read.
+                //    The buffer is borrowed, so nothing is disposed here.
                 var actual = new List<(int featureIdx, double2[] points)>();
                 TileGeometryBuffers geometry = decodedLayer.Geometry;
                 {
@@ -994,19 +925,14 @@ namespace MapRenderer.Tests.Text
         // ── production's OWN path ordering, through Extract ─────────────────────────────────────────
 
         /// <summary>
-        /// The symbols <c>Extract</c> emits for one feature follow that feature's paths in DECODE ORDER,
-        /// and there is one per path. This observes <c>Extract</c>'s own <c>ringStart</c>/<c>ringOrder</c>
-        /// bucketing and <c>CopyRing</c>, which the differential oracle cannot: it transcribes both into the
-        /// test, so an injection into production leaves it green.
-        /// <para>Path order is observable OUTPUT, not an implementation detail: the extractor's per-tile
-        /// <c>ordinal</c> becomes <c>SymbolFeature.FeatureIndex</c>, the stable tiebreak, so a reordering
-        /// silently changes which symbol wins a collision.</para>
-        /// <para>Also pins <c>RingCapacity == RingCount</c> for an MVT-materialized buffer. That identity is
-        /// why substituting one for the other in the bucketing is currently an arithmetic no-op
-        /// (<c>MvtGeometryMaterializer</c> sizes exactly from <c>PrecountRingsAndVertices</c>) — and it is the
-        /// assertion that goes RED on the day a producer starts over-allocating, which is the day the
-        /// capacity-vs-count trap becomes real. Without it, that trap has no observer at all.</para>
+        /// The symbols <c>Extract</c> emits for one feature follow that feature's paths in DECODE ORDER, one per
+        /// path. This observes <c>Extract</c>'s own bucketing and <c>CopyRing</c>, which the differential oracle
+        /// transcribes and cannot observe. Path order is OUTPUT: the per-tile <c>ordinal</c> becomes
+        /// <c>SymbolFeature.FeatureIndex</c>, the collision tiebreak.
         /// </summary>
+        /// <remarks>Non-obvious why: it also pins <c>RingCapacity == RingCount</c> for an MVT-materialized
+        /// buffer, the only observer of a producer that over-allocates and so makes a capacity-for-count
+        /// substitution in the bucketing an out-of-range bug.</remarks>
         [Test]
         public void SymbolOrder_WithinAFeature_FollowsDecodeOrder()
         {
@@ -1054,9 +980,8 @@ namespace MapRenderer.Tests.Text
                     "counting sort precisely so a feature's paths keep the order the decoder produced them in, " +
                     "and FeatureIndex (the collision tiebreak) is stamped from that order");
                 Assert.AreEqual(expected.y, symbols[i].AnchorRender.y, 1e-6, $"label {i} anchor.y");
-                // NOT a second pin on path order: `ordinal++` is stamped at each emit site and symbols are
-                // appended in emission order, so this holds for ANY path ordering. It pins emission order
-                // only; the anchor comparison above is the clause that discriminates.
+                // NOT a second pin on path order: `ordinal++` stamps each emit, so this holds for ANY path
+                // order. The anchor comparison above is the clause that discriminates.
                 Assert.AreEqual(i, symbols[i].FeatureIndex,
                     $"label {i}'s per-tile ordinal must follow EMISSION order (not path order)");
             }
@@ -1065,14 +990,10 @@ namespace MapRenderer.Tests.Text
         // ── the observer line could not build ──────────────────────────────────────────
 
         /// <summary>
-        /// A Point feature whose command stream is a single <c>MoveTo</c> of ONE point still emits
-        /// exactly one symbol, at that point's projection. Fill and line cannot observe this: fill
-        /// re-filters short rings downstream and line returns early below 2 points, so a
-        /// <c>&lt; 2</c>-point filter fused into the shared decode stage is invisible in both. Here it deletes
-        /// a rendered symbol.
-        /// <para>The control — a <c>MoveTo</c> of THREE points expecting THREE symbols — is what makes "one
-        /// symbol" a statement about the boundary value rather than an artefact of the emitter collapsing
-        /// anything.</para>
+        /// A Point feature whose command stream is a single <c>MoveTo</c> of ONE point still emits one symbol,
+        /// at that point's projection. A <c>&lt; 2</c>-point filter in the shared decode stage is invisible to
+        /// fill and line but deletes this rendered symbol. The control (THREE points, THREE symbols) shows
+        /// "one symbol" is the boundary value, not an emitter collapse.
         /// </summary>
         [Test]
         public void SymbolPointFeature_OnePointPath_StillEmitsOneSymbol()
@@ -1161,18 +1082,10 @@ namespace MapRenderer.Tests.Text
         // ── ownership, on the exit paths ────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The three selections that exercise <c>Extract</c>'s non-obvious buffer states: none throws and
-        /// none emits, and each asserts WHY it emitted nothing, so "zero symbols" can never be mistaken for
-        /// "the buffer was empty".
-        /// <list type="number">
-        /// <item>zero selected features ⇒ <c>Materialize</c> returns <c>default</c>, so <c>Dispose()</c> is a
-        /// no-op, not a throw;</item>
-        /// <item>one Polygon feature with a genuine multi-point ring ⇒ the buffer IS created with
-        /// <c>RingCount &gt; 0</c>, so the zero symbols provably came from <b>symbol's kind gate</b>;</item>
-        /// <item>one feature whose <c>Geometry</c> is <c>null</c> ⇒ the buffer IS created (feature count ≥ 1)
-        /// with <c>RingCount == 0</c>. An earlier plan claimed <c>IsCreated == false</c>
-        /// here and being wrong; this asserts what actually holds.</item>
-        /// </list>
+        /// Three selections that exercise <c>Extract</c>'s edge buffer states: none throws, none emits, and each
+        /// asserts WHY it emitted nothing. Zero features ⇒ <c>Materialize</c> returns <c>default</c>. One Polygon
+        /// ⇒ a created buffer with rings, rejected by symbol's kind gate. One <c>null</c>-geometry feature ⇒ a
+        /// created buffer with <c>RingCount == 0</c>.
         /// </summary>
         [Test]
         public void SymbolExtract_EmptyPolygonAndNullGeometrySelections_EmitNothingAndDoNotThrow()
@@ -1381,29 +1294,17 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Headline tooth: the cross-tile dedup winner set is a pure function of the tile set —
-    /// INVARIANT across display zoom. The store keys on the fixed <see cref="CrossTileSymbolKey.CanonicalGridMeters"/>,
-    /// so the <c>quantizeMeters</c> argument only GATES dedup on/off; its magnitude no longer sets the grid.
-    /// Sweeping the gate across a wide zoom range (its old per-frame <see cref="CameraPoseMath.MetersPerPixel"/>
-    /// values) must leave the ordered winner list — and the plan arrays — element-for-element identical.
-    ///
-    /// <para>The single-gate-value case passes with or without the fix, so it would be a degenerate tooth; the
-    /// SWEEP is what bites. RED-verified by reverting the store's four <c>DedupKey.For</c> grid inputs back to
-    /// <c>quantizeMeters</c>: the winner set then varies across the sweep (a coarse gate merges the split pair,
-    /// a fine gate splits it) → the cross-gate assertion fails.</para>
-    ///
-    /// <para><b>Winner identity is <c>(BlockId, LocalIndex)</c>.</b> There is no managed symbol list to
-    /// compare by reference. Comparing the SAME two arrays (blockId/localIndex/isDeparting)
-    /// across two DIFFERENT gate values is still a genuine, non-vacuous invariance check: it is not a restatement
-    /// of anything a single run computed, it is proof that TWO INDEPENDENT runs (different gate) produced the
-    /// SAME winner identities.</para>
+    /// The cross-tile dedup winner set is a pure function of the tile set — INVARIANT across display zoom.
+    /// The store keys on the fixed <see cref="CrossTileSymbolKey.CanonicalGridMeters"/>, so the
+    /// <c>quantizeMeters</c> argument only GATES dedup on/off. Sweeping the gate across the per-frame
+    /// <see cref="CameraPoseMath.MetersPerPixel"/> values of a wide zoom range must leave the ordered winner
+    /// list (<c>BlockId</c>, <c>LocalIndex</c>, <c>IsDeparting</c>) identical. One gate value cannot fail this.
     /// </summary>
     [TestFixture]
     public class SymbolDedupZoomInvarianceTests
     {
-        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
-        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
-        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        // Only Dispose decrements DebugLiveAllocCount (no finalizer does), so a leaked block shows as a
+        // deterministic delta, independent of GC timing.
         private long _liveBlocks;
         [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
         [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
@@ -1439,10 +1340,8 @@ namespace MapRenderer.Tests.Text
         [Test]
         public void WinnerSet_InvariantAcrossDisplayZoom()
         {
-            // Fixture: two same-text co-located symbols across two same-z tiles (must MERGE — one 4 m cell), plus
-            // two same-text symbols 8 m apart (must SPLIT — distinct 4 m cells). Under the fixed grid the winner
-            // set is {merged Co, splitA, splitB} = 3 for every gate. Under a per-zoom grid a coarse gate would
-            // collapse the 8 m pair (and, at the coarsest, the Co pair with them), so the count would vary.
+            // A co-located same-text pair across two tiles MERGES (one 4 m cell); a same-text pair 8 m apart
+            // SPLITS. A per-zoom grid would collapse the 8 m pair at a coarse gate, so the count would vary.
             double3 coAnchor = new double3(0, 0, 0);          // a 4 m cell centre
             double3 splitA = new double3(1000, 0, 0);         // cell 250
             double3 splitB = new double3(1008, 0, 0);         // cell 252 — 8 m from splitA, distinct under 4 m
@@ -1520,14 +1419,10 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Each symbol style layer gets its OWN material — a distinct
-    /// <see cref="MapMaterialSet.SymbolTextWorld"/> clone (NOT one shared material) — with its
-    /// <c>text-halo-*</c> bound by name. This is what makes per-layer halo variation possible.
-    /// <see cref="SymbolRenderLayer"/> owns the material (per-layer materials live on the layer object,
-    /// one owner), so this builds the render layers directly via
-    /// <see cref="RenderLayerSet.Build"/> (the same production path <c>MapView.SetStyle</c> drives).
-    /// <see cref="IRenderLayer.Material"/> IS <see cref="SymbolRenderLayer.WorldTextMaterial"/>, so the
-    /// two are asserted as a single identity.
+    /// Each symbol style layer gets its OWN material, a distinct <see cref="MapMaterialSet.SymbolTextWorld"/>
+    /// clone, not one shared material. <see cref="SymbolRenderLayer"/> owns it, so this builds the render
+    /// layers through <see cref="RenderLayerSet.Build"/>, the path <c>MapView.SetStyle</c> drives.
+    /// <see cref="IRenderLayer.Material"/> IS <see cref="SymbolRenderLayer.WorldTextMaterial"/>.
     /// </summary>
     [TestFixture]
     public class SymbolLayerMaterialTests : BaseTestFixture
@@ -1566,9 +1461,8 @@ namespace MapRenderer.Tests.Text
                 Assert.AreNotSame(m0, m1, "per-layer materials are DISTINCT instances, not one shared material");
                 Assert.AreNotSame(set.SymbolTextWorld, m0, "a layer material is a CLONE of the SymbolTextWorld base, not the base asset");
 
-                // No paint assertion here any more: a symbol layer's materials carry engine plumbing only.
-                // Every text-* term, text-halo-* included, is evaluated per feature and rides the vertex
-                // stream — SymbolHaloEmitTests reads it where it actually lands, on the emitted mesh.
+                // No paint assertion: every text-* term is evaluated per feature and rides the vertex
+                // stream, which SymbolHaloEmitTests reads on the emitted mesh.
             }
         }
     }
@@ -1578,29 +1472,11 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The PRIMARY semantic
-    /// tooth): the differential — production <see cref="SymbolSubsystem"/> output, driven through the
-    /// production processor machinery, deep-equals a single-pass <see cref="StyledSymbolTileBuilder.BuildAsync"/>
-    /// ORACLE fed the same bytes/style/camera-zoom/projection over a SECOND, independent builder/glyph
-    /// pipeline. THREE symbol layers — one on a different source (so the "s"-source layers' GLOBAL indices
-    /// {1,2} diverge from their within-build ordinals {0,1}) and two "s"-source layers with a
-    /// ZOOM-INTERPOLATED text-size (so the tile's integer zoom vs the captured camera zoom yield
-    /// observably different sizes) — so the per-layer processor split, material-index stamping, and
-    /// cross-layer symbol order are all exercised, and EACH falsifier is a genuine (non-coincidental)
-    /// divergence, not just a hypothetical one. See <c>SetUp</c>'s comment for the layout.
-    ///
-    /// <para>RED-verified against the un-rewired subsystem for the STRUCTURAL delegation teeth
-    /// Empirically, THIS differential passes unmodified against a structurally
-    /// faithful un-rewired <c>BuildTileAsync</c> too — it already calls
-    /// <c>ExtractLayers</c>/<c>Shape</c> with the same zoom/projection/global-material-indices the
-    /// oracle uses, so it computes IDENTICAL values. Its proven role (RED-verified by injecting each
-    /// falsifier into a scratch copy of the rewired <c>BuildTileAsync</c>) is a
-    /// WRONG-REWIRE falsifier, not a before/after discriminator.</para>
-    ///
-    /// <para>Falsifiers this tooth catches: (i) <c>ctx.Zoom</c> fed the tile's integer zoom instead of
-    /// the captured camera zoom; (ii) material indices remapped to per-build ordinals instead of global
-    /// <c>layerIndices</c>; (iii) per-layer split reordering or a dropped/collapsed layer; (iv) the main
-    /// tail skipped entirely (zero symbols).</para>
+    /// The differential: production <see cref="SymbolSubsystem"/> output, driven through the production
+    /// processor machinery, deep-equals a single-pass <see cref="StyledSymbolTileBuilder.BuildAsync"/> ORACLE
+    /// fed the same bytes/style/camera-zoom/projection over a SECOND builder/glyph pipeline.
+    /// It catches camera-zoom, material-index, layer-order and skipped-tail defects.
+    /// See <c>StyleJson</c>'s comment for the three-layer layout that makes each falsifier observable.
     /// </summary>
     [TestFixture]
     public class SymbolProcessorParityTests
@@ -1609,17 +1485,9 @@ namespace MapRenderer.Tests.Text
         private const string SourceId = "s";
         private static readonly TileId Tile = new TileId { Z = 3, X = 0, Y = 0 };
 
-        // THREE symbol layers, declared in an order that makes both falsifiers this differential exists to
-        // catch actually falsifiable (dev-side strengthening after the advisor flagged the original
-        // two-layer/constant-text-size style as hollow for exactly the two plumbing bugs (i)/(ii) name):
-        //  - "symbols-other" (a DIFFERENT source, "other") occupies GLOBAL index 0, so the two "s"-source
-        //    layers get GLOBAL indices {1, 2} while their WITHIN-BUILD ordinals (k in BuildTileAsync's loop)
-        //    are {0, 1} — global-index ≠ ordinal, so a material-index-remap bug ((ii): stamping `k`
-        //    instead of the global `layerIndices[k]`) produces an observably different MaterialIndex.
-        //  - "symbols-a"/"symbols-b" (source "s", over the fixture's "centroids") use a ZOOM-INTERPOLATED
-        //    text-size, so evaluating at the tile's INTEGER zoom (3) instead of the captured CAMERA zoom
-        //    (5.0) yields an observably different TextSizePx/glyph-quad geometry, not an
-        //    identical value by coincidence.
+        // Non-obvious why: "labels-other" (source "other") takes GLOBAL index 0, so the "s" layers' global
+        // indices {1,2} differ from their within-build ordinals {0,1} and falsifier (ii) is observable.
+        // "labels-a"/"labels-b" interpolate text-size by zoom, so tile zoom 3 vs camera zoom 5 differ (i).
         private static readonly string StyleJson = @"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
@@ -1707,9 +1575,8 @@ namespace MapRenderer.Tests.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
-            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
-            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
-            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            // Mirrors TileManager.KickMeshBuild: decode ON THE POOL; the kick owns the lease's birth reference,
+            // and its `finally` release frees the buffers unless a parked build acquired its own.
             byte[] bytes = _tileBytes;
             UniTask.RunOnThreadPool(() =>
             {
@@ -1719,9 +1586,8 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        // This fixture only ever commits ONE tile (SourceId/Tile), so it reads that tile's baked native block
-        // directly (DebugBlockFor) rather than routing through the cross-tile winner plan; the deep
-        // block-vs-block compare below needs the block itself.
+        // This fixture commits ONE tile, so it reads that tile's baked block directly (DebugBlockFor)
+        // for the block-vs-block compare, not through the cross-tile winner plan.
         private static readonly SymbolTileStore.Key ProductionKey = new SymbolTileStore.Key(SourceId, Tile);
 
         /// <summary>Drives the REAL production subsystem until it commits a baked block — same bytes, same
@@ -1746,24 +1612,15 @@ namespace MapRenderer.Tests.Text
             Assert.Fail("production build did not commit labels within 200 pumped frames");
         }
 
-        /// <summary>Builds the ORACLE symbol set: the un-rewired single pass
-        /// (<see cref="StyledSymbolTileBuilder.BuildAsync"/>) over a SECOND, independent glyph pipeline fed
-        /// the SAME ranges — atlas state is equivalent but independent, so this is not self-referential with
-        /// the processor machinery the rewire changes (only <c>ExtractLayers</c>/<c>Shape</c>, which it does not
-        /// modify, are shared).
-        /// <para><b>That independence premise has EXPIRED</b>: the shared-buffer move modifies exactly
-        /// <c>ExtractLayers</c>/<c>Shape</c>. This fixture is therefore no longer independent of the
-        /// symbol geometry path, and must not be cited as the oracle for a change to it —
-        /// <c>SymbolBufferParityTests</c> is that oracle. Recorded here rather than only in the newer file
-        /// because a stale independence claim left where a reader finds it is how this suite
-        /// disarmed a structural tooth once already.</para></summary>
+        /// <summary>Builds the ORACLE symbol set: the single pass (<see cref="StyledSymbolTileBuilder.BuildAsync"/>)
+        /// over a SECOND glyph pipeline fed the SAME ranges, independent of the processor machinery.</summary>
+        /// <remarks>Limitation: both arms share <c>ExtractLayers</c>/<c>Shape</c>, so this is NOT an oracle for
+        /// the symbol geometry path; <c>SymbolBufferParityTests</c> is that oracle.</remarks>
         private SymbolTileBuffer BuildOracle()
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
-            // Match SymbolSubsystem.SetStyle's atlas dimension EXACTLY (its AtlasDimension = 4096,
-            // clamped to the GPU max) — a different atlas size packs glyphs at different cells, so their
-            // normalized UVs would differ from production for a reason that has NOTHING to do with the rewire
-            // (a test-harness artifact, not a real divergence).
+            // Match SymbolSubsystem's AtlasDimension (4096, clamped to the GPU max): another atlas size packs
+            // glyphs at other cells, so the normalized UVs would differ for a harness-only reason.
             int dim = math.min(SystemInfo.maxTextureSize, 4096);
             using var oracleGlyphManager = new GlyphManager(TestGlyphSource.FromRanges(ranges), new GlyphAtlas(dim, dim));
             var oracleBuilder = new StyledSymbolTileBuilder(oracleGlyphManager);
@@ -1773,20 +1630,15 @@ namespace MapRenderer.Tests.Text
             var projection = _mapCamera.Projection;
 
             var oracle = new SymbolTileBuffer();
-            // BuildAsync completes synchronously here: TestGlyphSource resolves via UniTask.FromResult and
-            // neither BuildAsync/ExtractLayers/Shape forces a thread hop — no real async suspension.
-            // _sSourceLayers/_sSourceGlobalIndices mirror exactly what BuildTileAsync passes for the "s"
-            // build: the "s"-source layers in declared order, stamped with their GLOBAL indices {1,2}.
+            // Synchronous here: TestGlyphSource resolves via UniTask.FromResult and nothing forces a thread hop.
+            // The "s" layers go in declared order, stamped with their GLOBAL indices {1,2}, as production does.
             oracleBuilder.BuildAsync(mvt, Tile, _sSourceLayers, zoom, projection, oracle, _sSourceGlobalIndices)
                 .GetAwaiter().GetResult();
             return oracle;
         }
 
-        /// <summary>4.4b: the differential is now BLOCK-vs-block, collapsing the former symbol-for-symbol
-        /// (the retired per-symbol carrier's own assert helper) and batch-record comparisons into one — both compared the SAME
-        /// underlying committed content, just through two different readers, and
-        /// <see cref="BlockColumnHash.AssertColumnsEqual"/> already covers every column either one did (record
-        /// kind/detail, point/curved stage inputs, quads) at finer, per-column granularity.</summary>
+        /// <summary>The differential is BLOCK-vs-block: <see cref="BlockColumnHash.AssertColumnsEqual"/> compares
+        /// every committed column (record kind/detail, point/curved stage inputs, quads) one by one.</summary>
         [UnityTest]
         public IEnumerator ProductionBuild_MatchesSinglePassOracle_BlockForBlock()
         {
@@ -1804,12 +1656,9 @@ namespace MapRenderer.Tests.Text
             finally { oracle.Dispose(); }
         }
 
-        /// <summary>The "tail actually runs" tooth: a glyph-fetch
-        /// delegate reachable ONLY from <see cref="StyledSymbolTileBuilder.Shape"/> (the tail) records
-        /// the thread it runs on; together with the existing, unmodified
-        /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> recorder (which pins the WORKER half off main),
-        /// this proves the phase split runs on the right threads AND in the right order — symbols only commit
-        /// if the tail ran after the worker step that fed it.</summary>
+        /// <summary>The "tail actually runs" tooth: a glyph-fetch delegate, reached only from the main tail,
+        /// records the thread it runs on. With <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> (worker half off
+        /// main), this pins the phase split's threads AND order: symbols commit only after the tail runs.</summary>
         [UnityTest]
         public IEnumerator SymbolMainTail_RunsOnMainThread_AfterWorkerPass()
         {
@@ -1938,9 +1787,8 @@ namespace MapRenderer.Tests.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return;
-            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
-            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
-            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            // Mirrors TileManager.KickMeshBuild: decode ON THE POOL; the kick owns the lease's birth reference,
+            // and its `finally` release frees the buffers unless a parked build acquired its own.
             byte[] bytes = _tileBytes;
             UniTask.RunOnThreadPool(() =>
             {
@@ -1965,9 +1813,8 @@ namespace MapRenderer.Tests.Text
             return n;
         }
 
-        // Pump the production per-frame loop until the reconcile is FULLY quiescent: symbols committed, no pending
-        // tail, nothing in flight, and the schedule generation caught up (CollectRecomputeCount stable 2 frames).
-        // Leaves the last plan in _quiescedPlan.
+        // Pump until the reconcile is FULLY quiescent: symbols committed, no pending tail, nothing in flight, and
+        // CollectRecomputeCount stable for 2 frames. Leaves the last plan in _quiescedPlan.
         private IEnumerator PumpToQuiescence(List<LoadedTileKey> loaded)
         {
             int stable = 0; int lastRecompute = -1;
@@ -2001,11 +1848,8 @@ namespace MapRenderer.Tests.Text
                 "the cross-tile dedup ran OFF the main thread (a thread-pool worker)");
         }
 
-        // ═══ ONE reconcile in flight; the stale FRONT (unchanged in identity) is served while it is pending; the
-        //         completed result is applied on pickup even though the store moved on (apply-stale), then a follow-up
-        //         reconcile catches the display up. RED-verify: (a) a discard-on-generation-mismatch impl never
-        //         applies the stale result → the stale-applied assertion fails; (b) a clear-front-on-schedule breaks
-        //         the held-front assertions; the delta==1 pins one-in-flight coalescing. ═══
+        // ═══ ONE reconcile in flight serves the stale FRONT unchanged; pickup applies the stale result
+        //         (apply-stale), then a follow-up reconcile catches the display up. ═══
 
         [UnityTest]
         public IEnumerator Reconcile_OneInFlight_ServesStaleFront_AppliesStale_ThenReschedules()
@@ -2025,12 +1869,8 @@ namespace MapRenderer.Tests.Text
             int recomputeBefore = _subsystem.CollectRecomputeCount;
             var empty = new List<LoadedTileKey>();
 
-            // Gated frames. TWO distinct generation-advancing events fire WHILE the one reconcile is in flight, so its
-            // captured snapshot is genuinely STALE vs the store's current state:
-            //   f==0 → A leaves cover (schedules the gated reconcile off the A-DEPARTING snapshot),
-            //   f==5 → A re-enters cover (store moves back to A-ACTIVE; the in-flight snapshot is now stale).
-            // Throughout, the held FRONT is served unchanged — same WinnerCount AND the same per-record identity
-            // (blockId/localIndex/departing), not merely the same count (item 5). Exactly ONE reconcile is scheduled.
+            // f==0: A leaves cover (the gated reconcile captures A-DEPARTING); f==5: A re-enters, so that snapshot
+            // is STALE. The held FRONT keeps its per-record identity throughout; exactly ONE reconcile is scheduled.
             int[] idBlock = null, idLocal = null; byte[] idDep = null;
             for (int f = 0; f < 12; f++)
             {
@@ -2056,9 +1896,8 @@ namespace MapRenderer.Tests.Text
                 "exactly ONE reconcile was scheduled across all gated frames (coalesced — never a second in-flight worker)");
             int recomputeAfterGate = _subsystem.CollectRecomputeCount;
 
-            // Release the gate → the completed reconcile is applied on pickup. Its captured state is A-DEPARTING
-            // (stale), so the front FLIPS TO DEPARTING even though the store is now A-ACTIVE — proving apply-stale,
-            // not a recompute-to-current (a discard-on-mismatch impl would never show departing here).
+            // Release the gate: the front FLIPS TO the stale A-DEPARTING result although the store is A-ACTIVE.
+            // A discard-on-mismatch pickup would never show departing here.
             gate.Set();
             bool staleApplied = false;
             for (int f = 0; f < 200; f++)
@@ -2101,12 +1940,8 @@ namespace MapRenderer.Tests.Text
             return a;
         }
 
-        // ═══ A faulting reconcile (throws AFTER partially populating a MISALIGNED result — Output longer than
-        //         BlockId) → the exception is directly OBSERVED (GetResult rethrows), NO swap (a swap would feed the
-        //         misaligned partial buffer to SymbolGatherPlan.Build and crash), the old front is held, inFlight
-        //         resets, and a later event reschedules + recovers. RED-verify: (a) swap-on-non-success → the
-        //         misaligned back reaches the front → the held-front assertion fails (and Build would crash); (b) an
-        //         impl that swallows the fault without GetResult → ReconcileFaultObserved stays false. ═══
+        // ═══ A reconcile that throws after writing a MISALIGNED partial result: the fault is OBSERVED (GetResult
+        //         rethrows), NO swap (Build would crash on it), the old front holds, and a later event recovers. ═══
 
         [UnityTest]
         public IEnumerator Reconcile_Faults_Observed_NoSwap_FrontHeld_ReschedulesOnNextEvent()
@@ -2154,9 +1989,8 @@ namespace MapRenderer.Tests.Text
             Assert.IsTrue(recovered, "a later tile event rescheduled (fault-free) → the reconcile recovered and the front updated");
         }
 
-        // ═══ A restyle mid-flight drains the in-flight worker, releases the front + back snapshot pins (a block
-        //          shared front+back refcounts to 2), and frees every block exactly once — no leak, no double-free,
-        //          no missing-key throw. The gate is opened BEFORE SetStyle so the inline drain can't hang. ═══
+        // ═══ A restyle mid-flight drains the worker, releases the front + back pins (a shared block counts 2),
+        //          and frees every block once. The gate opens BEFORE SetStyle so the inline drain cannot hang. ═══
 
         [UnityTest]
         public IEnumerator Restyle_DrainsInFlightReconcile_ReleasesFrontAndBackPins_NoLeak()
@@ -2183,9 +2017,8 @@ namespace MapRenderer.Tests.Text
             }
             Assert.IsTrue(_subsystem.ReconcileInFlight(), "a reconcile is gated in flight (its back snapshot pins the shared block)");
 
-            // Restyle. Open the gate FIRST so DrainInFlightReconcile observes the worker instead
-            // of hanging on it. SetStyle then runs the teardown protocol: cancel → drain → ReleasePins(front) +
-            // ReleasePins(back) → Clear.
+            // Open the gate FIRST so DrainInFlightReconcile does not hang. SetStyle then runs
+            // cancel → drain → ReleasePins(front) + ReleasePins(back) → Clear.
             gate.Set();
             StyleDocument restyle = StyleParser.Parse(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
@@ -2195,20 +2028,11 @@ namespace MapRenderer.Tests.Text
                 "restyle drained the in-flight reconcile, released the front + back (shared, refcount 2) pins, and freed every block exactly once — no leak, no double-free");
         }
 
-        // ═══ The drain must JOIN the worker. A restyle/teardown while the reconcile worker is PARKED MID-RUN
-        //          must NOT free the block the worker still reads. A drain built on _reconcileHandle.GetResult()
-        //          (WorkHandle<bool>'s equivalent of UniTask's GetAwaiter().GetResult()) THROWS "not yet completed"
-        //          on a pending handle instead of blocking, so it would return WITHOUT joining and the following
-        //          ReleasePins+Clear would dispose the block under Run (native use-after-free) — the overlap
-        //          Restyle_DrainsInFlightReconcile_ReleasesFrontAndBackPins_NoLeak avoids by opening the gate
-        //          BEFORE SetStyle. Deterministic, no timing margin: with the worker
-        //          parked at the gate, drive the teardown core on a BACKGROUND thread — a joining drain
-        //          BLOCKS there (block stays alive), a non-joining drain returns and frees it — and read block
-        //          liveness from the test thread while the worker is STILL parked (gate unset). The 2 s Wait is
-        //          only an upper bound to tell "blocked" from "returned"; the liveness assert has no clock.
-        //          RED-verify: make DrainInFlightReconcile call `_reconcileHandle.GetResult()` directly instead
-        //          of `_reconcileHandle.ToUniTask().WaitOffPlayerLoop(...)` first → the teardown returns while the
-        //          worker is parked and DebugLiveAllocCount drops → both asserts fail.
+        // ═══ The drain must JOIN the worker: a teardown while the worker is PARKED MID-RUN must NOT free the
+        //          block it still reads. Non-obvious why: _reconcileHandle.GetResult() THROWS on a pending handle
+        //          instead of blocking, so a drain built on it returns unjoined and ReleasePins+Clear frees the block
+        //          under Run. The teardown runs on a BACKGROUND thread while the worker stays parked; the 2 s Wait
+        //          only tells "blocked" from "returned", and the liveness assert has no clock.
         [UnityTest]
         public IEnumerator TeardownWhileReconcileWorkerParked_JoinsWorker_DoesNotFreeBlockUnderIt()
         {
@@ -2238,10 +2062,8 @@ namespace MapRenderer.Tests.Text
             Assert.IsTrue(System.Threading.SpinWait.SpinUntil(() => _subsystem.Reconciler().GateForTest == null, 5000),
                 "the reconcile worker reached the gate (parked inside Run)");
 
-            // The teardown core (cancel → drain → ReleasePins front+back → Clear) on a BACKGROUND thread.
-            // A joining drain blocks on the parked worker HERE (never reaches ReleasePins). A non-joining drain
-            // returns at once, then ReleasePins drops the pin to 0 and the block is disposed while the worker is
-            // still parked.
+            // The teardown core on a BACKGROUND thread: a joining drain blocks here on the parked worker; a
+            // non-joining one returns at once and ReleasePins disposes the block under the parked worker.
             var teardown = System.Threading.Tasks.Task.Run(() => _subsystem.TeardownReconcileForTest());
 
             bool teardownReturnedWhileParked = teardown.Wait(2000); // upper bound: broken ≈ µs, fixed blocks until we set the gate
@@ -2256,13 +2078,8 @@ namespace MapRenderer.Tests.Text
                 "the block a parked reconcile worker still reads must NOT be freed under it: a non-joining drain lets ReleasePins+Clear dispose it mid-Run (native use-after-free)");
         }
 
-        // ═══ The SUCCESS-swap pin release (PickupCompletedReconcile's success branch), independent of
-        //          teardown. A rebuild
-        //          defers the old block (pinned by the displayed front); when the next reconcile SUCCEEDS and swaps,
-        //          the demoted old-front snapshot's ReleasePins frees that now-unreferenced block, returning to
-        //          baseline WHILE the subsystem is still live. RED-verify: delete the success-branch ReleasePins
-        //          in PickupCompletedReconcile → the demoted front never releases → the rebuilt-over block
-        //          stays deferred → this times out. ═══
+        // ═══ The SUCCESS-swap pin release (PickupCompletedReconcile's success branch), without teardown: the
+        //          demoted front's ReleasePins frees the rebuilt-over block it pinned, while the subsystem lives. ═══
 
         [UnityTest]
         public IEnumerator SuccessfulSwap_ReleasesDemotedFrontPins_FreesRebuiltOverBlock()
@@ -2274,11 +2091,8 @@ namespace MapRenderer.Tests.Text
             yield return PumpToQuiescence(loaded);
             long liveWithOneBlock = SymbolTileBlock.DebugLiveAllocCount; // the front pins this tile's block
 
-            // Rebuild the tile → a NEW block is baked; the OLD block is still referenced by the front snapshot, so
-            // CompleteBuild's release of the entry's own reference leaves it alive (the snapshot's own reference
-            // survives). PHASE 1: wait until the rebuild has committed and the old block is genuinely
-            // referenced-but-alive (TWO live blocks) — so the phase-2 return-to-one is a REAL free, not a
-            // trivially-already-true baseline.
+            // PHASE 1: the rebuild bakes a NEW block; the front snapshot keeps the OLD one alive (TWO live blocks),
+            // so the phase-2 return to one is a REAL free.
             DriveTileBytesReady(tile);
             bool deferred = false;
             for (int f = 0; f < 300; f++)
@@ -2291,9 +2105,8 @@ namespace MapRenderer.Tests.Text
             }
             Assert.IsTrue(deferred, "sanity: the rebuild baked a new block and DEFERRED the old (pinned) one — two live blocks");
 
-            // PHASE 2: the successful reconcile swap for the new generation demotes the old front and
-            // releases its pins (PickupCompletedReconcile's success branch) → the deferred old block frees,
-            // returning to ONE live block — with no restyle/teardown.
+            // PHASE 2: the successful swap demotes the old front and releases its pins, so the deferred block
+            // frees and ONE live block remains, with no restyle or teardown.
             bool freedBackToBaseline = false;
             for (int f = 0; f < 400; f++)
             {
@@ -2308,12 +2121,8 @@ namespace MapRenderer.Tests.Text
                 "a SUCCESSFUL reconcile swap demoted the old front and released its pins, freeing the deferred rebuilt-over block back to one live block — distinct from teardown");
         }
 
-        // ═══ The FAULT-path pin release (PickupCompletedReconcile's fault branch). A fault captures a back
-        //          snapshot that shares the displayed block with the front; the fault path must ReleasePins that
-        //          FAILED back, or its pin LEAKS and the block can never be freed. A subsequent restyle
-        //          (drain+release+Clear) then frees everything back to baseline. RED-verify: delete the
-        //          fault-branch ReleasePins in PickupCompletedReconcile →
-        //          the leaked back-pin keeps the block pinned → restyle's Clear can't free it → leak (not baseline). ═══
+        // ═══ The FAULT-path pin release (PickupCompletedReconcile's fault branch): the FAILED back snapshot shares
+        //          the front's block, so an unreleased pin LEAKS it; a later restyle then frees back to baseline. ═══
 
         [UnityTest]
         public IEnumerator FaultPickup_ReleasesFailedBackPins_NoLeakAfterRestyle()
@@ -2325,9 +2134,8 @@ namespace MapRenderer.Tests.Text
             yield return PumpToQuiescence(new List<LoadedTileKey> { Key(tile) });
             Assert.Greater(SymbolTileBlock.DebugLiveAllocCount, before, "sanity: the tile baked a live block (front pins it)");
 
-            // Fault the next reconcile; a tile event (A departs) schedules it — the captured back snapshot shares the
-            // tile's block with the front (refcount 2). On the fault pickup, the fault branch must ReleasePins the
-            // failed back.
+            // Fault the next reconcile; A departing schedules it, and its back snapshot shares the tile's block
+            // with the front (refcount 2).
             _subsystem.Reconciler().FaultNextRun = true;
             var empty = new List<LoadedTileKey>();
             bool faultObserved = false;
@@ -2341,10 +2149,8 @@ namespace MapRenderer.Tests.Text
             }
             Assert.IsTrue(faultObserved, "the fault was observed and its pickup completed");
 
-            // Restyle → drain + ReleasePins(front)+ReleasePins(back) + Clear. WITH the fault-branch release the
-            // shared block's back pin was already released, so front-release + Clear free it exactly once →
-            // baseline. WITHOUT it the leaked back pin keeps it pinned, so Clear's conditional flush must leave
-            // it → a leaked live block.
+            // Restyle: the back pin is already released, so front-release + Clear free the block once. A leaked
+            // back pin would keep it pinned past Clear's conditional flush.
             StyleDocument restyle = StyleParser.Parse(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             yield return null; yield return null;
@@ -2377,31 +2183,12 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        // ═══ A REAL front swap through the production subsystem must invalidate the gather memo — the
-        //      end-to-end guard (Memo_VersionChange_Invalidates in SymbolGatherMemoTests only proves the
-        //      version-consulted UNIT behaviour; only this proves the key is wired to a real reconcile swap).
-        //      Three required properties:
-        //        (a) EVENT vs SWAP keying: immediately after the store event (BeginBuild/CompleteBuild), before
-        //            the reconcile completes, the mirror must stay a memo HIT and still serve the OLD content —
-        //            an implementation keyed on the tile EVENT (e.g. _store.CollectGeneration) would
-        //            wrongly rebuild HERE instead of waiting for the swap.
-        //        (b) The rebuild must land specifically on the frame PickupCompletedReconcile's swap actually
-        //            happens (ReconcileInFlight() observed true, THEN the pickup call flips it false), not
-        //            merely "sometime within a settle window".
-        //        (c) The new content must be gather-VISIBLE-DIFFERENT at a FIXED WinnerCount — a byte-identical
-        //            rebuild (the construction SuccessfulSwap_ReleasesDemotedFrontPins_FreesRebuiltOverBlock
-        //            uses) can never fail SymbolBatchDiff regardless of memo correctness.
-        //      The tile event commits the replacement DIRECTLY through Store() (BeginBuild+Bake+
-        //      CompleteBuild — the SAME two store calls the real async worker path uses; MarkCollectDirty fires
-        //      from inside them either way, so this still exercises the real front/back double-buffer + pickup +
-        //      apply-stale state machine, only the MVT-decode step is bypassed). BOTH calls run in ONE
-        //      synchronous block, no CurrentBatch poll between them, so their two independent CollectGeneration
-        //      bumps (SymbolTileStore.BeginBuild and CompleteBuild each "always bump") coalesce
-        //      into exactly ONE ScheduleReconcileIfDirty-observed event: a single swap at a known frame, which is
-        //      what lets (a)/(b) assert an EXACT frame instead of tolerating the legitimate-but-unpredictable
-        //      double-swap a DriveTileBytesReady-driven rebuild can trigger (see Memo_RestyleBetweenTicks_Invalidates'
-        //      sibling test and this file's SuccessfulSwap_ReleasesDemotedFrontPins_FreesRebuiltOverBlock, both of
-        //      which DO tolerate that). ═══
+        // ═══ A REAL front swap through the production subsystem must invalidate the gather memo; the unit test
+        //      Memo_VersionChange_Invalidates cannot show the key is wired to a real reconcile swap. It pins:
+        //      (a) right after the store event the mirror stays a memo HIT on the OLD content (not event-keyed);
+        //      (b) the rebuild lands on the exact pickup frame; (c) the new content differs at a FIXED WinnerCount.
+        //      Non-obvious why: the replacement commits straight through Store() with no CurrentBatch poll between
+        //      BeginBuild and CompleteBuild, so their two CollectGeneration bumps coalesce into ONE swap. ═══
 
         [UnityTest]
         public IEnumerator Memo_RealFrontSwap_Invalidates()
@@ -2432,11 +2219,8 @@ namespace MapRenderer.Tests.Text
                     Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, $"frame {f}: no tile event — the gather must stay a memo HIT");
                 }
 
-                // The real tile event: replace the SAME store key's content with a DIFFERENT, gather-visible
-                // payload at the SAME winner count (Codex 1c) — synthetic symbols far from any coordinate the
-                // real fixture decodes to, so FirstDifference below is unambiguous regardless of the fixture's
-                // own content. BeginBuild+Bake+CompleteBuild run back-to-back (no CurrentBatch poll between
-                // them — see the header comment's coalescing argument).
+                // Replace the SAME key's content at the SAME winner count with synthetic symbols far from the
+                // fixture's coordinates, back-to-back with no CurrentBatch poll (see the header comment).
                 var replacementBuffer = new SymbolTileBuffer();
                 for (int i = 0; i < winnersBefore; i++)
                     AddPointSymbol(replacementBuffer, new double3(9000 + i * 10, 0, 9000), "replacement" + i, 900 + i, Tk(tile), 0.9f);
@@ -2458,10 +2242,8 @@ namespace MapRenderer.Tests.Text
                 Assert.IsNull(SymbolBatchDiff.FirstDifference(contentBefore, contentAtEvent),
                     "the OLD front's content must still be served this frame — the replacement hasn't been picked up yet");
 
-                // (b) poll until PickupCompletedReconcile's swap actually lands (ReconcileInFlight() observed
-                // true beforehand, then the pickup call flips it false this frame), asserting the mirror stays
-                // flat WHILE the worker is in flight and rebuilds EXACTLY on the swap frame — not merely
-                // "eventually, within a settle window".
+                // (b) poll until the pickup swap lands: the mirror stays flat while the reconcile is in flight
+                // and rebuilds on the swap frame itself.
                 bool sawInFlight = false, swappedThisFrame = false;
                 for (int f = 0; f < 400 && !swappedThisFrame; f++)
                 {
@@ -2523,13 +2305,9 @@ namespace MapRenderer.Tests.Text
             finally { harness.Dispose(); }
         }
 
-        // ═══ A restyle (SetStyle) between two production gathers on the SAME plan object must invalidate
-        //      the memo, even though the front content collapses to EMPTY. The `_frontSetVersion++` bump is
-        //      defense-in-depth (the `plan.WinnerCount == _mirrorCount` predicate term is the actual
-        //      crash-prevention for a release player) — with the bump present this test observes no throw and a
-        //      clean rebuild; the RED-verify signal for a MISSING bump is a Debug.LogAssertion from
-        //      AssertMemoPlanMatchesMirror (NUnit fails a test on an unexpected one), not a content diff or a
-        //      throw. ═══
+        // ═══ A restyle between two gathers on the SAME plan object must invalidate the memo, though the front
+        //      collapses to EMPTY. Non-obvious why: `plan.WinnerCount == _mirrorCount` already prevents the crash,
+        //      so a MISSING `_frontSetVersion++` shows only as AssertMemoPlanMatchesMirror's Debug.LogAssertion. ═══
 
         [UnityTest]
         public IEnumerator Memo_RestyleBetweenTicks_Invalidates()
@@ -2548,7 +2326,7 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
                 Assert.Greater(plan.WinnerCount, 0, "sanity: the tile produced at least one winner before the restyle");
 
-                // Restyle: SetStyle Clear()s _frontResult/_backResult — Step 2.3's bump site.
+                // Restyle: SetStyle Clear()s _frontResult/_backResult — SetStyle's `_frontSetVersion++` site.
                 StyleDocument restyle = StyleParser.Parse(StyleJson);
                 _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
 
@@ -2563,12 +2341,8 @@ namespace MapRenderer.Tests.Text
             finally { harness.Dispose(); }
         }
 
-        // ═══ The pin prevents a native USE-AFTER-FREE — a block a reconcile result still references is NOT freed
-        //         at a drop site while a snapshot references it; the gather derefs its NativeArrays safely; the
-        //         snapshot's release frees it.
-        //         RED-verify: revert the Release true-evict site's `?.Release()` to a direct `?.Value.Dispose()` →
-        //         the block frees at the drop site (the "not freed" assertion fails) and the gather derefs freed
-        //         memory. ═══
+        // ═══ The pin prevents a native USE-AFTER-FREE: a drop site does NOT free a block a snapshot references,
+        //         the gather derefs its NativeArrays safely, and the snapshot's release frees it. ═══
 
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
         private static SymbolTileStore.Key StoreKey(TileId t) => new SymbolTileStore.Key("s", t);
@@ -2690,27 +2464,17 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The off-main <see cref="SymbolReconciler"/> + the store's native
-    /// pin guard. The teeth: the worker is BYTE-IDENTICAL to an independent string oracle; the
-    /// disposal-bumps-generation edge; the reused-result SHRINK; the per-site defer/flush TIMING; the
-    /// cross-snapshot refcount OVERLAP. The SHRINK, TIMING and OVERLAP teeth are RED-verified against un-guarded code.
-    ///
-    /// <para><b>Every commit bakes a real block.</b> Every commit that participates in a
-    /// <c>CaptureSnapshot</c>/<c>Run</c> call bakes and commits a REAL <see cref="SymbolTileBlock"/> (via
-    /// <see cref="Commit"/>) — the reconciler reads the block, so a block-less (<c>Block == null</c>) entry is
-    /// not collected at all (see <c>SymbolTileStore.CaptureSnapshot</c>'s guard). Winner identity is
-    /// <c>(BlockId, LocalIndex)</c>; where a test needs to know WHICH symbol a winner is, it reads the
-    /// winner's <c>OrderedBlocks[BlockId]</c> block's own columns (<c>TileKey</c>/<c>PairRoles</c>/…) —
-    /// never a re-derivation of the oracle's own indices, which would just restate them (see the parity
-    /// note in <c>Reconciler_Run_MatchesStringOracle_MultiTile</c>).</para>
+    /// The off-main <see cref="SymbolReconciler"/> + the store's native pin guard. The teeth: the worker is
+    /// BYTE-IDENTICAL to an independent string oracle; the disposal-bumps-generation edge; the reused-result
+    /// SHRINK; the per-site defer/flush TIMING; the cross-snapshot refcount OVERLAP.
+    /// Every commit bakes a REAL <see cref="SymbolTileBlock"/> (<see cref="Commit"/>): CaptureSnapshot skips a
+    /// block-less entry. A test identifies a winner by its block's own columns, never by the oracle's indices.
     /// </summary>
     [TestFixture]
     public class SymbolReconcilerTests
     {
-        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
-        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
-        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here — real
-        // blocks via DebugLiveAllocCount, and FakeBlock via the same mirrored counter below.
+        // Only Dispose decrements DebugLiveAllocCount (no finalizer does), so a leaked block shows as a
+        // deterministic delta; FakeBlock mirrors that counter.
         private long _liveBlocks;
         private int _liveFakes;
         [SetUp] public void BaselineBlocks()
@@ -2730,9 +2494,8 @@ namespace MapRenderer.Tests.Text
 
         private sealed class FakeBlock : IDisposable
         {
-            // Mirrors SymbolTileBlock.DebugLiveAllocCount's idiom so the fixture's leak-guard TearDown can
-            // catch an abandoned fake commit too — every DisposeCount assertion in this fixture is 0 or 1,
-            // so decrementing unconditionally on every Dispose() call stays correct.
+            // Mirrors DebugLiveAllocCount for the leak-guard TearDown. Every DisposeCount here is 0 or 1, so
+            // an unconditional decrement stays correct.
             internal static int LiveCount;
             public int DisposeCount;
             public FakeBlock() => LiveCount++;
@@ -2741,25 +2504,18 @@ namespace MapRenderer.Tests.Text
 
         private static SymbolTileStore.Key Key(TileId t) => new SymbolTileStore.Key("src", t);
 
-        // Bakes a REAL block for `buffer` and commits it — the reconciler cutover means every commit a test wants
-        // CaptureSnapshot/Run to see needs a real SymbolTileBlock (a block-less entry is no longer collected;
-        // see the type doc). Bake does not intern (it copies the ids ShapedSymbol already carries),
-        // so there is no table to share here any more.
+        // Bakes a REAL block for `buffer` and commits it; CaptureSnapshot skips a block-less entry.
+        // Bake copies the ids ShapedSymbol carries, so no string table is shared.
         private static bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
             => store.CompleteBuild(key, gen, SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero));
 
-        // ShapedSymbol carries only the INTERNED TextId/IconImageId, not the raw string — but Oracle()
-        // below must stay a genuinely STRING-keyed computation (independent of SymbolStringTable.Intern, which
-        // is itself exactly what the RED-verification here targets — see Oracle's doc). So Point/Curved record
-        // each returned symbol's raw text/icon in this side table, keyed by the (structurally-comparable)
-        // ShapedSymbol value itself, for Oracle to read back instead of a now-nonexistent symbol.Text.
+        // ShapedSymbol carries only INTERNED ids; Oracle() must stay STRING-keyed, independent of
+        // SymbolStringTable.Intern. So Point/Curved record each symbol's raw text/icon here, keyed by value.
         private readonly Dictionary<ShapedSymbol, string> _rawText = new Dictionary<ShapedSymbol, string>();
         private readonly Dictionary<ShapedSymbol, string> _rawIcon = new Dictionary<ShapedSymbol, string>();
 
-        // Appends one point (or icon, via `icon`) symbol into `buffer` and returns the resulting record — so a
-        // caller can both group it into its tile's buffer AND hold it for a later assertion, mirroring the
-        // pre-migration per-symbol managed carrier local var it replaces. pairRole/pairId default to None/0 —
-        // every existing call site (unpaired symbols) is unaffected.
+        // Appends one point (or icon, via `icon`) symbol into `buffer` and returns the record for a later
+        // assertion. pairRole/pairId default to None/0 (unpaired).
         private ShapedSymbol Point(SymbolTileBuffer buffer, double3 anchor, int layer, string text, string icon,
             int feature, TileId tile, SymbolPairRole pairRole = SymbolPairRole.None, int pairId = 0)
         {
@@ -2780,15 +2536,10 @@ namespace MapRenderer.Tests.Text
             return symbol;
         }
 
-        // Independent STRING-keyed oracle — the SAME scan order + finest-zoom rule + per-tile blockId assignment
-        // as the reconciler, but keyed on the string CrossTileSymbolKey (NOT the code under test), and walking the
-        // fixture's OWN ShapedSymbol lists (NOT the block the reconciler reads) — a genuinely separate
-        // computation. activeTiles / departingTiles are in the store's _active / _departing enumeration order.
-        // ShapedSymbol itself does not carry the raw string (only the interned TextId/IconImageId,
-        // the SAME ints the reconciler's DedupKey reads) — reading those here would make this oracle blind to
-        // exactly the bug class it RED-verifies (a broken SymbolStringTable.Intern). So this
-        // reads the raw text/icon back from `_rawText`/`_rawIcon` (populated by Point/Curved), never from
-        // symbol.TextId/IconImageId.
+        // Independent STRING-keyed oracle: the reconciler's scan order, finest-zoom rule and blockId assignment,
+        // keyed on the string CrossTileSymbolKey over the fixture's OWN ShapedSymbol lists, in _active/_departing
+        // order. Non-obvious why: it reads `_rawText`/`_rawIcon`, not TextId/IconImageId — the interned ints the
+        // reconciler's DedupKey reads would blind it to a broken SymbolStringTable.Intern.
         private struct OracleOut
         {
             public List<ShapedSymbol> Output; public int ActiveCount;
@@ -2900,11 +2651,8 @@ namespace MapRenderer.Tests.Text
             Assert.IsFalse(oracle.Output.Contains(depShared), "sanity: the departing twin of the shared identity is claim-skipped");
             Assert.IsTrue(oracle.Output.Contains(icoA) && oracle.Output.Contains(icoB), "sanity: distinct icons both survive");
 
-            // The reconciler has no Output list — winner identity is (BlockId, LocalIndex).
-            // Comparing these element-by-element against the INDEPENDENT string oracle's own (blockId, localIndex)
-            // IS the parity check (both assign blockId in the SAME per-tile scan order over the SAME source lists,
-            // and localIndex == raw list position by the null-slot invariant) — not a restatement of anything the
-            // reconciler itself computed.
+            // Winner identity is (BlockId, LocalIndex); both sides assign blockId in the same per-tile scan order,
+            // and localIndex == raw list position by the null-slot invariant, so the oracle's pair is comparable.
             Assert.AreEqual(oracle.Output.Count, result.BlockId.Count, "same total emitted count");
             Assert.AreEqual(oracle.ActiveCount, result.ActiveCount, "same active/departing split");
             for (int i = 0; i < oracle.Output.Count; i++)
@@ -2936,8 +2684,7 @@ namespace MapRenderer.Tests.Text
         }
 
         // ═══ The reused RESULT (and index) SHRINKS — {A,B} → {B} → empty ═══
-        // RED-verify: strip `result.Clear()` / `_dedup.Clear()` from Run → the reused result accumulates prior
-        // runs' records → the counts stop shrinking → this fails.
+        // A Run that skips `result.Clear()` / `_dedup.Clear()` accumulates prior runs' records and fails this.
 
         [Test]
         public void Reconciler_ReusedResult_Shrinks_AcrossRuns()
@@ -2982,18 +2729,9 @@ namespace MapRenderer.Tests.Text
 
         // ═══ Per-site defer/flush TIMING — a block a snapshot still references is NOT disposed at the drop
         //         site; it frees only when the last reference (the snapshot's) is released ═══
-        // RED-verify, per site: replace that site's `?.Release()` with `?.Value.Dispose()` → the block disposes
-        // at the site itself, so ReleasePins has nothing left to free → the "frees exactly once" assertion
-        // fails FOR THAT [Values] CASE ONLY (the `live0` baseline is taken after the drop site runs, so the
-        // preceding "unchanged" assert can't observe an already-completed dispose) — four independent,
-        // individually discriminating recipes.
-        //
-        // CaptureSnapshot casts Entry.Block to SymbolTileBlock, so a FakeBlock committed
-        // here would throw at capture time — every block under test is a REAL baked block, and disposal is
-        // observed via SymbolTileBlock.DebugLiveAllocCount (the established leak-guard idiom, prior art
-        // SymbolReconcileAsyncTests.Pin_PreventsNativeUseAfterFree_InGather) rather than a fake's counter.
-        // The delta is taken relative to a baseline captured AFTER every block this test creates already exists
-        // (including the FifoEvict case's second tile), so only `t`'s own block's alive→disposed transition moves it.
+        // Non-obvious why: `live0` is taken after the drop site runs, so a site that disposes directly fails only
+        // the "frees exactly once" assert, per [Values] case. SymbolSnapshot.Add casts the block to
+        // SymbolTileBlock, so every block here is REAL (a FakeBlock would throw) and DebugLiveAllocCount observes it.
 
         public enum DeferSite { CommitOverwrite, ReleaseActiveTrueEvict, ReleaseStaleCached, FifoEvict }
 
@@ -3053,13 +2791,8 @@ namespace MapRenderer.Tests.Text
             store.Clear(); // the CommitOverwrite/FifoEvict sites leave an unpinned live block (t2 / u) behind
         }
 
-        // Genuinely discriminating: Clear() must RELEASE the entry's own reference, not dispose the block
-        // outright. At Clear() time the block has exactly two references — the entry's and the snapshot's — so
-        // a Clear() that disposes instead of releases frees the block while the snapshot still references it:
-        // the exact restyle-mid-reconcile use-after-free this mechanism exists to prevent.
-        // RED-verify: replace SymbolTileStore.cs Clear()'s `kv.Value.Block?.Release()` with
-        // `kv.Value.Block?.Value.Dispose()` → the block frees at Clear() while the snapshot still references it
-        // → the "must NOT dispose" assertion below fails.
+        // Clear() must RELEASE the entry's own reference, not dispose the block: the snapshot holds the second
+        // reference, and a disposing Clear() is the restyle-mid-reconcile use-after-free.
         [Test]
         public void Clear_KeepsPinnedDeferredBlockAlive_FreedOnReleasePins()
         {
@@ -3085,14 +2818,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // ═══ Cross-snapshot refcount OVERLAP — a block referenced by TWO snapshots survives one release ═══
-        // DECLARED SURVIVOR: s1 and s2 are two distinct SymbolSnapshot objects, each holding one slice, so
-        // any per-snapshot-dedupe injection is a no-op here. The only injection that isolates cross-snapshot
-        // accumulation is "don't acquire/release at all", which also reds
-        // ReleasePins_IsIdempotent_SecondReleaseDoesNotFreeUnderAnotherSnapshot,
-        // CaptureSnapshot_ReleasesThePreviousCaptureReferences and every
-        // DropSite_DefersWhileReferenced_FreesOnReleasePins case — not
-        // discriminating. The property is Interlocked.Increment: accumulation across independent acquirers
-        // is what the primitive IS, not a discipline this test can falsify in isolation. Kept for its assertions.
+        // Limitation: no defect reds this test alone; accumulation across snapshots is Interlocked.Increment
+        // itself, and skipping acquire/release also reds the DropSite and ReleasePins tests. Kept for its asserts.
 
         [Test]
         public void Pin_RefcountsAcrossTwoSnapshots_SurvivesSingleRelease()
@@ -3117,15 +2844,10 @@ namespace MapRenderer.Tests.Text
                 "the second release drops 1→0 → freed exactly once");
         }
 
-        // ═══ Releasing the SAME snapshot twice must NOT free a block another live snapshot still
-        //          references — the PickupCompletedReconcile → teardown shape in SymbolSubsystem (a demoted
-        //          snapshot's pins released once on swap, then again at teardown). Needs a SECOND live
-        //          reference (s2) or the tooth is vacuous:
-        //          SymbolTileBlock's dispose is already idempotent, so a premature free with only one reference
-        //          left is unobservable. ═══
-        // RED-verify: move the release loop into SymbolTileStore.ReleasePins (reset the slices in
-        // SymbolSnapshot.Clear() WITHOUT releasing Pin first) → the second ReleasePins(s1) decrements s1's slices
-        // a second time, the block's refcount hits 0 under s2 → the first assert below fails.
+        // ═══ Releasing the SAME snapshot twice (swap, then teardown, in SymbolSubsystem) must NOT free a
+        //          block another live snapshot still references. ═══
+        // Non-obvious why: SymbolTileBlock's dispose is idempotent, so only a SECOND live reference (s2) makes
+        // a premature free observable.
 
         [Test]
         public void ReleasePins_IsIdempotent_SecondReleaseDoesNotFreeUnderAnotherSnapshot()
@@ -3150,13 +2872,8 @@ namespace MapRenderer.Tests.Text
             Assert.IsFalse(pinned.Kinds.IsCreated, "the block frees exactly once, on s2's release");
         }
 
-        // ═══ Re-capturing into a reused snapshot releases what it PREVIOUSLY captured, so a block dropped
-        //          from the store between two captures is freed by the second capture rather than stranded. ═══
-        // One assert: Assert.AreEqual(0, s.Count) would pass whether or not Clear() releases the pin
-        // (Release(…, transferredToCache: false) already empties the store, so the re-capture yields Count == 0
-        // either way) — riding a vacuous assert on a real one reads as coverage it is not.
-        // RED-verify: drop the `Slices[i].Pin.Release()` call from SymbolSnapshot.Clear() → the re-capture
-        // resets the slice without releasing its reference → the block's refcount never reaches 0 → this fails.
+        // ═══ Re-capturing into a reused snapshot releases its PRIOR capture, freeing a dropped block. ═══
+        // One assert only: s.Count == 0 holds either way, because the Release already empties the store.
 
         [Test]
         public void CaptureSnapshot_ReleasesThePreviousCaptureReferences()
@@ -3177,12 +2894,8 @@ namespace MapRenderer.Tests.Text
                 "the re-capture must release what the snapshot previously held");
         }
 
-        // ═══ Cross-tile identity, no Frankenstein pair ════════════════
-        // Tile A (coarser) holds the COMPLETE pair; tile B (finer, SAME quantized cell) holds ONLY its icon
-        // (its text never resolved there). A rider has no DedupKey of its own, so
-        // it can only ride with ITS OWN winning owner: since B's finer icon beats A's icon at the shared
-        // (cell, layer, iconImage) key, A's rider is never emitted — not "text from A, icon from B".
-        // Pre-fix (independent icon/text keys), this would show TWO tile keys — icon from B, text from A.
+        // ═══ Cross-tile identity, no Frankenstein pair: tile A (coarser) holds the pair, tile B (finer) the icon.
+        // A rider has no DedupKey and rides only with ITS OWN owner, so B's icon wins and A's rider never emits.
 
         [Test]
         public void CentredPair_CrossTile_NoFrankenstein_OrphanedRiderNeverSurvivesAloneAcrossTiles()
@@ -3256,10 +2969,8 @@ namespace MapRenderer.Tests.Text
                 Assert.AreNotEqual(tileKeyDeparting, result.OrderedBlocks[result.BlockId[i]].TileKey,
                     "no record may carry the claim-skipped departing tile's key");
 
-            // (ii) the general structural invariant over the WHOLE output: every Rider is immediately preceded
-            // by its matching Owner (block-level PairRoles column — not Points[Detail], the hazard), sharing
-            // the same block and MaterialIndex. PairId itself is not a baked block column (no reader — deleted
-            // in 4.1); block+adjacency is the identity check the block-based winner plan can offer.
+            // (ii) Over the WHOLE output, every Rider directly follows its Owner (PairRoles column) in the same
+            // block and MaterialIndex; PairId is not a block column, so block + adjacency is the identity check.
             for (int i = 0; i < result.BlockId.Count; i++)
             {
                 SymbolTileBlock block = result.OrderedBlocks[result.BlockId[i]];
@@ -3318,27 +3029,13 @@ namespace MapRenderer.Tests.Text
 
     /// <summary>
     /// The symbol extractor buckets rings by the source layer's own feature ordinals, not by the
-    /// <b>selected</b> feature list.
-    ///
-    /// <para>It drives the production entry point (<see cref="SymbolFeatureExtractor.Extract"/>), so it
-    /// measures the symbol sequence production emits.</para>
-    ///
-    /// <para><b>Why a separate fixture from <c>SymbolBufferParityTests</c>.</b> Its
-    /// <c>SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle</c> states, in its own doc, that its
-    /// arm B <i>transcribes</i> the production bucketing rather than calling it — a defect
-    /// injected into <c>Extract</c>'s own <c>ringStart</c>/<c>ringOrder</c> leaves it green. This fixture's whole claim
-    /// is about that bucketing, so it must run production and compare against an independent control, not
-    /// against a re-implementation.</para>
-    ///
-    /// <para><b>The production configuration is the one under test</b> (the standing check). The symbol
-    /// fixtures in this repo hand the extractor a layer whose features it selects in full, so ordinal == slot
-    /// and the re-base is inert. Here the filter admits a <b>strict subset</b> (ordinals
-    /// <c>[0, 2, 3, 5]</c> of six); the unselected features <b>carry paths</b>; a <c>Polygon</c> is
-    /// <b>selected but undrawable</b>, sitting between selected features; the selected features are
-    /// <b>multi-path</b>, so bucketing is load-bearing; and — the discriminator for the specific off-by-N the
-    /// plan names — the <b>highest selected ordinal (5) exceeds the selected count (4)</b>, so a
-    /// <c>ringStart</c> sized to the selected count cannot even address the last feature.</para>
+    /// <b>selected</b> feature list. It drives <see cref="SymbolFeatureExtractor.Extract"/> against an
+    /// independent control, because <c>SymbolBufferParityTests</c> transcribes the bucketing and cannot see it.
     /// </summary>
+    /// <remarks>Non-obvious why: a full selection makes ordinal == slot and hides the re-base. Here the filter
+    /// admits ordinals <c>[0, 2, 3, 5]</c> of six; unselected features carry paths; a selected <c>Polygon</c>
+    /// sits between them; selected features are multi-path; and ordinal 5 exceeds the selected count (4), so a
+    /// <c>ringStart</c> sized to the selected count cannot address the last feature.</remarks>
     [TestFixture]
     public class SymbolSharedBufferTests
     {
@@ -3355,16 +3052,11 @@ namespace MapRenderer.Tests.Text
         private const string FilterJson = @"[""!="", ""cls"", ""skip""]";
 
         /// <summary>
-        /// The symbols extracted from the SIX-feature source layer, with only four features selected, are
-        /// the same sequence (count, <c>FeatureIndex</c>, text, anchor, placement, kind) as the symbols
-        /// extracted from the four selected features alone as their own, unfiltered layer.
-        ///
-        /// <para><b>Catches:</b> sizing the counting sort's <c>ringStart</c> to the <i>selected</i> count
-        /// instead of the layer's feature count (an <c>IndexOutOfRangeException</c> here, because ordinal 5
-        /// is addressed — and a silent mis-bucket wherever it is not); driving the feature loop over
-        /// selected-list positions while <c>RingFeatureIdx</c> names ordinals (paths land on the wrong
-        /// features); and dropping or re-ordering the per-tile <c>FeatureIndex</c> counter, which is the
-        /// stable placement tiebreak and therefore observable output.</para>
+        /// The symbols extracted from the SIX-feature source layer, with four features selected, are the same
+        /// sequence (count, <c>FeatureIndex</c>, text, anchor, placement, kind) as those extracted from the four
+        /// selected features alone as their own, unfiltered layer. It catches a <c>ringStart</c> sized to the
+        /// selected count, a feature loop over selected-list positions, and a dropped or re-ordered
+        /// <c>FeatureIndex</c> counter (the placement tiebreak).
         /// </summary>
         [Test]
         public void SymbolSharedLayerBuffer_BucketsPathsByOrdinal_MatchingTheSelectedOnlyControl()
@@ -3527,9 +3219,8 @@ namespace MapRenderer.Tests.Text
         private const string FontName = "LatinFont";
         private static readonly TileId Tile0 = new TileId { Z = 3, X = 0, Y = 0 };
 
-        // Root `sprite` URL + a symbol layer with BOTH icon-image and text-field, over the fixture's
-        // "centroids" source-layer (matches Assets/Fixtures/sample-tile.bytes, reused from
-        // SymbolSubsystemPumpTests).
+        // Root `sprite` URL + a symbol layer with BOTH icon-image and text-field, over the
+        // "centroids" source-layer of Assets/Fixtures/sample-tile.bytes.
         private static readonly string StyleJson = @"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
@@ -3548,12 +3239,8 @@ namespace MapRenderer.Tests.Text
         private string _spriteJson;
         private byte[] _spritePng;
         private int _tryBeginBuildCalls;
-        // EVERY test in this fixture controls SpritesSettled's deadline clock explicitly, frozen here
-        // rather than left on the real UnityEngine.Time.realtimeSinceStartup. The late- and absent-resolve
-        // tests never advance it (they must never cross SpriteFetchDeadlineSeconds), so their "still gated"
-        // assertions do not race real wall-clock time against the 8s deadline on a slow/loaded CI machine — a
-        // deadline trip mid-test would otherwise fail looking exactly like a real regression. Only the
-        // deadline tooth itself advances this field.
+        // SpritesSettled's deadline clock, frozen so "still gated" asserts never race wall-clock time against
+        // SpriteFetchDeadlineSeconds on a slow machine. Only the deadline test advances it.
         private double _simulatedNow;
 
         [SetUp]
@@ -3615,20 +3302,16 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        /// <summary>Mirrors SymbolSubsystemPumpTests.DriveTileBytesReady, but counts TryBeginBuild calls.
-        /// NOTE (review nit): in THIS harness the `_tryBeginBuildCalls == 1` assertions below cannot actually
-        /// fail — the counter only increments inside this method, which each test calls exactly once, and
-        /// there is no TileManager here to re-kick. They read as a "no re-kick" tooth but assert nothing
-        /// about the code under test; kept as executable documentation of the intent (no restyle/pan/zoom
-        /// path exists between park and drain that WOULD re-kick), not as a falsifiable regression guard.</summary>
+        /// <summary>Mirrors SymbolSubsystemPumpTests.DriveTileBytesReady, but counts TryBeginBuild calls.</summary>
+        /// <remarks>Limitation: the `_tryBeginBuildCalls == 1` asserts cannot fail here — only this method
+        /// increments it and no TileManager re-kicks. They document the "no re-kick" intent only.</remarks>
         private void DriveOnce(TileId tile)
         {
             _tryBeginBuildCalls++;
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return;
-            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
-            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
-            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            // Mirrors TileManager.KickMeshBuild: decode ON THE POOL; the kick owns the lease's birth reference,
+            // and its `finally` release frees the buffers unless a parked build acquired its own.
             byte[] bytes = _tileBytes;
             UniTask.RunOnThreadPool(() =>
             {
@@ -3738,15 +3421,8 @@ namespace MapRenderer.Tests.Text
             Assert.IsFalse(anyIcon, "no atlas ever resolved, so no icon can resolve either — text-only is the correct, inert outcome");
         }
 
-        // ── the deadline bound on a genuinely hung fetch (docs/road-shields-design.md § "Decisions", D6) ──
-        // Distinct from SpriteFetchResolvesAbsent_ParkedBuildStillCommitsText: its gate resolves (absent),
-        // reaching a terminal Status quickly, so it never
-        // exercises SpritesSettled's deadline branch at all. This tooth's gate is NEVER resolved — the
-        // UniTaskCompletionSource's Task stays Pending for the whole test — simulating a sprite endpoint
-        // that accepts the connection and never responds (UnityWebRequestSpriteSource sets no HTTP timeout).
-        // Deterministic: NowSecondsOverride (frozen in SetUp, advanced only here) fast-forwards the clock
-        // instantly, so this needs no real wait and doesn't depend on [UnityTest]'s frame-pump cadence to
-        // cross an 8-second real bound.
+        // ── the deadline bound on a hung fetch (docs/road-shields-design.md § "Decisions", D6) ──
+        // The gate NEVER resolves, so only SpritesSettled's deadline branch (clock jumped) releases it.
         [UnityTest]
         public IEnumerator SpriteFetchNeverResolves_DeadlineDispatchesTextOnly_QueueDrains()
         {
@@ -3756,10 +3432,8 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(Tile0) };
             DriveOnce(Tile0);
 
-            // Well before the deadline: still parked, nothing committed, one entry queued. Pumped until the
-            // entry APPEARS rather than for a fixed ten frames — the kick decodes the tile on the pool before
-            // it can park, so the enqueue lands a little later than it used to. The clock is frozen, so extra
-            // frames cannot cross the deadline and cannot weaken either assertion below.
+            // Pump until the entry APPEARS: the kick decodes on the pool before it parks. The clock is frozen,
+            // so extra frames cannot cross the deadline or weaken the asserts below.
             for (int f = 0; f < 300 && _subsystem.PendingSpriteCount() == 0; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);

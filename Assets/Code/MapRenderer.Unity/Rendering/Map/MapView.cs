@@ -50,23 +50,11 @@ namespace MapRenderer.Unity.Rendering.Map
     }
 
     /// <summary>
-    /// The live multi-tile render loop — per-layer styled fill/line rendering. A <b>plain C# class</b>
-    /// (the MonoBehaviour host is <see cref="MapViewComponent"/>). It is always fully wired: it is built with
-    /// its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/>, and owns its
-    /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so there are no
-    /// "is it wired yet" null guards and no lifecycle flag: before <see cref="SetStyle(string,CancellationToken)"/>
-    /// runs it is simply an empty map whose <see cref="LateUpdate"/> selects a cover but has no sources to fetch from,
-    /// so it renders nothing — a safe no-op, not an invalid state.
-    ///
-    /// <para>Architecture: one render bundle per fill/line style layer (declared/painter's order), each with a
-    /// per-layer Material + ZoomStyleApplier, held by the <see cref="RenderLayerSet"/>. The tile lifecycle
-    /// (cover→fetch→build→consume→evict, disposal/leak guards) lives in <see cref="TileManager"/>, ticked
-    /// once per frame. Per-frame: push zoom uniforms, snap the render origin to the look-at, rebuild, tick.</para>
-    ///
-    /// <para>Steady-state no-GC: the ApplyZoom loop is a plain <c>for</c> over a <c>List</c> (struct
-    /// enumerator); TileManager early-outs before any allocation when the cover is clean and nothing pends.</para>
-    ///
-    /// <para>Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.</para>
+    /// The live multi-tile render loop, a plain C# class hosted by <see cref="MapViewComponent"/>. It is built
+    /// with its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/> and owns its
+    /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so it has no "wired yet"
+    /// guards. Before <see cref="SetStyle(string,CancellationToken)"/> it is an empty map with no sources, so
+    /// <see cref="LateUpdate"/> renders nothing. Steady-state frames do not allocate.
     /// </summary>
     public sealed class MapView
     {
@@ -115,10 +103,8 @@ namespace MapRenderer.Unity.Rendering.Map
         private static readonly ProfilerMarker PmSymbolCollect =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolCollect);
 
-        // The symbol AGGREGATION (cross-tile dedup CollectInto + record → SoA batch build). Its own
-        // marker so the dedup/build cost is not misattributed to the unmarked LateUpdate self-time — it runs
-        // between Symbol.Collect and SymbolPlacementSystem.Tick and is a managed main-thread hot spot in its own right
-        // (it grows with the on-screen symbol count at high zoom).
+        // The symbol aggregation (cross-tile dedup + batch build), a managed main-thread cost that grows with the
+        // on-screen symbol count. Its own marker keeps it out of the unmarked LateUpdate self-time.
         private static readonly ProfilerMarker PmSymbolBatch =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolBatch);
 
@@ -137,22 +123,14 @@ namespace MapRenderer.Unity.Rendering.Map
         /// so an abort in between forces the next call down the full-rebuild arm.</summary>
         private StyleDocument _committedStyle;
 
-        // The FillAntialiasing this view's TileManager.CurrentStyle token was folded from.
-        // _config.FillAntialiasing is live-mutable; a toggle between two SetStyle calls must not be absorbed
-        // by an in-place restyle that leaves the token stale — the token bakes it in, since it changes
-        // vertices, not a uniform.
+        // The FillAntialiasing the TileManager.CurrentStyle token was folded from. It changes vertices, so a live
+        // toggle between two SetStyle calls must fail the in-place gate rather than leave the token stale.
         private bool _committedFillAntialiasing;
 
-        // The 4th gate conjunct: the base material REFERENCES the last real
-        // Layers.Build ran against. MapMaterialSet is a mutable ScriptableObject — PreparedCacheTests'
-        // FillExtrusionMaterialAssignedInPlace_.../FillExtrusionMaterialNulledInPlace_... mutate a field IN
-        // PLACE (same MapMaterialSet reference) between two SetStyle calls with byte-identical style
-        // content, specifically so a layer gains or drops a material and its dense id shifts. The in-place
-        // restyle path re-binds EXISTING appliers against EXISTING materials; it cannot discover a layer
-        // that would now build (or now be skipped) without re-running RenderLayerFactory, so it must refuse
-        // whenever any base material reference has changed since the last Build — Material equality
-        // (Unity's fake-null-aware Equals), not just a null/non-null check, because Restyle also never
-        // re-clones a swapped-but-still-non-null base.
+        // The base material references the last full Layers.Build ran against. Non-obvious why: an in-place
+        // restyle only re-binds existing appliers, so it cannot find a layer that a mutated MapMaterialSet
+        // field now builds or skips; the gate refuses on any reference change (Unity's Equals), and
+        // PreparedCacheTests' FillExtrusionMaterial*InPlace_ tests pin it.
         private (Material fill, Material line, Material fillExtrusion, Material symbolText, Material symbolIcon)
             _committedMaterials;
 
@@ -164,9 +142,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <see cref="Text.SymbolPlacementSystem.EaseFade"/> runs on SCALED time, so the two clocks disagree
         /// under <c>timeScale != 1</c> — a known limitation.</summary>
         internal Func<double> NowSecondsOverride { get; set; }
-        // Not `(NowSecondsOverride ?? DefaultNowSeconds)()`: that reads as a method-group-to-delegate
-        // conversion on every call, which this project's C# version does not cache — an allocation inside
-        // the scope MapView_SteadyStateTick_DoesNotAllocateGCMemory measures. The ternary never converts.
+        // A ternary, not `(NowSecondsOverride ?? DefaultNowSeconds)()`: that converts a method group to a delegate
+        // per call, which allocates inside MapView_SteadyStateTick_DoesNotAllocateGCMemory's scope.
         private double NowSeconds => NowSecondsOverride != null ? NowSecondsOverride() : Time.unscaledTimeAsDouble;
 
         /// <summary>How long a restyled uniform binding eases from its old value to its new one. The ONLY
@@ -200,19 +177,14 @@ namespace MapRenderer.Unity.Rendering.Map
             // The PreparedTileCache's Enabled toggle + byte/count budget — maintainer-tunable Inspector
             // fields (placeholder budget defaults pending in-editor VRAM profiling).
             TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
-            // One symbol system per view, owning this view's camera (constructed here, after Camera is set
-            // — a field initializer would see a null Camera). The world-anchored point/icon draw path's base
-            // materials are GUID assets, never Shader.Find; the icon base rides alongside the text one, both
-            // optional (null → that draw path stays inert, see MapMaterialSet.SymbolIconWorld's doc).
+            // Built here, after Camera is set: a field initializer would see a null Camera. Both base materials
+            // are optional; a null one leaves that draw path inert (see MapMaterialSet.SymbolIconWorld).
             SymbolPlacementSystem = new SymbolPlacementSystem(Camera,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
-            // The decoupled symbol subsystem produces the real map symbols SymbolPlacementSystem.Tick renders.
-            // Per-layer materials (the SymbolTextWorld clone) and the resolved text-halo-* live on each
-            // SymbolRenderLayer (Layers.Build), not here. DATA arrives via TileManager's per-tile KICK
-            // (SymbolSubsystem implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
-            // hand it TileManager's loaded set and it reconciles (no release/restore callbacks). cacheEnabled
-            // drives keep-warm-on-release so it matches the prepared mesh cache.
+            // Non-local invariant: symbol data arrives through TileManager's per-tile worker factory, but the
+            // tile lifecycle is pulled — LateUpdate hands over the loaded set and the subsystem reconciles.
+            // The cache flag drives keep-warm-on-release, so symbols match the prepared mesh cache.
             SymbolSubsystem = new SymbolSubsystem(Camera,
                 _config.PreparedCache.MaxCount, _config.PreparedCache.Enabled);
             TileManager.SymbolWorkerFactory = SymbolSubsystem;
@@ -233,9 +205,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private readonly List<Tile.LoadedTileKey> _loadedTileKeys = new List<Tile.LoadedTileKey>();
 
         // ── SetStyle — the style is the single source of truth ─────────────────────────────────
-        // There is no separate "Initialise": the map is fully valid at construction (an empty map whose
-        // Tick safely no-ops until data is wired). Loading/changing data is SetStyle — an async operation
-        // (fetch style + TileJSON) that fits the MonoBehaviour host's async Start naturally.
+        // No separate "Initialise": the map is valid at construction, and SetStyle loads or changes the data.
 
 
         /// <summary>The id of the active style.
@@ -287,11 +257,8 @@ namespace MapRenderer.Unity.Rendering.Map
             StyleDocument style;
             try
             {
-                // Paint/layout expressions parse eagerly here, so a malformed-but-valid-JSON
-                // expression (bad interpolate/step stops, wrong arity, unknown operator) throws NOW rather
-                // than lazily on first access. Caught here, before SetStyle(StyleDocument,...) — the overload
-                // commits _style/StyleId/TileManager.CurrentStyle as its very first step, so returning without
-                // calling it leaves the previous style fully live (no half-applied restyle).
+                // Expressions parse eagerly, so a malformed one throws here, before the other overload commits
+                // anything. Returning without calling it leaves the previous style fully live.
                 style = StyleParser.Parse(json, _config.FillAntialiasing);
             }
             catch (Exception ex)
@@ -309,23 +276,13 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public async UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
         {
-            // Transactional restyle: the ONE await runs FIRST, before any layer/identity mutation, so the
-            // OLD style's layers/
-            // materials/backend/identity stay fully live through the resolution window — a delayed or
-            // cancelled restyle leaves the previous map rendering (no blank background, no destroyed-
-            // material window, no new-cache-token probe under old visuals). BuildSourceSpecs now derives its
-            // source-ids from style.Layers directly (RenderLayerFactory.TryGetFetchSource), NOT from the
-            // not-yet-built Layers.Layers.
+            // Transactional restyle: the one await runs before any mutation, so a delayed or cancelled restyle
+            // leaves the old style's layers, materials, backend and identity live and rendering.
             var specs = await BuildSourceSpecs(style, ct);
             ct.ThrowIfCancellationRequested(); // last safe abort — nothing mutated yet (old style stays intact)
 
-            // TOCTOU: MapMaterialSet fields (and _config.MaterialSet itself) are live-mutable, so
-            // capture ONCE here and validate that SAME captured reference — a concurrent mutation between
-            // this check and its use (Layers.Build below) cannot slip a null base past validation (no await
-            // between validate and use). Fail-loud: an unconfigured base is a developer configuration error.
-            // Live-mutable here is a WITHIN-one-call guard only — a field mutation (or an outright swap to a
-            // different MapMaterialSet) that shifts the layer numbering ACROSS style loads is caught by the
-            // cache token's layer-numbering fold (below), not by this guard.
+            // TOCTOU: _config.MaterialSet is live-mutable, so capture it once and validate that same reference;
+            // no await separates validation from Layers.Build. Across style loads the token's numbering fold guards.
             var materialSet = _config.MaterialSet;
             materialSet.Validate();
 
@@ -335,9 +292,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 throw new InvalidOperationException("StyleDocument.Root is null — the prepared cache's " +
                     "cache-key digest needs it (a hand-built StyleDocument must set Root).");
 
-            // The last SUCCESSFULLY committed document, nulled for this call's duration — an abort below
-            // leaves it null, so the next call takes the full rebuild arm (correct, merely not fast).
-            // See docs/tile-pipeline-design.md, "Partial-survival restyle".
+            // Nulled for this call: an abort below leaves it null, so the next call takes the full rebuild arm.
+            // See docs/tile-pipeline-design.md § "Partial-survival restyle".
             StyleDocument   previous   = _committedStyle; // null on the first load — inPlace is false, as it must be
             _committedStyle            = null;
             Style.StyleTransition transition = StyleTransition;
@@ -360,9 +316,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 // "Partial-survival restyle".
                 TileManager.RestyleSourcesInPlace(specs, _config.Backend);
 
-                // Layers.Build / TileManager.CurrentStyle / SymbolSubsystem.SetStyle / LogSkippedLayers /
-                // _symbolStyleLayers/_symbolRenderLayers are skipped by design — docs/tile-pipeline-design.md,
-                // "Partial-survival restyle".
+                // The in-place arm skips Layers.Build, the style token, SymbolSubsystem.SetStyle and the symbol
+                // lists; see the same section.
                 Layers.ApplyZoom(new Style.StyleFrameInputs(
                     Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
                 TileManager.PushLayerDrawGates(); // the restyle may have moved a layer's zoom range
@@ -382,19 +337,12 @@ namespace MapRenderer.Unity.Rendering.Map
                 StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing));
             CommitProbe?.Invoke(CommitPhase.StyleTokenWritten);
             LogSkippedLayers(Layers.SkippedLayers); // once per style load, never per tile/frame
-            // Build seeds every layer's px uniforms at dpr 1. SetStyle is async — its continuation can
-            // resume AFTER this frame's LateUpdate has already run — and on a RESTYLE the previous tiles are
-            // still loaded, so the newly-built layers would draw them once at the seeded ratio (roads and
-            // halos ~36 % too thin at a ratio of 1.56). One line closes that window for every layer kind,
-            // including the symbol halo, which has no seed of its own at all.
+            // Non-obvious why: Build seeds px uniforms at ratio 1, and this async continuation can resume after this
+            // frame's LateUpdate, so restyled layers would draw loaded tiles once at the wrong device-pixel ratio.
             Layers.ApplyZoom(new Style.StyleFrameInputs(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
             TileManager.PushLayerDrawGates(); // fade advanced above; the gate must not lag it by a frame
-            // Derive the symbol layers from the just-built set (RenderLayerFactory is the sole registry)
-            // instead of re-walking style.Layers with an is-check. One walk, two lists: the typed StyleLayer
-            // for the subsystem, the owning SymbolRenderLayer (its material + presenter) for
-            // SymbolPlacementSystem.Tick — same order, so the ordinal mapping stays 1:1.
-            // Background is a per-covered-tile TileMesh
-            // layer projected through the same IProjection fill/line use, so the globe renders it correctly.
+            // Derive the symbol layers from the just-built set in one walk, filling two lists in the same order
+            // so the subsystem's layer ordinal maps 1:1 to the SymbolRenderLayer that draws it.
             _symbolStyleLayers.Clear();
             _symbolRenderLayers.Clear();
             foreach (var layer in Layers.Layers)
@@ -420,13 +368,10 @@ namespace MapRenderer.Unity.Rendering.Map
             => CommitProbe != null ? () => CommitProbe(CommitPhase.SourcesTeardownRecord) : null;
 
         /// <summary>Warns once, naming every layer <see cref="Style.RenderLayerSet.Build"/> skipped
-        /// for an actual compatibility reason (unsupported kind / unconfigured material). A by-design skip
-        /// stays silent — <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/> (a source-less symbol
-        /// layer), <see cref="Style.LayerSkipReason.Hidden"/> (<c>visibility: none</c>) and
-        /// <see cref="Style.LayerSkipReason.FullyTransparent"/>, each documented on its own enum member.
-        /// Internal (not private):
-        /// a test-assembly caller exercises the GenuinelyUnpainted suppression directly, via
-        /// InternalsVisibleTo (no production caller besides <c>SetStyle</c>).</summary>
+        /// for a compatibility reason (unsupported kind / unconfigured material). By-design skips stay silent:
+        /// <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/>, <see cref="Style.LayerSkipReason.Hidden"/>
+        /// and <see cref="Style.LayerSkipReason.FullyTransparent"/>. Internal so a test can exercise the
+        /// suppression directly.</summary>
         internal static void LogSkippedLayers(IReadOnlyList<Style.SkippedLayer> skipped)
         {
             var problems = new List<string>();
@@ -459,19 +404,10 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>
         /// Resolves each rendered source-id of <paramref name="style"/> into a
         /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
-        /// fetch); a <c>url</c>-only source fetches its TileJSON ONCE and resolves via <c>SourceResolver</c>. Failure
-        /// isolation: an offline/404/malformed TileJSON logs a warning and skips THAT source.
-        ///
-        /// Runs BEFORE <see cref="Style.RenderLayerSet.Build"/>, so it cannot walk the built
-        /// <see cref="Layers"/> set. Walks <paramref name="style"/>'s raw layers through
-        /// <see cref="Style.RenderLayerFactory.TryGetFetchSource"/> instead — the ONE registry of which style
-        /// layers fetch MVT tiles (fill/line/symbol with a non-empty source; background is source-less by
-        /// design; raster/circle/hillshade/unknown are excluded so no non-MVT bytes reach the MVT decode).
+        /// fetch); a <c>url</c>-only source fetches its TileJSON once. A failed TileJSON skips that source only.
+        /// It runs before <see cref="Style.RenderLayerSet.Build"/>, so it walks the raw style layers through
+        /// <see cref="Style.RenderLayerFactory.TryGetFetchSource"/>, the one registry of fetching layers.
         /// </summary>
-        // internal (not private): several EditMode/PlayMode teeth (e.g. TileFeatureSourceGetTileTests,
-        // MapViewSourceSpecTests) drive this method directly, reached via InternalsVisibleTo — test-only
-        // visibility widening, no behaviour change (ARCHITECTURE.md "test code must not bloat the
-        // production codebase").
         internal async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
             StyleDocument style, CancellationToken ct)
         {
@@ -498,10 +434,8 @@ namespace MapRenderer.Unity.Rendering.Map
                     continue;
                 }
 
-                // A geojson source is sliced locally: no TileJSON, no tiles[], no byte fetcher at all. Branch
-                // BEFORE the TileJSON fetch below (which it has no url for) and therefore before the
-                // no-tiles skip (which it would always hit). Same failure-isolation shape as the two warns
-                // around it — a bad source is skipped, never a thrown SetStyle.
+                // A geojson source is sliced locally, with no TileJSON, tiles[] or byte fetcher, so it branches
+                // before the TileJSON fetch and the no-tiles skip. A bad source is skipped, never a thrown SetStyle.
                 if (def.Type == SourceType.GeoJson)
                 {
                     if (def.Data == null || !def.Data.IsObject)
@@ -522,13 +456,8 @@ namespace MapRenderer.Unity.Rendering.Map
                     }
                     catch (System.Exception ex)
                     {
-                        // System.Exception, not just GeoJsonFormatException, so this really is the shape the
-                        // comment above claims. Every current GeoJsonParser throw IS a format exception, so
-                        // the widening changes no current behaviour — it is here because a parser edit that threw
-                        // anything else would otherwise fault SetStyle for the WHOLE style over one bad
-                        // source, which is the failure isolation this branch exists to provide. Cancellation
-                        // is rethrown: swallowing it is its own defect, and the TileJSON path beside this
-                        // makes the same exception.
+                        // System.Exception, not only GeoJsonFormatException: any other parser throw would fault
+                        // SetStyle for the whole style over one bad source. Cancellation is rethrown above.
                         Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to parse: " +
                                          $"{ex.Message}. Source skipped.");
                         continue;
@@ -585,32 +514,17 @@ namespace MapRenderer.Unity.Rendering.Map
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// One frame of the live loop, mirroring (and driven from) <c>MapViewComponent.LateUpdate</c>. Runs in
-        /// LateUpdate on purpose: the input <c>Controller</c> mutates the camera props in its <c>Update</c>, and
-        /// Unity runs every LateUpdate after every Update, so this pipeline is GUARANTEED to see this frame's
-        /// input — no execution-order attributes needed. The whole per-frame pipeline lives HERE, in one ordered
-        /// pass off a SINGLE camera snapshot, so tiles and symbols are always frame-coherent:
-        /// <list type="number">
-        ///   <item>commit the camera (DPI refresh + <see cref="MapCamera.SyncToCamera"/>) — the merged input
-        ///         state from every controller this frame;</item>
-        ///   <item>move the tiles — push zoom uniforms, then rebase every loaded tile onto the look-at's
-        ///         floating origin;</item>
-        ///   <item>place the symbols — project their anchors against the SAME snapshot + just-committed camera.</item>
-        /// </list>
-        /// Telemetry is not a step here: each provider publishes at the end of its OWN pass (see the facade
-        /// below), so its levels are that pass's rather than a shared end-of-frame instant's.
-        /// Allocation-free in steady state.
+        /// One frame of the live loop, driven from <c>MapViewComponent.LateUpdate</c>, which Unity runs after every
+        /// <c>Update</c>, so it sees this frame's input. One ordered pass off one camera snapshot keeps tiles and
+        /// symbols frame-coherent: commit the camera, move the tiles, place the symbols. Each telemetry provider
+        /// publishes at the end of its own pass. Allocation-free in steady state.
         /// </summary>
         public void LateUpdate()
         {
             using var _lateUpdate = PmLateUpdate.Auto(); // umbrella: self-time = residual unmarked per-frame cost
 
-            // 1. Update the camera FIRST — commit this frame's merged input to the Unity camera, so the tile
-            //    rebase and the symbol projection below both read the just-committed pose. DPI is refreshed from
-            //    the live config before the commit, and it now feeds TWO consumers, not one: the altitude
-            //    framing here, and the selector's framing viewport built at BuildTileSelectionConfig() below
-            //    (both are Camera.ViewportLogicalPx). This ordering is also what keeps
-            //    Camera.CameraRelativePosition fresh for BuildSceneFrame one line below.
+            // 1. Commit the camera first, with the live DPI: the altitude framing, the selector's framing viewport,
+            //    the tile rebase, symbol projection and BuildSceneFrame all read the committed pose.
             Camera.DevicePixelRatio = _config.DevicePixelRatio;
             using (PmCameraAdvance.Auto())
                 Camera.SyncToCamera();
@@ -621,29 +535,18 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmSceneFrame.Auto())
                 sceneFrame = BuildSceneFrame(cameraProperties);
 
-            // 2. Move the tiles. ApplyZoom first — so a fractional-zoom-only change always pushes uniforms
-            //    (fill/line zoom paint, zoom-step dasharrays for pixel line width). The applier also carries
-            //    the px→device basis: the style's logical px meet the device-pixel ratio here and
-            //    nowhere else. Read from _config, which OWNS the ratio — Camera.DevicePixelRatio is the same
-            //    value (copied one step above) but going through the camera would imply the camera owns the
-            //    paint basis, which is the confusion MapCamera's own doc-comment records.
+            // 2. Move the tiles. ApplyZoom first, so a fractional-zoom-only change still pushes uniforms. The style's
+            //    logical px meet the device-pixel ratio only here, read from _config, which owns the ratio.
             using (PmApplyZoom.Auto())
             {
-                // Re-read StyleTransition every frame so a live change to the property takes effect
-                // without a restyle — passed straight into the inputs struct, not staged through a
-                // settable property first.
+                // StyleTransition is re-read every frame, so a live change takes effect without a restyle.
                 Layers.ApplyZoom(new Style.StyleFrameInputs(
                     cameraProperties.Zoom, _config.DevicePixelRatio, NowSeconds, StyleTransition));
                 TileManager.PushLayerDrawGates();
             }
 
-            // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
-            // loaded tiles relative to it — best float precision, no threshold/rebase machinery.
-            // Place tiles via the projection-agnostic scene frame built from the launch-time projection +
-            // the look-at. Mercator: rebase = identity and SceneOriginRender = (mercX, 0, mercZ)
-            // (== SceneFrame.Mercator(cam.CenterMercator())), so placement is a bit-for-bit translation.
-            // Globe: rebase rotates every tile into the look-at's local ENU frame (up = +Y), so the same
-            // CameraPoseMath.ComputeRelativePose orbit frames it.
+            // Camera-relative rendering: every frame, place all loaded tiles relative to the look-at origin.
+            // Mercator's rebase is the identity; the globe's rotates each tile into the look-at's local ENU frame.
             using (PmInstancedRebuild.Auto())
                 TileManager.InstancedRebuild(sceneFrame);
 
@@ -651,24 +554,19 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmManagerTick.Auto())
                 TileManager.Tick(cameraProperties, BuildTileSelectionConfig());
 
-            // Hand the style's sprite sheet to the layers that paint from it (fill-pattern). Pulled per
-            // frame rather than pushed from the fetch because the sheet is owned and fetched by the symbol
-            // subsystem — the same per-frame pull SymbolPlacementSystem.Tick already does for SymbolSubsystem.IconTexture below.
-            // RenderLayerSet.SetSprites early-outs on an unchanged pair, so the steady state is one reference
-            // compare; the interesting frames are the one where the sheet lands and the one after a restyle.
+            // Pull the sprite sheet, which the symbol subsystem owns and fetches, into the fill-pattern layers each
+            // frame. SetSprites early-outs on an unchanged pair.
             Layers.SetSprites(SymbolSubsystem.SpriteAtlas, SymbolSubsystem.IconTexture);
 
             // 3. Place the symbols against the SAME snapshot the tiles used (never a second BuildSceneFrame).
             //    A style with no symbol layers simply has nothing to place.
             if (SymbolSubsystem.HasSymbolLayers)
             {
-                // ONE wall-clock read shared by ReconcileLoadedTiles' departing-tile grace window and CurrentBatch's
-                // coverage-fade grace window (REVISION 2) — same frame, same clock, no double Time.timeAsDouble read.
+                // One clock read shared by ReconcileLoadedTiles' and CurrentBatch's grace windows.
                 double now = Time.timeAsDouble;
 
-                // PULL the current loaded-tile set (post-Tick, so cache-hit adds and releases are already
-                // reflected) and reconcile the symbol store before collecting — restores kept-warm symbols for
-                // cache-hit re-entries, releases tiles that left cover. Then aggregate the active symbols.
+                // Pull the post-Tick loaded-tile set and reconcile the symbol store: it restores kept-warm symbols
+                // for cache-hit re-entries and releases tiles that left cover.
                 using (PmSymbolCollect.Auto())
                 {
                     TileManager.CollectLoadedTileKeys(_loadedTileKeys);
@@ -678,19 +576,13 @@ namespace MapRenderer.Unity.Rendering.Map
                     SymbolSubsystem.PumpBuilds();
                 }
 
-                // Stage-2 (symbol-label native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
-                // the pre-build tile-coverage cull, recording each winner's (blockId, localIndex) against the
-                // per-tile baked block, rebuilt every frame (allocation-free). Hoisted out of the SymbolPlacementSystem.Tick
-                // argument so its managed dedup/collect cost is MARKED (Symbol.BatchBuild), not folded into the
-                // umbrella self-time. Pass this frame's SAME sceneFrame snapshot the tiles used, so the coverage
-                // cull's projection matches the placement below exactly.
+                // The per-frame winner plan: collect, cross-tile dedup and coverage cull, recording each winner's
+                // baked-block slot. It takes the tiles' sceneFrame, so the cull projects as the placement does.
                 SymbolGatherPlan plan;
                 using (PmSymbolBatch.Auto())
                     plan = SymbolSubsystem.CurrentBatch(sceneFrame, _config.SymbolTileCoverageCull, now);
-                // Then gather the winning blocks' baked slices → project/collide/build the placement, presenting
-                // each slot through its own SymbolRenderLayer (material + persistent presenter). Push the
-                // per-symbol far-distance cull fraction live first (same read-every-Tick contract as the coverage
-                // cull above), so an Inspector tweak takes effect the same frame.
+                // Push the far-distance cull fraction live, then gather, project, collide and present each slot
+                // through its own SymbolRenderLayer.
                 SymbolPlacementSystem.SymbolMaxDistanceFraction = _config.SymbolMaxDistanceFraction;
                 SymbolPlacementSystem.Tick(sceneFrame, plan, SymbolSubsystem.Atlas, Time.deltaTime,
                     _symbolRenderLayers, SymbolSubsystem.IconTexture);
@@ -699,19 +591,13 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Builds the per-frame <see cref="Backend.SceneFrame"/> (Level-2 of the two-level RTC) from the
-        /// launch-time projection and the camera look-at: the render-space scene origin
-        /// (<c>projection.Project(lookAt)</c>) and the render→look-at-local-ENU rebase
-        /// (<c>transpose(projection.TangentBasisAt(lookAt))</c>). The look-at latitude is clamped to the
-        /// projection's valid range (<see cref="IProjection.ClampValidLatitude"/>) — ±85.05° for Web-Mercator
-        /// (matching <c>CenterMercator</c>), ±90° for the globe. For Web-Mercator the basis is the identity, so
-        /// the frame equals <c>SceneFrame.Mercator(cam.CenterMercator())</c> bit-for-bit.
-        ///
-        /// <para>Folds in <see cref="MapCamera.CameraRelativePosition"/> — fresh because <c>LateUpdate</c> runs
-        /// <see cref="MapCamera.SyncToCamera"/> before this call, never a <c>transform.position</c> round-trip.</para>
+        /// projection and the clamped camera look-at. For Web-Mercator the rebase is the identity, so the frame
+        /// equals <c>SceneFrame.Mercator(cam.CenterMercator())</c> bit-for-bit.
+        /// Non-local invariant: <see cref="MapCamera.CameraRelativePosition"/> is fresh only because
+        /// <c>LateUpdate</c> runs <see cref="MapCamera.SyncToCamera"/> before this call.
         /// </summary>
-        /// <remarks><c>internal</c> (not <c>private</c>) solely so the single-owner test can call it directly
-        /// after <see cref="MapCamera.SyncToCamera"/> without re-driving the whole <see cref="LateUpdate"/>
-        /// pipeline — no other production caller.</remarks>
+        /// <remarks><c>internal</c> so a test can call it after <see cref="MapCamera.SyncToCamera"/> without
+        /// driving the whole <see cref="LateUpdate"/>.</remarks>
         internal Backend.SceneFrame BuildSceneFrame(in CameraProperties cam)
         {
             IProjection proj = Camera.Projection;
@@ -782,10 +668,8 @@ namespace MapRenderer.Unity.Rendering.Map
             _selectorInputs    = key;
             _hasSelectorInputs = true;
 
-            // One universal FrustumTileSelector for every projection (occlusion via IProjection). LOD strategy
-            // from config; far-plane policy per projection — ray-sphere for a self-occluding globe
-            // (curvature-correct: tight near, limb far), geometry-aware for the flat atlas. The camera gets the
-            // SAME far so the rendered frustum is byte-for-byte the selected one.
+            // One FrustumTileSelector for every projection; the far-plane policy is ray-sphere for the globe and
+            // geometry-aware for the flat map. The camera gets the same far, so it renders the selected frustum.
             ITileLodStrategy lod = tileSelection.LodMode switch
             {
                 TileLodMode.ScreenSpaceLod => new ScreenSpaceLodStrategy(),
@@ -802,12 +686,9 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>
-        /// The per-frame view inputs the selector consumes. The camera IS the viewport, and the framing
-        /// viewport is literally <see cref="MapCamera.ViewportLogicalPx"/> — the SAME definition the camera
-        /// altitude frames from, not a second derivation of it. That is what makes "render far == selection
-        /// far" structural: an on-screen tile stays the same physical size across panel densities
-        /// because one quantity, not two, decides it. The projection is the pixel↔ground service the camera
-        /// owns (Web-Mercator).
+        /// The per-frame view inputs the selector consumes. The framing viewport is
+        /// <see cref="MapCamera.ViewportLogicalPx"/>, the same quantity the camera altitude frames from, so an
+        /// on-screen tile keeps its physical size across panel densities.
         /// </summary>
         internal Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
             => new Tile.TileManager.TileSelectionConfig
@@ -820,32 +701,21 @@ namespace MapRenderer.Unity.Rendering.Map
                 MaxReleasesPerTick   = _config.MaxReleasesPerTick,
                 MaxConcurrentTileLoads = _config.MaxConcurrentTileLoads,
                 PriorityStrategy       = _config.PriorityStrategy,
-                // Negative means "do not run the clip stage at all", which is not the same as a zero margin
-                // ("cut at the tile boundary"). The decode lives in the value type so the parity oracles can
-                // reach it — their reference arm must build under the SAME window as the arm it is compared
-                // against, or it stops being a comparison.
+                // Negative skips the clip stage; zero cuts at the tile boundary. The decode lives in the value
+                // type so the parity oracles build their reference arm under the same window.
                 BufferClip           = TileBufferClip.FromInspectorUnits(_config.FillTileBufferClip),
             };
 
         /// <summary>
-        /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
-        /// RenderLayerSet's materials, then the symbol placement system's mesh/material/native buffers.
-        /// Order matters TWICE: tiles first — their renderers reference layer materials — and
-        /// <see cref="Layers"/> before <see cref="SymbolPlacementSystem"/> — a <see cref="Style.SymbolRenderLayer"/>'s
-        /// presenter (destroyed by <c>Layers.Dispose()</c>) references a slot <see cref="Mesh"/> owned by
-        /// <see cref="SymbolPlacementSystem"/>; a MeshRenderer must not outlive the mesh it points at. The glyph atlas
-        /// texture is owned by <see cref="SymbolSubsystem"/> and disposed there, never here.
-        /// Idempotent (every dispose here is). The MonoBehaviour host calls this from OnDestroy.
+        /// Disposes the tiles, then the layer materials, then the symbol placement system, then the symbol
+        /// subsystem; idempotent. Non-local invariant: tiles go first because their renderers reference layer
+        /// materials, and <see cref="Layers"/> goes before <see cref="SymbolPlacementSystem"/> because a symbol
+        /// layer's presenter must not outlive the slot <see cref="Mesh"/> that system owns.
         /// </summary>
         public void Teardown()
         {
-            // Defense-in-depth: dispose each subsystem independently so a fault in ONE cannot strand the
-            // others. Learned the hard way — on Play-mode Stop Unity tears down the Entities World before this
-            // runs, and an unguarded entity touch inside TileManager.Dispose() threw straight out of here,
-            // leaving Layers/SymbolPlacementSystem/SymbolSubsystem (and everything TileManager disposes after the throw) undisposed:
-            // the whole-graph "finalized without Dispose()" flood. The exception is LOGGED, never swallowed
-            // silently, so a genuine teardown bug is still loud. Order is preserved (see the summary): tiles
-            // before Layers (renderers reference layer materials), Layers before SymbolPlacementSystem (presenter/slot-mesh).
+            // Each step is isolated and logs its exception, so one fault cannot strand the rest. Play-mode Stop
+            // can destroy the Entities World before this runs, so an entity touch in TileManager.Dispose() may throw.
             DisposeStep(TileManager, nameof(TileManager)); // tiles first — their renderers reference Layers' materials
             DisposeStep(Layers,      nameof(Layers));
             DisposeStep(SymbolPlacementSystem,      nameof(SymbolPlacementSystem));

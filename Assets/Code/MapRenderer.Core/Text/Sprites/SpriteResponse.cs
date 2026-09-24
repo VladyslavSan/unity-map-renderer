@@ -3,12 +3,9 @@
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
-    /// The response from a sprite-sheet fetch (<see cref="ISpriteSource.FetchAsync"/>) — the index JSON
-    /// text plus the raw sheet PNG bytes, fetched together since a sheet is a single keyless pair (unlike
-    /// glyph ranges, which are fontstack+range-keyed). Mirrors <see cref="GlyphRangeResponse"/>'s
-    /// absent-vs-error shape: <see cref="HasData"/> is false when the sheet is explicitly absent (HTTP
-    /// 204/404, missing file) — a defined "not found," never a throw — as opposed to a thrown error
-    /// (network failure, HTTP 5xx, IO error).
+    /// The response from a sprite-sheet fetch (<see cref="ISpriteSource.FetchAsync"/>): the index JSON
+    /// text plus the raw sheet PNG bytes. As in <see cref="GlyphRangeResponse"/>, <see cref="HasData"/>
+    /// is false when the sheet is explicitly absent (HTTP 204/404, missing file); a real error throws.
     /// </summary>
     public readonly struct SpriteResponse
     {

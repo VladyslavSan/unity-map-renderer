@@ -54,25 +54,11 @@ namespace MapRenderer.App.View
     }
 
     /// <summary>
-    /// Stateful, engine-free gesture recognizer — the touch source's brain.
-    ///
-    /// <para>Converts per-frame <see cref="TouchSample"/> lists into <see cref="GestureIntent"/>
-    /// values through <see cref="ViewInput.Apply"/>. Owns cross-frame disambiguation state
-    /// (one-finger grabbed-ground latch, two-finger family lock). No <c>UnityEngine</c>,
-    /// no <c>System.Math</c>, no LINQ, no per-call heap allocation in steady state.</para>
-    ///
-    /// <para><b>Family-lock rule:</b> on the first decisive two-finger motion, one of two
-    /// mutually-exclusive families is latched and held for the rest of the touch-event chain:
-    /// <list type="bullet">
-    ///   <item><b>TILT</b> — only <see cref="GestureKind.TiltBy"/> is emitted; zoom/heading never.</item>
-    ///   <item><b>ZOOM+ROTATE</b> — <see cref="GestureKind.ZoomAtAnchor"/> and
-    ///     <see cref="GestureKind.HeadingBy"/> may compose; <see cref="GestureKind.TiltBy"/> never.</item>
-    /// </list>
-    /// The latch resets only when the two-finger chain ends (finger count drops below 2).</para>
-    ///
-    /// <para><b>Purity:</b> this type and <see cref="TouchSample"/> contain zero
-    /// <c>UnityEngine</c>, <c>Touchscreen</c>, <c>EnhancedTouch</c>, <c>InputSystem</c>, or
-    /// <c>Vector2</c> references. All math is <c>Unity.Mathematics math.*</c>; no <c>System.Math</c>.</para>
+    /// Stateful, engine-free gesture recognizer: turns per-frame <see cref="TouchSample"/> lists into
+    /// <see cref="GestureIntent"/> values, with no per-call heap allocation in steady state. It owns the cross-frame
+    /// state: the one-finger grabbed-ground latch and the two-finger family lock. The first decisive two-finger motion
+    /// latches TILT (only <see cref="GestureKind.TiltBy"/>) or ZOOM+ROTATE (<see cref="GestureKind.ZoomAtAnchor"/> and
+    /// <see cref="GestureKind.HeadingBy"/>, never tilt) until the finger count drops below 2.
     /// </summary>
     public sealed class TouchGestureRecognizer
     {
@@ -148,9 +134,8 @@ namespace MapRenderer.App.View
 
                 if (!_panActive || _panFingerId != finger.FingerId)
                 {
-                    // Capture grabbed-ground on first frame of this drag (or new finger).
-                    // Copy to a local so we can pass `in` (CS8156 prevents `in view.Camera`
-                    // when `view` is itself an `in` parameter).
+                    // Capture grabbed-ground on the first frame of this drag (or a new finger). The local copy
+                    // exists because CS8156 rejects `in view.Camera` when `view` is itself an `in` parameter.
                     CameraProperties camSnap = view.Camera;
                     _grabbedGround = view.Projection.ScreenToGround(
                         finger.PositionPx, view.ViewportPx, in camSnap);
@@ -165,9 +150,7 @@ namespace MapRenderer.App.View
             // effectiveCount >= 2 — two-finger path.
             _panActive = false;
 
-            // Pick two fingers with the lowest FingerId for stable ordering.
-            // f0 and f1 are already ordered by the loop above (first two non-Ended samples).
-            // Sort by FingerId.
+            // f0 and f1 are the first two non-Ended samples; sort them by FingerId for a stable order.
             if (f0.FingerId > f1.FingerId)
             {
                 var tmp = f0; f0 = f1; f1 = tmp;
@@ -232,9 +215,8 @@ namespace MapRenderer.App.View
             // ── Emit by latched family (NO re-evaluation, NO flip) ────────────────────────────
             if (_family == TwoFingerFamily.Tilt)
             {
-                // Emit TiltBy unconditionally every frame (even zero centroid shift) —
-                // so B-CLASSIFY row 1 "keeps emitting ONLY TiltBy" holds on injected pinch frames.
-                // Sign: -dc.y (drag-up → pitch decreases; drag-down → pitch increases) matches Controller.
+                // Emit TiltBy every frame, even at zero centroid shift (Row1_TiltFamilyLatch_IgnoresSubsequentPinchTwist).
+                // Sign -dc.y (drag-up decreases pitch) matches Controller.
                 double tiltDeltaDeg = -dc.y * _cfg.PitchSensitivity;
                 results.Add(GestureIntent.TiltBy(tiltDeltaDeg, _cfg.MaxPitch));
             }

@@ -1,9 +1,5 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
-// (Tools/core-tests). Do NOT add any UnityEngine reference.
-//
-// Tests CameraProperties, CameraPropertiesUpdate (patch semantics), CameraPoseMath (altitude formula +
-// inverse + pose), and the shortest-angle heading lerp. There is no animation path: the instant
-// patch path is CameraPropertiesUpdate.ApplyTo.
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine reference.
+// Tests CameraProperties, CameraPropertiesUpdate.ApplyTo patches, CameraPoseMath, and the heading lerp.
 
 
 using System;
@@ -335,22 +331,14 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── Tilt-Y sign convention ──────────────────────────────────────────────────────────────────
-        //
-        // The sensitivity multiply (pitchSensitivity = 0.3) is applied by the caller before the delta
-        // reaches the seam, as MapController does when building a TiltBy intent.
+        // The caller applies the sensitivity multiply before the delta reaches the seam, as MapController does.
 
         /// <summary>
-        /// Pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead
-        /// (pitch DECREASES). The new Input System reports <c>delta.y &gt; 0</c> for an upward mouse
-        /// move; <c>MapController</c> negates it before building the <see cref="MapRenderer.App.View.GestureIntent.TiltBy"/>
-        /// intent, and <c>ApplyTiltDelta</c> adds <c>dy·sensitivity</c> to the current tilt.
-        ///
-        /// <para>So: +Y drag (drag up) → negate → TiltBy(dy = -positive * sensitivity) → tilt DECREASES.
-        /// This is the headless pin for that direction; <c>MapController</c>'s comment and call site must
-        /// agree (the final direction is a maintainer play-test call, noted in the stage).</para>
-        ///
-        /// <para>Starts from a non-zero tilt so the "pitch decreased" assertion is not vacuously
-        /// clamped at 0.</para>
+        /// Pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead (pitch DECREASES).
+        /// The Input System reports <c>delta.y &gt; 0</c> for an upward move; <c>MapController</c> negates it
+        /// before it builds the <see cref="MapRenderer.App.View.GestureIntent.TiltBy"/> intent, and
+        /// <c>MapController</c>'s call site must agree with this test. It starts from a non-zero tilt so the
+        /// "pitch decreased" assertion does not pass by a clamp at 0.
         /// </summary>
         [Test]
         public void TiltYSign_DragUp_NewIS_TiltsTowardOverhead()

@@ -6,18 +6,10 @@ using MapRenderer.Core.Rendering;
 namespace MapRenderer.Tests.Rendering
 {
     /// <summary>
-    /// Painter's-algorithm queue-assignment tests for <see cref="LayerDrawOrder"/>.
-    ///
-    /// Engine-free (pure C#) so it runs in BOTH the Unity EditMode runner and the fast
-    /// dotnet core-tests project. Proves the MECHANISM owns the order: queues are strictly
-    /// monotonic with declared index, distinct, all inside the transparent band.
-    ///
-    /// <para><b>Sub-slot bands.</b> <see cref="LayerDrawOrder"/> gives each declared layer a sub-slot
-    /// BAND (a symbol layer's icon = <see cref="LayerSubSlot.Base"/>, text =
-    /// <see cref="LayerSubSlot.Above"/>, so the badge never paints over its own number).
-    /// <see cref="BandStart_AndUniformStride_AreCorrect"/> reads the stride off the named
-    /// <see cref="LayerDrawOrder.SubSlotsPerLayer"/> constant rather than a literal, so it also catches a
-    /// NON-UNIFORM stride, which an exact-value list cannot distinguish from an intended change.</para>
+    /// Painter's-algorithm queues for <see cref="LayerDrawOrder"/> (engine-free, also in core-tests):
+    /// strictly monotonic with declared index, distinct, and inside the transparent band. Each layer
+    /// gets a sub-slot BAND (icon = <see cref="LayerSubSlot.Base"/>, text = <see cref="LayerSubSlot.Above"/>).
+    /// The stride is read off <see cref="LayerDrawOrder.SubSlotsPerLayer"/>, so a non-uniform one fails.
     /// </summary>
     [TestFixture]
     public class LayerDrawOrderTests

@@ -1,7 +1,5 @@
-// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified float4x4 — this file lives in
-// MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float4x4` would bind to a (nonexistent)
-// `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234) since the leading `Unity` segment
-// resolves against the CURRENT namespace first. See the namespace-collision trap in GlyphAtlasTexture.cs.
+// TOP-LEVEL `using Unity.Mathematics;`: inside this namespace a leading `Unity` resolves against the current
+// namespace first, so `Unity.Mathematics.float4x4` fails with CS0234 (see GlyphAtlasTexture.cs).
 
 using Unity.Mathematics;
 
@@ -21,24 +19,17 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         private const float ViewportMarginPx = 256f;
 
-        /// <summary>Magnitude past which a projected screen coordinate is treated as a near-plane blow-up
-        /// rather than a position. A point just in front of the camera plane has a tiny positive <c>clip.w</c>,
-        /// which survives the behind-camera test in <see cref="TryProjectPoint"/> and then divides into an
-        /// arbitrarily large screen coordinate — finite, so no NaN guard catches it, but useless as geometry.
-        /// <para>Lives here, not on a caller, because BOTH consumers of a projected point need the same
-        /// threshold: <c>SymbolStagingMath.StageCurved</c> bounds a path VERTEX (a blow-up there would explode
-        /// the arc walk), and <see cref="SymbolBox.TryBuildProjectedWorldGlyph"/> bounds a projected CORNER (a
-        /// blow-up there would make the collision AABB unbounded, where <see cref="SymbolBox.BuildRotatedGlyph"/>'s
-        /// screen box is bounded by the cell). Two copies of one threshold is how they drift apart.</para></summary>
+        /// <summary>Magnitude past which a projected screen coordinate is a near-plane blow-up, not a position:
+        /// a tiny positive <c>clip.w</c> passes the behind-camera test and divides into a huge, finite value.
+        /// Non-local invariant: <c>SymbolStagingMath.StageCurved</c> (path vertices) and
+        /// <see cref="SymbolBox.TryBuildProjectedWorldGlyph"/> (box corners) share this one threshold.</summary>
         internal const float MaxProjectedPx = 1e5f;
 
         /// <summary>
-        /// Projects <paramref name="renderPos"/> (render-space, pre-RTC — the SAME space
-        /// <c>projection.Project(geo)</c> emits) to a logical screen pixel, or returns <c>false</c> if the
-        /// anchor is behind the camera (<c>clip.w &lt;= 0</c>) or (with a fixed margin) outside the
-        /// viewport. <paramref name="sceneOriginRender"/> is the per-frame floating-origin rebase
-        /// (<c>SceneFrame.SceneOriginRender</c>) — MANDATORY: skipping it lands at the wrong pixel once the
-        /// camera has panned away from the render origin.
+        /// Projects <paramref name="renderPos"/> (pre-RTC render space, as <c>projection.Project(geo)</c> emits)
+        /// to a logical screen pixel, or returns <c>false</c> if it is behind the camera (<c>clip.w &lt;= 0</c>)
+        /// or outside the viewport plus a fixed margin. <paramref name="sceneOriginRender"/> is required: without
+        /// it the pixel is wrong once the camera pans away from the render origin.
         /// </summary>
         /// <param name="renderPos">The symbol anchor in render space (pre-RTC).</param>
         /// <param name="sceneOriginRender">The per-frame scene origin the camera orbits (<c>SceneFrame.SceneOriginRender</c>).</param>
@@ -84,10 +75,8 @@ namespace MapRenderer.Core.Text.Placement
         /// vertex may be far off-screen while the symbol's visible portion is on-screen, so the margin cull
         /// (correct for a point anchor) would wrongly drop the whole line.
         /// </summary>
-        /// <param name="rebase">The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>, identity on
-        /// Mercator). Applied AFTER the double subtract + float-narrow (mirrors
-        /// <c>FloatingOrigin.TileToSceneRebased</c> — rebasing before the subtract would rotate full-scale world
-        /// coordinates and blow the float32 precision budget).</param>
+        /// <param name="rebase">The render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>), applied after the
+        /// double subtract and narrow, since rotating full-scale coordinates would exceed float32 precision.</param>
         public static bool TryProjectPoint(
             in double3 renderPos,
             in double3 sceneOriginRender,
@@ -97,9 +86,8 @@ namespace MapRenderer.Core.Text.Placement
             out float2 screenPx,
             out float depth)
         {
-            // Manual double->float per-component narrowing (not an explicit double3->float3 cast): mirrors
-            // FloatingOrigin.TileToSceneRebased, which does the same field-by-field for the same reason —
-            // keeps this file compiling identically against the core-tests shim's minimal float2/float4.
+            // Per-component narrowing, not a double3->float3 cast, so this compiles against the core-tests
+            // shim's minimal types (as FloatingOrigin.TileToSceneRebased does).
             double3 local = renderPos - sceneOriginRender;
             float3 localF = new float3((float)local.x, (float)local.y, (float)local.z);
             float3 rebased = math.mul(rebase, localF); // rotate into the look-at ENU frame (identity on Mercator)

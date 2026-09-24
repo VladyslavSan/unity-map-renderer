@@ -1,7 +1,5 @@
-// Engine-free, BLITTABLE — this struct crosses into Burst jobs as a NativeArray<PositionedGlyph> element at the
-// MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray pattern
-// LineRibbonVertex/GeoCoordinate/GlyphAtlasEntry use) — keep to blittable scalar fields only: no byte[], no
-// string, no reference types.
+// BLITTABLE: this struct crosses into Burst jobs as a NativeArray<PositionedGlyph> element, so keep to
+// blittable scalar fields only (no byte[], string, or reference types).
 
 namespace MapRenderer.Core.Text
 {

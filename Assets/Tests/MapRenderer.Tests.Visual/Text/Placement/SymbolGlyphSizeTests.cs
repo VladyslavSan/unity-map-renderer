@@ -1,10 +1,6 @@
 // Pitched-camera glyph-size and device-pixel-ratio GPU/visual acceptance tests.
 //
-// Split by the bare-`Object` using collision (System.Object vs UnityEngine.Object,
-// CS0104) within the pitched-camera sub-area, then by content: fixture-harness
-// self-validation, glyph-size measurement, and collision-box geometry.
-// DevicePixelRatioSnapshotTests imports System; the other two are neutral —
-// no bare-Object user is in this file.
+// Split by the CS0104 bare-`Object` collision, then by content. No bare-Object user is in this file.
 //
 // Contents:
 //   MapPitchedGlyphSizeTests          — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback.
@@ -42,53 +38,21 @@ namespace MapRenderer.Tests.Visual
     // SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback. NOT registered in
     // Tools/core-tests/core-tests.csproj.
     //
-    // THE SIZE TEETH, on the off-look-at multi-depth fixture.
+    // THE SIZE TEETH. Under `*-pitch-alignment: map` a glyph's DRAWN SIZE is a world-metre quantity carried by
+    // the SAME `arcScale` that spaces the glyph anchors, so size and spacing foreshorten together.
     //
-    // THE CLAIM, in one line: under `*-pitch-alignment: map` a glyph's DRAWN SIZE is a world metre quantity
-    // carried by the SAME `arcScale` that already spaces the glyph anchors, so size and spacing foreshorten
-    // together and their RATIO is depth-independent.
-    //
-    // THE ALGEBRA THESE TEETH READ. `SymbolStagingMath.StageCurved` spaces glyph g at world arc
-    // `centerArc + (ArcCenter[g] − centre) · arcScale`, so the world gap between consecutive anchors is
-    // `ΔArcCenter · arcScale`. The drawn corner offset is `cornerBaked · arcScale` too. Therefore
-    //
-    //      gap_world / cellWidth_world = (ΔArcCenter · arcScale) / (cellWidthBaked · arcScale)
-    //                                  =  ΔArcCenter / cellWidthBaked                              … (5)
-    //
-    // `arcScale` CANCELS. The right-hand side is a quotient of two BAKED layout constants — independent of
-    // TextSizePx, of MetresPerLogicalPixel, of DPR, of zoom, of tilt and of depth. Both quantities are world
-    // lengths lying in the same ground plane at (locally) the same view depth, so both project through the same
-    // perspective divide, and
-    //
-    //      gap_screen / glyphSize_screen = ΔArcCenter / cellWidthBaked = CONSTANT AT EVERY DEPTH … (6)
-    //
-    // EVERY TOOTH HERE IS BLIND TO A UNIFORM SCALE ERROR, AND SAYS SO. That blindness is the same cancellation
-    // that makes them depth-independent; it is not a weakness that can be fixed here. The ABSOLUTE scale (and the
-    // DPR factor, and the ŷ sign) are pinned by `MapPitchedGlyphSizeTiltZeroTests` against the VIEWPORT arm,
-    // which shares no code with the map branch.
-    //
-    // WHY THE RECEDING ARM CARRIES THE CLAIM. `CrossNear`/`CrossFar` are ISO-DEPTH inherently, and for
-    // an iso-depth symbol a true per-glyph world size and a size scaled by ONE constant per symbol are IDENTICAL —
-    // that second thing is the reverted screen-ruler model. So a cross-arm reading cannot
-    // discriminate the model, and every reading here that claims to is on, or spans, the RECEDING arm. Cross-arm
-    // readings appear only as controls and are labelled as such.
-    //
-    // THREE ARMS, THREE REACHES — stated up front so no tooth over-claims:
-    //   • rendered ink — SEPARABILITY reaches both receding depths, a factor of ≈ 2 apart, and the
-    //                    cross arm at 1.25× and 1.5×. The RATIO read from ink reaches only the band where
-    //                    a glyph's ink run clears ≈ 4 px: MEASURED, RecedingFar's runs are 1–2 px at the shipped
-    //                    pose, so ±1 px quantisation there is not just noise but an upward BIAS. Raising SizePx
-    //                    does not help (the fixture is scale-invariant in it — see InkRunPose) and raising
-    //                    TextSizePx enough drives the receding road's near end behind the camera.
-    //   • world metres at the mesh — 8×, the deep pose, and the arm that carries the RATIO claim to
-    //                    depth. The fixture DISABLES the production far-distance cull (SymbolMaxDistanceFraction =
-    //                    +inf in OffLookAtSymbolScene) so the deep pose's far anchors — which sit beyond the camera
-    //                    far distance — survive to be measured; the cull is not this fixture's subject.
-    //   • pure staging, no camera (MapPitchedWorldArcStagingTests.WorldCellToAdvanceRatio_HoldsAtEveryMagnitude)
-    //                    — every magnitude regime to 50×.
-    //
-    // AND NOTE WHERE THE FAILURE BEGINS: 1.25× the look-at depth, not the horizon (the horizon is merely where
-    // the symptom is loudest). Letters_StaySeparable_PastTheMergeThreshold brackets 1.25× for that reason.
+    // Non-obvious why: StageCurved spaces glyphs by `ΔArcCenter · arcScale` and sizes corners by
+    // `cornerBaked · arcScale`, so arcScale cancels:
+    //      gap_world / cellWidth_world  = ΔArcCenter / cellWidthBaked                              … (5)
+    //      gap_screen / glyphSize_screen = ΔArcCenter / cellWidthBaked = CONSTANT AT EVERY DEPTH  … (6)
+    // Limitation: that cancellation makes every tooth here blind to a uniform scale error;
+    // MapPitchedGlyphSizeTiltZeroTests pins the absolute scale, DPR and ŷ sign. The cross arm is iso-depth,
+    // where a per-glyph size equals one constant per symbol, so it serves only as a control.
+    //   • rendered ink — separability at both receding depths and on the cross arm at 1.25× and 1.5×; the
+    //                    RATIO only where ink runs clear ≈ 4 px (RecedingFar's are 1–2 px).
+    //   • world metres at the mesh — the RATIO at 8× depth (OffLookAtSymbolScene disables the far cull).
+    //   • pure staging (MapPitchedWorldArcStagingTests.WorldCellToAdvanceRatio_HoldsAtEveryMagnitude) — to 50×.
+    // A screen-constant size fails from 1.25× the look-at depth, not at the horizon.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapPitchedGlyphSizeTests — Unity EditMode only
@@ -101,18 +65,11 @@ namespace MapRenderer.Tests.Visual
         private static OffLookAtSymbolSceneConfig ShippedPose() => new OffLookAtSymbolSceneConfig();
 
         /// <summary>
-        /// The ink-reading tests' pose — the SHIPPED one.
-        ///
-        /// <para><b>MEASURED FINDING: raising <see cref="OffLookAtSymbolSceneConfig.SizePx"/> does NOT magnify
-        /// this fixture, so it is not a remedy for a sub-pixel ink reading.</b> It was tried at 1024 and the
-        /// projected geometry did not change: the altitude framing uses the LOGICAL viewport, so doubling
-        /// SizePx doubles the orbit radius <c>d</c> AND the viewport height <c>H</c>, leaving
-        /// <c>MetresPerDevicePixel = 2·d·tan(fov/2)/H</c> — and therefore every world length in the fixture,
-        /// which is a multiple of it — unchanged, while every symbol sits at twice the view depth. The two
-        /// cancel exactly. Measured at 1024: <c>RecedingNear</c>'s per-glyph ink advance read 21–25 px, the
-        /// same band it reads at 512. This is the same scale-invariance the horizon measurement found for
-        /// ZOOM, for the same reason, and it rules out magnifying the fixture as a remedy. Do not spend a
-        /// round rediscovering it.</para>
+        /// The ink-reading tests' pose — the SHIPPED one. Limitation: raising
+        /// <see cref="OffLookAtSymbolSceneConfig.SizePx"/> does NOT magnify this fixture. Doubling SizePx
+        /// doubles both the orbit radius <c>d</c> and the viewport height <c>H</c>, so
+        /// <c>MetresPerDevicePixel = 2·d·tan(fov/2)/H</c> and every world length stay the same, and the
+        /// projected geometry does not change.
         /// </summary>
         private static OffLookAtSymbolSceneConfig InkRunPose() => new OffLookAtSymbolSceneConfig();
 
@@ -123,32 +80,13 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>THE RENDERED HEADLINE, on the DEPTH-SPANNING arm.</b> Proves, from rendered ink alone:
         /// both receding symbols segment into exactly <c>GlyphCount</c> separable ink runs, at two depths a
-        /// factor of ≈ 2 apart — <b>where the shipped code merges them already AT the look-at.</b>
+        /// factor of ≈ 2 apart.
         ///
-        /// <para><b>Why this is a real discriminator and not a formality.</b> On a receding road the world
-        /// advance foreshortens hard: measured, the anchor gap is 29.07 px at the look-at against a 32 px
-        /// cell, i.e. <c>r = 0.91</c> where separability needs <c>r &gt; 1</c>. So under the earlier
-        /// screen-constant size the RECEDING arm is ALREADY overlapping at zero extra depth, and it only gets
-        /// worse with distance. Under the world-metre model the cell foreshortens with the advance, so (6) fixes the ratio at
-        /// <c>AdvanceBakedPx / cellWidthBaked</c> at EVERY depth and all five letters stay apart. This is the
-        /// maintainer's acceptance criterion in its literal form — "when you move away it gets harder to read,
-        /// but it won't make the letters move closer to each other" — read off the arm where moving away
-        /// actually happens.</para>
-        ///
-        /// <para><b>It pins the PLANE, not just the unit.</b> <c>r</c> can only stay above 1 as the symbol
-        /// recedes if the glyph CELL foreshortens by the same factor the advance does, which requires x̂ to be
-        /// the road tangent lying IN the ground plane. A camera-facing or screen-aligned cell would keep its
-        /// width while the advance shrank, and the letters would merge exactly as they do today.</para>
-        ///
-        /// <para><b>Relationship to M10, which refuses to read spacing from ink.</b> M10's doc warns that an
-        /// ink-WIDTH reading conflates CPU spacing with shader size. This tooth does not read a width
-        /// against an expectation; it reads
-        /// whether consecutive runs are DISJOINT, which is a property of the two together and is exactly the
-        /// user-visible claim. No tension.</para>
-        ///
-        /// <para>RED recipe: turn the mechanism off — the receding runs merge and the count drops below
-        /// <c>GlyphCount</c>. A per-LABEL depth ruler leaves the near symbol separable and merges the far
-        /// one.</para>
+        /// <para>Non-obvious why: at the look-at the receding anchor gap is 29.07 px against a 32 px cell
+        /// (r = 0.91), so a screen-constant size overlaps already. A world-metre cell foreshortens with the
+        /// advance, and (6) keeps r fixed at every depth. That requires x̂ to lie IN the ground plane, so it
+        /// pins the PLANE too. It reads whether runs are DISJOINT, not an ink width. A per-symbol depth ruler
+        /// keeps the near symbol separable and merges the far one.</para>
         /// </summary>
         [Test]
         public void RecedingSymbols_StaySeparable_AtBothDepths()
@@ -194,31 +132,11 @@ namespace MapRenderer.Tests.Visual
         /// <c>advance_screen(i) / inkExtent_screen(i)</c> is the SAME number across every glyph pair whose ink
         /// run is large enough to measure — i.e. it does not drift with depth.
         ///
-        /// <para><b>HONEST REACH, and the measurement that fixes it.</b> POOLING both receding symbols
-        /// for a 2.37× depth span is not constructible: at the
-        /// shipped pose <c>RecedingFar</c>'s per-glyph ink runs measure <b>1–2 px</b>, so ±1 px of edge
-        /// quantisation is a ±50–100 % error AND a systematic upward bias on <c>r</c> (a 1.4 px extent reads
-        /// as 1 or 2, never as 1.4). Measured, pooled: <c>RecedingNear</c> gave r = 2.333 / 2.333 / 2.400 /
-        /// 2.500 while <c>RecedingFar</c> gave 5.0 / 3.0 / 3.0 / 6.0 — the far readings are quantisation, not
-        /// signal. Raising <c>SizePx</c> does not help (see <see cref="InkRunPose"/>: the fixture is
-        /// scale-invariant in it), and raising <c>TextSizePx</c> enough to fix it drives the receding road's
-        /// near end behind the camera, which the fixture asserts against. So this tooth reads only the
-        /// resolvable band, says so, and the depth reach of the RATIO claim is carried instead by
-        /// <see cref="WorldCellSize_AndWorldAdvance_ShareOneArcScale"/> — which measures the identical
-        /// quantity in WORLD METRES off the real mesh, at the shipped
-        /// pose, at DPR 2, and at <b>8×</b> the look-at depth.</para>
-        ///
-        /// <para><b>Why the expected value is NOT <c>AdvanceBakedPx / cellWidthBaked</c>.</b> That constant
-        /// (1.25) is the advance over the CELL width; an ink run measures the glyph's INK, which is narrower
-        /// than its cell box by the side bearings and by the letterform itself. Measured, the 'F' reads
-        /// ≈ 2.4 rather than 1.25 — a property of the glyph, not of the model. This tooth therefore asserts
-        /// only that the ratio is CONSTANT ACROSS DEPTH, which is the part (6) actually claims about a
-        /// rendered ink reading; the absolute constant is asserted where it is exact, against the CELL, by
-        /// <see cref="WorldCellSize_AndWorldAdvance_ShareOneArcScale"/>. Asserting 1.25 here would be a tooth
-        /// that pins the letterform, not the renderer.</para>
-        ///
-        /// <para>RED recipe: turn the mechanism off — the extent is then constant while the advance
-        /// foreshortens, so <c>r</c> moves with depth across the resolvable band.</para>
+        /// <para>Limitation: <c>RecedingFar</c>'s ink runs are 1–2 px, where ±1 px quantisation biases r
+        /// upward, so this reads only the resolvable band.
+        /// <see cref="WorldCellSize_AndWorldAdvance_ShareOneArcScale"/> carries the ratio to 8× depth in world
+        /// metres. The expected value is not the cell ratio 1.25: ink is narrower than the cell (the 'F' reads
+        /// ≈ 2.4), so this asserts only that r is CONSTANT across depth.</para>
         /// </summary>
         [Test]
         public void GapToInkExtentRatio_DoesNotDriftWithDepth_WhereInkIsResolvable()
@@ -243,10 +161,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(runs.Length, Is.EqualTo(f.Config.GlyphCount),
                     $"gap/ink ratio precondition ({id}): expected {f.Config.GlyphCount} ink runs, got {runs.Length}.");
 
-                // The runs come out ordered by increasing screen ROW; the glyph array is ordered along the
-                // ROAD. Pair them by matching that order — reading depths off the wrong end would invert the
-                // whole table while leaving the ratios unchanged, which is exactly the kind of silent
-                // mis-attribution a printed table is supposed to make impossible.
+                // Runs come out by screen ROW, glyphs along the ROAD. Pair them by row, or the depth column of the
+                // table silently inverts while the ratios stay unchanged.
                 GlyphMeasurement[] byRow = OrderedByScreenRow(f, glyphs);
 
                 for (int i = 0; i + 1 < runs.Length; i++)
@@ -282,12 +198,8 @@ namespace MapRenderer.Tests.Visual
             foreach (double d in depths) { minDepth = math.min(minDepth, d); maxDepth = math.max(maxDepth, d); }
             double resolvedDepthRatio = maxDepth / minDepth;
 
-            // THE BOUND, DERIVED from the achieved geometry — not rounded to a convenient number:
-            //  (a) ±1 px on each measured edge ⇒ ±2/extent on the extent and ±2/advance on the advance, both
-            //      of which enter r = advance/extent linearly;
-            //  (b) a glyph's own footprint is a fraction 1/expected of one advance, so the view depth — and
-            //      therefore the local scale — varies across it by about the adjacent-glyph depth step scaled
-            //      by that fraction.
+            // THE BOUND, derived from the achieved geometry: ±1 px per edge gives 2/extent + 2/advance, plus the
+            // depth step across one glyph's footprint (1/expected of an advance).
             double expectedCellRatio = f.Config.AdvanceBakedPx / f.GlyphCellWidthBakedPx;
             double quantisation = 2.0 / minExtent + 2.0 / minAdvance;
             double withinGlyph  = (maxAdjacentDepthRatio - 1.0) / expectedCellRatio;
@@ -320,32 +232,12 @@ namespace MapRenderer.Tests.Visual
         /// with a real gap between consecutive runs, at depth ratios <b>1.25</b> and <b>1.5</b> as well as at
         /// the shipped 2.0.
         ///
-        /// <para><b>Where 1.25× comes from, and why bracketing it matters more than going deep.</b> The
-        /// horizon measurement: the glyph cell is 32 screen px at <c>TextSizePx = 48</c> and the
-        /// cross-arm anchor gap is 40 px at the look-at, so under the screen-constant size model the gap
-        /// reaches the cell width at exactly <b>1.25× the look-at depth</b> (measured there: 32.0 px). That is
-        /// the FIRST depth at which the screen-constant model fails — not the horizon. On a tilted map most of the
-        /// frame is past 1.25×, which is why the maintainer sees the blob everywhere. A tooth that only
-        /// asserted at extreme depth would leave that whole band unobserved.</para>
-        ///
-        /// <para><b>Why this test does NOT go deep.</b> At ratio 8 the far symbol's entire 5-glyph screen extent is
-        /// 0.773 px — under the world-metre model the glyphs shrink with it, so there is no ink to count under EITHER model.
-        /// Chasing depth here would make the tooth vacuous, which is the opposite of what the headline asks.</para>
-        ///
-        /// <para><b>SCOPE CAVEAT — read this before citing this test as evidence for the model.</b> These
-        /// cells read the CROSS-AZIMUTH arm, which is ISO-DEPTH inherently and therefore CANNOT distinguish a
-        /// per-glyph world size from a per-symbol constant. That is fine here, because this test's claim is
-        /// "letters do not merge", not "the size is per-glyph" — and the 32.0 px threshold was measured on the
-        /// cross arm and is exact only there. <b><see cref="RecedingSymbols_StaySeparable_AtBothDepths"/> on
-        /// the receding arm is the discriminator; this test is the threshold observer.</b></para>
-        ///
-        /// <para><b>Non-vacuity is asserted per cell, not assumed.</b> The cell only means something if the
-        /// earlier model WOULD have merged these letters, i.e. if the measured anchor advance has fallen to at
-        /// most the cell's own screen width. Both numbers are computed from fixture constants and measured
-        /// anchor positions, printed, and asserted.</para>
-        ///
-        /// <para>RED recipe: turn the mechanism off. Expected reading — run count below <c>GlyphCount</c>
-        /// on <c>CrossFar</c> at both cells.</para>
+        /// <para>Non-obvious why: the cell is 32 px at <c>TextSizePx = 48</c> and the cross-arm gap is
+        /// 40 px at the look-at, so a screen-constant size first merges at 1.25× depth, not at the horizon. At
+        /// ratio 8 the whole symbol is 0.773 px, so a deep cell would be vacuous. Limitation: the iso-depth
+        /// cross arm cannot tell a per-glyph size from a per-symbol constant;
+        /// <see cref="RecedingSymbols_StaySeparable_AtBothDepths"/> is the discriminator. Each cell asserts
+        /// that its anchor advance is at most the cell width, so a screen-constant size would merge there.</para>
         /// </summary>
         [Test]
         public void Letters_StaySeparable_PastTheMergeThreshold(
@@ -374,9 +266,8 @@ namespace MapRenderer.Tests.Visual
                 targetDepthRatio, f.AchievedDepthRatio, runs.Length, f.Config.GlyphCount,
                 runs.Length > 1 ? minGap : -1, minAdvancePx, f.GlyphCellScreenWidthPx));
 
-            // NON-VACUITY. Under the earlier screen-constant size the cell keeps its full width while the
-            // anchor advance shrinks with depth, so the letters merge as soon as the advance falls to the
-            // cell width. If that has not happened at this cell, the cell is not testing anything.
+            // NON-VACUITY: a screen-constant cell merges once the advance falls to the cell width. If it has
+            // not fallen that far here, this cell tests nothing.
             Assert.That(minAdvancePx, Is.LessThanOrEqualTo(f.GlyphCellScreenWidthPx),
                 $"merge threshold non-vacuity (ratio {targetDepthRatio:F2}): CrossFar's smallest anchor advance is " +
                 $"{minAdvancePx:F2} px against a {f.GlyphCellScreenWidthPx:F2} px cell. The screen-constant model only " +
@@ -422,20 +313,10 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>Leg (a) — the ABSOLUTE world cell size, and the DPR factor.</b> Proves: the corner offsets
         /// the renderer actually wrote into the slot mesh are WORLD METRES of exactly
-        /// <c>cellWidthBaked · TextSizePx/OneEm · MetresPerLogicalPixel</c>.
-        ///
-        /// <para>Read from <c>WorldBillboardVertex.Offset</c> — production staging, production
-        /// <c>BuildWorldQuad</c>, a real built mesh. The expectation is built from the fixture's OWN
-        /// <c>MetresPerLogicalPixel = MetresPerDevicePixel × Config.DevicePixelRatio</c>, NOT
-        /// from any production field that already carries the product: if both sides sourced the ratio from
-        /// one place they would drop it together and the DPR leg would be vacuous.</para>
-        ///
-        /// <para><b>This is the leg that carries the absolute scale.</b> Leg (b) below divides it away. Run
-        /// at three poses — the shipped one, the deep tilt-72/ratio-8 one, and DPR 2 — because an omitted DPR
-        /// factor shows here as a clean ×2 and cancels in (b).</para>
-        ///
-        /// <para>RED recipe: multiply <c>cornerMetresPerLogicalPixel</c> by 2 in <c>StageCurved</c> ⇒ (a) RED,
-        /// (b) GREEN, which also puts on the record which leg carries the absolute scale.</para>
+        /// <c>cellWidthBaked · TextSizePx/OneEm · MetresPerLogicalPixel</c>, read from
+        /// <c>WorldBillboardVertex.Offset</c> on a real built mesh. Non-obvious why: the expectation uses the
+        /// fixture's OWN <c>MetresPerLogicalPixel</c>, so the DPR leg is not vacuous. This leg carries the
+        /// absolute scale that leg (b) divides away; an omitted DPR factor shows as ×2 at the dpr2 pose.
         /// </summary>
         [Test]
         public void WorldCellSize_IsTheBakedCellOnTheWorldRuler(
@@ -446,9 +327,8 @@ namespace MapRenderer.Tests.Visual
             double emScale = f.Config.TextSizePx / TextQuadLayout.OneEm;
             double expected = f.GlyphCellWidthBakedPx * emScale * f.MetresPerLogicalPixel;
 
-            // EVERY glyph, not just glyph 0: the corner scale is a per-VERTEX quantity, so reading one glyph
-            // would leave a per-glyph divergence on glyphs 1..N-1 invisible to this leg — and leg (b) could
-            // not see it either, since it divides the scale away. Reading them all costs nothing.
+            // EVERY glyph: the corner scale is per VERTEX, and leg (b) divides it away, so a divergence on
+            // glyphs 1..N-1 would otherwise go unseen.
             foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 int glyphs = GlyphQuadCount(f, id);
@@ -480,20 +360,10 @@ namespace MapRenderer.Tests.Visual
         /// <c>worldAdvance / cellWidth_world == AdvanceBakedPx / cellWidthBaked</c> — equation (5), with every
         /// scale cancelled — and that it reads the SAME number at the shipped pose, at DPR 2, and at the
         /// fixture's deepest constructible pose (tilt 72°, ratio 8, far anchor at ≈ 1 084 562 m).
-        ///
-        /// <para>This is the direct analogue of the horizon measurement's SPAN/ROAD reading: a quotient of two
-        /// WORLD lengths, so it is immune to the legibility limit that stops the ink-reading tests at ≈ 2.4×. It is also
-        /// a real end-to-end reading — production staging, production <c>BuildWorldQuad</c>, a real mesh — at
-        /// 8× depth, which no other tooth in the suite reaches.</para>
-        ///
-        /// <para><b>Reach, stated so it is not over-read:</b> 8× is the deep pose this fixture measures
-        /// at. The production far-distance cull is DISABLED for this fixture (<c>SymbolMaxDistanceFraction = +inf</c>
-        /// in <c>OffLookAtSymbolScene</c>) so the deep pose's far anchors — which sit beyond the camera far distance
-        /// — survive to be measured; the cull is not this fixture's subject. The identity is carried further still, on the
-        /// CPU with no camera, by <c>MapPitchedWorldArcStagingTests.WorldCellToAdvanceRatio_HoldsAtEveryMagnitude</c>.</para>
-        ///
-        /// <para>RED recipe: multiply <c>cornerMetresPerLogicalPixel</c> by 2 ⇒ this leg stays GREEN (it
-        /// cancels) while (a) goes RED. Leaving the corner unit in pixels (never metres) reds it hard.</para>
+        /// Non-obvious why: a quotient of two WORLD lengths has no legibility limit, so it reads a real mesh at
+        /// 8× depth; <c>MapPitchedWorldArcStagingTests.WorldCellToAdvanceRatio_HoldsAtEveryMagnitude</c> goes
+        /// further on the CPU. A doubled corner scale cancels here and shows in leg (a); a corner unit left
+        /// in pixels fails here.
         /// </summary>
         [Test]
         public void WorldCellSize_AndWorldAdvance_ShareOneArcScale(
@@ -534,27 +404,11 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>SPAN/ROAD is depth-invariant at 8× the look-at depth.</b> Proves: each receding
         /// symbol's staged world span, as a fraction of its own road length, is the SAME at the deep
-        /// tilt-72/ratio-8 pose as at the shipped tilt-55/ratio-2 one.
-        ///
-        /// <para><b>This is the spacing guarantee, and that is why it belongs beside the size teeth.</b> It is the regression
-        /// fence that keeps the SPACING half honest beside the SIZE half, and it closes
-        /// the "correct at 2×, wrong at 20×" gap that prompted the horizon measurement.
-        /// It may read more naturally beside <c>MapPitchedWorldArcLayoutTests</c>;
-        /// it lives here because it shares the tilt-72 pose with the world-cell tests and the fixture should pay for
-        /// that construction once.</para>
-        ///
-        /// <para><b>A ratio of two WORLD lengths, so the drawn glyph size cannot touch it</b> — which is what
-        /// makes it survivable at a depth where nothing is legible (at ratio 8 the far symbol's whole 5-glyph
-        /// screen extent is 0.773 px). The reference is the ratio-2 cell measured IN THE SAME TEST RUN, never
-        /// a hard-coded 0.3333333: the designed value is <c>1/(2·SpillMargin)</c>, so a literal would track a
-        /// fixture constant instead of the invariant and would go RED for the wrong reason if
-        /// <c>SpillMargin</c> ever moved.</para>
-        ///
-        /// <para><b>RED recipe — and note what it is NOT.</b> A per-symbol depth ruler (the screen-ruler
-        /// shape) leaves this GREEN, because SPAN/ROAD is a spacing reading and that ruler is a SIZE
-        /// defect. That is the point: this test fences the spacing half so a SIZE regression cannot be misread as
-        /// a SPACING one. Its own RED comes from injecting a screen walk (<c>worldArc = false</c>),
-        /// which reds it hard.</para>
+        /// tilt-72/ratio-8 pose as at the shipped tilt-55/ratio-2 one. It fences the SPACING half beside the
+        /// size teeth, and it shares their tilt-72 pose. Non-obvious why: a ratio of two WORLD lengths ignores
+        /// glyph size, so it holds where nothing is legible. The reference is the ratio-2 reading from the same
+        /// run, not the literal <c>1/(2·SpillMargin)</c>. A per-symbol SIZE ruler leaves it GREEN; a screen walk
+        /// fails it.
         /// </summary>
         [Test]
         public void SymbolSpanPerRoad_IsDepthInvariant_AtEightTimesDepth()
@@ -585,21 +439,10 @@ namespace MapRenderer.Tests.Visual
         /// <b>The world residual at 8×.</b> Proves: at the deep pose every staged gap is
         /// <c>AdvanceWorldMetres</c> to within <b>0.01 %</b>.
         ///
-        /// <para><b>Where the bound comes from, and what it must clear.</b> It is set ABOVE the fixture's own
-        /// RTC artifact at this pose and below the real precision floor, and BOTH are named here so a future
-        /// RED is diagnosed as a bookkeeping question before it is diagnosed as a size defect:
-        /// <list type="bullet">
-        /// <item><b>The artifact (not a defect).</b> <c>OffLookAtSymbolScene</c> derives all six symbols' tile
-        /// keys from the LOOK-AT's z14 tile, so its far symbols sit ≈ 1e6 m from their nominal
-        /// <c>TileOriginRender</c>, and the <c>float3 AnchorLocal</c> RTC bake at that distance is the ENTIRE
-        /// source of the drift: 4.2e-5 % at ratio 2, 4.05e-4 % at ratio 5. In production a symbol's tile origin
-        /// is its OWN tile's, a few km away, so this never bites. 0.01 % is ≈ 25× the ratio-5 artifact.</item>
-        /// <item><b>The floor.</b> <c>PolylineArcMath.BuildCumulativeWorld</c> accumulates in <c>double</c> and
-        /// narrows per entry, so the real floor is the <c>float</c> storage of the cumulative — it needs a
-        /// ≈ 2–3 × 10⁹ m road (≈ 50 Earth circumferences) to breach 1 %. 0.01 % is four orders below it.</item>
-        /// </list>
-        /// A bound tightened below the artifact goes RED on fixture bookkeeping and gets misdiagnosed; one
-        /// widened far past it stops discriminating.</para>
+        /// <para>Non-obvious why: the 0.01 % bound sits above the fixture's RTC artifact and far below the real
+        /// floor. All six symbols take the LOOK-AT's tile key, so far symbols bake <c>float3 AnchorLocal</c>
+        /// ≈ 1e6 m from their origin (4.05e-4 % drift at ratio 5; production uses the symbol's own tile). The
+        /// floor is the <c>float</c> cumulative arc, which needs a ≈ 2–3 × 10⁹ m road to breach 1 %.</para>
         /// </summary>
         [Test]
         public void WorldGapResidual_StaysBounded_AtEightTimesDepth()
@@ -634,12 +477,10 @@ namespace MapRenderer.Tests.Visual
         // Helpers — all fixture-side; no production member exists for these teeth (test-code-bloat rule)
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-        /// <summary>Tilt 72°, ratio 8 — the deep cell this fixture measures at. The production far-distance cull,
-        /// which would otherwise drop the far anchors at this depth, is DISABLED for this fixture
-        /// (<c>SymbolMaxDistanceFraction = +inf</c> in <c>OffLookAtSymbolScene</c>) so they survive to be measured.
-        /// Tilt, not zoom, is the knob: the fixture is scale-invariant in zoom (every world length in it is a
-        /// multiple of <c>MetresPerDevicePixel</c>, which zoom rescales along with the reference depth), while
-        /// tilt is what brings the horizon into frame.</summary>
+        /// <summary>Tilt 72°, ratio 8 — the deep cell this fixture measures at (<c>OffLookAtSymbolScene</c>
+        /// disables the far-distance cull that would drop its far anchors). Tilt, not zoom, is the knob: every
+        /// world length is a multiple of <c>MetresPerDevicePixel</c>, so the fixture is scale-invariant in
+        /// zoom, while tilt brings the horizon into frame.</summary>
         private static OffLookAtSymbolSceneConfig DeepPose()
             => new OffLookAtSymbolSceneConfig { TiltDegrees = 72.0, TargetDepthRatio = 8.0 };
 
@@ -703,28 +544,14 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — real MapCamera + Camera/RenderTexture, off-screen GPU render + CPU readback.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // The RENDERED teeth for the device-pixel-ratio convention. Every quantity below is
-    // measured at dpr 1 and dpr 2 and asserted as a RATIO, never as "it changed": a "changed" assertion is
-    // exactly what lets a dpr² error through, and ratios also absorb the constant AA-straddle offset.
+    // The RENDERED teeth for the device-pixel-ratio convention. Every quantity is measured at dpr 1 and dpr 2
+    // and asserted as a RATIO: a "changed" assertion lets a dpr² error through, and a ratio absorbs AA offsets.
     //
-    // FIXTURE SHAPE IS LOAD-BEARING. The swept variable is a real MapCamera's DevicePixelRatio and the camera
-    // rendered IS that MapCamera's own UnityEngine.Camera (the SymbolLayerOrderSnapshotTests shape). The two
-    // nearest precedents would both make these teeth vacuous: LineAaSnapshotTests builds its own orthographic
-    // camera and never mentions dpr, so a line arm taken from it would only restate the material uniform;
-    // MapViewSnapshotTests renders a separate SnapCam framed from scene bounds, which is dpr-blind by
-    // construction, so its ground span would not move at all. Only the pure pixel helpers are shared, via
-    // PixelCoverage.
-    //
-    // THE PHYSICAL FRAMEBUFFER MUST NOT MOVE WITH DPR — if it scaled with the ratio everything would cancel
-    // and these tests would pass on the broken tree. Two objects hold a size here, and both are Size×Size at
-    // every dpr: (1) the RenderTexture assigned to the MapCamera's camera, which is what MapCamera.ViewportPx
-    // reads, and (2) SnapshotRenderer's own _rt, which is what _ScreenParams reads during the draw. This
-    // fixture does NOT use MapViewTestExtensions.WithTestCamera, so that class's shared static
-    // RenderTexture is not involved at all.
-    //
-    // What SHOULD move at dpr 2 is the camera: the altitude is framed from the LOGICAL viewport height
-    // (MapCamera.SyncToCamera), so it halves, the visible ground halves, and every world-anchored quantity
-    // doubles in device px. That is the control the line family is measured against.
+    // Non-obvious why: the fixture shape is load-bearing. The swept variable is a real MapCamera's
+    // DevicePixelRatio, and the rendered camera IS that MapCamera's own camera. The physical framebuffer (the
+    // camera's RenderTexture and SnapshotRenderer's _rt) stays Size×Size at every dpr, or everything cancels.
+    // What moves is the camera: its altitude is framed from the LOGICAL viewport, so at dpr 2 it halves and
+    // every world-anchored quantity doubles in device px. That is the control.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // DevicePixelRatioSnapshotTests — Unity EditMode only
@@ -771,9 +598,8 @@ namespace MapRenderer.Tests.Visual
             ]
         }";
 
-        // text-color: white — a CONSTANT text-color binds _TextColor (style-transitions epic); leaving it
-        // at the spec default (black) would multiply MeasureTextHeightPx's hand-injected TextInk vertex
-        // colour (bypassing SymbolFeatureExtractor.EvaluatePaint) down to black.
+        // text-color white: a constant text-color binds _TextColor, and the black default would multiply
+        // MeasureTextHeightPx's hand-injected TextInk vertex colour down to black.
         private const string SymbolStyleJson = @"{
             ""version"": 8,
             ""layers"": [
@@ -831,9 +657,8 @@ namespace MapRenderer.Tests.Visual
             // The ctor's 5th argument IS the swept variable (pinned by CameraTransformTests' 2× altitude tooth).
             var mapCam = new MapCamera(uCam, props, 1f, null, devicePixelRatio);
 
-            // The experiment's precondition, asserted rather than assumed: the PHYSICAL viewport must be
-            // identical at every ratio. If it scaled with dpr, the altitude change and the framebuffer change
-            // would cancel and every tooth below would pass on the broken tree.
+            // Precondition: the PHYSICAL viewport is identical at every ratio, or the altitude and framebuffer
+            // changes cancel and every tooth below passes vacuously.
             Assert.That(mapCam.ViewportPx.x, Is.EqualTo((double)Size).Within(1e-9),
                 $"physical viewport width must stay {Size} at dpr {devicePixelRatio}.");
             Assert.That(mapCam.ViewportPx.y, Is.EqualTo((double)Size).Within(1e-9),
@@ -845,11 +670,9 @@ namespace MapRenderer.Tests.Visual
             double halfFov  = math.radians(mapCam.CurrentProperties.VerticalFovDeg) * 0.5;
             double metresPerDevicePx = 2.0 * altitude * math.tan(halfFov) / Size;
 
-            // The frame constant the line shader sizes every px-valued width with. It is PROCESS state: a
-            // fixture that never pushes it renders against whatever ruler an earlier fixture in the batch
-            // left behind. The MapCamera ctor syncs and therefore pushes, so the constant arrives with the
-            // scene — asserted here rather than trusted, because the failure is silent and reads as a
-            // conversion bug three subsystems away.
+            // Non-local invariant: the line shader's frame constant is PROCESS state, so an unpushed fixture
+            // renders against an earlier fixture's ruler. The MapCamera ctor pushes it; this asserts that,
+            // because the failure is silent and looks like a conversion bug elsewhere.
             Assert.That((double)Shader.GetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel),
                 Is.EqualTo(metresPerDevicePx).Within(0.1).Percent,
                 $"at dpr {devicePixelRatio} the pushed frame constant must be this scene's own metres per " +
@@ -1123,12 +946,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>T2.</b> Over a dpr 1 → 2 sweep on a FIXED framebuffer, a styled <c>line-width</c> road's
         /// rendered device width and a known ground feature's on-screen device span scale by the SAME factor,
-        /// and that factor is exactly 2.
-        ///
-        /// <para>RED against the un-fixed tree by arithmetic, not by assertion: <c>_Width</c> is handed to
-        /// the shader raw and <c>pxToWorld</c> is metres per DEVICE pixel, so <c>widthWorld·(d/mpp) = W</c>
-        /// device px at every ratio — the road keeps its literal screen width (ratio 1.00) while the ground
-        /// span doubles. That divergence IS the reported symptom.</para>
+        /// and that factor is exactly 2. A raw <c>_Width</c> with a per-DEVICE-px <c>pxToWorld</c> would keep
+        /// the road at W device px (ratio 1.00) while the ground span doubles.
         /// </summary>
         [Test]
         public void LineWidth_AndGroundSpan_ScaleTogetherAcrossDpr()
@@ -1192,18 +1011,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T2b.</b> At BOTH ratios the pushed <c>_MapFrameMetersPerDevicePixel</c> equals this
-        /// scene's own metres per device pixel, and the pair halves exactly.
-        ///
-        /// <para>Named separately from the render arms because it is the tooth that would have made the
-        /// investigation one step long. The symptom was a styled 16 px road rendering 128 px at dpr 1 and
-        /// 161 px at dpr 2 — a ratio of 1.258 that looks like a broken conversion and sent the search to the
-        /// projection subsystem. The cause was neither: this fixture never pushed the global, so the shader
-        /// read <c>MetersPerPixel(5.0) = 2445.985</c> left behind by an earlier fixture while the camera stood
-        /// at zoom 8 (<c>305.748113</c>). 2445.985 / 305.748113 = 8.000 = 2³, three whole zoom levels — and a
-        /// 16 px band × 8 is exactly the 128 px measured. A globe-vs-Mercator mismatch at latitude 30 would
-        /// have been 1.1547, and this fixture is Mercator anyway.</para>
-        ///
-        /// <para>No render, so it cannot go Inconclusive on a headless GPU.</para>
+        /// scene's own metres per device pixel, and the pair halves exactly. Non-obvious why: a stale global from
+        /// an earlier fixture (e.g. zoom 5 under a zoom-8 camera) scales every width by 2³ and looks like a broken
+        /// conversion; this separate test names it directly.
         /// </summary>
         [Test]
         public void FrameConstant_IsTheScenesOwnMetresPerDevicePixel_AtBothRatios()
@@ -1211,9 +1021,8 @@ namespace MapRenderer.Tests.Visual
             int id = ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel;
 
             double pushedAt1, sceneAt1, pushedAt2, sceneAt2;
-            // BuildScene's own precondition asserts the equality; these read the numbers back out so the
-            // RATIO clause below has both halves at once, which is what names the 8.000 rather than a
-            // per-ratio "it does not match".
+            // BuildScene asserts the equality; these read the numbers back so the RATIO clause below has both
+            // halves at once.
             using (var scene1 = BuildScene(Dpr1))
             {
                 pushedAt1 = Shader.GetGlobalFloat(id);
@@ -1246,18 +1055,10 @@ namespace MapRenderer.Tests.Visual
         // ── T3 (load-bearing) ────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>T3 — the reported symptom, pinned.</b> A rendered line and a rendered symbol must scale by the
-        /// SAME factor across the dpr sweep, and that factor must be 2.
-        ///
-        /// <para>Both are asserted against 2.0 AND against each other. "Both moved" would pass
-        /// on a build that multiplied the LABEL side at the style seam as well — the symbol path already
-        /// divides by the logical viewport, so a second multiply gives <c>textRatio == 4</c>, which the
-        /// against-2.0 clause is the only thing that catches.</para>
-        ///
-        /// <para>Two arms over the SAME sweep with the SAME fixed framebuffer, rendered one at a time: the
-        /// symbol is anchored at the look-at and the ribbon crosses it, so a combined frame would put the two
-        /// measurements on top of each other. Both render through the swept MapCamera's own camera, which is
-        /// the part that matters.</para>
+        /// <b>T3.</b> A rendered line and a rendered symbol must scale by the SAME factor across the dpr
+        /// sweep, and that factor must be 2. The against-2.0 clause catches a second dpr multiply on the
+        /// symbol side (<c>textRatio == 4</c>). The two arms render one at a time through the swept MapCamera,
+        /// because the ribbon crosses the look-at symbol.
         /// </summary>
         [Test]
         public void LineWidth_AndTextSize_ScaleByTheSameFactorAcrossDpr()
@@ -1312,42 +1113,16 @@ namespace MapRenderer.Tests.Visual
     // SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
     // Tools/core-tests/core-tests.csproj (it renders).
     //
-    // THE TILT-ZERO CALIBRATION ARM.
-    //
-    // WHY TILT 0 IS THE ONLY POSE THAT CAN SAY THIS. At tilt 0 the ground plane is perpendicular to the view
-    // axis, so every ground point shares ONE view depth d, and `MetresPerLogicalPixel` is BY DEFINITION the
-    // metres-per-logical-pixel ruler at d. A map-pitched corner displaced by `cornerPx · mppLogical` METRES
-    // therefore projects to exactly `cornerPx` LOGICAL PIXELS — which is what the viewport branch adds
-    // to clip.xy after projection. So at tilt 0 a map-pitched curved symbol and a viewport-pitched twin must
-    // render PIXEL-IDENTICALLY (up to AA).
-    //
-    // That single identity carries three things at once, and each is a separate tooth below:
-    //   • the ABSOLUTE SCALE (ink count, DPR 1) — every ratio tooth in MapPitchedGlyphSizeTests is blind to a uniform scale
-    //     error `k`, because `k` cancels in a quotient of two lengths. Only an absolute comparison can see it,
-    //     and this is the only pose where an absolute comparison has a reference that shares no code with the
-    //     arm under test.
-    //   • the DPR factor (the DPR 2 cells) — an omitted or duplicated `DevicePixelRatio` shows up here as a ×2 and nowhere
-    //     else.
-    //   • the SIGN of the ground frame's ŷ (ink centroid, 45°/90°) — SYMBOL_WORLD_MAP_Y_SIGN is the one constant
-    //     here that is not derived: it is MEASURED, by gating both values on one tree.
-    //
-    // THE REFERENCE IS THE VIEWPORT ARM, AND THAT IS NOT AN ACCIDENT. It shares NO code with the map branch:
-    // `SymbolWorldIsMapPitched` sends the two down mutually exclusive paths in the vertex stage. A rebuilt reference
-    // is the recorded lesson — a reference drawn from the arm under test cancels the very defect it is meant to
-    // expose. The two symbols here differ in EXACTLY ONE FIELD, `ShapedSymbol.PitchAlignment`.
-    //
-    // WHY 45° AND 90° ARE SWEPT AND 0° ALONE WOULD BE VACUOUS FOR THE SIGN. A road at 0° is horizontal on
-    // screen, and the 'F' cell's displacement about its anchor is then symmetric under the mirror the sign
-    // controls — a FALSE AGREEMENT is measurable at 0° and 22.56 px of disagreement at 45°/90° against a 1.0 px
-    // bound. A sign constant must be read where the code is not inert.
-    //
-    // WHY THE CENTROID IS LEGITIMATE HERE, AND ONLY HERE. At tilt 0 the projection RESTRICTED TO THE GROUND
-    // PLANE is affine, so it commutes with the centroid and an ink centroid is a faithful position reading. It
-    // is NOT under tilt: a 12.41 px convexity gap appears the moment tilt is non-zero. No tooth outside
-    // this file takes a centroid.
-    //
-    // NO METRE LITERALS: every world length here is a multiple of `scene.MetresPerDevicePixel`, the same rule
-    // TiltFixtureSelfTests and OffLookAtSymbolScene enforce — a bare metre literal is sub-pixel at this pose.
+    // THE TILT-ZERO CALIBRATION ARM. Non-obvious why: at tilt 0 every ground point shares ONE view depth, where
+    // `MetresPerLogicalPixel` is the ruler, so a map-pitched corner of `cornerPx · mppLogical` metres projects to
+    // `cornerPx` logical px, which the viewport branch adds after projection. A map-pitched curved symbol and
+    // its viewport twin (differing only in `ShapedSymbol.PitchAlignment`, no shared code) render alike. Teeth:
+    //   • ABSOLUTE SCALE (ink count) — the ratio teeth in MapPitchedGlyphSizeTests cancel a uniform error `k`.
+    //   • DPR factor (DPR 2 cells) — an omitted or duplicated ratio shows here as ×2.
+    //   • ŷ SIGN (ink centroid, 45°/90°) — SYMBOL_WORLD_MAP_Y_SIGN is measured, not derived. At 0° the cell is
+    //     symmetric under that mirror, so 0° alone would be vacuous.
+    // The centroid is sound only here: at tilt 0 the ground projection is affine and commutes with it.
+    // NO METRE LITERALS: every world length is a multiple of `scene.MetresPerDevicePixel`.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapPitchedGlyphSizeTiltZeroTests — Unity EditMode only
@@ -1364,12 +1139,9 @@ namespace MapRenderer.Tests.Visual
         /// trivially satisfied); 200 leaves a wide margin at both ends.</summary>
         private const double RoadHalfLengthRulerUnits = 200.0;
 
-        /// <summary>Ink-count agreement bound, as a fraction. A uniform scale error `k` reads here as `k²`
-        /// (the glyph is a 2D patch), so 2 % brackets a 1 % scale error — and the failure modes this tooth
-        /// exists for are not marginal: reinterpreting metres as pixels is a ~mpp× quad, an omitted DPR
-        /// factor is ×2, i.e. ×4 in count. The slack absorbs only the sub-pixel disagreement between two
-        /// arithmetically different routes to the same clip position (world displace → MVP, versus
-        /// MVP → clip add), which lands on the glyph's AA boundary and nowhere else.</summary>
+        /// <summary>Ink-count agreement bound, as a fraction. A scale error `k` reads as `k²`, so 2 % brackets
+        /// a 1 % scale error; the real failure modes are ×4 (omitted DPR) or ~mpp×. The slack absorbs only
+        /// the AA-edge disagreement between two routes to one clip position.</summary>
         private const double InkCountTolerance = 0.02;
 
         /// <summary>Ink-centroid agreement bound, in pixels. Same reasoning as above; the analogue reads
@@ -1388,29 +1160,10 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>The absolute-scale clause (DPR 1 and 2; 0°, 45°, 90°).</b> Proves: at
         /// tilt 0 a map-pitched curved symbol covers the same number of ink pixels as its viewport-pitched
-        /// twin, at both device-pixel ratios and at three road angles.
-        ///
-        /// <para><b>This is the only size tooth that is not blind to a uniform scale error.</b>
-        /// <c>MapPitchedGlyphSizeTests</c>' ratio teeth all read a QUOTIENT of two lengths, in which
-        /// <c>arcScale</c>, <c>TextSizePx</c>, <c>MetresPerLogicalPixel</c>, DPR and <c>OneEm</c> cancel
-        /// identically — that cancellation is what makes them depth-independent, and it is also what makes
-        /// them unable to see a factor `k` applied to everything. The count reads such a `k` as `k²`.</para>
-        ///
-        /// <para><b>The DPR 2 cell is where an omitted DevicePixelRatio shows.</b> The scene's world
-        /// geometry is DPR-invariant (the orbit radius and <c>MetresPerDevicePixel</c> halve together, so
-        /// <c>MetresPerLogicalPixel</c> is the same number of metres at both ratios), and both arms then land
-        /// on twice as many DEVICE pixels at DPR 2. A production ruler that dropped the ratio — i.e. used
-        /// metres-per-DEVICE-pixel — would halve the map arm's world size at DPR 2 while the viewport arm,
-        /// which divides by <c>_ScreenParamsLogical</c>, would not move.</para>
-        ///
-        /// <para><b>Blind to a mirror, inherently — predict that, do not discover it.</b> A mirror is an
-        /// ISOMETRY, so it preserves ink count exactly. Flipping
-        /// <c>SYMBOL_WORLD_MAP_Y_SIGN</c> leaves this clause at ratio 1.0000 and reds only the centroid
-        /// clause below. That is why the two are separate <c>[Test]</c>s and not two asserts in one method.</para>
-        ///
-        /// <para>RED recipe: <c>SymbolWorldIsMapPitched</c> → <c>return false</c> is catastrophic here —
-        /// metres reinterpreted as logical px draws a quad ~<c>mpp</c>× oversized, so the map arm's ink is
-        /// either the whole frame or nothing.</para>
+        /// twin, at both device-pixel ratios and at three road angles. It is the one size tooth that sees a
+        /// uniform scale error `k` (as `k²`). At DPR 2 a ruler that dropped the ratio would halve the map arm
+        /// while the viewport arm stays. Limitation: a mirror preserves ink count, so a flipped ŷ sign shows
+        /// only in the separate centroid test.
         /// </summary>
         [Test]
         public void MapPitched_AtTiltZero_MatchesViewport_InkCount(
@@ -1440,28 +1193,10 @@ namespace MapRenderer.Tests.Visual
         /// <b>The mirror/translation clause (DPR 1 and 2; 0°, 45°, 90°).</b>
         /// Proves: at tilt 0 the map-pitched glyph's ink CENTROID sits within
         /// <see cref="InkCentroidTolerancePx"/> of its viewport twin's, at both ratios and all three angles.
-        ///
-        /// <para><b>The ŷ sign is pinned here.</b> <c>SYMBOL_WORLD_MAP_Y_SIGN</c> is the one constant here that is
-        /// not derivable on paper: <c>WorldBillboardVertex.Offset</c> arrives in a y-DOWN frame (the
-        /// negation in <c>BillboardMath.BuildWorldQuad</c>), and that class's own doc states outright that the
-        /// convention must not be re-derived on paper because the previous paper reading was
-        /// self-contradictory. So which of <c>±cross(upWS, x̂)</c> is "downward on screen" was MEASURED — both
-        /// values gated on one tree, and the one matching the
-        /// viewport arm kept.</para>
-        ///
-        /// <para><b>The 45° and 90° cells are the discriminating ones; 0° cannot see a mirror across the road
-        /// axis.</b> At 0° the road is screen-horizontal and the flip the sign controls maps the cell onto a
-        /// near-symmetric image of itself. A false agreement reads at 0° and 22.56 px at 45°/90° against
-        /// this same 1.0 px bound — a sign constant must be read where the code is not inert. 0° is retained as
-        /// the control, labelled as such — it is what says the pair agrees at all before the sign is asked
-        /// about.</para>
-        ///
-        /// <para><b>Why a centroid is sound at this pose and at no other.</b> Restricted to the ground plane
-        /// at tilt 0 the projection is AFFINE, so it commutes with the centroid. Under tilt it does not:
-        /// A 12.41 px convexity gap appears under tilt. Nothing else here reads a centroid.</para>
-        ///
-        /// <para>RED recipe: flip the sign — RED here, GREEN on the count clause above. Also RED,
-        /// catastrophically, under <c>SymbolWorldIsMapPitched</c> → <c>return false</c>.</para>
+        /// Non-obvious why: <c>SYMBOL_WORLD_MAP_Y_SIGN</c> cannot be derived on paper, because
+        /// <c>WorldBillboardVertex.Offset</c> is y-DOWN, so this pins it. A flipped sign reads 22.56 px at
+        /// 45°/90° against the 1.0 px bound; 0° is the control. The centroid is sound only at tilt 0, where
+        /// the ground projection is affine (tilt opens a 12.41 px convexity gap).
         /// </summary>
         [Test]
         public void MapPitched_AtTiltZero_MatchesViewport_InkCentroid(
@@ -1499,37 +1234,14 @@ namespace MapRenderer.Tests.Visual
         /// curved symbol whose per-vertex <c>Up</c> is <see cref="float3.zero"/> still renders, and at tilt 0
         /// with a screen-horizontal road it renders as its viewport twin does — i.e. it took
         /// <c>SymbolWorldMapPitchClip</c>'s camera-facing METRE fallback, and did NOT reinterpret its metre
-        /// offsets as pixels.
+        /// offsets as pixels. Older fixtures and the null-<c>PathUpRender</c> bakers write a zero <c>Up</c>.
         ///
-        /// <para><b>The hazard this exists for.</b> Roughly ten older fixtures write <c>float3.zero</c> for
-        /// <c>Up</c>, and both <c>SymbolTileBlockBaker</c> and the parity oracle do so whenever
-        /// <c>PathUpRender</c> is null. Those feed a zero-length normal straight into a tangent-frame
-        /// construction. Without this tooth the fallback is an unobserved branch — the shape that let a
-        /// <c>normalize(0)</c> NaN stop round caps rendering at all, undetected.</para>
-        ///
-        /// <para><b>Why comparing against the VIEWPORT twin is legitimate here, rather than merely checking a
-        /// magnitude.</b> The fallback is not a second, separately-invented convention: it is the GROUND
-        /// branch's own expression, <c>SIGN · _ProjectionParams.x · cross(up, x̂)</c>, with the CAMERA-PLANE
-        /// normal <c>UNITY_MATRIX_V[2].xyz</c> substituted for the surface normal. At tilt 0 the camera looks
-        /// straight down, so the surface normal IS <c>V[2].xyz</c> — the two expressions are then literally the
-        /// same number, and <b>no handedness claim is involved</b>. At a road angle of 0° the viewport arm's own
-        /// tangent rotation is additionally the identity (the projected road direction is screen +x), so all
-        /// three frames coincide and the arms must render alike. The road angle is FIXED at 0° here for that
-        /// reason, not for convenience.</para>
-        ///
-        /// <para><b>⚠ Do NOT restate this as "<c>cross(V[2], V[0]) == V[1]</c>, so the fallback is
-        /// camera-up".</b> That identity is FALSE — Unity's world basis is left-handed under the standard cross
-        /// product, so <c>cross(V[2], V[0]) == −V[1]</c>. A shader that believed it would give the fallback
-        /// the opposite screen sense to the ground frame, so exactly one of this tooth and
-        /// <see cref="MapPitched_AtTiltZero_MatchesViewport_InkCentroid"/> could ever be green, whichever sign
-        /// was chosen. <b><c>Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl</c> is authoritative</b> on this; its
-        /// ⚠ DO-NOT block in <c>SymbolWorldMapPitchClip</c> carries the derivation and the measurement. Keep the
-        /// two sites in agreement.</para>
-        ///
-        /// <para><b>What each failure mode looks like.</b> Fallback missing entirely (x̂ = ŷ = 0) ⇒ the quad
-        /// collapses to a point and the ink floor fails. Fallback routed to the viewport pixel formula ⇒ a
-        /// metre magnitude in a pixel expression, a quad ~<c>mpp</c>× oversized. Both are caught by the count
-        /// clause; the centroid clause additionally catches a mirrored fallback.</para>
+        /// <para>Non-obvious why: the viewport twin is a fair reference, because the fallback is the ground
+        /// branch's own expression with the camera-plane normal <c>UNITY_MATRIX_V[2].xyz</c> in place of the
+        /// surface normal. At tilt 0 the two normals are equal, and at road angle 0° the viewport tangent
+        /// rotation is the identity, so all three frames coincide. Unity's basis gives
+        /// <c>cross(V[2], V[0]) == −V[1]</c>, not <c>V[1]</c>; <c>Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl</c>
+        /// is authoritative on this.</para>
         /// </summary>
         [Test]
         public void MapPitchedWithDegenerateUp_AtTiltZero_TakesTheMetreFallback_InkCount()
@@ -1594,19 +1306,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Renders the SAME curved symbol twice through ONE scene and ONE camera — once with
-        /// <c>PitchAlignment = Map</c>, once with the field left at the enum's zero value
-        /// (<see cref="AlignmentMode.Auto"/>, which resolves to the earlier screen path) — and returns both
-        /// ink signatures.
-        ///
-        /// <para><b>The pair differs in EXACTLY ONE FIELD.</b> Same tile key, same feature index, same glyph
-        /// cell, same <c>TextSizePx</c>, same road, same camera, same frame. Everything a scale error could
-        /// hide behind is shared, so what survives the comparison is the branch itself.</para>
-        ///
-        /// <para>Both arms are rendered from one <see cref="SymbolPlacementSystem"/>, re-Ticked between them —
-        /// the same two-pass discipline <c>OffLookAtSymbolScene</c> uses, and for the same reason: one camera
-        /// means one projection, so the two frames are comparable inherently rather than by assumption.
-        /// Each Tick is duplicated because the collision verdict is harvested one Tick late.</para>
+        /// Renders the SAME curved symbol twice through ONE scene, camera and
+        /// <see cref="SymbolPlacementSystem"/> — once with <c>PitchAlignment = Map</c>, once with
+        /// <see cref="AlignmentMode.Auto"/>, which resolves to the screen path — and returns both ink
+        /// signatures. Each Tick is duplicated because the collision verdict is harvested one Tick late.
         /// </summary>
         private static void Measure(double devicePixelRatio, float roadAngleDeg, bool degenerateUp,
             out InkReading map, out InkReading viewport)
@@ -1635,18 +1338,16 @@ namespace MapRenderer.Tests.Visual
                 double3 origin = frame.SceneOriginRender;
                 double mpp = scene.MetresPerDevicePixel;
 
-                // The road, in the render-space XZ plane (east = X, north = Z; the flat local approximation is
-                // exact enough at zero tilt and zero heading). NO metre literals — every length is a multiple
-                // of the frame ruler.
+                // The road in the render-space XZ plane (east = X, north = Z). NO metre literals: every length is
+                // a multiple of the frame ruler.
                 double rad = math.radians(roadAngleDeg);
                 var dir = new double3(math.cos(rad), 0.0, math.sin(rad));
                 double halfLen = RoadHalfLengthRulerUnits * mpp;
                 double3 pathA = origin - dir * halfLen;
                 double3 pathB = origin + dir * halfLen;
 
-                // The per-vertex surface normal. This scene is Web-Mercator, so up IS (0,1,0) — except on
-                // the degenerate-Up arm, which feeds the float3.zero that the older fixtures and the
-                // null-PathUpRender bakers write, to reach SymbolWorldGroundFrame's guard.
+                // Web-Mercator up is (0,1,0); the degenerate-Up arm feeds float3.zero to reach
+                // SymbolWorldGroundFrame's guard.
                 double3 up = degenerateUp ? double3.zero : new double3(0.0, 1.0, 0.0);
 
                 long tileKey = TestTileKeys.PackedContaining(sceneConfig.LookAt.Surface, zoom: 14);

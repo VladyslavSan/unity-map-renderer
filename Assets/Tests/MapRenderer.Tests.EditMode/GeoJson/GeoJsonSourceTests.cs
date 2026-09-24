@@ -42,9 +42,8 @@ namespace MapRenderer.Tests.GeoJsons
 
         private const int ProfilerSampleCapacity = 64;
 
-        // Tile-local corners of the authored rectangle, at the extent MapView slices with
-        // (GeoJsonSliceOptions.Default). Chosen well inside [0, extent] so no clip, buffered or not, can touch
-        // them — the tooth is about the source rendering at all, not about seams.
+        // Tile-local corners of the authored rectangle at GeoJsonSliceOptions.Default's extent, well inside
+        // [0, extent] so no clip can touch them.
         private const double RectMin = 1024.0, RectMax = 3072.0;
 
         // A second rectangle, disjoint from the first, for the restyle arms. Its whole point is that a mesh
@@ -151,29 +150,11 @@ namespace MapRenderer.Tests.GeoJsons
         // ── a GeoJSON source renders through the real loop ────────────────────────────────────────────
 
         /// <summary>
-        /// <b>The headline tooth</b> — a style whose only source is inline geojson renders a fill mesh, driven
-        /// through the production <c>MapView.SetStyle</c> → <c>BuildSourceSpecs</c> path (not a hand-minted
-        /// <c>SourceSpec</c>, or the wiring would be unobserved).
-        ///
-        /// <para>The positional assertion is the part that makes it more than a smoke test: the mesh's four
-        /// vertices must sit on the AUTHORED rectangle's corners, computed independently through
-        /// <c>ToLonLat</c> → <c>WebMercator.FromLonLat</c>. A pipeline that rendered <i>something</i> — the
-        /// whole tile, a mis-scaled quad, the wrong feature — fails it.</para>
-        ///
-        /// <para><b>Coverage, not membership.</b> The corners are consumed ONE-TO-ONE and the triangulated
-        /// area is checked against the rectangle's. "Each vertex is near SOME corner" is a strictly weaker
-        /// claim that a mesh with all four vertices collapsed onto one valid corner satisfies while
-        /// rendering a degenerate polygon — measured, not reasoned: a fill writer injected to emit
-        /// <c>WorldPositions[0]</c> for every vertex passed the membership form of this test.</para>
-        ///
-        /// <para><b>Partition, not summed area.</b> The indexed triangles are also required to TILE the quad:
-        /// three distinct corners each, all four corners referenced, and the shared edge an authored
-        /// diagonal. Summing unsigned triangle areas cannot make that claim — emit both index triples as the
-        /// same three-corner half and the two half-areas add to exactly the rectangle's, with every vertex
-        /// still present and still consumed one-to-one, while half the polygon renders twice.</para>
-        ///
-        /// <para>A <c>BuildSourceSpecs</c> with no geojson branch fails this at the first step: the source
-        /// resolves to no tiles and no pipeline exists at all.</para>
+        /// A style whose only source is inline geojson renders a fill mesh through the production
+        /// <c>MapView.SetStyle</c> → <c>BuildSourceSpecs</c> path. The four interior vertices must sit on the
+        /// AUTHORED corners, each claimed ONE-TO-ONE, so four vertices collapsed on one corner fail. The
+        /// triangles must also TILE the quad: two copies of one half-triangle pass a summed-area check but
+        /// render half the polygon twice.
         /// </summary>
         [Test]
         public void AnInlineGeoJsonSource_RendersItsAuthoredPolygon()
@@ -198,10 +179,8 @@ namespace MapRenderer.Tests.GeoJsons
                 Assert.IsNotNull(meshes, "the inline geojson source must have produced a tile mesh");
                 Assert.AreEqual(1, meshes.Length, "one fill layer ⇒ one layer mesh");
                 Assert.IsNotNull(meshes[0]);
-                // 4 interior + 8 band: the rectangle triangulates to a 4-vertex quad (Mercator, no
-                // subdivision), and the outward boundary band appends two vertices per ring vertex AFTER it.
-                // Every claim below is about the INTERIOR quad, so each reads the prefix — a band vertex sits
-                // at a ring corner too and would exhaust the one-to-one corner pool.
+                // 4 interior + 8 band vertices, the band AFTER the quad. Claims below read only the interior
+                // prefix, because band vertices also sit on corners and would exhaust the corner pool.
                 const int interiorVertexCount = 4;
                 Assert.AreEqual(interiorVertexCount + 2 * interiorVertexCount, meshes[0].vertexCount,
                     "the authored rectangle triangulates to a 4-vertex quad (Mercator, no subdivision), " +
@@ -222,10 +201,8 @@ namespace MapRenderer.Tests.GeoJsons
                 Assert.Less(tolerance * 100.0, 2.0 * WebMercator.WorldExtent,
                     "the tolerance must be orders of magnitude below a tile edge, or it could pass by looseness");
 
-                // Consumed one-to-one: a corner already claimed by an earlier vertex is no longer available,
-                // so four vertices can only pass by covering four DISTINCT corners. WHICH corner each mesh
-                // slot claimed is recorded, because the topology arm below has to read the index buffer in
-                // terms of AUTHORED corners rather than of mesh slots.
+                // Each vertex claims a DISTINCT corner. The claimed corner per slot is recorded, because the
+                // topology arm below reads the index buffer in authored corners.
                 Vector3[] meshVertices = meshes[0].vertices;
                 var authoredCornerOf   = new int[interiorVertexCount];
                 var unclaimed          = new List<double2>(expected);
@@ -259,11 +236,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "against an emptied pool.");
 
                 // ── The triangles must PARTITION the quad, which the summed area below cannot see. ──
-                // Both triples emitted as the SAME three-corner half leaves every vertex present, every
-                // corner consumed one-to-one, and two half-area triangles summing to exactly the whole —
-                // while rendering half the polygon, twice. Only the index TOPOLOGY distinguishes it.
-                // The INTERIOR triangles only — a band triangle is one with a vertex past the interior
-                // prefix, and it has no authored corner to name.
+                // Interior triangles only: a band triangle has a vertex past the prefix and no authored corner.
                 var interiorIndices = new List<int>();
                 foreach (int[] triangle in Triples(meshes[0].triangles))
                     if (triangle[0] < interiorVertexCount && triangle[1] < interiorVertexCount && triangle[2] < interiorVertexCount)
@@ -329,18 +302,10 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <b>Anti-vacuity for the headline tooth.</b> The same style with an EMPTY FeatureCollection must
-        /// render nothing. Without this arm the tooth above cannot tell "rendered the dataset" from
-        /// "rendered anything at all".
-        ///
-        /// <para><b>Measured limitation, stated so it is not over-read.</b> This arm is satisfied UPSTREAM of
-        /// the decoder: an empty dataset has an inverted bounding box, so <c>GetTile</c>'s probe rejects every
-        /// tile and no decode is even attempted. Verified by injection — a decoder made to emit a full-extent
-        /// quad whenever its slice is empty leaves this arm GREEN. So the "renders anything" hole is closed by
-        /// two teeth together, not by this one: this arm observes the PROBE (its partner is
-        /// <see cref="GetTile_AnEmptyDataset_RejectsEveryTile"/>), and
-        /// <c>GeoJsonTileDecoderTests.AnEmptySlice_YieldsATileWithNoLayerAtAll</c> observes the DECODER —
-        /// that one is what the injected quad reds.</para>
+        /// The same style with an EMPTY FeatureCollection renders nothing, so the test above cannot pass by
+        /// rendering anything at all. Limitation: the probe rejects every tile before any decode (see
+        /// <see cref="GetTile_AnEmptyDataset_RejectsEveryTile"/>), so a decoder that emits a quad for an empty
+        /// slice passes here; <c>GeoJsonTileDecoderTests.AnEmptySlice_YieldsATileWithNoLayerAtAll</c> catches it.
         /// </summary>
         [Test]
         public void AnEmptyInlineDataset_RendersNothing()
@@ -366,22 +331,10 @@ namespace MapRenderer.Tests.GeoJsons
             finally { view.Teardown(); }
         }
 
-        /// <summary>A geojson source whose <c>data</c> is a URL string (not supported in v1) or malformed must
-        /// be SKIPPED with a warning, never fault <c>SetStyle</c> — the same failure isolation the TileJSON
-        /// path already has.
-        ///
-        /// <para><b>"Skipped" is observed, not inferred from the absence of a throw.</b> Not throwing is
-        /// satisfied by an implementation that silently substituted a different source — a byte fetcher over
-        /// the URL, say, or an empty dataset standing in. So the arms below also require that NO source
-        /// factory and NO document loader was reached, that nothing rendered, and — the arm the other three
-        /// cannot make — that <b>no pipeline owns a feature source at all</b>.</para>
-        ///
-        /// <para><b>Why that last arm is not redundant.</b> A local <c>GeoJsonTileFeatureSource</c> is
-        /// constructed inside <c>BuildSourceSpecs</c> through neither override, and an EMPTY
-        /// <c>FeatureCollection</c> substituted for the bad <c>data</c> fetches nothing, builds no byte
-        /// source and renders nothing — its inverted bbox makes the probe reject every tile. Absence of
-        /// output is therefore not absence of wiring, and only a count of wired sources separates
-        /// them.</para></summary>
+        /// <summary>A geojson source whose <c>data</c> is a URL string (unsupported) or malformed is SKIPPED
+        /// with a warning and never faults <c>SetStyle</c>. Skipping is observed, not inferred from no throw: no
+        /// source factory or document loader runs, nothing renders, and NO source is wired. The last arm
+        /// catches an EMPTY <c>FeatureCollection</c> substitute, which fetches and renders nothing.</summary>
         [Test]
         public void UnsupportedOrMalformedData_IsSkipped_NotThrown()
         {
@@ -407,15 +360,9 @@ namespace MapRenderer.Tests.GeoJsons
             finally { view.Teardown(); }
         }
 
-        /// <summary>The skip contract, positively: no source is wired, nothing was fetched, nothing was
-        /// constructed, nothing rendered. Pumped first — a substituted source needs the chance to produce
-        /// something before the absence of output means anything. The frame budget is small on purpose: a
-        /// skipped source has no pipeline, so there is nothing to WAIT for, only something to give a wrong
-        /// implementation room to do.
-        ///
-        /// <para>The counters arrive as <c>Func&lt;int&gt;</c>, not as <c>int</c>: passed by value they are
-        /// evaluated at the CALL SITE, so the pump this helper performs could not affect them and a
-        /// substitution that fetched lazily at tile-load time would be invisible to both arms.</para>
+        /// <summary>The skip contract: no source is wired, nothing was fetched, constructed or rendered. It pumps
+        /// a few frames first, so a substituted source has the chance to produce something. The counters are
+        /// <c>Func&lt;int&gt;</c>, so they are read AFTER the pump and see a lazy fetch at tile-load time.
         /// </summary>
         private static void AssertNothingWasWired(
             MapView view, System.Func<int> docFetches, System.Func<int> factoryCalls, string what)
@@ -437,9 +384,7 @@ namespace MapRenderer.Tests.GeoJsons
                 "that was skipped — which passes a does-not-throw test while putting data on screen that " +
                 "the style does not declare.");
 
-            // LAST on purpose: the three arms above are the ones an empty-dataset substitution satisfies, so
-            // leaving them ahead of this makes a RED here evidence that they really did stay green — that
-            // the hole this arm closes is a hole and not a duplicate.
+            // LAST, so a RED here shows the three arms above stayed green for an empty-dataset substitute.
             Assert.AreEqual(0, view.WiredFeatureSourceCount(),
                 $"{what} must leave NO source wired. This is the arm the three above cannot make: a source " +
                 "substituted with an EMPTY FeatureCollection fetches nothing, builds no byte source and " +
@@ -530,16 +475,9 @@ namespace MapRenderer.Tests.GeoJsons
         };
 
         /// <summary>
-        /// <b>Source type (unit)</b> — <c>type</c> is part of the key. It is not a tolerated extra field: it is the
-        /// field <c>MapView.BuildSourceSpecs</c> branches on to decide whether the source fetches bytes or
-        /// slices a local dataset, so two definitions differing only in it are not the same source under any
-        /// reading of the question the key asks.
-        ///
-        /// <para><b>The value is structural, not the repro.</b> Reaching this collision through a style
-        /// document is narrow — a data-less geojson source and a tiles-less vector source are both skipped
-        /// before a spec is minted, so each side must also carry the other type's keys — but the field
-        /// belongs in the key regardless, and a future reader must not delete it for being hard to trigger.
-        /// </para>
+        /// <c>type</c> is part of the source key: <c>MapView.BuildSourceSpecs</c> branches on it to fetch bytes
+        /// or slice a local dataset. Non-obvious why: the field stays in the key although a style
+        /// rarely reaches this collision, because two definitions differing only in it are different sources.
         /// </summary>
         [Test]
         public void TwoSourcesDifferingOnlyInType_HaveDifferentKeys()
@@ -547,9 +485,8 @@ namespace MapRenderer.Tests.GeoJsons
             TileManager.SourceKey vector  = TileManager.SourceKey.From(DefTyped(SourceType.Vector));
             TileManager.SourceKey geoJson = TileManager.SourceKey.From(DefTyped(SourceType.GeoJson));
 
-            // Preconditions: EVERY other key field really is equal, so `type` is the only discriminator left.
-            // Asserted field by field rather than claimed, because a key that gained a seventh field would
-            // otherwise make this test pass for a reason that has nothing to do with the type.
+            // Preconditions, field by field: EVERY other key field is equal, so a new key field cannot make this
+            // pass for a reason other than `type`.
             Assert.AreEqual(vector.Url,     geoJson.Url,     "precondition: equal url");
             Assert.AreEqual(vector.Tiles,   geoJson.Tiles,   "precondition: equal tiles[]");
             Assert.AreEqual(vector.MinZoom, geoJson.MinZoom, "precondition: equal minzoom");
@@ -723,18 +660,10 @@ namespace MapRenderer.Tests.GeoJsons
             => new GeoJsonTileFeatureSource(GeoJsonParser.Parse(dataJson), options, Scheduler);
 
         /// <summary>
-        /// <b>The decisive tooth, INVERTED — <c>GetTile</c> SLICES, and slices OFF THE MAIN THREAD.</b>
-        ///
-        /// <para><c>GetTile</c> slices eagerly, like the MVT source: every drop path owns a reference
-        /// under the reference-count model, so a pre-built tile is never freed by nothing.</para>
-        ///
-        /// <para><b>Eager slicing stays off the main thread:</b> the
-        /// slice runs inside the kick's pool lambda, so it is never main-thread work. Eagerly slicing inside
-        /// <c>Tick</c> would put a full slice on the frame thread for EVERY cover tile — the exact defect
-        /// this asserts against, and the reason the source routes through
-        /// <c>TileDecodeDispatch.DecodeAsync</c> rather than calling its decoder inline. A main-thread-only
-        /// recorder on the decode marker must read ZERO while an all-thread recorder reads at least one; the
-        /// synchronous form flips the first to non-zero.</para>
+        /// <c>GetTile</c> slices eagerly, like the MVT source, and OFF THE MAIN THREAD through
+        /// <c>TileDecodeDispatch.DecodeAsync</c>; an inline slice would put a full slice on the frame thread
+        /// for EVERY cover tile. A main-thread-only recorder on the decode marker reads ZERO while an
+        /// all-thread recorder reads at least one.
         /// </summary>
         [UnityTest]
         public IEnumerator GetTile_SlicesOffTheMainThread()
@@ -776,17 +705,10 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <b>The scheduler-policy tooth</b> — proves the source actually REACHES the
-        /// <see cref="IWorkScheduler"/> it was constructed with, rather than merely landing off the main
-        /// thread by coincidence. <see cref="GetTile_SlicesOffTheMainThread"/> only proves "not on main",
-        /// which a <c>DecodeAsync</c> that ignored its scheduler parameter and hardcoded
-        /// <see cref="ThreadPoolWorkScheduler"/> internally would satisfy too — that substitution is exactly
-        /// what the WebGL fix depends on being impossible.
-        ///
-        /// <para>Constructed with <see cref="InlineWorkScheduler"/> instead of <see cref="Scheduler"/>.
-        /// <see cref="GeoJsonTileFeatureSource.GetTile"/> has no <c>await</c> before <c>DecodeAsync</c>, so
-        /// under Inline the whole slice runs synchronously on THIS test's own thread — the inverse of the
-        /// sibling tooth's assertion, using the same two recorders.</para>
+        /// The source REACHES the <see cref="IWorkScheduler"/> it was constructed with. A <c>DecodeAsync</c>
+        /// that hardcoded <see cref="ThreadPoolWorkScheduler"/> passes <see cref="GetTile_SlicesOffTheMainThread"/>
+        /// but breaks WebGL. With <see cref="InlineWorkScheduler"/>, and no <c>await</c> before
+        /// <c>DecodeAsync</c>, the whole slice runs on THIS thread: the inverse of the sibling test.
         /// </summary>
         [UnityTest]
         public IEnumerator GetTile_HonoursAnInjectedInlineScheduler_AndSlicesOnTheCallingThread()
@@ -827,13 +749,9 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <b>The lifetime tooth</b> — the LAST release frees the tile's native buffers, and a second
-        /// <c>GetTile</c> for the same tile slices again (there is no cross-call cache).
-        ///
-        /// <para>Reduced from "one slice per open SCOPE": a lease never slices, so sharing within one is
-        /// trivially true now and is pinned where it belongs (<c>SharedDisposableSharingTests</c>). What
-        /// survives here is the half no probe can see — <c>Geometry.IsCreated</c> going false is the only
-        /// place in the suite that observes the NATIVE free rather than a counted <c>Dispose</c> call.</para>
+        /// The LAST release frees the tile's native buffers, and a second <c>GetTile</c> for the same tile
+        /// slices again (no cross-call cache). <c>Geometry.IsCreated</c> going false is the only place in the
+        /// suite that observes the NATIVE free; <c>SharedDisposableSharingTests</c> pins sharing.
         /// </summary>
         [Test]
         public async Task TheLastReleaseFreesTheBuffers_AndASecondGetTileSlicesAgain()
@@ -883,9 +801,8 @@ namespace MapRenderer.Tests.GeoJsons
         {
             using var source = SourceOver(RectangleAt(RectMin, RectMax), GeoJsonSliceOptions.Default);
 
-            // async Task, and every non-null handle released: GetTile is async now, so
-            // `.GetAwaiter().GetResult()` on a UniTask that has not completed does not block, and a handle
-            // taken and dropped is a decoded tile nothing frees.
+            // Awaited, because GetResult() on an incomplete UniTask does not block. Every non-null handle is
+            // released, or its decoded tile leaks.
             async UniTask<SharedDisposable<IDecodedTile>> Take(TileId id)
             {
                 SharedDisposable<IDecodedTile> h = await source.GetTile(id);
@@ -893,12 +810,8 @@ namespace MapRenderer.Tests.GeoJsons
                 return h;
             }
 
-            // The rectangle is authored at tile-local 1024..3072 of extent 4096 at z0, i.e. unit-square
-            // [0.25, 0.75]². At z3 each tile is 0.125 wide and the buffer adds 64/4096/8 ≈ 0.00195, so the
-            // corner tiles' windows ([−0.002, 0.127] and [0.873, 1.002]) miss it and the middle ones cover it
-            // outright. The CORNER tiles, not the z2 quadrant ones: at z2 the buffered window reaches 0.2539,
-            // which touches the rectangle's edge — the probe is right to keep those, and a test asserting
-            // otherwise would be asserting the buffer away.
+            // The rectangle spans unit-square [0.25, 0.75]². The z3 corner windows ([−0.002, 0.127] with the
+            // buffer) miss it; z2 corner windows reach 0.2539 and touch it, so the probe keeps those.
             Assert.IsNotNull(await Take(new TileId { Z = 3, X = 3, Y = 3 }),
                 "a tile the dataset overlaps must get a handle");
             Assert.IsNull(await Take(new TileId { Z = 3, X = 0, Y = 0 }),
@@ -907,10 +820,8 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.IsNull(await Take(new TileId { Z = 3, X = 7, Y = 7 }),
                 "…and the same on the far side, so the probe is not simply rejecting low indices");
 
-            // The probe is CONSERVATIVE, and that has to be visible: a tile the buffered window merely grazes
-            // is kept, even though it may slice to nothing. Rejecting it would be the failure mode that
-            // matters (geometry silently lost); keeping it costs an empty tile the coordinator already
-            // handles.
+            // The probe is CONSERVATIVE: it keeps a tile the buffered window grazes. Rejecting it could lose
+            // geometry; keeping it costs an empty tile.
             Assert.IsNotNull(await Take(new TileId { Z = 2, X = 0, Y = 0 }),
                 "a tile whose BUFFERED window reaches the dataset's box must be kept — the probe never " +
                 "rejects a tile that could carry geometry");
@@ -931,17 +842,9 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// Options this source cannot honour are rejected where they are ACCEPTED, not once per tile inside
-        /// a scope — <b>the whole option set, not the extent alone</b>.
-        ///
-        /// <para><c>default(GeoJsonSliceOptions)</c> has <c>Extent == 0</c>, which makes the probe's window
-        /// NaN. Every NaN comparison is false, so <c>disjoint</c> is false, so the probe answers "keep" for
-        /// every tile in the cover and each one then faults its own <c>GetTile</c> task — loud, but at the
-        /// wrong place and N times, with the wiring site that chose the options nowhere in the report.</para>
-        ///
-        /// <para><b>The tolerance arm rejects at construction too, alongside the extent one.</b> A
-        /// non-zero <c>SimplifyTolerance</c> is unimplemented, so it is exactly as unusable as a zero
-        /// extent, and admitting it here would defer the same fault to every tile's own decode.</para>
+        /// Unusable options — a zero <c>Extent</c> or a non-zero <c>SimplifyTolerance</c> — are rejected at
+        /// construction, not once per tile. A zero extent makes the probe's window NaN, so every cover tile is
+        /// kept and faults its own <c>GetTile</c> task, N times and away from the wiring site.
         /// </summary>
         [Test]
         public void TheSource_RejectsUnusableOptions_AtConstruction()
@@ -970,12 +873,9 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <c>GetTile</c> observes its <c>CancellationToken</c>. Nothing here is long enough to cancel
-        /// mid-call, and no production caller threads a token today — <c>TileManager.Tick</c> calls
-        /// <c>GetTile(id)</c>, the sole call site, for both implementations. This pins SEAM-CONTRACT
-        /// CONFORMANCE, not an observed cancellation path: the seam declares the parameter, so an
-        /// implementation that ignored it would go on minting handles the moment the coordinator threads
-        /// one through a teardown, and the defect would surface as a leak rather than as a fault.
+        /// <c>GetTile</c> observes its <c>CancellationToken</c>. This pins seam-contract conformance: the
+        /// sole caller, <c>TileManager</c>, passes no token. An implementation that ignored it would mint
+        /// handles once a caller cancels in teardown, and the defect would show as a leak, not a fault.
         /// </summary>
         [Test]
         public async Task GetTile_ObservesCancellation()

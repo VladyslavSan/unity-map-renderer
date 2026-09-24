@@ -1,8 +1,5 @@
-// Shader paint-color conversion GPU/visual acceptance test.
-//
-// Standalone, not merged with ShaderLightingTests.cs: the two collide on bare `Object`
-// (System.Object vs UnityEngine.Object, CS0104) — this file uses the bare
-// UnityEngine.Object.DestroyImmediate, ShaderLightingTests.cs imports System.
+// Shader paint-color conversion GPU/visual acceptance test. Not merged with ShaderLightingTests.cs: the two
+// collide on bare `Object` (CS0104), because that file imports System.
 //
 // Contents:
 //   PaintColorRenderTests  — Unity-only: render tests requiring a GPU context (SnapshotRenderer).
@@ -23,26 +20,18 @@ using Fill = MapRenderer.Core.Style.Fill;
 
 namespace MapRenderer.Tests.Visual
 {
-    // Unity-only: render tests requiring a GPU context (SnapshotRenderer).
-    // NOT included in Tools/core-tests/core-tests.csproj.
+    // The GPU half of PaintColorSingleApplyTests: that fixture recomposes `_BaseColor.rgb × vColor.rgb` on the
+    // CPU and could drift from the HLSL; this one reads the quantity off a rendered pixel.
     //
-    // The cross-instrument half of PaintColorSingleApplyTests. That fixture re-implements the fragment's
-    // `_BaseColor.rgb × vColor.rgb` on the CPU from the two real sources and could drift from the HLSL; this one
-    // reads the quantity ITSELF off a rendered pixel. Neither substitutes for the other — but the CPU one is the
-    // headline, because this one needs a GPU to render anything at all.
-    //
-    // Lighting is cancelled rather than controlled. Three renders differing ONLY in the style's line-color give
+    // Non-obvious why: three renders differing ONLY in line-color cancel lighting instead of controlling
+    // it. They give
     //
     //     albedo = (linear(pixel) - linear(pixelBlack)) / (linear(pixelWhite) - linear(pixelBlack))
     //
-    // which is exact under any affine response `pixel = k1·albedo + k2` — so no assumption about ambient, the
-    // URP Lit BRDF, or exposure enters the assertion. The white and black arms run the identical production
-    // binder + builder path, so they carry no hand-set uniforms to drift from production.
-    //
-    // This is also the measurement that settles how a Color-typed material property reaches the shader: in Linear
-    // colour space Unity converts it sRGB→linear on upload, so a correctly-single-applied #6699CC must measure
-    // LINEAR (0.1329, 0.3185, 0.6038). Measuring the sRGB triple (0.4, 0.6, 0.8) instead would mean no upload
-    // conversion happens and PaintColorSingleApplyTests' composition is the half that is wrong.
+    // which is exact under any affine response `pixel = k1·albedo + k2`, so ambient, BRDF and exposure drop out.
+    // The white and black arms run the production binder + builder path, so they have no hand-set uniforms.
+    // In Linear colour space Unity converts a Color property sRGB→linear on upload, so a single-applied #6699CC
+    // measures LINEAR (0.1329, 0.3185, 0.6038); the sRGB triple would mean the CPU composition is wrong.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // PaintColorRenderTests — Unity-only: render tests requiring a GPU context (SnapshotRenderer).
@@ -145,9 +134,8 @@ namespace MapRenderer.Tests.Visual
             camera.backgroundColor    = Color.black;
             camera.enabled            = false;
 
-            // The frame constant the line shader converts a PIXEL width with. Omitting it renders every
-            // styled width as a plausible-looking 1 px hairline, which the centre sample would still hit —
-            // and then the reading would come off a feathered edge instead of the solid core.
+            // Without this frame constant every styled width renders as a 1 px hairline, and the centre
+            // sample would read a feathered edge instead of the solid core.
             Shader.SetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
                                   2f * orthoSize / SnapH);
 
@@ -194,15 +182,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// The line fragment REPLACES surface alpha rather than multiplying into it, so <c>_BaseColor.a</c>
-        /// only reaches the output because the two forward passes multiply it in explicitly. Nothing on the
-        /// CPU can observe that: a composed check spells out the INTENDED formula and passes whether the
-        /// shader carries the term or not. This reads the composite instead.
-        ///
-        /// <para>Two arms of identical WHITE albedo over a black clear, differing only in the authored alpha.
-        /// Straight-alpha blend against a zero destination gives <c>pixel = alpha × albedo</c>, so the ratio
-        /// is the authored alpha and every lighting term cancels. It reads <b>1.0</b> — the authored alpha
-        /// silently dropped — if the builder gate ships without the fragment delta.</para>
+        /// The line fragment REPLACES surface alpha, so <c>_BaseColor.a</c> reaches the output only because the
+        /// two forward passes multiply it in; no CPU check can observe that. Two WHITE arms over a black clear
+        /// differ only in authored alpha: a straight-alpha blend gives <c>pixel = alpha × albedo</c>, so the
+        /// ratio is the authored alpha and lighting cancels. A dropped alpha reads <b>1.0</b>.
         /// </summary>
         [Test]
         public void ConstantLineColorAlpha_RenderedPixel_CarriesTheAuthoredAlpha()

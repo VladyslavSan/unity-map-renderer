@@ -5,16 +5,11 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// An <see cref="IRenderLayer"/> that paints from the style's sprite sheet — <c>fill-pattern</c>.
-    /// <c>line-pattern</c> and <c>background-pattern</c> are not implemented; they would resolve a sprite
-    /// name the same way.
-    /// A seam rather than a constructor argument because the sheet is fetched asynchronously (one keyless
-    /// request per style, owned by <c>SymbolSubsystem</c>) while layer materials build eagerly and
-    /// synchronously inside <c>MapView.SetStyle</c>: at <c>TryCreate</c> time the sheet provably does not
-    /// exist yet, so a pattern-bearing layer starts unresolved and is told later via
-    /// <see cref="RenderLayerSet.SetSprites"/>. Resolving late is cheap because it is a pure
-    /// material-uniform change — the fill mesh already carries world-unit pattern coordinates in stream 1
-    /// (flat and globe paths), so no tile is re-meshed and no restyle is triggered
-    /// (<c>FillPatternResolveTests</c>).
+    /// <c>line-pattern</c> and <c>background-pattern</c> are not implemented.
+    /// Non-obvious why: a seam, not a constructor argument, because <c>SymbolSubsystem</c> fetches the
+    /// sheet asynchronously after <c>MapView.SetStyle</c> builds the layers, so
+    /// <see cref="RenderLayerSet.SetSprites"/> delivers it later. That is a uniform change only: stream 1
+    /// already holds world-unit pattern coordinates, so no tile re-meshes (<c>FillPatternResolveTests</c>).
     /// </summary>
     internal interface ISpriteConsumerRenderLayer : IRenderLayer
     {

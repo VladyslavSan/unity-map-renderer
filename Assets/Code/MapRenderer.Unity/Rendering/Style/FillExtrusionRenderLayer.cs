@@ -14,18 +14,11 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Fill-extrusion <see cref="ITileMeshRenderLayer"/>: a MapLibre <c>fill-extrusion</c> layer as a
-    /// runtime render object.
-    ///
-    /// <para><b>Roof + wall mesh, dedicated shader.</b> <see cref="BuildGraphRequest"/> delegates to
-    /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> (roof cap + side walls, VS height extrusion
-    /// along a per-vertex <c>sec φ</c>-baked extrude-up), and <see cref="TryCreate"/> clones the dedicated
-    /// <c>Map/FillExtrusion</c> base material
-    /// (<see cref="Materials.MapMaterialSet.FillExtrusionMaterial"/>) via
-    /// <see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/>.</para>
-    ///
-    /// Axes (design "Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> /
-    /// <see cref="DrawPersistence.Persistent"/>.
+    /// Fill-extrusion <see cref="ITileMeshRenderLayer"/>: a <c>fill-extrusion</c> layer as a runtime render
+    /// object, <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
+    /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> builds the roof and walls, which the vertex
+    /// shader extrudes along a per-vertex <c>sec φ</c>-baked up. <see cref="TryCreate"/> clones the
+    /// <c>Map/FillExtrusion</c> base (<see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/>).
     /// </summary>
     internal sealed class FillExtrusionRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {

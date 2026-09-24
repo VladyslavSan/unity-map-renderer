@@ -9,12 +9,10 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Async
 {
     /// <summary>
-    /// Settle-mechanism proof for the PlayMode test assembly. A real fill-style tile build hops to the
-    /// ThreadPool (<c>UniTask.RunOnThreadPool</c>, <c>configureAwait: false</c>), so it completes on
-    /// wall-clock time on a background thread — NOT via the PlayerLoop. In an EditMode <c>[UnityTest]</c>
-    /// a <c>yield return null</c> frame is instantaneous and starves that worker, so the build never lands;
-    /// in PlayMode the frame has real duration, the worker finishes, and the next <c>LateUpdate</c> consumes
-    /// it. This asymmetry is the whole reason the async settle tests belong here, not in EditMode.
+    /// Settle-mechanism proof for the PlayMode test assembly. A real tile build runs on the ThreadPool, so
+    /// it completes on wall-clock time, not via the PlayerLoop. Non-obvious why: an EditMode <c>yield return
+    /// null</c> frame is instantaneous and starves that worker, while a PlayMode frame has real duration, so
+    /// the worker finishes and the next <c>LateUpdate</c> consumes it.
     /// </summary>
     [TestFixture]
     public class AsyncSettlePilotTests : BaseTestFixture

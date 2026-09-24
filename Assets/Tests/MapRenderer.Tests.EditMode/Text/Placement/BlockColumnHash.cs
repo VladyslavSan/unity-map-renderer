@@ -1,8 +1,5 @@
-// Unity EditMode only — SymbolTileBlock is Unity.Collections-side (NativeArray), reached here via
-// InternalsVisibleTo("MapRenderer.Tests.EditMode") from MapRenderer.Unity/AssemblyInfo.cs. It is in
-// THIS assembly, not MapRenderer.Tests.Shared — that assembly also links PlayMode, where the NativeArray
-// access this helper does is unwanted (presence-check-cannot-detect-misplacement: the wrong PLACE, not the
-// wrong content, is the risk).
+// Unity EditMode only — SymbolTileBlock (NativeArray) is reached via InternalsVisibleTo from
+// MapRenderer.Unity/AssemblyInfo.cs. Not in MapRenderer.Tests.Shared, which PlayMode also links.
 
 using System;
 using NUnit.Framework;
@@ -16,28 +13,11 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// A shared column-by-column digest and equality helper over a baked
-    /// <see cref="SymbolTileBlock"/> — the single place every bake-invariant test reads the block's
-    /// arrays from, so they cannot drift into checking different columns.
-    ///
-    /// <para><b>Two different jobs, two different methods.</b> <see cref="Hash"/> folds every column into a
-    /// compact per-column digest — cheap to pin as a handful of committed <c>int</c> constants, but a
-    /// mismatch only says WHICH COLUMN moved, not which element. <see cref="AssertColumnsEqual"/> is the
-    /// diagnosable counterpart: element-wise equality between two blocks with the column name and the first
-    /// differing index in the failure message — the shape a prod-vs-oracle compare needs to localize
-    /// a divergence.</para>
-    ///
-    /// <para><b>TextIds/IconImageIds are EXCLUDED from <see cref="Hash"/></b> and compared by
-    /// <see cref="AssertColumnsEqual"/> only via EQUIVALENCE CLASS, never raw id value: those two columns are
-    /// bake-order ids from a caller-supplied <see cref="SymbolStringTable"/>, so two independently-captured
-    /// blocks (a fresh intern table each) can assign the SAME string a DIFFERENT id without any real
-    /// divergence. Folding the raw id into a hash — or asserting raw equality — would make the guard brittle
-    /// to interning order, not to an actual bake defect.</para>
-    ///
-    /// <para><b>Bit-pattern, not value, for float/double.</b> Every float/double column hashes (and
-    /// compares) the IEEE bit pattern (<c>math.asuint(float)</c> / <see cref="BitConverter.DoubleToInt64Bits"/>),
-    /// not the numeric value — the byte-identity invariant this helper guards means <c>-0.0</c> and
-    /// <c>+0.0</c> ARE different, and a future change that starts landing on the "other" zero is exactly the
-    /// kind of drift the golden exists to catch. Do not loosen this to a tolerance comparison.</para>
+    /// <see cref="SymbolTileBlock"/>, the one place bake-invariant tests read the block's arrays from.
+    /// <see cref="Hash"/> gives a per-column digest; <see cref="AssertColumnsEqual"/> names the column and first
+    /// differing index. Non-obvious why: TextIds/IconImageIds are bake-order intern ids, so they are left out
+    /// of <see cref="Hash"/> and compared by equivalence class; float/double compare as IEEE bit patterns, so
+    /// <c>-0.0</c> and <c>+0.0</c> differ — do not loosen this to a tolerance.
     /// </summary>
     internal static class BlockColumnHash
     {
@@ -184,14 +164,10 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(a[i] == a[j], b[i] == b[j], $"{column} equivalence mismatch at ({i},{j})");
         }
 
-        // ── per-struct field hashers/comparers. One line per field — kept in exact sync with the type's
-        // field list; SymbolTileBlockGoldenTests carries a reflection field-count guard so a field added
-        // to one of these structs without a matching line here fails the gate rather than silently hashing
-        // fewer fields than the type has. ──
+        // ── per-struct field hashers/comparers, one line per field. SymbolTileBlockGoldenTests' reflection
+        // field-count guard fails the gate when a struct gains a field with no line here. ──
 
-        // 26 Combine calls == PointStageInput's 26 public fields (SymbolTileBlockGoldenTests' reflection
-        // guard pins the field count so a field silently added to the struct without a matching line here
-        // fails the gate instead of hashing fewer fields than the type has).
+        // 26 Combine calls == PointStageInput's 26 public fields (pinned by that reflection guard).
         private static int HashPointStageInput(PointStageInput p)
         {
             int h = 17;

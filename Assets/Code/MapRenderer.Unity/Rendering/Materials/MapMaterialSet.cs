@@ -3,17 +3,11 @@ using UnityEngine;
 namespace MapRenderer.Unity.Rendering.Materials
 {
     /// <summary>
-    /// The base <see cref="Material"/> per map rendering technique (fill, line, …).
-    ///
-    /// <para>Per-style-layer materials are <b>clones</b> of these bases (see <see cref="MaterialFactory"/> +
-    /// <see cref="MaterialExtensions.CloneWithParent"/>), so a single base asset is the editable source of
-    /// default styling for all fills / all lines — and, in the Editor, live-tunable during Play.</para>
-    ///
-    /// <para>This replaces hardcoded <c>Shader.Find("...")</c> name lookups in code: the base material
-    /// references its shader by GUID, so renaming a shader never breaks material creation.</para>
-    ///
-    /// Create one via <c>Assets ▸ Create ▸ MapRenderer ▸ Material Set</c>, assign the base fill/line
-    /// materials, then reference it on the map component (e.g. <c>MapView</c>).
+    /// The base <see cref="Material"/> per map rendering technique (fill, line, …). Per-style-layer materials
+    /// are clones of these bases (<see cref="MaterialFactory"/>), so one base asset is the editable,
+    /// Play-mode-tunable source of default styling. A base references its shader by GUID, so a shader rename
+    /// never breaks material creation. Create one via <c>Assets ▸ Create ▸ MapRenderer ▸ Material Set</c>
+    /// and reference it on the map component.
     /// </summary>
     [CreateAssetMenu(fileName = "MapMaterialSet", menuName = "MapRenderer/Material Set", order = 0)]
     public sealed class MapMaterialSet : ScriptableObject
@@ -50,16 +44,10 @@ namespace MapRenderer.Unity.Rendering.Materials
         [SerializeField] public Material SymbolIconWorld;
 
         /// <summary>
-        /// Fails LOUD when any base material is unassigned, rather than letting a null base reach the
-        /// pipeline (a null-material fill/line/background/symbol slot crashes a backend's
-        /// <c>AddTileLayer</c> — see <c>BackendNullSlotTests</c>' doc). A partial material set is a developer
-        /// CONFIGURATION error (an unassigned <see cref="ScriptableObject"/> field), not a runtime/data
-        /// condition.
-        ///
-        /// <para>The fields above are live-mutable, so call this on a CAPTURED reference at COMMIT time
-        /// (immediately before the synchronous <c>SetStyle</c> commit, after the one
-        /// <c>await BuildSourceSpecs</c>) — never at construction/entry alone, which a concurrent mutation
-        /// during the await could invalidate (TOCTOU). See <c>MapView.SetStyle</c>.</para>
+        /// Throws when a required base material is unassigned, a developer configuration error; a null slot
+        /// would crash a backend's <c>AddTileLayer</c>. Non-local invariant: the fields are live-mutable, so
+        /// <c>MapView.SetStyle</c> calls this on a captured reference at commit time, after its one
+        /// <c>await</c>; a check at entry alone would miss a mutation during the await (TOCTOU).
         /// </summary>
         public void Validate()
         {

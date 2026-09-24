@@ -1,11 +1,5 @@
-// MapMaterialSet.Validate() fails LOUD when any base material is unassigned, making a null-material
-// background/fill/line/symbol slot (which would otherwise crash or leak at a backend's AddTileLayer
-// — see BackendNullSlotTests' doc) unrepresentable. RED-verifiable: a stubbed-empty Validate() must
-// fail every "missing base throws" case here.
-//
-// Stays its own file: its `using System;` (for InvalidOperationException) would collide with
-// MaterialsTests.cs's bare `Object.DestroyImmediate` calls (System.Object vs UnityEngine.Object, CS0104) —
-// see docs/conventions-short.md's "Plain-import collisions" note.
+// MapMaterialSet.Validate() throws when any base material is unassigned, so a null-material slot never
+// reaches a backend's AddTileLayer. Own file: its `using System;` collides with MaterialsTests' bare Object.
 
 using System;
 using NUnit.Framework;
@@ -17,11 +11,8 @@ namespace MapRenderer.Tests.Materials
     [TestFixture]
     public class MapMaterialSetValidationTests : BaseTestFixture
     {
-        // A THROWAWAY MapMaterialSet per test — never the shared production asset (nulling a base here must
-        // never mutate the committed asset other tests in the same batch also load via MapMaterialSetTestUtil).
-        // symbolWorld defaults true (assigned) so the existing fill/line cases below keep testing exactly
-        // what they tested before — SymbolTextWorld is the only symbol base left, pinned by its own
-        // dedicated case.
+        // A THROWAWAY set per test, so nulling a base never mutates the committed asset other tests load.
+        // symbolWorld defaults to assigned; SymbolTextWorld has its own case.
         private static MapMaterialSet NewSet(bool fill, bool line, bool symbolWorld = true)
         {
             var prod = MapMaterialSetTestUtil.Load();

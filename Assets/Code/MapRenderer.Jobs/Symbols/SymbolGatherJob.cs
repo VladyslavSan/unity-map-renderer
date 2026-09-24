@@ -9,23 +9,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// The Burst gather (docs/symbol-label-perf-design.md): compacts every winner's pre-baked
-    /// <see cref="BlockView"/> slice into one contiguous set of native mirror pools, remapping every
-    /// <c>Detail</c>/<c>*Start</c> field by the running pool offset. Runs SYNCHRONOUSLY through
-    /// <c>.Run()</c>, strictly before <c>TickCore</c> reads a single element — no double-buffering, no swap,
-    /// no resize under a reader.
-    ///
-    /// <para><b>Byte-identical to the managed gather it replaces.</b> Every value written is either an
-    /// integer running offset or a struct copied element-for-element from a block's own array; no new
-    /// floating-point arithmetic appears anywhere.</para>
-    ///
-    /// <para>Resizes the caller's <c>Allocator.Persistent</c> mirror <see cref="NativeList{T}"/> outputs itself:
-    /// pass 1 totals the per-pool sizes, pass 2 fills — so the resize is bounded and single-shot, not
-    /// per-element growth.</para>
-    ///
-    /// <para>Does NOT write the three per-record masks (<c>SymbolDeparting</c>/<c>SymbolCoverageFading</c>/
-    /// <c>SymbolDropped</c>) — those are the per-frame overrides <c>WritePerFrameMasks</c> rewrites every Tick
-    /// (memo hit or not) and are resized/filled by the caller, outside this job.</para>
+    /// The Burst gather (docs/symbol-label-perf-design.md): compacts each winner's <see cref="BlockView"/> slice
+    /// into contiguous native mirror pools, remapping each <c>Detail</c>/<c>*Start</c> field by the pool offset.
+    /// It runs through <c>.Run()</c> before <c>TickCore</c> reads any element. Pass 1 totals the pool sizes and
+    /// resizes the caller's mirror lists once; pass 2 fills. <c>WritePerFrameMasks</c>, not this job, writes
+    /// the per-frame masks (<c>SymbolDeparting</c>/<c>SymbolCoverageFading</c>/<c>SymbolDropped</c>).
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct SymbolGatherJob : IJob
@@ -190,13 +178,9 @@ namespace MapRenderer.Jobs.Symbols
             OutCounts[CountMaxBoxes] = maxBoxes; OutCounts[CountMaxQuads] = maxQuads; OutCounts[CountMaxCandidates] = maxCandidates;
         }
 
-        // Element-wise stand-in for NativeArray<T>.Copy over a non-owning UnsafeList view (a view has no
-        // NativeArray to hand NativeArray<T>.Copy) — same source/dest/start/count contract, called only where
-        // the caller already checked count > 0 (Quads/Glyphs/Anchors/WorldPoints) or where the source is always
-        // non-empty (AnchorFadeIds' fadeCount = anchorCount + 1 >= 1, no guard needed — see call site).
-        // By VALUE, not `in`: UnsafeList<T> is not a readonly struct and its `this[int]` getter isn't
-        // readonly-annotated, so `in` would force a defensive copy per element in this hot per-winner loop —
-        // the repo's `in ⟺ readonly struct` gate (docs/conventions-short.md).
+        // NativeArray<T>.Copy over a non-owning UnsafeList view, element-wise, with the same contract.
+        // Non-obvious why: `src` is by value, because UnsafeList<T> is not a readonly struct and `in` would
+        // force a defensive copy per element.
         private static void CopyView<T>(UnsafeList<T> src, int srcStart, NativeArray<T> dst, int dstStart, int count)
             where T : unmanaged
         {

@@ -26,9 +26,8 @@ namespace MapRenderer.Tests.Expressions
 
             EvalArgBuffers.Return(buffer);
 
-            // Return clears in place, so the same array reference now holds default (Null) slots — the string
-            // and the list are no longer reachable through the pool. RED without the Array.Clear in Return
-            // (the slots would still read String / Array).
+            // Return clears in place, so the pool roots neither the string nor the list. RED without the
+            // Array.Clear in Return.
             Assert.That(buffer[0].Type, Is.EqualTo(ValueType.Null),
                 "Return must clear the string slot so the pool roots no argument string.");
             Assert.That(buffer[1].Type, Is.EqualTo(ValueType.Null),
@@ -38,9 +37,8 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void Return_ClearsEverySlot_NotJustTheUsedPrefix()
         {
-            // Fill EVERY slot of the rented buffer, then return. This pins that Return clears the whole array
-            // (0..Length), so a later arity-N < Length reuse whose AsSpan(0, N) hides the tail cannot expose a
-            // retained reference. Deterministic: inspects the same array it filled — no pool-reuse assumption.
+            // Return must clear the whole array, not just a prefix: a later AsSpan(0, N) reuse hides the tail,
+            // which would otherwise retain a reference. The test inspects the array it filled.
             Value[] buffer = EvalArgBuffers.Rent(4);
             for (int i = 0; i < buffer.Length; i++) buffer[i] = Value.String("tail-ref-" + i);
 

@@ -25,13 +25,9 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
-    /// Live loop tests for <see cref="MapView"/> with per-layer styled fill rendering.
-    /// Covers:
-    ///   (1) view-state drives tile selection + eviction releases (container destroyed).
-    ///   (2) wiring parity: MapView with a 1-fill-layer style produces the same mesh vertex count
-    ///       as StyledFillTileBuilder called directly — proves the live-loop wiring is correct.
-    ///   (3) NO per-frame GC in steady state (the acceptance teeth — the ApplyZoom loop and all
-    ///       reused buffers must not allocate in the pan / static-frame / bearing-only cases).
+    /// Live loop tests for <see cref="MapView"/> with styled fill rendering: view state drives tile selection
+    /// and eviction; a 1-fill-layer style gives the same vertex count as StyledFillTileBuilder called directly;
+    /// and the steady-state tick allocates no GC memory on a pan, a static frame, or a heading change.
     /// </summary>
     [TestFixture]
     public class MapViewLiveLoopTests : BaseTestFixture
@@ -79,11 +75,8 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
-        // ── (3) NO per-frame GC in steady state (acceptance teeth) ─────────────────────────────
-        // Zero-allocation per-frame is the BRG backend's contract. The Entities default does allocate GC
-        // intermittently over many frames (verified by MapView_SteadyStateTick_Entities_AllocationVerdict
-        // below, via the same GC.Alloc-recorder instrument) — magnitude unverified; the once-quoted
-        // "~409 B/frame" came from a since-debunked GC.GetTotalMemory measure. Pin BRG: this asserts a BRG property.
+        // ── (3) NO per-frame GC in steady state ────────────────────────────────────────────────
+        // Zero per-frame allocation is the BRG backend's contract; the Entities backend allocates at times.
 
         [Test]
         public void MapView_SteadyStateTick_DoesNotAllocateGCMemory()
@@ -112,10 +105,7 @@ namespace MapRenderer.Tests.MapViews
                 view.LateUpdate();
 
                 // ── (a) THE PAN CASE ──
-                // A small center nudge stays within the loaded z2 cover (one z2 tile spans ~10,000 km
-                // at the equator, so a 111 km pan loads no new tiles), but it DOES dirty the cover so
-                // Tick runs the full recompute: TileCover.Cover + _coverSet rebuild + request/release
-                // scan + floating-origin rebase loop + ApplyZoom loop. All must allocate ZERO bytes.
+                // A 1° pan stays inside the loaded z2 cover but dirties it; the full recompute must not allocate.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
                 Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "MapView.LateUpdate must not allocate during a within-cover pan (cover recompute path: " +
@@ -130,19 +120,13 @@ namespace MapRenderer.Tests.MapViews
                     "A static frame (cover clean, nothing pending) must early-out with zero allocation.");
 
                 // ── (c) a heading/tilt change still ticks alloc-free. ──
-                // Heading DIRTIES the cover (it rotates the viewport quad → a different tile bbox), so this Tick
-                // runs the full recompute — but at the whole-world z2 cover the re-selected set is identical, so
-                // request/release find nothing and the recompute stays zero-alloc. Tilt is not in the cover key:
-                // the selector has no tilt branch.
+                // Heading dirties the cover, but the whole-world z2 set stays the same, so nothing loads.
                 view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 });
                 Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "A heading/tilt change must tick alloc-free (cover recompute over an unchanged whole-world set).");
 
                 // ── (d) AT SCALE: zero-alloc must hold over MANY frames, not just one. ──
-                // This is the symmetric counterpart to MapView_SteadyStateTick_Entities_AllocationVerdict,
-                // which trips the GC.Alloc recorder over N Ticks while a single Entities Tick is clean. BRG
-                // must stay clean at the SAME N — otherwise the divergence would be shared-Tick-path churn,
-                // not EG-specific. (Same N as the Entities verdict so the comparison is genuine.)
+                // Same N as the Entities verdict below, so a clean BRG shows the churn is Entities-specific.
                 const int N = 50;
                 Assert.That(() => { for (int i = 0; i < N; i++) view.LateUpdate(); }, Is.Not.AllocatingGCMemory(),
                     $"BRG.Tick must not allocate across {N} steady-state frames — proving the zero-alloc " +
@@ -154,13 +138,8 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
-        // ── (3b) Entities backend allocation VERDICT (informational, not a hard tooth) ──────────────
-        // Mirrors the BRG test above exactly — same within-cover pan on the same loaded cover, same
-        // GC.Alloc-recorder instrument (Is.Not.AllocatingGCMemory) — but with the default Entities backend.
-        // This is the apples-to-apples answer to "do the EG system groups allocate in the live Tick path?"
-        // (the claim the BRG pin is justified on). It REPORTS the verdict rather than asserting zero, because
-        // whether Entities-allocates-per-frame is a measured trade-off, not a contract. The figure the
-        // constraint carries is a COUNT of GC.Alloc calls, not bytes — reported as such.
+        // ── (3b) Entities backend allocation VERDICT (informational, not a hard assertion) ─────────
+        // The BRG test on the Entities backend. Its allocation is a trade-off, not a contract: it reports a count.
         [Test]
         public void MapView_SteadyStateTick_Entities_AllocationVerdict()
         {
@@ -192,10 +171,8 @@ namespace MapRenderer.Tests.MapViews
                 Assert.AreEqual(16, view.LoadedTileCount(),
                     "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
 
-                // Measure over MANY frames, not one. A single Entities Tick is alloc-free, but EG's system
-                // groups allocate INTERMITTENTLY (the isolated Rebuild×50 test trips the recorder) — so a
-                // 1-frame sample under-reports. Looping N static Ticks (InstancedRebuild fires every frame)
-                // is the honest "does sitting still leak GC over time" characterization of the live path.
+                // Measure over MANY frames: a single Entities Tick is alloc-free, but its system groups
+                // allocate INTERMITTENTLY, so a 1-frame sample under-reports.
                 const int N = 50;
                 string verdict;
                 try

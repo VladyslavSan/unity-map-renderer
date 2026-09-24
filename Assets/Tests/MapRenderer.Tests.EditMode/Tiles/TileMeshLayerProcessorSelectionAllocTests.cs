@@ -1,12 +1,5 @@
-// Unity EditMode only (UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() — the only trustworthy
-// allocation meter on Unity Mono, see MapRenderer.Tests.EditMode/Meshing/LineBuildAllocTests.cs). NOT
-// registered in core-tests.csproj.
-//
-// perf/gc-elimination: the single biggest managed allocator on the mesh-build worker pass was
-// `new List<SelectedTileFeature>()` in TileMeshLayerProcessor.ProcessOnWorker — one per (tile ×
-// resolving style-layer), grown from empty by doubling (~318 KB/tile-build on a liberty-shaped style,
-// measured before this fix). This pins the fix: selection now appends into the build's already-pooled
-// TileBuildBuffers instead.
+// Unity EditMode only: Is.Not.AllocatingGCMemory() is the only trustworthy allocation meter on Unity Mono.
+// Pins that ProcessOnWorker's feature selection appends into the build's pooled TileBuildBuffers.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -110,12 +103,9 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// The tooth: a warmed <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>, run across TWO style
-        /// layers resolving to different-sized source layers (the shape a real worker pass repeats over every
-        /// layer) with a REAL, non-null <see cref="TileBuildBuffers"/>, must allocate zero managed bytes.
-        /// RED against the un-fixed <c>new List&lt;SelectedTileFeature&gt;()</c> site — forcing that
-        /// allocating path even when <c>Buffers != null</c> reds THIS test alone (RED-verified in review:
-        /// 31/31 → 30/31, only this case failed; the read-count and precondition teeth did not shift).
+        /// A warmed <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>, run across TWO style layers that
+        /// resolve to different-sized source layers with a REAL <see cref="TileBuildBuffers"/>, allocates zero
+        /// managed bytes. A per-call <c>new List&lt;SelectedTileFeature&gt;()</c> would red this test alone.
         /// </summary>
         [Test]
         public void ProcessOnWorker_OverTwoLayers_WithPooledBuffers_AllocatesNoGCMemory()
@@ -152,10 +142,8 @@ namespace MapRenderer.Tests.Tiles
                     placesProcessor.ProcessOnWorker(tile, in context);
                 }
 
-                // Warm the EXACT delegate the constraint measures below: JIT + the buffers' one-time
-                // grow-from-empty happen here, outside the measured region (see allocgcmemory-constraint-
-                // false-positives note: warming the exact delegate avoids cross-thread/JIT false positives on
-                // a very fast, single-invocation path).
+                // Warm the same delegate the constraint measures: JIT and the buffers' one-time grow happen
+                // here, outside the measured region, so they cannot read as false positives.
                 for (int i = 0; i < 8; i++) RunBothLayers();
 
                 Assert.That(RunBothLayers, Is.Not.AllocatingGCMemory(),

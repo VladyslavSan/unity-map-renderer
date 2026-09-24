@@ -7,13 +7,9 @@ using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>One decoded tile layer: name, extent, its features — and <b>its geometry</b>.
-    ///
-    /// <para>The element type of <see cref="Features"/> is <see cref="IFeature"/>, the evaluation surface
-    /// itself.</para>
-    ///
-    /// <para><b>The layer OWNS its coordinates.</b> <see cref="Geometry"/> is a member of the layer, minted
-    /// eagerly by the decoder, which was itself handed the tile address — so the buffer's
-    /// <c>Tile</c>/<c>Extent</c> and the layer they describe cannot disagree.</para>
+    /// The layer OWNS its coordinates: the decoder, which holds the tile address, mints
+    /// <see cref="Geometry"/> eagerly, so the buffer's <c>Tile</c>/<c>Extent</c> cannot disagree with the
+    /// layer.
     /// </summary>
     public interface ITileLayer
     {
@@ -29,16 +25,10 @@ namespace MapRenderer.Jobs.Tiles
     }
 
     /// <summary>
-    /// A decoded tile: layers looked up by name. This is the *universal*, polymorphic-by-kind decode
-    /// surface — vector sources resolve to <see cref="ITileLayer"/>/<see cref="IFeature"/>, and a non-vector
-    /// kind (raster → texture, terrain → heightfield) would be an additional decode result at this same
-    /// level, not an addition to the vector-feature shape above. Implemented by <see cref="MvtTile"/> and
-    /// <see cref="GeoJsonTile"/>.
-    ///
-    /// <para><b>Why <see cref="IDisposable"/>.</b> A decoded tile holds <c>Allocator.Persistent</c> native
-    /// memory (its layers' <see cref="ITileLayer.Geometry"/>), so it has a definite lifetime and a single
-    /// owner. That owner is the <c>SharedDisposable{IDecodedTile}</c> that wraps it: consumers read layers
-    /// inside a held reference and <b>never</b> dispose the tile themselves.</para>
+    /// A decoded tile: layers looked up by name (<see cref="MvtTile"/>, <see cref="GeoJsonTile"/>).
+    /// Non-local invariant: the tile holds <c>Allocator.Persistent</c> geometry, so its single owner is the
+    /// <c>SharedDisposable{IDecodedTile}</c> that wraps it; consumers read layers inside a held reference and
+    /// <b>never</b> dispose the tile themselves.
     /// </summary>
     public interface IDecodedTile : IDisposable
     {

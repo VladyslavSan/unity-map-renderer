@@ -7,22 +7,12 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// The fill graph's earcut node: one polygon per <see cref="Execute"/> call. It takes that polygon's
-    /// <c>GetSubArray</c> views and calls <see cref="EarcutJob.Execute"/> directly. Batched by
-    /// <see cref="FillMeshGraph.EarcutPolygonBatch"/> and deferred over <c>buffers.PerPolyOuterCount</c>, so
-    /// the polygon count need not be known at schedule time.
-    ///
-    /// <para><b>Bit-exact regardless of which worker runs a polygon, or how many run at once.</b> Every
-    /// index into <see cref="Buffers"/>' offset tables and flat columns comes from CONSECUTIVE entries of a
-    /// monotonic table, so the bytes one polygon touches are a function of that polygon's input alone.</para>
-    ///
-    /// <para><b>One field, one attribute.</b> <see cref="Buffers"/> nests several
-    /// <see cref="NativeList{T}"/> columns, and <see cref="NativeDisableParallelForRestrictionAttribute"/>
-    /// on the OUTER struct field is enough to write outside <c>index</c> through all of them. The attribute
-    /// appears in this file and nowhere else.</para>
-    ///
-    /// <para>Every column resolves with <c>.AsArray()</c> <b>inside</b> <see cref="Execute"/>, never at
-    /// schedule time, because the sizing node is what gives these lists their final length.</para>
+    /// The fill graph's earcut node: one polygon per <see cref="Execute"/>, calling
+    /// <see cref="EarcutJob.Execute"/> on its <c>GetSubArray</c> views, deferred over
+    /// <c>buffers.PerPolyOuterCount</c>. It is bit-exact on any worker, because every index comes from
+    /// consecutive entries of a monotonic table. Non-local invariant: the one
+    /// <see cref="NativeDisableParallelForRestrictionAttribute"/> on <see cref="Buffers"/> covers its nested
+    /// columns, and each column resolves <c>.AsArray()</c> inside <see cref="Execute"/>, after sizing.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct EarcutBatchJob : IJobParallelForDefer

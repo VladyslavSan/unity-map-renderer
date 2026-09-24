@@ -8,13 +8,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.GeoJson
 {
     /// <summary>
-    /// How a dataset is cut into tiles. A <c>readonly struct</c> so it can be taken <c>in</c> without the
-    /// per-read defensive copy a mutable struct would force.
-    ///
-    /// <para>Every member is a SOURCE-level parameter: nothing forces the MVT conventions on a synthesised
-    /// source, so <see cref="Extent"/> is chosen rather than inherited. Build from
-    /// <see cref="Default"/> — a <c>default(GeoJsonSliceOptions)</c> has <c>Extent = 0</c> and is
-    /// rejected.</para>
+    /// How a dataset is cut into tiles; a <c>readonly struct</c>, so <c>in</c> costs no defensive copy. Every
+    /// member is a source-level parameter, so <see cref="Extent"/> is chosen rather than inherited from MVT.
+    /// Build from <see cref="Default"/>: a <c>default(GeoJsonSliceOptions)</c> has <c>Extent = 0</c> and is
+    /// rejected.
     /// </summary>
     public readonly struct GeoJsonSliceOptions
     {
@@ -32,31 +29,20 @@ namespace MapRenderer.Core.GeoJson
         public double Extent { get; init; }
 
         /// <summary>
-        /// Buffer margin kept on every side, authored in tile units at
-        /// <see cref="TileBufferClip.ReferenceExtent"/> and rescaled to <see cref="Extent"/> by the same
-        /// <c>b = keep · extent / 4096</c> formula <see cref="TileBufferClip.TryWindow"/> uses. Set 0 to cut
-        /// exactly at the tile boundary; negative and NaN both degrade to that in <see cref="Window"/>.
-        ///
-        /// <para><b>There is no GeoJSON-specific fill seam.</b> At the production configuration
-        /// <c>MapViewConfig.FillTileBufferClip</c> defaults to <c>0.0</c>, and
-        /// <c>TileBufferClip.FromInspectorUnits(0.0)</c> takes the <c>KeepTileUnits(0.0)</c> branch, whose
-        /// <c>IsEnabled</c> is <b>true</b> with a keep of 0 — only a NEGATIVE knob disables it. So the fill
-        /// pipeline clips every layer to <c>[0, extent]</c>, MVT and GeoJSON alike, and a GeoJSON fill sliced
-        /// at buffer 64 is cut back by the same job that cuts a server-buffered MVT fill.</para>
-        ///
-        /// <para>What is NOT clipped, identically for both formats, is the <b>line</b> and <b>symbol</b>
-        /// path: a polyline or a point inside the margin is emitted by both neighbouring tiles.</para>
+        /// Buffer margin on every side, in tile units at <see cref="TileBufferClip.ReferenceExtent"/>,
+        /// rescaled to <see cref="Extent"/> as <see cref="TileBufferClip.TryWindow"/> does
+        /// (<c>b = keep · extent / 4096</c>). 0 cuts at the tile boundary; negative and NaN degrade to 0.
+        /// Non-local invariant: the default <c>MapViewConfig.FillTileBufferClip</c> (0.0) still clips every
+        /// fill layer to <c>[0, extent]</c>, so a buffered GeoJSON fill is cut back like an MVT fill. For both
+        /// formats, a line or point inside the margin is emitted by both neighbouring tiles.
         /// </summary>
         public double BufferAtReferenceExtent { get; init; }
 
         /// <summary>
-        /// Douglas–Peucker-style tolerance, in tile units. <b>0 is the only supported value in v1</b>; any
-        /// other is rejected by <see cref="Validate"/> where the options are accepted, and — for a caller
-        /// that reaches <see cref="GeoJsonTileSlicer.Slice"/> with options it never handed to a source — by
-        /// that method's own <see cref="NotSupportedException"/>.
-        /// Present-but-throwing rather than absent so the deferral is an observable, tested state: a
-        /// silently-ignored parameter is indistinguishable from an implemented one. Simplification is an
-        /// optimisation, and a fixture wants the EXACT authored position.
+        /// Douglas–Peucker-style tolerance, in tile units. Only 0 is supported: <see cref="Validate"/>
+        /// rejects any other value, and <see cref="GeoJsonTileSlicer.Slice"/> throws
+        /// <see cref="NotSupportedException"/>. It throws rather than being ignored, so an unimplemented
+        /// setting is observable; a fixture wants the exact authored position.
         /// </summary>
         public double SimplifyTolerance { get; init; }
 
@@ -68,45 +54,13 @@ namespace MapRenderer.Core.GeoJson
         };
 
         /// <summary>
-        /// Throws unless every option is one this slicer can honour: <see cref="Extent"/> a WHOLE NUMBER in
-        /// <c>(0, uint.MaxValue]</c>, and <see cref="SimplifyTolerance"/> exactly 0.
-        /// <see cref="BufferAtReferenceExtent"/> is unchecked — <see cref="Window"/> degrades
-        /// NaN and every negative to the tile boundary, so its whole domain is honourable.
-        ///
-        /// <para><b>Why integrality, and not a silent round.</b> Tile-local coordinates are quantized to
-        /// integers, and downstream the extent is carried in two forms: as the <c>double</c> it is here, and
-        /// as the whole number a decoded tile layer reports (the wire format's extent field is an unsigned
-        /// integer). A fractional extent makes those two disagree — 4096.5 arrives as both 4096.5 and 4096 —
-        /// so every consumer that joins them is off by a fraction of a tile with nothing to notice. There is
-        /// no authoring intent a fractional extent expresses, so it is rejected at the door rather than
-        /// rounded into a value nobody asked for.</para>
-        ///
-        /// <para><b>Why the upper bound is <c>uint.MaxValue</c>, and why it is what rejects infinity.</b>
-        /// The pair of readings above is the whole point, so the domain of this option is the domain of the
-        /// narrower reading: a decoded layer carries the extent as a <c>uint</c>
-        /// (<c>GeoJsonTileLayer.Extent</c>) while the materializer keeps this <c>double</c>. An integral
-        /// value above <c>uint.MaxValue</c> passes the integrality clause and then narrows by an UNCHECKED
-        /// conversion, so the layer reports one extent and the geometry another — the same defect the
-        /// integrality clause closes, through a different door. <c>double.PositiveInfinity</c> is both
-        /// positive and equal to its own <c>floor</c>, so the upper bound is also the only clause that
-        /// rejects it, and it has to be rejected here rather than downstream: <see cref="Window"/> would
-        /// make <c>∞ − ∞</c>, and a NaN window keeps every tile and then slices away every vertex. NaN
-        /// itself fails all three comparisons. <c>uint.MaxValue</c> is ADMITTED rather than capped at some
-        /// smaller "sensible" extent: extent is a per-source authoring choice, and what this validator owes
-        /// is representability, not taste.</para>
-        ///
-        /// <para><b>Why the tolerance is validated HERE.</b> A non-zero <see cref="SimplifyTolerance"/> is
-        /// unimplemented, so it is as unusable as a zero extent, and this validator states the whole domain
-        /// of the options it validates. <see cref="GeoJsonTileSlicer.Slice"/> keeps its own tolerance guard,
-        /// a DUPLICATE of this arm — <c>Slice</c> calls <c>Validate()</c> unconditionally three lines later,
-        /// so deleting it would reject the same options here instead. It is kept because it runs FIRST, so
-        /// the exception a direct <c>Slice</c> caller sees stays a <see cref="NotSupportedException"/> rather
-        /// than this <see cref="ArgumentOutOfRangeException"/>. Unifying the two types is a behaviour change
-        /// on a public API, out of scope here.</para>
-        ///
-        /// <para>Called by <see cref="GeoJsonTileSlicer.Slice"/> and by every source that retains options to
-        /// slice with later — the point of validating from one place is that "the window is NaN and every
-        /// decode faults" cannot be discovered a scope at a time.</para>
+        /// Throws unless <see cref="Extent"/> is a whole number in <c>(0, uint.MaxValue]</c> and
+        /// <see cref="SimplifyTolerance"/> is 0; <see cref="Window"/> handles every buffer value.
+        /// Non-obvious why: a decoded layer carries the extent as a <c>uint</c>
+        /// (<c>GeoJsonTileLayer.Extent</c>) and this is a <c>double</c>, so a fractional or larger extent
+        /// makes the two disagree. The upper bound also rejects +∞, whose infinite window slices away every
+        /// vertex; NaN fails every comparison. <c>Slice</c> and every source that keeps options call this;
+        /// <c>Slice</c> checks the tolerance first, so its caller sees <see cref="NotSupportedException"/>.
         /// </summary>
         public void Validate()
         {
@@ -126,20 +80,10 @@ namespace MapRenderer.Core.GeoJson
         }
 
         /// <summary>
-        /// The inclusive clip window in tile units — <c>[−b, Extent + b]²</c>. Uses the same
-        /// arithmetic, in the same order, as <see cref="TileBufferClip.TryWindow"/>, so the two windows are
-        /// bit-equal and not merely close. The operand ORDER is in fact free while
-        /// <see cref="TileBufferClip.ReferenceExtent"/> is a power of two — dividing by it is an exact binary
-        /// scaling — but keeping it identical is what makes the equality readable without that argument, and
-        /// what survives a change of reference extent.
-        ///
-        /// <para><b>Including that type's two input guards</b>, which a window advertising itself as the
-        /// same window has to carry as well. A NEGATIVE margin would erode INTO the tile
-        /// (<c>min &gt; 0</c>, <c>max &lt; Extent</c>) instead of cutting at its boundary, silently losing
-        /// geometry the tile owns. A NaN one is worse — <c>math.max(0, NaN)</c> is NaN, so it would make an
-        /// all-NaN window against which every vertex tests outside and the whole map slices away to nothing.
-        /// Both degrade to "cut exactly at the tile boundary", which is why NaN is rejected explicitly
-        /// rather than clamped.</para>
+        /// The inclusive clip window in tile units, <c>[−b, Extent + b]²</c>, computed with the same
+        /// arithmetic in the same order as <see cref="TileBufferClip.TryWindow"/>, so the two are bit-equal.
+        /// It carries the same input guards: a negative margin would erode into the tile, and a NaN one would
+        /// make an all-NaN window that drops every vertex, so both degrade to the tile boundary.
         /// </summary>
         public void Window(out double2 min, out double2 max)
         {
@@ -153,12 +97,9 @@ namespace MapRenderer.Core.GeoJson
         }
 
         /// <summary>
-        /// The same window as <see cref="Window"/>, expressed in UNIT-SQUARE terms for a given tile: the
-        /// tile's own corners grown by the buffer margin. Two callers need exactly this box and it must be
-        /// exactly the same box in both — <see cref="GeoJsonTileSlicer.Slice"/>'s per-feature bbox reject,
-        /// which runs before any per-vertex work, and the source-level O(1) emptiness probe that decides
-        /// whether a tile is worth a decode handle at all. A second copy of the arithmetic would let the
-        /// probe reject a tile the slicer would have kept.
+        /// The <see cref="Window"/> in unit-square terms for a tile: its corners grown by the buffer margin.
+        /// <see cref="GeoJsonTileSlicer.Slice"/>'s per-feature bbox reject and the source's O(1) emptiness probe
+        /// share it, so the probe cannot reject a tile the slicer would keep.
         /// </summary>
         public void UnitSquareWindow(TileId tile, out double2 min, out double2 max)
         {
@@ -189,14 +130,11 @@ namespace MapRenderer.Core.GeoJson
 
         internal IReadOnlyList<ProjectedFeature> Features { get; }
 
-        /// <summary>The union of every feature's unit-square bounding box — INVERTED
-        /// (<c>+∞</c>/<c>−∞</c>) for a dataset with no located feature, so an intersection test rejects
-        /// everything with no special case, exactly as the per-feature boxes already do.
-        ///
-        /// <para>Its consumer is the source's O(1) emptiness probe: a tile whose buffered unit-square window
-        /// (<see cref="GeoJsonSliceOptions.UnitSquareWindow"/>) misses this box cannot contain a feature, so
-        /// the source can answer "absent" without slicing. Conservative in the safe direction — an
-        /// intersecting tile may still slice to nothing.</para></summary>
+        /// <summary>The union of every feature's unit-square bounding box; inverted (<c>+∞</c>/<c>−∞</c>)
+        /// for a dataset with no located feature, so an intersection test rejects everything.
+        /// The source's O(1) emptiness probe answers "absent" for a tile whose
+        /// <see cref="GeoJsonSliceOptions.UnitSquareWindow"/> misses it; an intersecting tile may still slice to
+        /// nothing.</summary>
         public double2 BboxMin { get; }
 
         /// <inheritdoc cref="BboxMin"/>
@@ -284,33 +222,15 @@ namespace MapRenderer.Core.GeoJson
     }
 
     /// <summary>
-    /// Cuts a projected GeoJSON dataset into one tile's worth of geometry: bbox reject → affine map into
-    /// tile-local coordinates → clip to the buffered window → quantize.
-    ///
-    /// <para><b>Coordinate space and winding (producer declaration).</b> Output is tile-local
-    /// <c>double2</c> at <see cref="GeoJsonSliceOptions.Extent"/>, origin top-left, Y down, quantized to
-    /// integers. Exterior rings are CW-on-screen (POSITIVE shoelace, standard cross-product sum),
-    /// holes CCW (negative) — the MVT convention
-    /// <c>RingAssemblyJob</c> classifies against, so a GeoJSON tile is indistinguishable
-    /// from an MVT one downstream. Rings are implicitly closed (the first vertex is not repeated). Both
-    /// clippers are orientation-preserving, so output winding equals the winding
-    /// <see cref="GeoJsonParser"/> normalised. The Unity-front reversal for stock Cull Back stays where it
-    /// is, at the mesh-write boundary in <c>StyledFillTileBuilder</c>
-    /// (<c>docs/coordinates-and-projections.md</c>).</para>
-    ///
-    /// <para><b>Lazy, not eager, and stateless.</b> Slicing is a pure function of (dataset, tile, options),
-    /// evaluated per requested tile; memoization belongs to the source that calls it. Eager pyramid slicing
-    /// would mean enumerating up to <c>4^z</c> tiles for a world-spanning dataset — an unbounded loop that
-    /// laziness ELIMINATES rather than caps. Per-slice cost is O(features) via the bbox reject, over a count
-    /// fixed at parse time. There is no spatial index: every slice visits every feature. An index would not
-    /// change this signature.</para>
-    ///
-    /// <para><b>Quantization.</b> Rounding to integers happens AFTER clipping, so that when the extent and
-    /// the rescaled buffer are integral the window edges land on integers and an intersection vertex placed
-    /// exactly on a boundary stays there. Maximum positional error is 0.5 tile units
-    /// (<c>WorldExtent / (extent · 2^z)</c> metres ≈ 0.3 m at extent 4096, z14). Rounding can, in
-    /// pathological cases, collapse a thin ring or introduce a self-touch; the assembler's <c>rLen &lt; 3</c>
-    /// / <c>|area2| &lt; 1</c> filters and earcut's cure → split → drop cascade already handle that.</para>
+    /// Cuts a projected GeoJSON dataset into one tile's geometry: bbox reject → affine map into tile-local
+    /// coordinates → clip to the buffered window → quantize. Output is tile-local <c>double2</c> at
+    /// <see cref="GeoJsonSliceOptions.Extent"/>, origin top-left, Y down; rings are implicitly closed.
+    /// Non-local invariant: exteriors are positive shoelace and holes negative, the MVT convention
+    /// <c>RingAssemblyJob</c> classifies against, because both clippers keep the winding
+    /// <see cref="GeoJsonParser"/> normalised. Slicing is lazy and stateless, O(features) per tile with no
+    /// spatial index; eager pyramid slicing would loop over up to <c>4^z</c> tiles. Rounding runs after
+    /// clipping, so an on-boundary vertex stays on an integer edge (error ≤ 0.5 tile units); the assembler's
+    /// area filters and earcut's cure → split → drop cascade handle a ring that rounding collapses.
     /// </summary>
     public static class GeoJsonTileSlicer
     {
@@ -359,9 +279,8 @@ namespace MapRenderer.Core.GeoJson
             switch (feature.Source.GeometryType)
             {
                 case TileGeometryType.Point:
-                    // A point is in exactly one tile before the margin; with it, up to four. That duplication
-                    // is the point of the margin — it is what lets a symbol near a seam be placed from either
-                    // tile.
+                    // A point is in one tile before the margin and in up to four with it. That duplication lets
+                    // a symbol near a seam be placed from either tile.
                     foreach (List<double2> path in feature.Paths)
                     {
                         if (path.Count == 0) continue;
@@ -387,9 +306,8 @@ namespace MapRenderer.Core.GeoJson
                     break;
 
                 case TileGeometryType.Unknown:
-                    // RFC §3.2's UNLOCATED feature — `"geometry": null`, which GeoJsonParser accepts. It
-                    // carries identity and properties but no geometry, so it contributes to no tile: the
-                    // empty path list is the intended result, not a gap.
+                    // RFC §3.2's unlocated feature (`"geometry": null`) has no geometry, so it contributes
+                    // to no tile; the empty path list is intended.
                     break;
             }
 

@@ -1,7 +1,5 @@
-// Filters/FilterCompilationTests.cs — legacy-vs-expression filter dialect routing, legacy/expression
-// selection equivalence, and per-operator legacy-filter selection. Engine-free: compiled verbatim by both
-// the Unity EditMode runner (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project
-// (Tools/core-tests/). Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Filter dialect routing, legacy/expression selection equivalence, and per-operator legacy selection.
+// Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine or NativeArray reference.
 //
 // Contents:
 //   FilterDialectTests      — IsExpressionFilter's dialect routing, especially the ambiguous overlapping
@@ -609,10 +607,7 @@ namespace MapRenderer.Tests.Filters
         public void NotEqProperty_StringMismatch()
         {
             var result = Select("[\"!=\",\"name\",\"beta\"]");
-            // features with name != "beta"; feature 5 has null name -> null != "beta" -> true... wait.
-            // null == "beta"? No. Eq: null.Equals(string) -> false. So != is true for missing prop.
-            // Let me think: Eq does Value.Equals; Null != String -> false; negate -> true.
-            // So feature 5 passes "!=".
+            // Feature 5 has no name: Null equals no String, so "!=" is true for the missing property.
             Assert.IsTrue(result.Contains(0));
             Assert.IsFalse(result.Contains(1), "feature 1 name=beta should not match !=beta");
         }

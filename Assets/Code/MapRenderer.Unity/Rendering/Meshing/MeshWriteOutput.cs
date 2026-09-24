@@ -7,13 +7,11 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// The write graph's per-layer output — the write-side mirror of <c>FillGraphOutput</c>
-    /// (job-scheduling-design.md). Mesh-neutral: these five fields are exactly what any write
-    /// step returns (<see cref="StyledFillTileBuilder.ScheduleWrite"/> today; a line write step mints its
-    /// own copy rather than this type becoming fill-specific-in-name-only). Returned with <see cref="Handle"/>
-    /// UNCOMPLETED: the caller polls/completes it, then calls <see cref="TakePayload"/> (handle already
-    /// completed by the caller — mirrors <c>FillGraphOutput</c>'s own "never dispose/read while in flight"
-    /// contract) or <see cref="Dispose"/> (which completes first, for the released-mid-flight / teardown path).
+    /// The write graph's per-layer output, the write-side mirror of <c>FillGraphOutput</c>
+    /// (docs/job-scheduling-design.md). Mesh-neutral: these five fields are what any write step returns.
+    /// Non-local invariant: it returns with <see cref="Handle"/> UNCOMPLETED; the caller completes it before
+    /// <see cref="TakePayload"/>, or calls <see cref="Dispose"/>, which completes first (released-mid-flight
+    /// and teardown path).
     /// </summary>
     internal struct MeshWriteOutput
     {

@@ -1,6 +1,5 @@
 // Engine-free (NUnit + Core only) → runs in BOTH the Unity EditMode runner and the fast core-tests project.
-// Locks the first-cut globe visible-tile cover: near-hemisphere cap around the look-at,
-// bounded loop, antimeridian wrap, pole → all columns.
+// Locks the globe visible-tile cover: bounded loop, antimeridian wrap, polar wedge, tilt asymmetry.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -21,9 +20,8 @@ namespace MapRenderer.Tests.Globe
         private static ViewContext View(in CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = new double2(RefH, RefH), Projection = new SphericalProjection() };
 
-        // The universal FrustumTileSelector on the globe path (SphericalProjection ⇒ horizon occlusion). Flat
-        // LOD + ×4 far reproduce the previous single-zoom globe behaviour these tests lock. onScreenTilePx 512 ⇒
-        // offset 0 ⇒ emitted z == IntegerZoom.
+        // FrustumTileSelector on the globe path. Flat LOD + ×4 far give a single-zoom cover, and
+        // onScreenTilePx 512 ⇒ emitted z == IntegerZoom.
         private static FrustumTileSelector Sel(int pad = 1)
             => new FrustumTileSelector(minZoom: 0, maxZoom: 22, onScreenTilePx: 512,
                                        lod: new FlatLodStrategy(), farPolicy: new MultiplierFarPlane(4.0));
@@ -69,9 +67,8 @@ namespace MapRenderer.Tests.Globe
         public void NearPole_CoversAWideLongitudeWedge()
         {
             var buf = new List<TileId>();
-            // Looking near a pole, converging meridians make the frustum footprint span MANY longitude columns
-            // (a wide wedge) and reach the pole-adjacent tile row. Unlike the old cap, the frustum does NOT cover
-            // ALL columns (that was over-cover of the far side) — only the wedge actually in view.
+            // Near a pole, converging meridians make the footprint a wide wedge that reaches the pole row, but
+            // it covers only the columns in view, not ALL columns.
             Sel().SelectVisibleTiles(View(Cam(0, 84.0, 5.0)), buf);
 
             Assert.IsNotEmpty(buf);
@@ -105,9 +102,8 @@ namespace MapRenderer.Tests.Globe
         [Test]
         public void Tilted_CoverExtendsTowardTheView_NotSymmetricCap()
         {
-            // THE globe fix: at 60° tilt looking north, the cover must reach FARTHER north (toward the horizon,
-            // lower tile Y) than south (behind the camera). The old cap was tilt-blind → symmetric, so this
-            // fails for it. Heading 0 tilt 60 at the equator; north = lower Y.
+            // At 60° tilt looking north from the equator, the cover must reach FARTHER north (lower tile Y)
+            // than south; a tilt-blind symmetric cap fails this.
             var cam = new CameraProperties(
                 new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 6, heading: 0, tilt: 60);
             var buf = new List<TileId>();

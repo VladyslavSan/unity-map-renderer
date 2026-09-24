@@ -1,14 +1,10 @@
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// Tiny scheme classifier for map URIs (style docs, TileJSON docs, and tile-URL templates). The
-    /// two loader seams (document loader, tile-source factory) dispatch on these so the offline story is
-    /// explicit: a <c>file://</c> URI is local file IO, never a network call.
-    ///
-    /// <para>The local-path extraction is a <b>textual</b> strip of the <c>file://</c> prefix
-    /// rather than <c>new System.Uri(...).LocalPath</c>: a tile-URL <i>template</i> carries <c>{z}/{x}/{y}</c>
-    /// tokens that are not valid URI characters, so <c>System.Uri</c> parsing is unreliable for them. POSIX
-    /// (macOS/Linux — this project's targets): <c>file:///abs/path</c> → <c>/abs/path</c>.</para>
+    /// Scheme classifier for map URIs (style docs, TileJSON docs, tile-URL templates). The document loader
+    /// and tile-source factory dispatch on it, so a <c>file://</c> URI is local file IO, never a network call.
+    /// <see cref="LocalPath"/> strips the prefix as text, because <c>System.Uri</c> does not reliably parse
+    /// the <c>{z}/{x}/{y}</c> tokens of a template. POSIX: <c>file:///abs/path</c> → <c>/abs/path</c>.
     /// </summary>
     internal static class MapUri
     {

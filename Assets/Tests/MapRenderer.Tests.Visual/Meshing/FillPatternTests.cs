@@ -1,12 +1,5 @@
-// Fill-pattern GPU/visual acceptance tests.
-//
-// The three-way split follows TWO using collisions, not the line cap: `CameraProperties`
-// (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System.Object vs
-// UnityEngine.Object) — both CS0104. Within that constraint each file below groups
-// its dominant fill sub-area.
-// This file: UnityEngine.Rendering importers (or neutral) that use bare Object —
-// dominated by the pattern-fill fixtures, plus the Lit/world/band/translate fixtures
-// that share the same collision profile.
+// Fill-pattern GPU/visual tests. The file split follows two CS0104 collisions (`CameraProperties`, bare
+// `Object`); this file holds the UnityEngine.Rendering (or neutral) importers that use bare Object.
 //
 // Contents:
 //   FillPatternSnapshotTests            — the black-region fix, at the pixel level.
@@ -36,32 +29,19 @@ using MapRenderer.Unity.Rendering.Materials;
 
 namespace MapRenderer.Tests.Visual
 {
-    // Namespace-collision guard: `using Unity.Mathematics;` + bare `int2` is REQUIRED. Inline as
-    // `Unity.Mathematics.int2` the leading `Unity` segment binds to `MapRenderer.Unity` (reachable from this
-    // file's `MapRenderer.Tests.Visual` namespace), not the global `Unity` root — CS0234.
+    // Keep `using Unity.Mathematics;` + bare `int2`: inline, `Unity.Mathematics.int2` binds `Unity` to
+    // `MapRenderer.Unity` (reachable from `MapRenderer.Tests.Visual`), not the global root — CS0234.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillPatternSnapshotTests — the black-region fix
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The black-region fix, at the pixel level.
-    ///
-    /// <para><b>The defect.</b> A <c>fill-pattern</c> layer characteristically declares no
-    /// <c>fill-color</c>, so it inherits the spec default <c>rgba(0,0,0,1)</c>, which
-    /// <c>StyledFillTileBuilder</c> bakes per-feature into the COLOR stream. A renderer that never
-    /// consults the pattern paints those layers solid opaque black — Liberty's
-    /// <c>road_area_pattern</c> plazas and <c>landcover_wetland</c>. See docs/fill-parity-design.md.</para>
-    ///
-    /// <para><b>RED-verify.</b> <see cref="UnresolvedPattern_PaintsNothing"/> fails without the fix:
-    /// <c>_FillPattern</c> was a declared-but-unread uniform, so setting it changed nothing and the black
-    /// vertex colour reached the framebuffer. The assertion is on the BACKGROUND fraction, so a shader that
-    /// ignores the pattern cannot pass it by accident.</para>
-    ///
-    /// <para>These are the engine-side teeth; the resolve arithmetic they depend on is pinned engine-free by
-    /// <c>FillPatternTests</c>.</para>
-    ///
-    /// Camera + background match the sibling fill snapshot fixtures (top-down ortho 512², dark slate).
+    /// The black-region fix, at the pixel level. A <c>fill-pattern</c> layer usually declares no
+    /// <c>fill-color</c>, so it inherits <c>rgba(0,0,0,1)</c>, which <c>StyledFillTileBuilder</c> bakes into the
+    /// COLOR stream; a renderer that ignores the pattern paints the layer solid black (docs/fill-parity-design.md).
+    /// <see cref="UnresolvedPattern_PaintsNothing"/> asserts the BACKGROUND fraction, so a shader that ignores the
+    /// pattern cannot pass it. <c>FillPatternTests</c> pins the resolve arithmetic engine-free.
     /// </summary>
     [TestFixture]
     public class FillPatternSnapshotTests : BaseTestFixture
@@ -125,9 +105,8 @@ namespace MapRenderer.Tests.Visual
             Track(mapGo);
             var (camGo, camera) = BuildCamera();
             Track(camGo);
-            // Baseline: the SAME geometry with no pattern declared. This is the pre-fix rendering, and
-            // it is what proves the geometry is actually on screen — without it, "no black pixels" would
-            // also pass on an empty render.
+            // Baseline: the SAME geometry with no pattern. It proves the geometry is on screen, so "no black
+            // pixels" cannot pass on an empty render.
             mat.SetFloat(FillShaderProps.PropertyId.FillPattern, 0f);
             using var solid = new SnapshotRenderer(SnapW, SnapH);
             solid.Render(camera);
@@ -218,10 +197,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void PatternWithTransparentTexels_ShowsBackgroundThrough()
         {
-            // A fill-pattern sprite is typically an alpha-masked overlay (Liberty's wetland hatch is mostly
-            // transparent), so discarding its alpha renders a solid block instead of a pattern. This failed
-            // before fills declared _SURFACE_TYPE_TRANSPARENT: URP's OutputAlpha() forces alpha to 1 on an
-            // opaque surface, so the mask never reached the blend unit however correct the sampling was.
+            // A pattern sprite is usually an alpha-masked overlay, so discarding its alpha renders a solid block.
+            // An opaque surface fails this: URP's OutputAlpha() forces alpha to 1 without _SURFACE_TYPE_TRANSPARENT.
             var (mapGo, mat)    = FillSceneHelper.BuildFillGo(fillColorExpression: OpaqueBlack);
             Track(mapGo);
             var (camGo, camera) = BuildCamera();
@@ -277,10 +254,8 @@ namespace MapRenderer.Tests.Visual
                 new Vector4((float)pattern.Rect.x, (float)pattern.Rect.y,
                             (float)pattern.Rect.z, (float)pattern.Rect.w));
 
-            // The whole reason late resolve is cheap: the mesh already carries world-unit pattern coordinates
-            // in stream 1, so nothing about the geometry depends on the sprite. If this ever fails, the
-            // "pure material-uniform change" claim in docs/fill-parity-design.md is void and the
-            // resolve path needs a tile rebuild.
+            // Late resolve is cheap because the mesh carries world-unit pattern coordinates in stream 1. If this
+            // fails, docs/fill-parity-design.md's "pure material-uniform change" is void and resolve needs a rebuild.
             Assert.AreSame(before, filter.sharedMesh,
                 "resolving a pattern must not replace the Mesh instance (no re-mesh).");
             Assert.AreEqual(vertsBefore, filter.sharedMesh.vertexCount,
@@ -295,16 +270,9 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Measures what a pattern fill actually puts on screen, for a single tile under a top-down camera.
-    /// Written as a diagnostic while chasing a maintainer-reported pattern artefact — every theory at the
-    /// time was speculation, and this replaced it with a count.
-    ///
-    /// <para>Answers the question the eye conflates with everything else: does the pattern actually TILE, or
-    /// is one sprite stretched across the fill because <c>_PatternScale</c> never reached the shader? That
-    /// distinction is invisible in a description and decides which bug you are looking at.</para>
-    ///
-    /// <para>Uses a sprite whose two halves differ sharply, so counting transitions along a scanline counts
-    /// repetitions directly — no autocorrelation guesswork.</para>
+    /// Measures what a pattern fill puts on screen, for a single tile under a top-down camera: does the pattern
+    /// TILE, or is one sprite stretched across the fill because <c>_PatternScale</c> never reached the shader?
+    /// The sprite's two halves differ sharply, so transitions along a scanline count repetitions directly.
     /// </summary>
     [TestFixture]
     public class FillPatternPeriodDiagnostic : BaseTestFixture
@@ -399,11 +367,8 @@ namespace MapRenderer.Tests.Visual
                       $"redRuns={redRuns} blueRuns={blueRuns} transitions={transitions}  " +
                       $"repeatsAcrossTile={repeatsAcrossTile}");
 
-            // Exact counts are not assertable: the fixture's polygon is not convex, so a scanline crosses
-            // it in several disjoint spans and each break splits a run. What IS assertable is that the
-            // pattern TILES — several alternations of both colours. One run of each would mean the sprite
-            // is stretched across the whole fill (i.e. _PatternScale never reached the shader), and zero
-            // would mean a flat colour (sampling a single texel).
+            // The polygon is not convex, so a scanline crosses it in several spans and exact counts are not
+            // assertable. Several runs of both colours mean it TILES; one means stretched, zero a flat colour.
             Assert.GreaterOrEqual(redRuns, 2,
                 $"the pattern must repeat, not stretch — got {redRuns} red run(s). 1 means _PatternScale " +
                 "is not reaching the shader; 0 means the sample is a flat colour.");
@@ -426,28 +391,19 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Namespace-collision guard: `using Unity.Mathematics;` + bare `int2` is REQUIRED. Inline as
-    // `Unity.Mathematics.int2` the leading `Unity` segment binds to `MapRenderer.Unity` (reachable from this
-    // file's `MapRenderer.Tests.Visual` namespace), not the global `Unity` root — CS0234.
+    // Keep `using Unity.Mathematics;` + bare `int2`: inline, `Unity.Mathematics.int2` binds `Unity` to
+    // `MapRenderer.Unity` (reachable from `MapRenderer.Tests.Visual`), not the global root — CS0234.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillPatternThroughSpriteSheetTests — U4 — a fill-pattern resolved through the REAL SpriteSheet never samples outside its own…
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// U4 — a <c>fill-pattern</c> resolved through the REAL <see cref="SpriteSheet"/> never samples outside
-    /// its own content rect.
-    ///
-    /// <para>This is the gap <c>FillPatternSnapshotTests</c> leaves: that fixture builds its own two-texel
-    /// <c>FilterMode.Point</c> texture and never touches <see cref="SpriteSheet"/>, so nothing there sees the
-    /// padded repack at all. Patterns are the consumer with the most to lose from it — they wrap with
-    /// <c>frac()</c> INSIDE the rect the index reports, so the moment <see cref="SpriteEntry"/>'s rect stops
-    /// meaning "the content" and starts meaning "the padded cell", every tiling seam samples the transparent
-    /// border and the pattern develops holes.</para>
-    ///
-    /// <para>Two failures are therefore watched at once: a texel of the NEIGHBOURING sprite's hue (the
-    /// sampler reached across the cell) and a TRANSPARENT texel (the sampler reached into the border). Both
-    /// are impossible while the rect is the content rect and the pattern is point-sampled inside it.</para>
+    /// A <c>fill-pattern</c> resolved through the REAL <see cref="SpriteSheet"/> never samples outside its own
+    /// content rect; <c>FillPatternSnapshotTests</c> never touches the padded repack. Patterns wrap with
+    /// <c>frac()</c> INSIDE the <see cref="SpriteEntry"/> rect, so a rect meaning "the padded cell" makes every
+    /// tiling seam sample the transparent border. The test watches for a NEIGHBOURING sprite's hue and for a
+    /// TRANSPARENT texel; neither can occur while the rect is the content rect.
     /// </summary>
     [TestFixture]
     public class FillPatternThroughSpriteSheetTests : BaseTestFixture
@@ -591,20 +547,10 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance tests — the Lit material foundation for fills.
-    ///
-    /// Material-foundation tests:
-    ///   Test 1: PBR lighting is active (acceptance #1).
-    ///   Test 2: Restyle with no mesh rebuild (acceptance #2).
-    ///
-    /// Shader teeth (a shallow or stripped shader CANNOT pass these):
-    ///   Test 3: Shader validity — Map/Fill compiles without shader errors.
-    ///   Test 4: Normal map changes shading (tooth #1).
-    ///   Test 5: Base map samples (tooth #2).
-    ///   Test 6: Metallic/smoothness produce specular delta (tooth #3).
-    ///
-    /// Ambient: forced to Flat near-black so the directional term dominates.
-    /// Camera: top-down ortho (512×512, Y=200, orthoSize=70).
+    /// The Lit material foundation for fills: PBR lighting is active, and a restyle needs no mesh rebuild.
+    /// The shader teeth — Map/Fill compiles, and a normal map, a base map and metallic/smoothness each change
+    /// the render — fail on a shallow or stripped shader.
+    /// Ambient is Flat near-black so the directional term dominates. Camera: top-down ortho 512×512.
     /// </summary>
     [TestFixture]
     public class LitFillSnapshotTests : VisualTestFixture
@@ -777,9 +723,8 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_Metallic",   0f);
             mat.SetFloat("_Smoothness", 0.3f);
 
-            // Light aimed at 45° so the normal map creates measurable shading variation.
-            // Use moderate intensity (1.0f) so the flat render doesn't saturate to lum=1.0,
-            // which would prevent meaningful comparison with the normal-map render.
+            // A 45° light makes the normal map vary the shading; intensity 1.0 keeps the flat render from
+            // saturating to lum=1.0, which would hide the difference.
             AddDirectionalLight(mapGo, 1.0f, Quaternion.Euler(45f, 45f, 0f));
 
             using var snapNormal = new SnapshotRenderer(SnapW, SnapH);
@@ -790,7 +735,7 @@ namespace MapRenderer.Tests.Visual
             SnapshotRenderer.WritePngFromRgba32(frameFlat.Pixels, "lit-fill-normal-off.png");
 
             // Create a procedural normal map: alternating bumps to produce measurable shading delta.
-            // A 4×4 texture with alternating left/right normals (in tangent space).
+            // A 16×16 texture with alternating left/right normals (in tangent space).
             var normalTex = Track(CreateProceduralNormalMap(16));
 
             // Render WITH normal map keyword enabled and the procedural texture bound.
@@ -799,10 +744,8 @@ namespace MapRenderer.Tests.Visual
             snapNormal.Render(camera);
             snapNormal.WritePng("lit-fill-normal-on.png");
 
-            // Mean absolute per-pixel difference (A vs B) — the discriminating metric.
-            // A hand-assembled constant-+Y-normal shader gives diff ≈ 0 (both renders identical).
-            // A working normal map with alternating deflections gives diff > 0.
-            // Background pixels cancel in the diff (same slate in both renders).
+            // Mean absolute per-pixel difference: a constant-+Y-normal shader gives ≈ 0, a working normal map
+            // gives > 0. Background pixels cancel, as both renders share the slate.
             double lumFlat = SnapshotCoverage.MeanLuminanceOfNonBackground(frameFlat.Pixels, Bg32);
             double absPixelDiff = MeanAbsDiff(frameFlat.Pixels, snapNormal.Pixels);
 
@@ -1040,29 +983,18 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — the OUTWARD-BAND mechanism probe, answered on rendered pixels.
-    // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: it renders).
-    //
-    // THE MECHANISM. Leave the filled region where it is; grow a ~1 device-px band OUTWARD from the boundary
-    // in the vertex shader and ramp coverage 1 → 0 across it. Interior vertices carry `side = 0`, band outer
-    // vertices carry `side = 1`, and the fragment reuses the line path's outer-edge formula:
+    // Unity EditMode only (it renders, so it is not in Tools/core-tests) — the OUTWARD-BAND mechanism probe.
+    // Interior vertices carry `side = 0`, band outer vertices `side = 1`, and the fragment reuses the line
+    // path's outer-edge formula:
     //
     //     sideGrad = max(length(float2(ddx(side), ddy(side))), 1e-6)
     //     coverage = saturate((1 - |side|) / sideGrad)
     //
-    // P1 — THE QUESTION. Across an interior triangle every vertex carries the SAME `side`, so the interpolated
-    // varying is constant and its screen derivative is exactly 0. Interior coverage therefore rests entirely
-    // on the `1e-6` clamp: `saturate(1 / 1e-6)` must come back as 1.0, on the GPU, after whatever the shader
-    // compiler does to that expression. That is a fragment-stage fact about a real device, not something the
-    // HLSL can be read for, so this fixture renders it. Three arms, because a constant is only interesting
-    // where it stops being one: the interior alone, the interior across its junction with the band (where a
-    // 2x2 derivative quad can straddle two primitives carrying different gradients), and the same under a
-    // grazing tilt where the band's own derivative is largest.
-    //
-    // P3 — the depth question, isolated. Every depth-writing fill pass hardcodes `ZWrite On`, so a band
-    // fragment at coverage 0 writes depth (and casts a shadow) unless the pass clips it. A quad whose every
-    // vertex carries `side = 1` renders coverage 0 everywhere, which is exactly that fragment; putting opaque
-    // geometry behind it and asking whether it survives settles the question without the band existing yet.
+    // Non-obvious why: an interior's `side` is constant, so its derivative is 0 and coverage rests on
+    // `saturate(1 / 1e-6)` returning 1.0 after the GPU's shader compiler — a device fact only a render answers.
+    // P1 checks it face-on, across the band junction (a 2x2 derivative quad can straddle two primitives) and
+    // under a grazing tilt. P3: a coverage-0 fragment in a `ZWrite On` pass writes depth unless the pass clips
+    // it; a quad of `side = 1` isolates that fragment.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillOutwardBandProbeTests — Unity EditMode only
@@ -1216,9 +1148,8 @@ namespace MapRenderer.Tests.Visual
         /// </summary>
         /// <param name="meshes">Geometry to draw, in the order given.</param>
         /// <param name="materials">One material per mesh; disposed with the frame.</param>
-        /// <param name="tiltDegrees">Rotation about X applied to the camera; 0 is face-on. Non-zero
-        /// switches the camera to PERSPECTIVE, because a grazing view under orthographic foreshortens
-        /// uniformly and would not exercise the varying per-pixel derivative the tilt arm is about.</param>
+        /// <param name="tiltDegrees">Camera rotation about X; 0 is face-on. Non-zero is PERSPECTIVE, as orthographic
+        /// foreshortens uniformly and would not vary the per-pixel derivative.</param>
         private static ProbeFrame Render(Mesh[] meshes, Material[] materials, float tiltDegrees)
         {
             var objects = new GameObject[meshes.Length + 1];
@@ -1251,9 +1182,8 @@ namespace MapRenderer.Tests.Visual
             }
             else
             {
-                // Orbit the camera up out of the plane's normal by `tiltDegrees` and aim it back at the
-                // origin, so the quad is seen edge-on-ish: the projected band narrows toward zero px and
-                // |grad side| grows without bound, which is the régime the tilt arm exists to reach.
+                // Orbit by `tiltDegrees` and aim back at the origin: the projected band narrows toward zero px,
+                // so |grad side| grows without bound.
                 camera.orthographic = false;
                 camera.fieldOfView = 40f;
                 float radians = math.radians(tiltDegrees);
@@ -1319,11 +1249,9 @@ namespace MapRenderer.Tests.Visual
         // ── P1: is a constant side = 0 interior stable? ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Face-on, band 20 device px wide so the interior and the ramp are unambiguously separable. The
-        /// interior's <c>side</c> is constant, so its screen derivative is exactly 0 and coverage falls out
-        /// of the <c>1e-6</c> clamp alone. The outer-edge assertion is not decoration: without it a shader
-        /// that returned a constant 1 everywhere would pass the interior half, and the probe would be
-        /// vacuous.
+        /// Face-on, band 20 device px wide so the interior and the ramp separate. The interior's <c>side</c> is
+        /// constant, so its derivative is 0 and coverage comes from the <c>1e-6</c> clamp alone. The outer-edge
+        /// assertion stops a shader that returns a constant 1 from passing the interior half.
         /// </summary>
         [Test]
         public void ConstantSideInterior_ReadsFullCoverage_FaceOn()
@@ -1348,10 +1276,8 @@ namespace MapRenderer.Tests.Visual
                 "derivative there is exactly 0, so this is the 1e-6 clamp failing to saturate — the " +
                 "outward-band mechanism needs a different interior encoding.");
 
-            // …and the ramp must actually exist, or the interior verdict above is vacuous. This tooth is
-            // NOT "coverage is 0 beyond the geometry": that holds trivially when nothing is drawn there and
-            // would pass a shader returning 1 for every fragment it does run. A pixel strictly between 0
-            // and 1 can only come from a working ramp.
+            // The ramp must exist, or the interior verdict is vacuous. "Coverage 0 beyond the geometry" passes a
+            // shader that returns 1 everywhere; only a working ramp gives a pixel strictly between 0 and 1.
             double graded = 0.0;
             int gradedRow = -1;
             var ramp = new System.Text.StringBuilder("P1 face-on: rows across the band's outer edge → ");
@@ -1370,12 +1296,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// The junction case. A 2x2 derivative quad straddling the interior/band boundary contains fragments
-        /// of two primitives with different <c>side</c> gradients — zero on one side, <c>1/bandPx</c> on the
-        /// other. Scans outward across it at a one-device-pixel band, the shipped sizing, and requires
-        /// coverage to stay saturated right up to the styled edge and then fall inside about a pixel. A dip
-        /// at the junction is the failure mode this arm exists to catch; it would render as a dark hairline
-        /// inset from every polygon boundary.
+        /// The junction case: a 2x2 derivative quad straddling the interior/band boundary holds fragments of two
+        /// primitives with <c>side</c> gradients 0 and <c>1/bandPx</c>. At the shipped one-pixel band, coverage
+        /// must stay saturated up to the styled edge. A dip there renders as a dark hairline inset from every
+        /// polygon boundary.
         /// </summary>
         [Test]
         public void ConstantSideInterior_HoldsAcrossTheBandJunction()
@@ -1438,13 +1362,10 @@ namespace MapRenderer.Tests.Visual
         // ── P3: does a coverage-0 fragment in a ZWrite-On pass occlude what is behind it? ───────────────
 
         /// <summary>
-        /// The fill's ShadowCaster / GBuffer / DepthOnly / DepthNormals passes hardcode <c>ZWrite On</c> and
-        /// take no coverage input. A band fragment at coverage 0 is fully transparent but is still a
-        /// fragment, so it writes depth unless the pass clips. Isolated here with a constant
-        /// <c>side = 1</c> quad — coverage 0 across its whole face — drawn in front of an opaque red quad
-        /// queued behind it. Both arms are rendered: <c>ZWrite On</c> is the fill's depth passes, and
-        /// <c>ZWrite Off</c> is the control that proves the arms differ for the reason claimed and not
-        /// because the red quad was never visible.
+        /// The fill's ShadowCaster / GBuffer / DepthOnly / DepthNormals passes hardcode <c>ZWrite On</c>, so a
+        /// coverage-0 band fragment writes depth unless the pass clips. A constant <c>side = 1</c> quad (coverage
+        /// 0 everywhere) sits in front of an opaque red quad. <c>ZWrite On</c> models the fill's depth passes;
+        /// <c>ZWrite Off</c> is the control that proves the red quad is visible at all.
         /// </summary>
         [Test]
         public void ZeroCoverageFragment_WritesDepth_AndHidesGeometryBehindIt()
@@ -1487,14 +1408,9 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// The outward band puts a polygon's ramp OVER its neighbour's interior wherever two polygons of one
-        /// layer abut — which, at the shipped <c>FillTileBufferClip: 0</c>, is every tile seam. Whether that
-        /// costs anything at <c>fill-opacity &lt; 1</c> depends on a fact about the pipeline, not about the
-        /// band: do two fragments of the SAME layer, same mesh, same draw, blend twice at one pixel, or does
-        /// depth state reject the second?
-        ///
-        /// <para>Two overlapping polygons in one layer answer it directly and need no shader. This measures
-        /// the composited alpha — the quantity a rim is made of, not the background's surviving
-        /// weight.</para>
+        /// layer abut, which at the shipped <c>FillTileBufferClip: 0</c> is every tile seam. Do two fragments of
+        /// the SAME layer and draw blend twice at one pixel, or does depth state reject the second? Two
+        /// overlapping polygons answer it with no probe shader, measuring the composited alpha a rim is made of.
         /// </summary>
         [Test]
         public void OverlappingPolygonsInOneLayer_ReportsWhetherTheyCompositeTwice()
@@ -1555,17 +1471,10 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeFillBandRenderTests.cs — the boundary band, observed in rendered pixels on the CURVED arm.
-    //
-    // The shipped Liberty scene is a globe scene, so the flat arm's rendered teeth say nothing about the
-    // configuration the feature was built for. This renders the same globe twice — band on, band off — and
-    // measures the difference between the two frames rather than modelling absolute colours, which a lit
-    // sphere makes unmodellable.
-    //
-    // CULL BACK IS LOAD-BEARING HERE, not scene dressing. Earcut normalises every outer ring's winding before
-    // triangulating, so a band that inherited its ring's own sign is counter-wound against the interior and
-    // back-face culled: the fill renders EXACTLY as before, with correct geometry in the mesh and every
-    // job-level tooth green. That defect is invisible under the _Cull Off default and visible here.
+    // GlobeFillBandRenderTests — the boundary band, observed in rendered pixels on the CURVED arm, which the
+    // shipped scene uses. It compares band-on and band-off frames, as a lit sphere defies absolute colours.
+    // Non-obvious why: Cull Back is load-bearing. Earcut normalises outer-ring winding, so a band that kept
+    // its ring's sign is counter-wound and culled, which only this fixture sees: the _Cull default is Off.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GlobeFillBandRenderTests — The fill boundary band
@@ -1645,13 +1554,8 @@ namespace MapRenderer.Tests.Visual
             Color32[] raw = snap.Pixels.Pixels;
             if (superSample == 1) return new Frame((Color32[])raw.Clone(), SnapPx, SnapPx);
 
-            // Box-downsample: a pixel that any sub-sample covered carries ink. This is what a hard
-            // rasterizer WOULD have drawn if it could see sub-pixel geometry.
-            //
-            // MEASURED, so nobody re-opens it: reducing by MAX deviation from the clear colour instead —
-            // strictly more faithful to "was any sub-sample covered", since a 1/64-covered pixel averages
-            // down to a single LSB against a half-LSB threshold — produces the IDENTICAL offender count
-            // on both poses. The residual this tooth reports is therefore not an artefact of averaging.
+            // Box-downsample: a pixel any sub-sample covered carries ink. Non-obvious why: a MAX-deviation
+            // reduction gives the identical offender count on both poses, so the residual is not an averaging artefact.
             int wide = SnapPx * superSample;
             var small = new Color32[SnapPx * SnapPx];
             for (int y = 0; y < SnapPx; y++)
@@ -1684,112 +1588,39 @@ namespace MapRenderer.Tests.Visual
         // ── The band reaches the globe, and grows outward by one pixel ─────────────────────────────────
 
         /// <summary>
-        /// Rendered band-on against band-off on the same globe:
-        /// <list type="bullet">
-        /// <item>background pixels GAIN ink, and there are some — the band renders at all, un-culled;</item>
-        /// <item>no pixel LOSES ink to background — nothing was displaced inward or removed;</item>
-        /// <item>every gained pixel sits within <see cref="FillBandJob.MiterLimit"/> + 1 px of geometry the
-        /// 8× reference shows — a rim, not a geometry shift.</item>
-        /// </list>
+        /// Rendered band-on against band-off on the same globe: background pixels GAIN ink (the band renders,
+        /// un-culled), no pixel LOSES ink (nothing moved inward), and every gained pixel lies within
+        /// <see cref="FillBandJob.MiterLimit"/> + 1 px of geometry in the 8× supersampled band-free frame.
         ///
-        /// <para><b>The reach bound is DERIVED, and so is the oracle.</b> Both were wrong in an earlier form
-        /// of this tooth, which asserted 2 px against the band-free frame and failed on 481 correct pixels.
-        /// <list type="number">
-        /// <item><b>Why <see cref="FillBandJob.MiterLimit"/> + 1, not 1.</b> The band is one device pixel
-        /// measured PERPENDICULAR to an edge, and the join factor rides in the band vector's magnitude
-        /// to hold that through a corner — so at a sharp coastline spike the outer vertex sits up
-        /// to <c>MiterLimit</c> px along the bisector, by the same design
-        /// <c>FillBandJob</c>'s <c>AMiterKeepsThePerpendicularWidthThroughARightAngle</c> asserts. A bound
-        /// below that contradicts a tooth of this same feature. The <c>+ 1</c> is the rasterised pixel the
-        /// outermost vertex lands in; nothing else is added, and the number is never widened to clear a
-        /// count.</item>
-        /// <item><b>Why the 8× reference and not the band-free frame.</b> An island or peninsula narrower
-        /// than a pixel renders as NOTHING at 1×, so the band-free frame is missing exactly the geometry the
-        /// band is correctly antialiasing: 66 such pixels had no 1× ink within 16 px in any direction while
-        /// sitting right on top of real coastline. <b>It does not close the gap entirely</b> — 45 pixels here
-        /// and 78 pole-on remain, whose banded ink is a HAIRLINE (median 2-4 ink px in a 5×5, most with no
-        /// offender neighbour), i.e. features too thin for even 8× to sample. Reducing by max coverage
-        /// instead of mean leaves the same counts, so it is not an averaging artefact. The exact oracle is
-        /// the mesh, not pixels — project the band quads' ring segments and test distance to the SEGMENT.
-        /// <b>Attempted and withdrawn, so the next attempt starts informed:</b> collecting ring edges as
-        /// "every edge of a band triangle whose two endpoints both carry side 0" measured far WORSE (2231
-        /// here, 3585 pole-on). Its mask traced front-facing coastline near the disk centre and back-side
-        /// geometry showing through, but was empty along front-facing coastline AT THE LIMB — where the
-        /// offenders are — so the collection, not the idea, is what is incomplete. Two traps already paid
-        /// for: <c>Camera.WorldToScreenPoint</c> projects to the camera's pixel rect, which
-        /// <c>SnapshotRenderer</c> has not yet set to <see cref="SnapPx"/> at that point (use the
-        /// clip-space route), and no flip of the mask improves the fit, so alignment is not the fault.</item>
-        /// </list>
-        /// Together they make this a bound on DISPLACEMENT rather than on antialiasing quality: band ink can
-        /// only ever appear within a miter of the ring segment it is anchored to, so a displacement that is
-        /// not the size it claims lands outside it.</para>
+        /// <para>Non-obvious why: the reach is <c>MiterLimit</c> + 1, not 1, because the band stays one pixel
+        /// wide PERPENDICULAR to the edge, so at a sharp spike its outer vertex sits up to <c>MiterLimit</c> px
+        /// along the bisector (<c>FillBandJobTests.AMiterKeepsThePerpendicularWidthThroughARightAngle</c>); the
+        /// + 1 is the pixel that vertex lands in. The oracle is the 8× frame because an island narrower than a pixel
+        /// renders as nothing at 1× while its band is correctly drawn.</para>
         ///
-        /// <para><b>The bound is a COUNT, not zero, and the count is the oracle's blind spot — not the
-        /// band's error.</b> Three numbers, three roles: <b>measured</b> 45 here and 78 pole-on on this
-        /// machine; <b>asserted</b> 60 and 100, the measurement plus slack, because these are rendered
-        /// counts and a different GPU or driver may rasterise a hairline differently — an exact pin on a
-        /// GPU-dependent quantity is a flake, not a tighter tooth; <b>RED</b> at 290 and 351, where a x2
-        /// displacement lands. The slack spends under a tenth of the distance to the RED, which still fails
-        /// by 4.8x oblique and 3.5x pole-on. The surviving pixels are hairlines:
-        /// median 2-4 ink px in a 5×5 neighbourhood, most with no offender neighbour at all. They exist
-        /// because a band quad is emitted per ring edge regardless of how thin the feature is, so a coastline
-        /// sliver too thin for even 8× supersampling to sample renders as nothing in the reference while its
-        /// band is drawn at full width. Nothing is taken away — <c>lost = 0</c> throughout.
-        /// What the bound cannot discriminate is sub-pixel geometry, which is a property of the oracle and
-        /// is written down here rather than left as an unexplained residual.</para>
+        /// <para>Limitation: features too thin even for 8× leave hairline offenders, so the bound is a COUNT,
+        /// not zero — measured 45 oblique and 78 pole-on, asserted 60 and 100 as GPU slack, against 290 and 351
+        /// for a ×2 displacement. An exact oracle would test distance to the band's ring SEGMENTS; a mask of
+        /// band-triangle edges with both ends at side 0 missed the limb. Project through clip space, not
+        /// <c>Camera.WorldToScreenPoint</c>: <c>SnapshotRenderer</c> sets the pixel rect only later.</para>
         ///
-        /// <para><b>Two behaviours this passes, because they are the contract.</b> A band vertex
-        /// up to <see cref="FillBandJob.MiterLimit"/> px out at a sharp corner, with the perpendicular width
-        /// still one pixel — that is what the miter is FOR. And band ink over a feature the hard rasterizer
-        /// dropped entirely: an island narrower than a pixel renders as nothing band-free and is painted
-        /// band-on, which is antialiasing doing its job, not a leak (<c>lost = 0</c> proves nothing was taken
-        /// away). Neither is a defect to suppress; suppressing either would change what the feature
-        /// promises.</para>
-        ///
-        /// <para><b>No interior-purity assertion here.</b> The fixture is the countries layer,
-        /// whose polygons share internal edges, and a band along an intra-layer shared edge composites over
-        /// its neighbour's interior BY DESIGN — the residual rim the mechanism accepts. An interior-purity
-        /// check over this fixture would therefore red on correct behaviour. What covers that claim instead:
-        /// <c>FillBoundaryBandRenderTests.ASquareFillHasGradedBoundaryPixels_AndAnUngradedInterior</c> on a
-        /// single polygon, and — on this arm specifically —
-        /// <c>GlobeFillBandTests.ABandQuadSplitsTheSharedEdgeExactlyWhereTheInteriorDoes</c>, which asserts
-        /// every interior vertex still carries <c>side = 0</c> and a bit-identical position after
-        /// subdivision.</para>
-        ///
-        /// <para>RED-verify: ① suppress the band on both arms and the gain count falls to 0; ② counter-wind
-        /// the band quads (drop <c>FillBandJob</c>'s reversal for a positively-wound ring) and Cull Back
-        /// removes them, so the gain count falls to 0 again; ③ amplify the shader displacement <b>×2</b> and
-        /// the REACH assertion reds — 45 offenders become 290 here and 78 become 351 pole-on.
-        /// <b>×2, not ×20, and the difference is not cosmetic.</b> At ×20 the band adds 132 984 px against
-        /// 56 091 px of fill, so the ink-volume guard above fires FIRST and the reach assertion is never
-        /// evaluated: ×20 reds this test while proving nothing about the bound it is here to verify. A ×2
-        /// band stays under that guard (11 889 &lt; 14 022) and is caught by reach alone, which also shows
-        /// the bound discriminates a mere DOUBLING, not only a gross displacement.</para>
+        /// <para>No interior-purity check: countries share internal edges, where the band overlaps the
+        /// neighbour's interior by design. Covered instead by
+        /// <c>FillBoundaryBandRenderTests.ASquareFillHasGradedBoundaryPixels_AndAnUngradedInterior</c> and
+        /// <c>GlobeFillBandTests.ABandQuadSplitsTheSharedEdgeExactlyWhereTheInteriorDoes</c>. The reach RED
+        /// case is ×2: ×20 trips the ink-volume guard (<c>gained &lt; ink / 4</c>) before reach runs.</para>
         /// </summary>
         [Test]
         public void TheGlobeFillsSilhouetteGainsInkOutward_WithinTheMiterLimit()
             => AssertTheBandGrowsOutwardWithinAMiter(ObliquePose, "oblique", oracleBlindPixels: 60);
 
         /// <summary>
-        /// The same contract straight down the polar axis, which is the pose that actually exercises the
-        /// grazing-incidence hazard, if anything does. Pole-on, the equator IS the silhouette,
-        /// so equatorial coastline runs ALONG the limb and its outward band direction points down the view
-        /// ray — the geometry that drives <c>MapPixelsToWorld</c>'s probe span to zero, where its
-        /// <c>max(refPx, 0.1)</c> clamp stops the scale exploding but cannot stop a finite step along a
-        /// tangent that is edge-on. <see cref="ObliquePose"/> approaches that regime and never enters it:
-        /// with the guard disabled entirely it renders pixel-for-pixel the same frame.
-        ///
-        /// <para><b>This pose is the evidence that the regime is not reached.</b> A grazing-incidence
-        /// suppression guard lived in <c>Fill_VertexModify.hlsl</c> and was deleted after measurement:
-        /// disabling it entirely left BOTH poses pixel-for-pixel identical on every field, here included, so
-        /// nothing it could have suppressed was ever drawn. The arithmetic behind the hazard is real and is
-        /// real; its manifestation was not reachable from any camera tried, and this is the
-        /// pose that tried hardest. A guard nobody can trigger is superstition, and the difference is a pose
-        /// where removing it changes the picture — there is none.</para>
-        ///
-        /// <para>RED-verify: as the oblique case, and additionally this pose renders 64% more ink
-        /// (92 086 px against 56 091), so a displacement defect has more boundary to show up on, not
-        /// less.</para>
+        /// The same contract straight down the polar axis. Pole-on the equator IS the silhouette, so coastline
+        /// runs along the limb with its band direction down the view ray, driving <c>MapPixelsToWorld</c>'s
+        /// probe span to zero; its <c>max(refPx, 0.1)</c> clamp bounds the scale but not a finite step along an
+        /// edge-on tangent. It also renders more ink than the oblique pose, so a displacement has more boundary.
+        /// Limitation: no camera tried reaches that hazard. A grazing-incidence guard in
+        /// <c>Fill_VertexModify.hlsl</c> would change neither frame, so the shader has none.
         /// </summary>
         [Test]
         public void PoleOn_WhereTheLimbCarriesFillBoundary_TheBandIsStillBoundedByAMiter()
@@ -1799,9 +1630,8 @@ namespace MapRenderer.Tests.Visual
         /// </summary>
         /// <param name="pose">Camera position and up vector.</param>
         /// <param name="poseName">Short label for the reported measurements.</param>
-        /// <param name="oracleBlindPixels">Offenders the 8× oracle cannot explain — a limitation of the
-        /// ORACLE, not of the band. Measurement plus slack, because the count is GPU-dependent; see this
-        /// file's <c>TheGlobeFillsSilhouetteGainsInkOutward</c> doc for all three numbers.</param>
+        /// <param name="oracleBlindPixels">Offenders the 8× oracle cannot explain: measurement plus GPU slack, see
+        /// <c>TheGlobeFillsSilhouetteGainsInkOutward_WithinTheMiterLimit</c>.</param>
         private static void AssertTheBandGrowsOutwardWithinAMiter(
             (Vector3 Position, Vector3 Up) pose, string poseName, int oracleBlindPixels)
         {
@@ -1846,14 +1676,10 @@ namespace MapRenderer.Tests.Visual
                 $"the band added {gained} px against {ink} px of fill — far too many for a one-pixel rim " +
                 "around the silhouettes. That is a geometry shift, not antialiasing.");
 
-            // Reach: every gained pixel must sit within a miter of geometry that is really there. The bound
-            // is DERIVED from the production miter ceiling, not chosen — see this test's doc. The failure
-            // carries each offender's separation AND its radius from the frame centre, because the globe's
-            // limb sits at a known radius and "is this the limb?" is the first question a red here raises.
-            // The oracle for "is there geometry here" is the band-free build SUPERSAMPLED 8× and
-            // box-downsampled — see this test's doc for why the 1× frame cannot serve. ANY deviation from
-            // the background counts here, not the 3-LSB colour tolerance, because a sub-pixel sliver is
-            // exactly what this reference exists to find.
+            // Reach: every gained pixel sits within a miter of geometry in the band-free build SUPERSAMPLED 8×.
+            // Non-obvious why: ANY deviation from background counts here, not the 3-LSB tolerance, because a
+            // sub-pixel sliver is what this reference exists to find. A failure reports each offender's
+            // separation and its radius, since the limb sits at a known radius.
             Frame superHard = RenderGlobe(pose, suppressBand: true, superSample: 8);
             const double faintest = 0.5 / 255.0;
             var hasGeometry = new bool[n];
@@ -1925,31 +1751,10 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Headless visual snapshot tests: render the world-fill map to an off-screen
-    /// <c>RenderTexture</c>, write PNGs to <c>Logs/snapshots/</c>, and run a tolerant
-    /// coverage assertion.
-    ///
-    /// Why off-screen: <c>Camera.Render()</c> with <c>camera.targetTexture</c> set renders to the RT,
-    /// NOT to the screen/framebuffer. This works in batchmode without a display (subject to the GPU
-    /// context being available — see the all-black guard below).
-    ///
-    /// Acceptance criteria:
-    ///   - PNGs are written under <c>Logs/snapshots/</c>.
-    ///   - The world-fill render passes the tolerant coverage assertion.
-    ///   - The blank-render control FAILS the coverage assertion (gate has teeth).
-    ///   - Written PNGs are human/agent-readable artefacts (no in-tree golden baselines needed).
-    ///
-    /// GPU-context guard:
-    ///   If BOTH the world-fill render AND the blank-control render come back all-black, this
-    ///   indicates EditMode batchmode could not obtain a GPU context. The test marks itself
-    ///   <c>Inconclusive</c> (not a failure) and directs the runner to re-run as PlayMode
-    ///   (<c>./Tools/run-tests.sh PlayMode</c>).
-    ///
-    /// Background colour: a distinctive dark slate (not black) so all-black reads back as "no GPU"
-    /// rather than "background only", which is critical to the guard logic.
-    ///
-    /// Camera setup: mirrors <c>MapTestScene.cs</c> exactly — top-down ortho, solid-colour clear,
-    /// camera at Y=200 looking straight down, orthographicSize=70.
+    /// Headless snapshot tests: render the world-fill map to an off-screen <c>RenderTexture</c> (so batchmode
+    /// needs no display), write PNGs to <c>Logs/snapshots/</c> as readable artefacts with no golden baselines,
+    /// and run a tolerant coverage assertion. The blank-render control must FAIL that assertion, so the gate
+    /// has teeth. The background is dark slate, not black, so an all-black frame reads as "no GPU context".
     /// </summary>
     [TestFixture]
     public class WorldFillSnapshotTests : BaseTestFixture
@@ -2061,15 +1866,15 @@ namespace MapRenderer.Tests.Visual
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// Builds a camera GameObject configured to mirror <c>MapTestScene.cs</c>:
-        /// top-down orthographic, solid-colour clear with the dark-slate background.
+        /// Builds a camera GameObject: top-down orthographic, solid-colour clear with the dark-slate
+        /// background.
         /// </summary>
         private static (GameObject go, Camera camera) BuildCamera()
         {
             var go     = new GameObject("SnapshotCamera");
             var camera = go.AddComponent<Camera>();
 
-            // Top-down orthographic — exactly as in MapTestScene.
+            // Top-down orthographic.
             camera.transform.position = new Vector3(0f, 200f, 0f);
             camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             camera.orthographic       = true;
@@ -2119,28 +1924,11 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <c>fill-translate</c> as a real SCREEN-PIXEL offset, and <c>fill-translate-anchor</c>
-    /// as a real branch.
-    ///
-    /// <para><b>What was wrong.</b> <c>Fill_VertexModify</c> applied <c>_FillTranslate.xy</c> as world units
-    /// while its own comment claimed "px→world applied CPU-side" — and nothing applied it. So
-    /// <c>fill-translate: [16, -8]</c> displaced geometry by 16 world METRES, at every zoom. The sign was
-    /// also inverted against the spec ("negatives indicate left and up" ⇒ +y is DOWN, i.e. south on a
-    /// north-up map), and <c>fill-translate-anchor</c> had no effect at all.</para>
-    ///
-    /// <para><b>The discriminating tooth is zoom-invariance</b>
-    /// (<see cref="Translate_DisplacesTheSameScreenDistance_AtDifferentZooms"/>): a screen-pixel offset moves
-    /// the geometry by the same number of PIXELS regardless of camera scale, whereas a world-unit offset
-    /// moves it by half as many pixels when the view covers twice the world. No parse test can catch that,
-    /// and a world-unit shader cannot pass it.</para>
-    ///
-    /// Camera + background match the sibling fill snapshot fixtures (top-down ortho 512², dark slate).
-    ///
-    /// <para><b>Raster orientation.</b> <see cref="SnapshotRenderer.Pixels"/> is BOTTOM-left origin (row 0
-    /// is the bottom scanline; row index grows UPWARD on screen) — Unity's native ReadPixels convention. The
-    /// camera looks down −Y with up = +Z, so NORTH is the TOP of the image = HIGH row index, and SOUTH is
-    /// LOW row index. Getting this backwards is what made the first version of the sign test look like a
-    /// shader bug when the shader was correct.</para>
+    /// <c>fill-translate</c> as a real SCREEN-PIXEL offset, with the spec's sign ("negatives indicate left and
+    /// up", so +y is south on a north-up map), and <c>fill-translate-anchor</c> as a real branch.
+    /// <see cref="Translate_DisplacesTheSameScreenDistance_AtDifferentZooms"/> discriminates: a world-unit
+    /// offset moves half as many pixels when the view covers twice the world. Non-obvious why:
+    /// <see cref="SnapshotRenderer.Pixels"/> has a BOTTOM-left origin, so NORTH (the image top) is a HIGH row.
     /// </summary>
     [TestFixture]
     public class FillTranslateSnapshotTests
@@ -2173,14 +1961,10 @@ namespace MapRenderer.Tests.Visual
             return (go, camera);
         }
 
-        /// <summary>Centroid (column, row) of the non-background pixels. Column grows RIGHT; row grows UP
-        /// (bottom-left origin — see the fixture summary). Returns false when nothing rendered.
-        ///
-        /// <para><paramref name="touchesBorder"/> is the load-bearing output. A centroid only tracks a rigid
-        /// translation while the whole shape is INSIDE the frame — if the fill is clipped at an edge, moving
-        /// it just trades pixels across that edge and the centroid barely shifts. That silently turned the
-        /// first version of these tests into a no-op (a 40 px translate measured as 4.8 px), so every caller
-        /// asserts on this rather than trusting the camera framing.</para></summary>
+        /// <summary>Centroid (column, row) of the non-background pixels; column grows RIGHT, row grows UP.
+        /// Returns false when nothing rendered. <paramref name="touchesBorder"/> is load-bearing: a centroid
+        /// tracks a rigid translation only while the shape is INSIDE the frame, as a clipped fill trades pixels
+        /// across the edge and barely moves. Every caller asserts it rather than trusting the framing.</summary>
         private static bool TryCentroid(Frame frame, out Vector2 centroid, out bool touchesBorder)
         {
             double sumX = 0, sumY = 0;
@@ -2232,9 +2016,8 @@ namespace MapRenderer.Tests.Visual
         {
             const float translatePx = 40f;
 
-            // FillSceneHelper fits the mesh into 100 world units, so orthographicSize must exceed ~50 for the
-            // whole fill to stay in frame (see TryCentroid's border guard). 70 and 140 both contain it with
-            // margin and differ by exactly 2× in world-units-per-pixel.
+            // The mesh spans 100 world units, so orthographicSize must exceed ~50 to keep the fill in frame
+            // (TryCentroid's border guard); NearOrtho and FarOrtho both do.
             Vector2 nearBase  = CentroidWithTranslate(NearOrtho, Vector2.zero,                0f, 0f, "fill-translate-near-base.png");
             Vector2 nearMoved = CentroidWithTranslate(NearOrtho, new Vector2(translatePx, 0), 0f, 0f, "fill-translate-near-moved.png");
             Vector2 farBase   = CentroidWithTranslate(FarOrtho,  Vector2.zero,                0f, 0f, "fill-translate-far-base.png");

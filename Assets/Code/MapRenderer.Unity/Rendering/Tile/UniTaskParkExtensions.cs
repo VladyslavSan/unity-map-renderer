@@ -33,10 +33,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             var done = new ManualResetEventSlim(false, spinCount: 0); // spinCount:0 -> park immediately, no spin
             awaiter.UnsafeOnCompleted(done.Set);
             bool ok = done.Wait(timeoutMs);
-            // Dispose ONLY on success: on timeout the continuation is still registered and will call
-            // done.Set() later. Set() on a disposed event throws an unobserved ObjectDisposedException on a
-            // ThreadPool thread, which can crash the batch run. Leak on timeout; the finalizer reclaims it,
-            // and a timeout already fails the caller.
+            // Dispose only on success: after a timeout the continuation still calls done.Set(), which throws
+            // on a disposed event on a ThreadPool thread. On timeout the finalizer reclaims the event.
             if (ok) done.Dispose();
             return ok;
         }

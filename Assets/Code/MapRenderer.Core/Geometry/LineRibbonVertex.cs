@@ -3,13 +3,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Per-vertex output of the 3D ribbon builder (<c>RibbonJob</c>). The centerline is projected FIRST, so every
-    /// field is final render-space data: no downstream reconstruction, tangent frame, or winding flip.
-    /// <see cref="Across"/> is <c>normalize(cross(along, up))</c> from the SAME <c>up</c> the centerline was
-    /// projected with, so the ribbon front-faces outward for every projection (<c>GlobeLineWindingTests</c>).
-    /// <para>Line mesh streams (<c>StyledLineTileBuilder</c>): 0 = Position + <see cref="Up"/> (Normal);
-    /// 1 = <see cref="Across"/> (TexCoord0); 2 = (<see cref="Side"/>, <see cref="DistanceAlong"/>);
-    /// 3 = color + <see cref="WidthScale"/>.</para>
+    /// Per-vertex output of the 3D ribbon builder (<c>RibbonJob</c>): final render-space data, because the
+    /// centerline is projected first. <see cref="Across"/> is <c>normalize(cross(along, up))</c> from the same
+    /// <c>up</c>, so the ribbon front-faces outward for every projection (<c>GlobeLineWindingTests</c>). Mesh
+    /// streams: 0 = Position + <see cref="Up"/>; 1 = <see cref="Across"/>; 2 = (<see cref="Side"/>,
+    /// <see cref="DistanceAlong"/>); 3 = color + <see cref="WidthScale"/>.
     /// </summary>
     public struct LineRibbonVertex
     {

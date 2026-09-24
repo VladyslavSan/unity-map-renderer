@@ -9,19 +9,9 @@ namespace MapRenderer.Tests.TestSupport
     /// <summary>
     /// Reads a committed <c>.pbf</c> fixture's <b>per-feature MVT geometry command streams</b> straight out of
     /// the bytes, independently of production's decoder.
-    ///
-    /// <para><b>Why this exists.</b> The differential oracles
-    /// (<c>StyledLineBufferParityTests</c>, <c>SymbolBufferParityTests</c>, <c>JobifiedPipelineTests</c>'
-    /// decode parity, <c>LineRibbonJobTests</c>' fixture sweep) reached the command words through
-    /// <c>MvtFeature.Geometry</c> and ran <see cref="MvtGeometry.Decode"/> over them. That field is gone —
-    /// geometry belongs to the layer now, and the words are consumed and dropped inside
-    /// <c>MvtDecoder.Decode</c>. Reading the buffer those same oracles are checking would <b>disarm</b> them
-    /// (arm A and arm B would become the same measurement), so arm A gets its own reader.</para>
-    ///
-    /// <para>That is a strict improvement, not a workaround: the oracle shares NO code with the decoder it
-    /// audits. It reads only layer name, extent, per-feature geometry type and geometry field, skipping
-    /// everything else, and it reuses only <see cref="ProtobufReader"/>, the generic varint primitive that
-    /// the glyph decoder also uses and that is not MVT-specific.</para>
+    /// Non-obvious why: <c>MvtDecoder.Decode</c> consumes and drops the command words, and reading the buffer
+    /// the differential oracles check would make arm A and arm B the same measurement. So arm A shares no code
+    /// with the decoder it audits; it reuses only the generic varint primitive <see cref="ProtobufReader"/>.
     /// </summary>
     public static class MvtFixtureStreams
     {

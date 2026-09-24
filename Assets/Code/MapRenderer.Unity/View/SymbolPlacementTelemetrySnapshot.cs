@@ -5,12 +5,10 @@ namespace MapRenderer.Unity.View
 {
     /// <summary>
     /// A snapshot of the symbol PLACEMENT pass — what the last Tick projected, culled, collided and drew.
-    /// Produced and published by <c>SymbolPlacementSystem</c>, which owns every number in it. Its sibling,
-    /// <see cref="SymbolStoreTelemetrySnapshot"/> (what the store is holding), is a separate snapshot
-    /// because it has a separate owner and publishes when its own pass finishes, not at one shared frame
-    /// instant (<c>docs/telemetry-design.md</c>). Every field is an instantaneous LEVEL at the instant of
-    /// capture, never a rate — a plain <c>init</c>-only, engine-free carrier so it compiles in the fast
-    /// core-tests project and the Unity runner alike.
+    /// Produced and published by <c>SymbolPlacementSystem</c>, which owns every number in it. Its sibling
+    /// <see cref="SymbolStoreTelemetrySnapshot"/> has a separate owner and publish instant, so it is a separate
+    /// snapshot (<c>docs/telemetry-design.md</c>). Every field is a LEVEL at capture, never a rate; the carrier
+    /// is engine-free, so it compiles in the core-tests project too.
     /// </summary>
     public readonly struct SymbolPlacementTelemetrySnapshot
     {
@@ -27,11 +25,9 @@ namespace MapRenderer.Unity.View
         public int HorizonCulledSymbols { get; init; }
 
         /// <summary>Symbols skipped on the last Tick because their style layer is out of the LIVE camera zoom's
-        /// <c>[minzoom, maxzoom)</c> — the display-time layer gate, evaluated per-frame and moved AHEAD of
-        /// projection so an out-of-zoom symbol (e.g. a z14 tile's <c>poi_r*</c> points before the camera reaches
-        /// their minzoom) is never projected/staged/collided. A record still fading out is exempt — it stays
-        /// staged and is suppressed post-stage. Watch this against <see cref="InputSymbolCount"/> to see the
-        /// gate's reach on an overzoomed view.</summary>
+        /// <c>[minzoom, maxzoom)</c>. The gate runs per frame ahead of projection, so an out-of-zoom symbol is never
+        /// projected, staged or collided; a record still fading out stays staged and is suppressed post-stage.
+        /// Compare it with <see cref="InputSymbolCount"/> to see the gate's reach on an overzoomed view.</summary>
         public int ZoomCulledSymbols { get; init; }
 
         /// <summary>Companion to <see cref="SymbolStoreTelemetrySnapshot.CoverageDroppedSymbols"/>: symbols
@@ -52,12 +48,10 @@ namespace MapRenderer.Unity.View
         /// <summary>Glyph quads submitted to the GPU on the last Tick (4 vertices each) — the drawn symbol load.</summary>
         public int PlacedQuadCount { get; init; }
 
-        /// <summary>Fade records held — the size of the map the per-frame decay sweep walks, so a COST rather
-        /// than just a memory figure. An identity that has finished fading OUT is dropped rather than parked at 0,
-        /// so this should track the drawn symbol count and settle when the camera does; if it instead tracks
-        /// <see cref="CollisionCandidateCount"/>, invisible identities are being retained and the sweep is paying
-        /// for symbols nobody can see. Keep it the RAW map size — a filtered or epsilon-thresholded count hides
-        /// the regression it exists to expose, because a fading-IN symbol holds a sub-epsilon value.</summary>
+        /// <summary>Fade records held: the size of the map the per-frame decay sweep walks, so a COST. A faded-out
+        /// identity is dropped, so this tracks the drawn count; if it tracks <see cref="CollisionCandidateCount"/>,
+        /// invisible identities are retained. Keep it the RAW map size: a fading-in symbol holds a sub-epsilon
+        /// value, so a thresholded count hides the regression.</summary>
         public int LiveFadeSymbolCount { get; init; }
 
         /// <summary>CUMULATIVE heavy rebuilds of the native symbol mirror since startup — bumped once per real

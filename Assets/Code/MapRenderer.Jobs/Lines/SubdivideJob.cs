@@ -12,8 +12,7 @@ namespace MapRenderer.Jobs.Lines
     /// <see cref="LineCurvatureSubdivision.SegmentSteps"/> over the per-point surface up
     /// (<see cref="SrcUp"/>), then linear interpolation in tile space, over the flat columns
     /// <see cref="RingGatherJob"/> produced. A flat projection's <c>∞</c> tolerance yields 1 step per
-    /// segment, so the output is the original ring: the Mercator path is the degenerate value of the SAME
-    /// code, with no capability flag.
+    /// segment, so Mercator runs the same code with no flag.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct SubdivideJob : IJob

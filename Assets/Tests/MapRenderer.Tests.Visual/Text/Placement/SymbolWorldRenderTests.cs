@@ -1,14 +1,5 @@
-// World-space symbol render-comparison and halo-color GPU/visual acceptance tests.
-//
-// Split by the bare-`Object` using collision (System.Object vs UnityEngine.Object,
-// CS0104): SymbolWorldMotionTests.cs holds the System-importing (or neutral) members,
-// SymbolWorldRenderTests.cs holds the bare-Object users — the two may not merge.
-// SymbolLayerOrderSnapshotTests moved OUT of this topic entirely, to
-// Rendering/LayerOcclusionTests.cs: all four of its tests pin draw order / render-
-// layer occlusion (docs/commit-conventions.md), not text placement geometry.
-// CurvedTextOnPathRenderTests aliases `TextAnchor` to MapRenderer.Core.Text.TextAnchor
-// (UnityEngine also declares one); no other file in either destination references
-// TextAnchor at all, so the alias is inert for them.
+// World-space symbol render-comparison and halo-color GPU/visual acceptance tests. Split by the CS0104
+// bare-`Object` collision: SymbolWorldMotionTests.cs holds the System importers, so the two may not merge.
 //
 // Contents:
 //   WorldCurvedAbRenderSnapshotTests  — Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
@@ -43,32 +34,13 @@ using MapRenderer.Unity.View;
 namespace MapRenderer.Tests.Text.Placement
 {
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
-    // NOT registered in core-tests.csproj. Modeled on WorldSymbolAbRenderSnapshotTests (T2's point A/B) but for
-    // CURVED (along-line) text.
+    // NOT registered in core-tests.csproj. It renders ONLY the world CURVED path (a real Tick through
+    // Map/Symbol/TextWorld) and asserts the asymmetric 'F' glyph's centroid and bounding box against goldens.
     //
-    // The tooth renders ONLY the world curved path (a real SymbolPlacementSystem.Tick through
-    // Map/Symbol/TextWorld) and asserts its ink signature — centroid + bounding box, a shape/orientation
-    // fingerprint rather than a coarse centroid — against committed golden values. The readback is
-    // deterministic run-to-run on the same hardware and driver.
-    //
-    // WHAT A GOLDEN CANNOT DO. It catches a future change that shifts or mirrors the glyph, but it cannot
-    // prove today's rotation SIGN: a golden minted from a wrong-signed render would enshrine the wrong sign.
-    // The sign rests on an independent RED-verify — injecting a negated sdir.y fails this tooth 4 cases of 5
-    // — and on a rendered diagonal-symbol eyeball.
-    //
-    // WHY A CURVED TOOTH IS SENSITIVE TO POINT-BLOCK ANCHORING. Production routes curved symbols through
-    // CurvedTextLayout, which takes no options and no anchor, so a point-anchoring change moves no curved
-    // symbol on the map; but this fixture borrows the point layout as a quad factory (see BuildGlyphF), so
-    // its cell inherits TextLayoutOptions.Default's Center anchor. Expect the goldens to move — as a pure
-    // translation, which cannot touch rotation sense or glyph shape — whenever that anchor is redefined.
-    // docs/road-shields-design.md states the shipped optical-centring formula.
-    //
-    // 'F' (a fully asymmetric glyph — no mirror symmetry in x or y) is used so a wrong rotation sense renders
-    // visibly different ink (not an aliased 'F'-looking mirror) — a real discriminator, not a tautology against
-    // its own mint: a future sign regression moves the bounding box/centroid far outside the tight per-run
-    // tolerance below (headless GPU readback is deterministic run-to-run on the same hardware/driver — the
-    // tolerance only absorbs legitimate AA-level jitter). Both a 45° diagonal AND a vertical line are swept (a
-    // diagonal alone leaves a residual sign ambiguity only the vertical resolves).
+    // Limitation: a golden catches a later shift or mirror, but cannot prove the rotation SIGN, because a
+    // golden minted from a wrong sign enshrines it. A 45° diagonal AND a vertical line are swept; the diagonal
+    // alone leaves a sign ambiguity. The fixture borrows the point layout as a quad factory, so a change to
+    // TextLayoutOptions.Default's Center anchor moves the goldens by a pure translation.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // WorldCurvedAbRenderSnapshotTests — Unity EditMode only
@@ -80,10 +52,8 @@ namespace MapRenderer.Tests.Text.Placement
         private const int Size = 512;
         private const float TextSizePx = 160f;
 
-        // Per-run pixel tolerance. The CENTROID is the sign discriminator (a wrong rotation sign moves it by
-        // TENS of pixels — far outside this margin) and is robust (an average over all ink), so it stays
-        // tight. The bounding-box EDGES are inherently more AA-fragile (a single stray edge pixel moves an
-        // edge), so they get a looser margin — they add shape confirmation, not the sign check.
+        // The CENTROID is the robust sign discriminator (a wrong sign moves it by tens of px), so it stays
+        // tight. Bounding-box EDGES are AA-fragile and only confirm shape, so they get a looser margin.
         private const float GoldenCentroidTolerancePx = 4f;
         private const float GoldenBboxTolerancePx = 8f;
 
@@ -104,13 +74,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // 'F' (70) — no mirror symmetry in x or y (unlike 'A'), so a wrong rotation sense cannot alias back
-        // to a correct-looking render.
-        //
-        // Internal (not private): MapRenderer.Tests.Visual.OffLookAtSymbolScene builds its multi-glyph
-        // cross-azimuth symbols out of copies of THIS one cell rather than carrying a second copy of the
-        // decoder/shaper bootstrap (test-code-bloat convention — widen and reuse, never duplicate-and-drag;
-        // the same call WorldPointEmitRenderTests.BuildGlyphA already makes).
+        // 'F' (70) has no mirror symmetry, so a wrong rotation sense cannot alias to a correct render.
+        // Internal so OffLookAtSymbolScene reuses this cell instead of a second decoder/shaper bootstrap.
         internal static (GlyphAtlasTexture texture, SymbolQuad quad) BuildGlyphF()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
@@ -120,11 +85,8 @@ namespace MapRenderer.Tests.Text.Placement
             texture.Upload(atlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "F", Metrics = new AtlasMetrics(atlas) });
-            // NB: this fixture uses the POINT layout purely as a quad factory, so the cell it hands back
-            // inherits point-block anchoring — TextLayoutOptions.Default.Anchor is Center. Production
-            // curved symbols never take this path (CurvedTextLayout has no block anchor at all), so a
-            // change to vertical anchoring moves THIS tooth's goldens while moving no curved symbol on the
-            // map. Expect a re-mint here, and only here, whenever the centre anchor is redefined.
+            // The POINT layout is only a quad factory here, so the cell inherits its Center anchor, which
+            // production curved text never uses. A new centre anchor re-mints these goldens and nothing else.
             var layoutQuads = new List<SymbolQuad>();
             TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, layoutQuads);
             Assert.AreEqual(1, layoutQuads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
@@ -160,9 +122,7 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     Color32[] newPixels = RenderNewWorldPath(uCam, mapCamera, in frame, pathA, pathB, quad, atlasTexture, tileKey);
 
-                    // Golden values re-minted for the optical-centring change — a pure ~21.33 px translation
-                    // of the earlier goldens, shape and orientation unchanged; see the RE-MINT block in
-                    // this file's header for the proof.
+                    // Goldens for the optical-centred cell (docs/road-shields-design.md states the formula).
                     if (lineAngleDeg == 0f)
                         AssertGolden(newPixels, "0°", centroidRow: 234.9f, centroidCol: 250.9f, minRow: 189, maxRow: 302, minCol: 231, maxCol: 294);
                     else if (lineAngleDeg == 45f)
@@ -177,10 +137,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // Tile-corner placement: TileKey names a NEIGHBOR of the containing tile, so the per-glyph Level-1 RTC
-        // bake is genuinely large (comparable to a whole tile span), not the small in-tile offset the main sweep
-        // above already carries incidentally. It mirrors the nonzero-AnchorLocal pattern of
-        // WorldPointEmitRenderTests.RealTick_NonzeroAnchorLocal_IsPixelEquivalentToZeroAnchorLocalBaseline.
+        // Tile-corner placement: TileKey names a NEIGHBOR of the containing tile, so the Level-1 RTC bake is a
+        // whole tile span, not the small in-tile offset the main sweep carries.
         [Test]
         public void NewWorldPath_RendersUprightCurvedGlyph_MatchesGolden_NonzeroAnchorLocal()
         {
@@ -219,10 +177,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // A globe rebase (nonzero frame.Rebase, SphericalProjection) — the plan's sweep explicitly requires
-        // "Mercator + a globe rebase", not Mercator alone (the RTC bake's tile-origin cancellation, and the
-        // shader's Jacobian projection, must both still hold once the object-to-world transform carries a
-        // real rotation, not just a translation).
+        // A globe rebase: the RTC cancellation and the shader's Jacobian must still hold once the
+        // object-to-world transform carries a real rotation, not just a translation.
         [Test]
         public void NewWorldPath_RendersUprightCurvedGlyph_MatchesGolden_GlobeRebase()
         {
@@ -257,10 +213,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // A short line straddling the frame's look-at, oriented at `lineAngleDeg` in the render-space XZ
-        // plane (east=X, north=Z — the flat local approximation is valid at zero tilt/heading). Half-length
-        // mirrors the SAME altitude-relative magnitude WorldSymbolAbRenderSnapshotTests/WorldSymbolMotionTests
-        // already validate keeps a point comfortably on-screen (altitude*0.02 total span here).
+        // A short line across the look-at at `lineAngleDeg` in the render-space XZ plane (east=X, north=Z),
+        // spanning altitude*0.02 so it stays on-screen.
         private static (double3, double3) ShortLineAt(Camera uCam, in SceneFrame frame, float lineAngleDeg)
         {
             double altitude = uCam.transform.position.y;
@@ -271,14 +225,8 @@ namespace MapRenderer.Tests.Text.Placement
             return (centre - dir3 * halfLen, centre + dir3 * halfLen);
         }
 
-        // Asserts the render's ink signature — centroid AND bounding box (a real shape/orientation
-        // fingerprint, not just a coarse centroid) — against the committed golden. A wrong rotation
-        // sign/sense rotates the asymmetric 'F' glyph towards a different angle, moving the bounding box far
-        // outside GoldenTolerancePx (tens of pixels), not a small AA-level difference.
-        // MINT MODE — set true to print the actual ink signature (for capturing a fresh golden) instead of
-        // asserting against the committed one below. MUST be false when committed (asserting mode).
-        // static readonly (not const): keeps the golden-mint toggle without the compiler proving the mint
-        // block dead and emitting CS0162 "unreachable code" — flip to true to regenerate the goldens.
+        // MINT MODE: true prints the ink signature for a fresh golden instead of asserting. MUST be false
+        // when committed. static readonly, not const, so the mint block does not raise CS0162.
         private static readonly bool MintGolden = false;
 
         private static void AssertGolden(Color32[] pixels, string label,
@@ -338,25 +286,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
     }
 
-    // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
-    // NOT registered in core-tests.csproj.
-    //
-    // The two findings that must run through the REAL production path rather than a hand-built test
-    // scaffold, plus the no-leak tooth:
-    //
-    //   Real-emit upright: the Y-negation fix lived only in test scaffold (BuildOneGlyphWorldMesh).
-    //     This renders a point symbol through the REAL SymbolPlacementSystem.Tick (which now produces the world
-    //     mesh via BillboardMath.BuildWorldQuad) and asserts the SAME upright check WorldSymbolAbRenderSnapshotTests
-    //     already pins for the scaffold — now against production.
-    //
-    //   Nonzero AnchorLocal through the real builder+shader: emits the SAME glyph twice through the
-    //     REAL Tick, differing ONLY in TileKey — one whose tile origin equals the anchor (AnchorLocal == 0, the
-    //     scaffold's degenerate case) and one whose tile origin does NOT (AnchorLocal != 0, a real Level-1 RTC
-    //     bake) — asserts the two renders are pixel-equivalent (the RTC cancellation, running through
-    //     TransformObjectToHClip for real).
-    //
-    // Both reuse WorldSymbolAbRenderSnapshotTests' fixture-glyph + camera setup and WorldSymbolInkAnalysis's ink
-    // helpers (shared, not duplicated — see that file's header).
+    // Unity EditMode only. Point symbols through the REAL Tick render upright, render pixel-equivalent under a
+    // zero and a nonzero AnchorLocal (the RTC cancellation), and leak nothing.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // WorldPointEmitRenderTests — Unity EditMode only
@@ -465,11 +396,8 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
             var projection = new WebMercatorProjection();
 
-            // The symbol's anchor is chosen to be EXACTLY a tile's render-space origin (SW corner) — so a
-            // symbol whose TileKey names THAT tile bakes AnchorLocal == 0 (the scaffold's degenerate case).
-            // A DIFFERENT (neighbour) tile's origin differs from the anchor, so the SAME symbol's AnchorLocal
-            // is genuinely nonzero there — the two must still land on the SAME real-world point (the RTC
-            // cancellation), hence pixel-equivalent renders.
+            // The anchor is a tile's render-space origin, so that TileKey bakes AnchorLocal == 0 and a
+            // neighbour's bakes a nonzero one. Both must land on the SAME world point.
             TileId zeroTile = TestTileKeys.Containing(lookAt, zoom: 14);
             TileId nonzeroTile = new TileId { X = zeroTile.X + 1, Y = zeroTile.Y, Z = zeroTile.Z };
             double3 anchorRender = TileRenderOrigin.Project(zeroTile, projection);
@@ -577,19 +505,13 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     long tileKey = SymbolTileKey.Pack(new TileId { Z = 12, X = 100 + i, Y = 200 });
                     var buffer = new SymbolTileBuffer();
-                    // All three symbols share AnchorRender, and PointFadeId hashes
-                    // (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so leaving
-                    // Text at its default would give all three the SAME FadeId. Only one candidate is ever
-                    // live per Tick, so that is not a same-frame violation, but iterations
-                    // 1 and 2 would then be satisfied by the id the PREVIOUS iteration's harvested collision
-                    // already put in _placedLastFrame, instead of validating their own tile's placement —
-                    // green for the wrong reason. Distinct text per iteration keeps each id unique.
+                    // Non-local invariant: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage), so
+                    // with one Text the three symbols share a FadeId. Iterations 1 and 2 would then pass on the
+                    // previous iteration's placement. Distinct text keeps each id unique.
                     TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, quads, bounds.Min, bounds.Max,
                         text: "T" + i, paint: SymbolPaint.Default, textSizePx: 40f, sortKey: 0f, featureIndex: i, tileKey: tileKey);
-                    // Collision verdicts apply one Tick late (HarvestCollision consumes the PREVIOUS Tick's
-                    // scheduled job) — a fresh candidate's own Tick shows nothing, so a second, identical Tick is
-                    // needed before its placement can be asserted. The duplicate is fade-neutral (deltaTime
-                    // defaults to +inf, snapping to target either way) and does not move any expectation.
+                    // Collision verdicts apply one Tick late, so a second, identical Tick precedes the assert. It
+                    // is fade-neutral: deltaTime defaults to +inf.
                     system.Tick(in frame, plan.Build(buffer), atlasTexture);
                     system.Tick(in frame, plan.Build(buffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, $"tick {i} must place its label.");
@@ -612,25 +534,10 @@ namespace MapRenderer.Tests.Text.Placement
         }
     }
 
-    // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. Fixture/harness
-    // modeled on WorldSymbolMotionTests but does NOT touch that file — the motion regression
-    // tooth: build the world-anchored CURVED mesh ONCE (frozen — AnchorLocal/Tangent never rebaked, exactly
-    // like WorldSymbolMotionTests' point case), then PAN AND ROTATE (heading) the camera and re-render the SAME
-    // frozen mesh with only the per-frame object transform updated — the glyph
-    // must (a) track its WORLD anchor (position) and (b) RE-ORIENT to the live screen tangent (the whole point
-    // of the shader-side projection — a shallow impl that baked a screen rotation would pass (a) and fail
-    // (b)). Uses a NONZERO per-glyph AnchorLocal (a tile-corner bake, mirroring WorldPointEmitRenderTests)
-    // and a NON-axis-aligned (diagonal) world Tangent.
-    //
-    // RED-VERIFIED — the two failure modes were INJECTED and observed to fail, not argued by analogy:
-    //   (b) RE-ORIENTATION (the novel curved-only assertion): injecting a static-angle defect into the shader's
-    //       along-line branch (SymbolTextWorld_ForwardPass.hlsl — force `ang = 0.0`, skipping the Jacobian)
-    //       makes this test FAIL after the pan+rotate (Failed(Child) on a filtered run). So the re-orient check
-    //       genuinely discriminates — a shallow impl that baked a static screen rotation does NOT slip past.
-    //   (a) POSITION tracking: rides the SHARED anchor line `clip = TransformObjectToHClip(input.anchorOS)`
-    //       (line ~61) that point/icon use too, which the point motion precedent WorldSymbolMotionTests already
-    //       RED-verifies against a frozen screen-baked mesh; this test additionally exercises it with a nonzero
-    //       tile-corner AnchorLocal, so the shared reprojection is covered by that precedent (same code path).
+    // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. The CURVED
+    // mesh is built ONCE and frozen, then the camera PANS and ROTATES and only the object transform updates.
+    // The glyph must (a) track its WORLD anchor and (b) RE-ORIENT to the live screen tangent. Non-obvious why:
+    // a baked screen rotation passes (a) and fails (b). It uses a nonzero AnchorLocal and a diagonal Tangent.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // WorldCurvedMotionTests — Unity EditMode only
@@ -693,9 +600,8 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 double altitude0 = uCam.transform.position.y;
 
-                // The FROZEN world anchor — the glyph's own world point, a diagonal world Tangent (non-
-                // axis-aligned), and a NONZERO AnchorLocal (baked against a NEIGHBOR tile's origin, not the
-                // anchor's own containing tile — mirrors WorldPointEmitRenderTests' nonzero-AnchorLocal pattern).
+                // The FROZEN anchor: a diagonal world Tangent and a NONZERO AnchorLocal, baked against a
+                // NEIGHBOR tile's origin.
                 double3 anchorRender = frame0.SceneOriginRender + new double3(0.0, 0.0, altitude0 * 0.02);
                 var projection = new WebMercatorProjection();
                 TileId containingTile = TestTileKeys.Containing(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }, zoom: 14);
@@ -741,14 +647,8 @@ namespace MapRenderer.Tests.Text.Placement
                         out float2 anchorScreen0, out _),
                     "anchor must project in front of the camera at pose 0.");
 
-                // ── Pan (new look-at longitude) AND rotate (a new heading) — the SAME frozen mesh (its baked
-                //    AnchorLocal/Tangent never rebaked) is reused; only the per-frame object transform is
-                //    recomputed against the new SceneFrame, mirroring exactly how a real tile/symbol renderer
-                //    re-places a frozen mesh every frame. ────────────────────────────────────────────────
-                // WorldSymbolMotionTests' point precedent uses 0.5deg at zoom 8 (~182px shift) — this test runs
-                // at zoom 12 (16x finer: each zoom level doubles screen-px-per-degree), so the SAME 0.5deg pan
-                // would blow ~2900px past the 512px frame (0 ink). Scaled down by 2^(12-8) to land the SAME
-                // ballpark on-screen shift.
+                // ── Pan AND rotate; the frozen mesh is reused and only its object transform is recomputed. ──
+                // 0.5° at zoom 12 would move ~2900 px, off the 512 px frame, so the pan is 0.5° / 2^(12-8).
                 var lookAt1 = new GeoCoordinate3D { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude + 0.5 / 16.0, Altitude = 0.0 };
                 mapCamera.SetProperties(new CameraProperties(lookAt1, zoom: 12.0, heading: 90.0, tilt: 0.0));
                 mapCamera.SyncToCamera();
@@ -774,9 +674,8 @@ namespace MapRenderer.Tests.Text.Placement
                         out float2 anchorScreen1, out _),
                     "anchor must project in front of the camera at pose 1.");
 
-                // (a) POSITION: the glyph must shift by the anchor's own projected screen delta — the SAME
-                //     analytic reasoning as WorldSymbolMotionTests (Offset is a fixed additive clip-space
-                //     term that cancels exactly in a delta).
+                // (a) POSITION: the glyph shifts by the anchor's projected screen delta; Offset is a fixed
+                //     additive clip-space term that cancels in a delta.
                 float2 expectedDeltaScreen = anchorScreen1 - anchorScreen0;
                 Assert.Greater(math.abs(expectedDeltaScreen.x) + math.abs(expectedDeltaScreen.y), 50f,
                     "the pan must produce a nontrivial expected screen shift, or this tooth is vacuous.");
@@ -788,10 +687,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.That(actualDeltaRowAsScreenY, Is.EqualTo(expectedDeltaScreen.y).Within(20f),
                     $"Y: the curved glyph must shift by the anchor's projected screen delta after the pan (expected {expectedDeltaScreen.y:F1}px, got {actualDeltaRowAsScreenY:F1}px).");
 
-                // (b) ORIENTATION: a 90° heading change against a diagonal world tangent must swap the
-                //     rendered glyph's on-screen aspect ratio measurably — the shallow-impl failure mode
-                //     (a baked screen rotation, or no rotation at all) leaves this ratio UNCHANGED, since a
-                //     baked/absent rotation is oblivious to the live camera bearing.
+                // (b) ORIENTATION: a 90° heading change must swap the glyph's aspect ratio; a baked or absent
+                //     rotation ignores the camera bearing and leaves it UNCHANGED.
                 float aspectRatioChange = math.abs(aspect1 - aspect0) / math.max(aspect0, 1e-3f);
                 Assert.Greater(aspectRatioChange, 0.25f,
                     $"the curved glyph must visibly RE-ORIENT after the heading rotation (aspect ratio {aspect0:F2} -> {aspect1:F2}, " +
@@ -823,11 +720,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>Builds a one-glyph world-anchored CURVED <see cref="Mesh"/> via the REAL production
-        /// <see cref="BillboardMath.BuildWorldQuad"/> (unlike WorldSymbolAbRenderSnapshotTests'/
-        /// WorldSymbolMotionTests' point scaffolds, which hand-roll the corner math independently — curved's
-        /// rotation-by-tangent has no simpler independent form worth re-deriving here; BuildWorldQuad's own
-        /// corner/rotation math is separately pinned by BillboardMathTests). Unrotated corners
-        /// (rotationRadians: 0f) + AlignFlags bit1 set — the shader rotates <c>Offset</c> live from
+        /// <see cref="BillboardMath.BuildWorldQuad"/> (BillboardMathTests pins its corner math). Corners are
+        /// unrotated with AlignFlags bit1 set, so the shader rotates <c>Offset</c> live from
         /// <paramref name="tangentLocal"/>'s projected screen angle.</summary>
         private static Mesh BuildOneGlyphWorldMeshCurved(in SymbolQuad quad, float textSizePx, float3 colorRgb,
             in float3 anchorLocal, in float3 tangentLocal)
@@ -868,24 +762,11 @@ namespace MapRenderer.Tests.Visual
     // Unity-only: render test requiring a GPU context (SnapshotRenderer).
     // NOT included in Tools/core-tests/core-tests.csproj.
     //
-    // Answered on BOTH sides — read this before "fixing" either arm. The question is unchanged
-    // (does text-halo-color reach the screen converted sRGB->linear exactly ONCE?) but there are two carriers to
-    // ask it of, and the conversion lives in a different place on each:
-    //   * CONSTANT text-halo-color rides the Color-TYPED `_HaloColor` uniform, which Unity converts on upload —
-    //     so SymbolRenderLayer.BindColorTint must NOT pre-convert, and the
-    //     vertex stream carries WHITE.
-    //   * every other kind bakes into the vertex COLOR stream on a second copy of the label's glyphs, which
-    //     Unity does NOT convert — so SymbolPlacementSystem.LinearHaloColor MUST pre-convert, the exact sibling
-    //     of LinearColor, and the uniform stays WHITE.
-    // The fragment multiplies the two, so exactly one of them is ever non-white. One arm below per carrier; a
-    // conversion done twice or not at all fails whichever arm owns it.
-    //
-    // The quad below carries exactly what WorldSymbolRenderer.Emit's halo run writes, taken through the
-    // production linearization — never from the authored hex, which is what makes the conversion observable. Two
-    // SDF-shape overrides (_SdfEdge/_SdfRangeTexels, never the halo values) drive coverage to a flat 1 so the
-    // centre pixel is the pure halo colour, opaque, over a black clear — the shader is unlit, so unlike
-    // PaintColorRenderTests no white/black calibration arm is needed. No glyph/atlas fixture is needed either:
-    // the quad's UV is constant, so its sampled texel plays no part — see RenderHalo.
+    // Non-local invariant: text-halo-color reaches the screen converted sRGB→linear exactly ONCE, on one of two
+    // carriers. A CONSTANT rides the Color-typed `_HaloColor` uniform, which Unity converts on upload, so
+    // BindColorTint must NOT pre-convert. Every other kind bakes into the vertex COLOR stream, which Unity does
+    // not convert, so LinearHaloColor MUST. The fragment multiplies the two, so one is always WHITE; one arm per
+    // carrier. SDF overrides drive coverage to a flat 1, so the centre pixel is the pure halo colour.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolHaloColorRenderTests — Unity-only: render test requiring a GPU context (SnapshotRenderer).
@@ -970,13 +851,10 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Renders one halo run: the production material (<see cref="SymbolRenderLayer.Create"/>, which
-        /// binds <c>_HaloColor</c>) over a quad whose vertex COLOR is <paramref name="streamSrgb"/> taken
-        /// through <c>SymbolPlacementSystem.LinearHaloColor</c> — the caller spells out that payload so the
-        /// carrier under test is explicit, never derived from the production predicate. Optionally followed
-        /// by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/>
-        /// (<see cref="RestyledHaloColor_RenderedPixel_MatchesTheNewAuthored"/>).
-        /// Returns the centre sample in linear RGB.
+        /// Renders one halo run: the production material (<see cref="SymbolRenderLayer.Create"/>) over a quad
+        /// whose vertex COLOR is <paramref name="streamSrgb"/> through <c>LinearHaloColor</c>; the caller names
+        /// the carrier explicitly. Optionally restyles to <paramref name="restyleToHex"/> first. Returns the
+        /// centre sample in linear RGB.
         /// </summary>
         private static double3 RenderHalo(string haloColorJson, in float4 streamSrgb,
             string restyleToHex = null, double duration = 0.0)
@@ -987,17 +865,14 @@ namespace MapRenderer.Tests.Visual
             Assert.IsNotNull(renderLayer.WorldTextMaterial, "MapMaterialSet.SymbolTextWorld must be assigned.");
             Material mat = renderLayer.WorldTextMaterial;
 
-            // Drive coverage to a flat 1 regardless of the atlas texture's content: a tiny _SdfRangeTexels(0)
-            // zeroes the fragment's `unitRange`, floor-ing screenPxRange to its 1.0 minimum REGARDLESS of the
-            // atlas texel size or the (constant) UV's screen-space derivative, so screenDist is exactly
-            // -_SdfEdge. The styled 20px halo widening then swamps _SdfEdge(3) and saturates.
+            // Flat coverage 1: _SdfRangeTexels(0) floors screenPxRange to 1.0, so screenDist is -_SdfEdge, and
+            // the 20 px halo widening swamps _SdfEdge(3) whatever the atlas holds.
             mat.SetFloat(Shader.PropertyToID("_SdfRangeTexels"), 0f);
             mat.SetFloat(Shader.PropertyToID("_SdfEdge"), 3f);
             mat.SetVector(Shader.PropertyToID("_ScreenParamsLogical"), new Vector4(SnapSize, SnapSize, 0f, 0f));
 
-            // The restyle seam. AFTER the SDF overrides (Restyle/ApplyZoom touch only _TextColor and
-            // _HaloColor, so the overrides above survive unaffected) and BEFORE the render, so the sample
-            // reflects the eased/settled colour, not the initial bind.
+            // The restyle seam, before the render so the sample is the settled colour. Restyle touches only
+            // _TextColor and _HaloColor, so the SDF overrides survive.
             if (restyleToHex != null)
             {
                 Symbol.StyleLayer newLayer = BuildSymbolLayer("\"" + restyleToHex + "\"");
@@ -1005,20 +880,16 @@ namespace MapRenderer.Tests.Visual
                 renderLayer.ApplyZoom(new StyleFrameInputs(8.0, 1.0, duration));
             }
 
-            // _MainTex is a Texture2DArray sampler — every other production/test caller of this shader binds
-            // a real atlas before rendering; an unbound array sampler renders nothing on this backend. Its
-            // content is irrelevant here (the overrides above fix coverage regardless of what is sampled), so
-            // a single-texel placeholder is enough.
+            // An unbound Texture2DArray _MainTex renders nothing on this backend. Coverage ignores its content,
+            // so a single-texel placeholder is enough.
             using var bag = new ObjectDisposalBag();
             var blankAtlas = bag.Track(new Texture2DArray(1, 1, 1, TextureFormat.R8, false));
             blankAtlas.SetPixels(new[] { UnityEngine.Color.black }, 0);
             blankAtlas.Apply();
             mat.SetTexture(Shader.PropertyToID("_MainTex"), blankAtlas);
 
-            // The production chain a halo vertex's colour actually comes from: what
-            // SymbolFeatureExtractor.StreamRgba bakes for this carrier, through
-            // SymbolPlacementSystem.LinearHaloColor (where the stream's one sRGB→linear convert lives).
-            // dpr is 1 here, so text-halo-width's logical px are already device px.
+            // The production chain: the stream colour through LinearHaloColor, where its one sRGB→linear
+            // convert lives. At dpr 1 text-halo-width's logical px are device px.
             var paint = new SymbolPaint
             {
                 HaloColor = streamSrgb,

@@ -1,6 +1,5 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header): this file lives in
-// MapRenderer.Unity.Text.Placement and uses Unity.Mathematics types — TOP-LEVEL `using Unity.Mathematics;`
-// + unqualified types, never an inline `Unity.Mathematics.X`.
+// Namespace-collision guard (see GlyphAtlasTexture.cs's header): TOP-LEVEL `using Unity.Mathematics;` and
+// unqualified types, never an inline `Unity.Mathematics.X`.
 
 using System;
 using System.Collections.Generic;
@@ -21,26 +20,11 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// The dedicated world-anchored symbol renderer — NOT an <see cref="Backend.ITileRenderBackend"/> (no
-    /// mesh-update op, no per-instance registration a symbol's per-frame Opacity rewrite would fit). Owns a
-    /// persistent <c>Dictionary&lt;WorldSymbolKey, Slot&gt;</c> keyed by <c>(TileKey, Slot, Kind)</c> — one
-    /// mesh per (tile, material slot, text/icon) — plus its OWN <see cref="SceneTileTree"/> ("Map Symbols"
-    /// root) so symbols are grouped root → per-tile container → per-symbol-layer node → text/icon sibling
-    /// children, the SAME organization the <see cref="Backend.GameObjects.TileRenderer"/> tile backend uses
-    /// for fill/line.
-    ///
-    /// <para><b>Per-frame lifecycle</b> (mirrors <see cref="SymbolPlacementSystem"/>'s per-slot present/hide
-    /// discipline): <see cref="BeginFrame"/> clears every live slot's native accumulators (dictionary +
-    /// slots persist — no alloc); <see cref="Emit"/> appends a surviving point/icon/curved candidate's glyph
-    /// corners into its slot (created lazily on first use — warm-up-only alloc); <see cref="EndFrame"/>
-    /// builds every non-empty slot's mesh, lazily attaches it to a text/icon child under its tile's
-    /// per-symbol-layer node, hides the rest, refreshes the tree's per-tile transform ONCE (not per slot),
-    /// and reclaims a slot idle for <see cref="IdleReclaimFrames"/> consecutive frames (self-contained —
-    /// reads only what <see cref="Emit"/> handed it, never a batch tile array, so the coverage cull's
-    /// <c>-1</c> degenerate can never reach here).</para>
-    ///
-    /// <para>Main-thread only (touches <see cref="Mesh"/>/<see cref="GameObject"/>, mirrors every other
-    /// GPU-resource boundary in this codebase).</para>
+    /// The world-anchored symbol renderer: one mesh per <c>(TileKey, Slot, Kind)</c>, under its own
+    /// <see cref="SceneTileTree"/> (root → tile → symbol layer → text/icon). It is not an
+    /// <see cref="Backend.ITileRenderBackend"/>, which has no op for a per-frame Opacity rewrite. Per frame:
+    /// <see cref="BeginFrame"/> clears, <see cref="Emit"/> appends, <see cref="EndFrame"/> builds, hides and
+    /// reclaims. Main-thread only.
     /// </summary>
     internal sealed class WorldSymbolRenderer : VerifiedDisposable
     {
@@ -48,15 +32,12 @@ namespace MapRenderer.Unity.Text.Placement
         // roughly a second of frames at 60fps. A reappearing key just lazily re-creates its slot.
         private const int IdleReclaimFrames = 60;
 
-        // WorldBillboardVertex.AlignFlags bit1 — "rotate Offset by the projected Tangent."
-        // Point/icon leave bit0 (map-bearing) as their only bit; curved sets ONLY
-        // this one (bit1 set ⇒ the shader ignores bit0 — MapLibre line placement ignores
-        // text-rotation-alignment).
+        // WorldBillboardVertex.AlignFlags bit1: rotate Offset by the projected Tangent. Curved sets only this
+        // bit, and the shader then ignores bit0 (map-bearing), so line placement ignores text-rotation-alignment.
         private const float AlongLineAlignFlag = 2f;
 
-        // WorldBillboardVertex.AlignFlags bit2 — "Offset is WORLD METRES; displace the anchor in its
-        // own ground plane BEFORE projection" (Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl). bit0 is
-        // map-bearing and bit1 is along-line, so bit2 is the next free one.
+        // WorldBillboardVertex.AlignFlags bit2: Offset is world metres, applied in the anchor's ground plane
+        // before projection (Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl).
         private const float MapPitchAlignFlag = 4f;
 
         private sealed class Slot
@@ -70,10 +51,8 @@ namespace MapRenderer.Unity.Text.Placement
             public int IdleFrames;
         }
 
-        // The per-symbol-layer node under a tile container that a slot's text/icon child hangs off. Keyed by
-        // (tile, DrawIndex) so a tile's text and icon children for the SAME layer are siblings under ONE node
-        // — the layer-node level of the root→tile→layer tree that SceneTileTree itself only owns one level
-        // of (root→tile); this dictionary is the thin second level specific to the symbol path.
+        // The per-symbol-layer node, keyed by (tile, DrawIndex), so a layer's text and icon are siblings. It
+        // is the tree level below the tile container, which SceneTileTree does not own.
         private struct LayerNodeRec
         {
             public GameObject Go;
@@ -96,10 +75,8 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Hierarchy names for the symbol tree's three levels. Const so the two leaf names are picked from a
-        // named pair rather than a literal ternary at the construction site. NOT shared with
-        // WorldSymbolGroupingTests, which asserts these strings literally — pointing the test at the same
-        // constant would make it compare a value to itself and stop pinning the name at all.
+        // Hierarchy names for the symbol tree. Non-obvious why: WorldSymbolGroupingTests asserts these as
+        // literals, because a test that reads the same constant compares a value to itself.
         private const string TreeRootName  = "Map Symbols";
         private const string TextChildName = "text";
 
@@ -109,31 +86,16 @@ namespace MapRenderer.Unity.Text.Placement
         // GameObjects.TileRenderer.AddTileLayer's identical fallback.
         private const string LayerNodeFallbackName = "symbol-";
 
-        // The symbol path's own root→tile-container tree (mirrors the GameObjects tile backend's
-        // "MapTiles (GameObject backend)" tree: symbols always maintain their own
-        // tree so the organization is identical no matter which backend draws tile fills).
-        // internal (not private): SymbolPlacementSystemTestExtensions reads NodeCount off it — the LIVE
-        // tile-container count, which _tree.Root.childCount is not (it also holds the pool node).
+        // The symbol path's own root→tile tree, the same shape whichever backend draws tile fills. Internal so
+        // tests read NodeCount, the live tile count; _tree.Root.childCount also holds the pool node.
         internal readonly SceneTileTree                          _tree       = new(TreeRootName);
         private readonly Dictionary<LayerNodeKey, LayerNodeRec> _layerNodes = new();
 
         private readonly Dictionary<WorldSymbolKey, Slot> _slots = new();
 
-        // Recycled scene nodes. EnsureChild early-returns for a live slot, so a still camera creates nothing —
-        // but a ZOOM STEP replaces the whole cover at once and a pan churns tiles continuously, and each
-        // entering tile pays one layer node per symbol layer plus one leaf per (layer, kind). The leaves carry
-        // two AddComponent calls each (MeshFilter + MeshRenderer), which is the real cost here and the reason
-        // renting beats reallocating: a pooled leaf keeps its components, so a rent is a reparent.
-        //
-        // Text and icon get SEPARATE pools purely so a rent never has to rename ("text"/"icon" is the only way
-        // the two differ). Layer nodes are named per style layer, so that pool does rename on rent.
-        //
-        // A released node parks under _poolRoot, which is INACTIVE. ObjectPool is scene-unaware — it only
-        // files the reference away — so without a reparent a released leaf stays under its layer node, both
-        // drawing and keeping the node looking occupied. SetParent(null) is NOT the alternative: it promotes
-        // the leaf to a SCENE-ROOT object, live in the Hierarchy and still active. _poolRoot is a CHILD of
-        // the symbol tree root, not a second scene root, so everything symbol-related stays under one
-        // top-level object — which means the tree root's child count is live tiles PLUS this node.
+        // Recycled scene nodes: a pooled leaf keeps its MeshFilter and MeshRenderer, so a rent is a reparent.
+        // Text and icon pools are separate so a rent never renames. Released nodes park under the inactive
+        // _poolRoot, a child of the tree root. Non-obvious why: SetParent(null) makes an active scene-root object.
         private const string PoolRootName = "(node pool)";
 
         private readonly GameObject             _poolRoot;
@@ -170,15 +132,9 @@ namespace MapRenderer.Unity.Text.Placement
                 defaultCapacity: 32,
                 maxSize: 512);
 
-        /// <summary>A leaf's per-node settings, applied once at CREATION (not per rent): symbols neither cast
-        /// nor receive shadows, and DontSave keeps these out of the saved scene. MeshNode decides none of
-        /// this — see its header.
-        ///
-        /// <para>The shadow flags are a DECISION, not an oversight, and unlike tile geometry they are
-        /// per-node rather than per-rent because every leaf answers the same way: a symbol is a camera-facing
-        /// billboard held a fixed offset above the ground, so a cast shadow would be a floating dark quad and
-        /// a received one would darken the glyphs it is there to make legible. See
-        /// <c>Style.IRenderLayer.CastShadows</c> for the tile-geometry half of the same decision.</para></summary>
+        /// <summary>A leaf's settings, applied once at creation: DontSave, and no shadows. Non-obvious why: a
+        /// symbol is a billboard above the ground, so a cast shadow is a floating dark quad and a received one
+        /// darkens the glyphs. <c>Style.IRenderLayer.CastShadows</c> holds the tile-geometry half.</summary>
         private static MeshNode NewLeaf(string name)
         {
             var node = new MeshNode(name);
@@ -228,23 +184,13 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         /// <summary>
-        /// Appends <paramref name="emit"/>'s already-staged glyph quads (<paramref name="quads"/>, the SAME
-        /// pool <c>SymbolPlacementSystem</c>'s screen path reads — no new staged-quad stream) into the
-        /// slot for <c>(emit.TileKey, emit.Slot, emit.AtlasKind)</c>, creating it lazily on first use.
-        /// Returns the quad count emitted (for <c>LastQuadCount</c>) — the LABEL's quad count, which a halo
-        /// run does not change. Reads the world payload ONLY from <paramref name="emit"/> — never a batch
-        /// tile array.
-        ///
-        /// <para><b>A visible <c>text-halo-*</c> emits this label's glyph run twice</b> — the halo copy
-        /// first, then the text copy. The two runs are contiguous blocks of ONE index buffer, so the whole
-        /// label's halo is behind the whole label's text however its glyphs overlap each other. Grouping is
-        /// per CALL, i.e. per label (one <see cref="CandidateEmit"/> carries every glyph of every line a
-        /// label shapes to): two labels that overlap are still ordered only by which emitted first, which
-        /// collision already keeps from mattering.</para>
+        /// Appends <paramref name="emit"/>'s staged glyph quads into its <c>(TileKey, Slot, AtlasKind)</c> slot,
+        /// created on first use, and returns the symbol's quad count; a halo run does not change that count.
+        /// A visible <c>text-halo-*</c> writes the run twice, halo first, as contiguous blocks of one index buffer.
+        /// Non-obvious why: the whole symbol's halo then draws behind all of its text, however its glyphs overlap.
         /// </summary>
-        /// <param name="haloDevicePixelRatio">Scales <see cref="CandidateEmit.HaloWidthPx"/>/
-        /// <see cref="CandidateEmit.HaloBlurPx"/> from the style's logical px into the device px the SDF
-        /// shader measures in. Read per Tick against the live ratio, so a dpr change needs no re-bake.</param>
+        /// <param name="haloDevicePixelRatio">Scales the halo width and blur from logical px into the device px
+        /// the SDF shader measures in; read per Tick, so a dpr change needs no re-bake.</param>
         public int Emit(in CandidateEmit emit, NativeArray<PlacedQuad> quads, float fadeOpacity,
             float haloDevicePixelRatio)
         {
@@ -267,13 +213,8 @@ namespace MapRenderer.Unity.Text.Placement
             int quadCount = emit.QuadCount;
             if (quadCount == 0) return 0;
 
-            // Batch the stream growth: ONE ResizeUninitialized per stream for this candidate's whole quad run,
-            // then write through array views — instead of 14 bounds/safety-checked NativeList.Add per quad. The
-            // written values and index bases are byte-identical to the per-Add form (only the store mechanism
-            // changes); the billboard math below is untouched. Trims Editor collections-check overhead; the
-            // release delta is negligible (the real per-quad cost is BillboardMath.BuildWorldQuad, unchanged).
-            // Icons have no `icon-halo-*` path, and a zero-width or fully transparent halo is the spec
-            // default — all three emit the text run alone, so a haloless layer pays nothing.
+            // One ResizeUninitialized per stream for the whole quad run, then writes through array views. Icons,
+            // a zero-width halo and a transparent halo all emit the text run alone.
             bool drawHalo = emit.AtlasKind != SymbolKind.Icon
                          && emit.HaloWidthPx > 0f && emit.HaloColor.w > 0f;
             int  runs     = drawHalo ? 2 : 1;
@@ -298,41 +239,23 @@ namespace MapRenderer.Unity.Text.Placement
             for (int k = 0; k < quadCount; k++)
             {
                 PlacedQuad q = quads[emit.QuadStart + k];
-                // A curved candidate's world anchor/tangent are PER-GLYPH (on the quad itself), not
-                // per-candidate (emit.AnchorLocal is a point symbol's single shared anchor) — and its
-                // corners carry no per-quad screen rotation, being rotated instead by the shader from the
-                // projected Tangent. Point/icon keep the per-candidate anchor + baked screen rotation +
-                // tangentLocal=0/alignFlags=0; the shader's tangent branch is never taken for them.
-                // The along-line arm carries icon-rotate, the one constant the shader's tangent rotation
-                // must compose ON TOP of. Curved text leaves ExtraRotationRadians at 0.
+                // A curved candidate's anchor, tangent and up are per glyph, and the shader rotates it from the
+                // projected Tangent on top of icon-rotate. Point/icon use the per-candidate anchor and baked rotation.
                 float3 anchorLocal     = emit.AlongLine ? q.AnchorLocal : emit.AnchorLocal;
                 float  rotationRadians = emit.AlongLine ? emit.ExtraRotationRadians : q.RotationRadians;
                 float3 tangentLocal    = emit.AlongLine ? q.Tangent : float3.zero;
-                // Same per-glyph-vs-per-candidate selector as tangentLocal above — a curved candidate's
-                // up rides the quad (per-glyph, sampled along the path); point/icon carry the candidate's
-                // single anchor up.
                 float3 surfaceUp       = emit.AlongLine ? q.SurfaceUp : emit.SurfaceUp;
 
-                // ONE local decides BOTH the corner unit and the shader bit, so a state where the offsets
-                // are metres while the shader believes they are pixels — or the reverse — is not expressible.
-                // The emit.AlongLine conjunct is a SCOPE FENCE, not a defensive check: SymbolStagingMath writes
-                // CornerMetresPerLogicalPixel only in StageCurvedAnchor, so it is already 0 on every point
-                // emit. It marks the one place a later change would cross into point/icon map-pitch.
+                // One local decides both the corner unit and the shader bit, so they cannot disagree. The AlongLine
+                // conjunct is a scope fence: only StageCurvedAnchor writes CornerMetresPerLogicalPixel.
                 bool  mapPitchCorners  = emit.AlongLine && emit.CornerMetresPerLogicalPixel > 0f;
-                // On every non-map path this is the literal 1f, and `x * 1f` is bitwise identity for every
-                // finite float and for ±0/±Inf/NaN payloads alike, so the non-map vertex stream is
-                // unchanged.
+                // 1f off map pitch, and `x * 1f` is bitwise identity, so the non-map vertex stream is unchanged.
                 float cornerScale      = mapPitchCorners ? emit.CornerMetresPerLogicalPixel : 1f;
                 float  alignFlags      = emit.AlongLine
                     ? (mapPitchCorners ? AlongLineAlignFlag + MapPitchAlignFlag : AlongLineAlignFlag)
                     : 0f;
-                // ONE unit for the whole `off`: the shader has a single displacement path, so the corners and
-                // the translate delta must share whichever unit is in force. The consequence: under map pitch
-                // `text-translate` becomes a WORLD translate rather than a screen one. The spec's proper
-                // control for that is
-                // `text-translate-anchor`, not `text-pitch-alignment`, so this is a recorded limitation and
-                // not a design position; it is inert on all 7 shipped line-symbol layers, none of which set
-                // a translate (the delta is exactly float2.zero there, and 0 · k == 0).
+                // The shader has one displacement path, so corners and translate share one unit. Limitation: under
+                // map pitch `text-translate` is a world translate, though the spec ties that to `text-translate-anchor`.
                 float2 translateDelta  = emit.TranslateDeltaPx * cornerScale;
 
                 BillboardMath.BuildWorldQuad(in q.Quad, in anchorLocal, q.TextSizePx * cornerScale, q.Color.xyz,
@@ -356,9 +279,8 @@ namespace MapRenderer.Unity.Text.Placement
 
                 if (!drawHalo) continue;
 
-                // The halo copy is the SAME geometry — only the colour and the SDF widening differ, which is
-                // all "halo" means to the shader. So a halo wider than the glyph cell's SDF padding clips at
-                // the cell edge, exactly as it did when one fragment computed both.
+                // The halo copy is the same geometry with its own colour and SDF widening. Limitation: a halo
+                // wider than the glyph cell's SDF padding clips at the cell edge.
                 tl.ColorRGB = haloColorLinear; tl.SdfWidenPx = haloWiden;
                 tr.ColorRGB = haloColorLinear; tr.SdfWidenPx = haloWiden;
                 br.ColorRGB = haloColorLinear; br.SdfWidenPx = haloWiden;
@@ -370,9 +292,8 @@ namespace MapRenderer.Unity.Text.Placement
                 vView[h + 2] = br;
                 vView[h + 3] = bl;
 
-                // text-halo-color's own alpha rides the opacity stream, the one channel the shader
-                // multiplies coverage by. The quad's alpha already carries text-opacity, which is why
-                // LinearHaloColor does not fold it in again.
+                // text-halo-color's alpha rides the opacity stream. The quad's alpha already carries
+                // text-opacity, so LinearHaloColor does not fold it in again.
                 float haloOpacity = opacity * haloOpacityScale;
                 oView[h + 0] = haloOpacity;
                 oView[h + 1] = haloOpacity;
@@ -401,31 +322,21 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly int ScreenParamsLogicalPropId = Shader.PropertyToID("_ScreenParamsLogical");
 
         /// <summary>
-        /// Builds every non-empty slot's mesh and lazily attaches it to a text/icon child under its tile's
-        /// per-symbol-layer node in the shared <see cref="_tree"/> (root → tile container → layer node →
-        /// text/icon sibling children), resolving its draw material from
-        /// <paramref name="symbolLayers"/> or the <paramref name="fallbackTextMaterial"/>/
-        /// <paramref name="fallbackIconMaterial"/> pair; hides every other live slot (idle-frame
-        /// reclamation destroys one idle <see cref="IdleReclaimFrames"/> consecutive frames). A
-        /// resolved-null material (an icon slot with no <c>WorldIconMaterial</c> configured)
-        /// hides that slot instead of throwing. Refreshes the tree's per-tile transform exactly ONCE per
-        /// call via <see cref="SceneTileTree.Rebuild"/> — not once per slot.
+        /// Builds every emitted slot's mesh, attaches it under its tile's layer node, and hides every other slot.
+        /// A slot whose material resolves to null stays hidden instead of throwing. It refreshes the tree's
+        /// per-tile transforms once per call, and it destroys a slot idle for <see cref="IdleReclaimFrames"/> frames.
         /// </summary>
-        /// <param name="frame">This frame's floating-origin scene frame — the ONE
-        /// <see cref="SceneTileTree.Rebuild"/> below rebases every tile container against it.</param>
-        /// <param name="symbolLayers">Per-symbol-layer render layers, indexed by a slot's layer index; each
-        /// may own its own world text/icon material. Null / empty → every slot resolves to the
-        /// fallback pair below.</param>
-        /// <param name="fallbackTextMaterial">The world TEXT material used for any slot whose layer supplies
-        /// none (and for every slot when <paramref name="symbolLayers"/> is null/empty). Null ⇒ that slot
-        /// stays hidden rather than throwing.</param>
-        /// <param name="fallbackIconMaterial">The world ICON counterpart. Null is the routine case — icons
-        /// are optional, so an unconfigured icon material hides icon slots instead of faulting.</param>
+        /// <param name="frame">This frame's floating-origin scene frame; every tile container rebases on it.</param>
+        /// <param name="symbolLayers">Render layers indexed by a slot's layer index, each with its own world
+        /// materials. Null or empty resolves every slot to the fallback pair.</param>
+        /// <param name="fallbackTextMaterial">The world text material for a slot whose layer supplies none.
+        /// Null hides that slot.</param>
+        /// <param name="fallbackIconMaterial">The world icon counterpart. Null is routine, because icons are
+        /// optional; it hides icon slots.</param>
         /// <param name="atlasTexture">The glyph atlas (Texture2DArray) TEXT world materials bind to.</param>
         /// <param name="spriteTexture">The sprite sheet ICON world materials bind to (may be null — icons optional).</param>
-        /// <param name="viewportLogicalPx">This frame's logical viewport size — refreshes the resolved
-        /// material's <c>_ScreenParamsLogical</c> (the vertex shader's px→clip offset scale), mirrors
-        /// <c>SymbolPlacementSystem.BuildSlotMesh</c>'s identical per-frame refresh.</param>
+        /// <param name="viewportLogicalPx">This frame's logical viewport size, written to the material's
+        /// <c>_ScreenParamsLogical</c> (the vertex shader's px→clip offset scale).</param>
         public void EndFrame(in SceneFrame frame,                IReadOnlyList<SymbolRenderLayer> symbolLayers,
             Material                       fallbackTextMaterial, Material fallbackIconMaterial,
             Texture                        atlasTexture,         Texture spriteTexture, double2 viewportLogicalPx)
@@ -437,11 +348,8 @@ namespace MapRenderer.Unity.Text.Placement
                 WorldSymbolKey key  = kv.Key;
                 Slot          slot = kv.Value;
 
-                // Idle-reclaim tracks whether this key was EMITTED to this frame (self-contained
-                // reclamation), NOT whether it ended up presented — an emitted-but-unrenderable slot (no
-                // resolved material: e.g. an icon slot with no WorldIconMaterial configured, or the demo path
-                // with a null worldTextBase) is a legitimate steady-state case that must stay resident
-                // (hidden), not churn its Mesh/GameObject/NativeLists every IdleReclaimFrames.
+                // Idle-reclaim tracks emission, not presentation: an emitted slot with no material is a steady
+                // state that stays resident and hidden instead of churning every IdleReclaimFrames.
                 bool emittedThisFrame = slot.Vertices.Length > 0;
                 Material material = emittedThisFrame
                     ? ResolveMaterial(in key, symbolLayers, fallbackTextMaterial, fallbackIconMaterial)
@@ -452,9 +360,8 @@ namespace MapRenderer.Unity.Text.Placement
                     WorldBillboardMeshBuilder.Build(slot.Vertices.AsArray(), slot.Opacity.AsArray(),
                         slot.Indices.AsArray(), slot.Mesh);
 
-                    // The texture/screen-params refresh BuildSlotMesh does for the screen path — the world
-                    // material needs the SAME per-frame bind (atlas/sprite texture never changes per-slot,
-                    // only per-Kind, so this is a straight compare-assign-free SetTexture/SetVector).
+                    // The same per-frame texture and screen-params bind that BuildSlotMesh does for the screen
+                    // path. The texture depends only on Kind.
                     Texture texture = key.Kind == SymbolKind.Icon ? spriteTexture : atlasTexture;
                     material.SetTexture(AtlasPropId, texture);
                     material.SetVector(ScreenParamsLogicalPropId,
@@ -532,9 +439,8 @@ namespace MapRenderer.Unity.Text.Placement
 
             MeshNode node = (key.Kind == SymbolKind.Icon ? _iconChildPool : _textChildPool).Get();
 
-            // AttachAt resets local TRS: a recycled node carries the previous tenant's, and the grouping
-            // tooth asserts this child sits at LOCAL identity — the container carries the one per-tile
-            // placement write, never this child.
+            // AttachAt resets the previous tenant's local TRS. The child sits at local identity; the container
+            // carries the one per-tile placement write.
             node.AttachAt(layerRec.Go.transform, key.Kind == SymbolKind.Icon ? IconChildName : TextChildName);
 
             slot.Node = node;
@@ -577,12 +483,8 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // The per-layer world material (WorldTextMaterial/WorldIconMaterial), else the demo fallback —
-        // mirrors SymbolPlacementSystem.ResolveSlotMaterial/ResolveIconMaterial. A slot index out of range
-        // (or no symbolLayers — the demo path) resolves straight to the fallback, never throws. Both world
-        // materials' renderQueue are written at Build/Create time (RenderLayerSet.Build for text via
-        // SymbolRenderLayer.Material, SymbolRenderLayer.Create for icon), so this is pure selection —
-        // no per-frame queue sync.
+        // The per-layer world material, else the fallback; an out-of-range slot resolves to the fallback. Both
+        // renderQueues are set at build time (RenderLayerSet.Build, SymbolRenderLayer.Create), so this only selects.
         private static Material ResolveMaterial(in WorldSymbolKey key, IReadOnlyList<SymbolRenderLayer> symbolLayers,
             Material                                             fallbackTextMaterial, Material fallbackIconMaterial)
         {
@@ -644,9 +546,8 @@ namespace MapRenderer.Unity.Text.Placement
         {
             _tree.Dispose();
 
-            // After the tree: Clear only destroys each pool's PARKED objects, and a live node is in the tree,
-            // not the pool — the line above already destroyed those. Both halves have to run or the parked set
-            // outlives the renderer.
+            // Clear destroys only each pool's parked objects; the tree dispose above destroyed the live ones.
+            // Both must run, or the parked set outlives the renderer.
             _textChildPool.Clear();
             _iconChildPool.Clear();
             _layerNodePool.Clear(); // _poolRoot itself died with the tree root above

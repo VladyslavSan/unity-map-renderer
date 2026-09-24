@@ -1,11 +1,6 @@
-// Fast-lane tests of the SnapshotCoverage/SnapshotVerdict test-infra types.
-//
-// Stays at Visual/'s root, not a topic subfolder: these test a Tests.Shared test-harness
-// type, not a Core/Unity/Jobs production type, so no commit-scope topic word fits, and
-// docs/test-conventions.md's vocabulary does not answer 'which folder' for a fixture
-// that tests test-infrastructure. Both classes are also this assembly's only fast-lane
-// members (Tools/core-tests/core-tests.csproj) — merging them together is the ceiling;
-// neither can join any GPU-touching Visual/ file without breaking the fast-lane compile.
+// Fast-lane tests of the SnapshotCoverage/SnapshotVerdict test-infra types. Non-obvious why: they sit at
+// Visual/'s root because they test a test-harness type, so no commit-scope topic fits, and as this assembly's
+// only fast-lane members (Tools/core-tests) they cannot join a GPU-touching file without breaking that compile.
 //
 // Contents:
 //   SnapshotColorTests     — unit tests for the region samplers on SnapshotCoverage (SampleRegionMeanColor + RegionColorVariance), used by the multi-layer reorder snapshot test.
@@ -136,14 +131,9 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Unit tests for <see cref="SnapshotCoverage"/> and <see cref="SnapshotVerdict"/>.
-    ///
-    /// All tests operate on synthetic <see cref="Frame"/> buffers — no GPU, no UnityEngine.Texture.
-    /// They run in both the Unity EditMode runner and the dotnet core-tests project.
-    ///
-    /// Lessons honoured:
-    ///   - Pin exact expected booleans; never write unbounded-skip guards.
-    ///   - Every assertion has teeth: negative controls prove the gate is not trivially green.
+    /// Unit tests for <see cref="SnapshotCoverage"/> and <see cref="SnapshotVerdict"/> over synthetic
+    /// <see cref="Frame"/> buffers (no GPU), in both the Unity EditMode runner and dotnet core-tests.
+    /// They pin exact expected booleans, and negative controls prove the gate is not trivially green.
     /// </summary>
     [TestFixture]
     public class SnapshotCoverageTests
@@ -263,9 +253,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapLike_LargeConnectedFillBlob_PassesWithExpectedSpread()
         {
-            // 512×512, background with ~40% fill covering a central region.
-            // This simulates a world-fill map: land fills the central ~40% of the frame,
-            // background (ocean/clear) fills the rest.
+            // 512×512 world-fill map: land fills the central ~40% of the frame, background (ocean) fills
+            // the rest.
             const int W = 512, H = 512;
             // Fill a horizontal band from row 100 to 400, col 50 to 460 (roughly 55% area).
             // That exceeds 40% to be safe; use a region that hits multiple grid buckets.
@@ -302,9 +291,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void TinyFill_ConfinedToOneBucket_FailsSpreadGate()
         {
-            // Grid: 8×8 buckets over a 64×64 image → each bucket is 8×8 pixels.
-            // Paint exactly one bucket (8×8 = 64 pixels) at top-left corner to guarantee
-            // DistinctRegionBucketsHit == 1. Fill fraction = 64/4096 = 1.5% (below default 10% gate).
+            // An 8×8 grid over 64×64 px: paint one whole 8×8 bucket so DistinctRegionBucketsHit == 1.
+            // Fill fraction = 64/4096 = 1.5%, below the default 10% gate.
             const int W = 64, H = 64;
             Frame frame = PartialFillBuffer(
                 W, H,
@@ -330,12 +318,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void CustomThreshold_MinBuckets1_ModerateFill_Passes()
         {
-            // Build a 64×64 buffer with a 16×24-pixel filled region (384 / 4096 = 9.375% fill).
-            // That clears the blank threshold (only 90.6% bg, well under 97%) AND clears the
-            // uniform threshold (bg and fill land in distinct RGB buckets, max-bucket ~90.6% < 95%).
-            // With minBuckets=1, the spread gate is trivially satisfied by any fill at all.
-            // With the default minBuckets=8, the 16-wide, 24-tall strip spans only ~3 row-bands × 2
-            // col-bands = 6 grid buckets → still below the default spread gate of 8.
+            // Non-obvious why: a 16×24 strip in 64×64 (9.4% fill) clears the blank (97%) and uniform (95%)
+            // gates. It spans ~6 grid buckets, so minBuckets=1 passes and the default 8 would not.
             const int W = 64, H = 64;
             Frame frame = PartialFillBuffer(
                 W, H,
@@ -370,12 +354,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void SolidColour_SharesBgRNibble_IsUniform_True_PassesFalse()
         {
-            // Fill colour R=20: R>>4 = 1, same as BgR=26>>4=1.
-            // A purely R-channel histogram would collapse both into the same bucket.
-            // The new full-RGB histogram keeps this as a distinct bucket from bg because G and B
-            // differ — but the ENTIRE BUFFER is this single solid colour (no bg pixels at all),
-            // so 100% of pixels fall in one RGB bucket → IsUniform must still be true.
-            // This test pins that the histogram rewrite didn't break the single-colour detection.
+            // R=20 shares the background's R nibble, but the WHOLE buffer is this one colour, so 100% of
+            // pixels fall in one RGB bucket and the full-RGB histogram must still report IsUniform.
             const byte SolidR = 20;
             const byte SolidG = 180;
             const byte SolidB = 70;
@@ -394,25 +374,15 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ---------------------------------------------------------------------------------
-        // IsUniform FALSE for a two-colour map frame where fill shares background's R nibble.
-        // This is the discriminating regression test: the old R-only histogram wrongly returned
-        // IsUniform=true for this case; the new full-RGB histogram returns IsUniform=false.
+        // IsUniform FALSE for a two-colour map frame where fill shares background's R nibble. An R-only
+        // histogram would merge the two colours into one bucket.
         // ---------------------------------------------------------------------------------
 
         [Test]
         public void MapLike_FillSharesBgRNibble_NotUniform_Passes()
         {
-            // Fill colour: R=20 (nibble 1 — same as BgR=26), G=180, B=70.
-            // Distance from bg (26,28,38): |20-26|+|180-28|+|70-38| = 6+152+32 = 190 > Tolerance(15).
-            // → correctly counted as fill, not background.
-            //
-            // Under the OLD R-only histogram: bg (R=26→nibble 1) and fill (R=20→nibble 1) collapse
-            // into the same bucket. With ~47% bg + ~47% fill both in bucket 1, max/total ≈ 94%
-            // → just under the 95% threshold in this layout, but the flaw is structural: any layout
-            // that tips over 95% would false-positive. The full-RGB histogram keeps them distinct
-            // (bg lands in bucket (1,1,2); fill lands in bucket (1,11,4)).
-            //
-            // 512×512 buffer, fill region x∈[50,460) y∈[100,400): 410×300 = 123,000 px / 262,144 = ~47%.
+            // Fill (20,180,70) is 190 from bg (26,28,38), past Tolerance 15, but shares its R nibble. Full-RGB
+            // buckets keep them apart: bg (1,1,2), fill (1,11,4). The fill region is 410×300 px (~47%).
             const int W = 512, H = 512;
             const byte NibbleFillR = 20;
             const byte NibbleFillG = 180;
@@ -451,9 +421,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void SinglePixel_Fill_FilledFractionNonZero_ButFailsGate()
         {
-            // 1 fill pixel out of 64 pixels (8×8): background fraction = 63/64 = 98.4% >= BlankThreshold(97%).
-            // The buffer is correctly classified as blank (near-empty render), AND must fail the gate.
-            // The fill fraction is non-zero but vanishingly small (1.5%) — still below minFill=10%.
+            // 1 fill pixel in 8×8: background is 98.4% >= BlankThreshold (97%), so the frame is blank and
+            // fails the gate; its 1.5% fill is also below minFill=10%.
             const int W = 8, H = 8;
             Frame frame = PartialFillBuffer(W, H, 0, 0, 1, 1, BgR, BgG, BbB, FillR, FillG, FillB);
             var result = SnapshotCoverage.Analyse(frame, Bg);
@@ -555,10 +524,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MeanLuminance_KnownRGB_ExactValue()
         {
-            // Buffer: 2×1 pixels. Both non-background.
-            //   pixel0: R=200, G=100, B=50 → lum = (0.2126*200 + 0.7152*100 + 0.0722*50)/255
-            //   pixel1: R=50,  G=200, B=100 → lum = (0.2126*50  + 0.7152*200 + 0.0722*100)/255
-            // Neither matches the dark-slate bg (BgR=26, BgG=28, BbB=38).
+            // 2×1 buffer, both pixels non-background; each lum = (0.2126·R + 0.7152·G + 0.0722·B)/255.
             var buf = new Color32[]
             {
                 new Color32(200, 100, 50, 255),

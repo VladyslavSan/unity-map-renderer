@@ -7,20 +7,11 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// The algorithm-agnostic <b>seam</b> every consumer talks to for "which tiles does the camera see".
-    /// One call per frame; the concrete algorithm lives behind it (<see cref="FrustumTileSelector"/> is the
-    /// default; a distance-based-LOD impl is a drop-in replacement). Non-local invariant — what keeps it
-    /// generic, do not change:
-    /// <list type="bullet">
-    ///   <item>No algorithm knob on the method (no pad, no min/max zoom, no <c>out selectionZoom</c>) —
-    ///     tuning constants belong on the concrete impl's constructor, never here or on
-    ///     <see cref="ViewContext"/>.</item>
-    ///   <item>The returned set MAY span multiple zoom levels (each <see cref="TileId"/> carries its own
-    ///     <c>Z</c>); the seam never exposes a single selection-zoom for the whole set, which is what makes
-    ///     a mixed-zoom (distance-LOD) impl a drop-in replacement.</item>
-    ///   <item>No fallback-provenance on the interface — the seam returns just the set; the consumer owns
-    ///     how to transition between sets, including which parent/child a downgraded tile came from.</item>
-    /// </list>
+    /// The algorithm-agnostic seam for "which tiles does the camera see", called once per frame
+    /// (<see cref="FrustumTileSelector"/> by default). Non-local invariant: it stays generic, so tuning
+    /// knobs belong on an implementation's constructor, never here or on <see cref="ViewContext"/>; the
+    /// set may mix zoom levels (each <see cref="TileId"/> has its own <c>Z</c>), so a distance-LOD selector
+    /// drops in; it returns only the set, and the consumer owns transitions and parent/child provenance.
     /// </summary>
     public interface IVisibleTileSelector
     {

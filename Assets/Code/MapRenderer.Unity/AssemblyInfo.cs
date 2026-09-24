@@ -1,15 +1,12 @@
 using System.Runtime.CompilerServices;
 
-// Lets the EditMode test assembly reach MapRenderer.Unity internals (e.g. MapView.Layers,
-// RenderLayerSet) so test-only accessors can live as extension methods in the test assembly
-// instead of bloating the production public API. See MapViewTestExtensions (now in the shared
-// test-support assembly, granted below).
+// Lets the test assemblies reach MapRenderer.Unity internals (e.g. MapView.Layers, RenderLayerSet), so
+// test-only accessors live as extension methods in a test assembly, not on the production public API.
 [assembly: InternalsVisibleTo("MapRenderer.Tests.EditMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.Shared")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.PlayMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.Visual")]
 
-// The app/demo layer (MapRenderer.App — composition root, input, dev UI) is a first-party consumer that
-// reaches library internals (MapView.View/SymbolPlacementSystem, telemetry snapshots, the symbol-breakdown trigger). Same
-// mechanism as the test assemblies above: physical separation without a hardened public API surface yet.
+// MapRenderer.App (composition root, input, dev UI) is a first-party consumer of library internals
+// (MapView.View/SymbolPlacementSystem, telemetry snapshots) that has no hardened public API to use.
 [assembly: InternalsVisibleTo("MapRenderer.App")]

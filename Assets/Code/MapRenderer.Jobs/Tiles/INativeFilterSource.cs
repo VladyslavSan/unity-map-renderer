@@ -8,10 +8,9 @@ namespace MapRenderer.Jobs.Tiles
     /// <summary>
     /// The native-filter capability seam: implemented by a tile layer that can evaluate a compiled
     /// <see cref="NativeFilterProgram"/> against its own features without going through
-    /// <see cref="MapRenderer.Core.Filters.CompiledFilter"/>. Mirrors <see cref="IIndexedFeatureSource"/> —
-    /// a capability probed with <c>as</c>, handing back a per-selection product — so
-    /// <c>FeatureSelector</c> stays format-agnostic: another layer type (the GeoJSON one has no native path)
-    /// opts in by implementing this interface too, never by an <c>is MvtLayer</c> allow-list.
+    /// <see cref="MapRenderer.Core.Filters.CompiledFilter"/>. Like <see cref="IIndexedFeatureSource"/>, it
+    /// is a capability probed with <c>as</c>, so <c>FeatureSelector</c> stays format-agnostic: a layer type
+    /// opts in by implementing it, never by an <c>is MvtLayer</c> allow-list.
     /// </summary>
     internal interface INativeFilterSource
     {
@@ -19,11 +18,7 @@ namespace MapRenderer.Jobs.Tiles
         /// A disposable per-selection matcher bound to (this layer + <paramref name="program"/>), or
         /// <c>null</c> to signal "fall back to the managed path" — e.g. the program's literal strings
         /// collide in this layer's value table (the <c>Rebind</c> ≥2-id refusal). The caller owns disposal.
-        ///
-        /// <para><b>No <c>zoom</c> parameter.</b> <see cref="NativeFilterProgram"/>'s accepted subset has
-        /// no zoom form and requires a statically-Boolean root, so any zoom-bearing filter is refused at
-        /// compile time and never reaches a matcher — a <c>zoom</c> parameter here would invite the false
-        /// assumption that it is honoured.</para>
+        /// There is no <c>zoom</c> parameter, because the compiler refuses any zoom-bearing filter.
         /// </summary>
         /// <param name="program">The compiled, tile-independent program to bind against this layer.</param>
         INativeFeatureMatcher TryBindNativeFilter(NativeFilterProgram program);
@@ -37,13 +32,9 @@ namespace MapRenderer.Jobs.Tiles
     internal interface INativeFeatureMatcher : IDisposable
     {
         /// <summary>Evaluates every feature of this matcher's own layer, ordinal <c>[0, featureCount)</c>,
-        /// against the bound program in ONE Burst job and returns the match column: index <c>i != 0</c>
-        /// means feature <c>i</c> matched — an evaluation error excludes, mirroring
-        /// <see cref="MapRenderer.Core.Filters.CompiledFilter"/>'s caught-exception → exclude. No
-        /// <c>featureCount</c> parameter: the matcher already knows it (it sized its own result columns from
-        /// it at construction), so there is one source for the bound, not two the caller could let drift.
-        /// The returned array is owned by this matcher — valid until <see cref="IDisposable.Dispose"/>,
-        /// never disposed by the caller.</summary>
+        /// against the bound program in ONE Burst job; <c>[i] != 0</c> means feature i matched, and an
+        /// evaluation error excludes, as in <see cref="MapRenderer.Core.Filters.CompiledFilter"/>. The
+        /// matcher owns the bound and the array, valid until <see cref="IDisposable.Dispose"/>.</summary>
         NativeArray<byte> MatchAll();
     }
 }

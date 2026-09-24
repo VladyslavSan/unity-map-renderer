@@ -154,19 +154,10 @@ namespace MapRenderer.Core.Geo
         /// <summary>
         /// Computes the camera pose relative to the floating origin (look-at at scene 0,0,0) from a
         /// <see cref="CameraProperties"/>. Coordinates are right-handed, Y=up, X=east, Z=north; heading is CW
-        /// from north; the camera orbits the look-at.
-        ///
-        /// <para>At heading 0 the camera sits south of and above the look-at and looks north and down, so tilt
-        /// swings the view toward the horizon in the bearing direction. The closed-form orbit geometry is a
-        /// non-local invariant. With <c>sinT=tilt.Sin</c>, <c>cosT=tilt.Cos</c>, <c>sinH/cosH</c> from heading:
-        /// <code>
-        ///   pos = (−alt·sinT·sinH,  alt·cosT,  −alt·sinT·cosH)   // camera, opposite the bearing dir
-        ///   fwd = −pos/alt = (sinT·sinH, −cosT, sinT·cosH)       // toward look-at; |pos| ≡ alt
-        ///   up  = (sinH·cosT,  sinT,  cosH·cosT)                 // world-up preserved (up.y = sinT ≥ 0)
-        /// </code>
-        /// <c>up</c> is unit-length and ⟂ <c>fwd</c> for all tilt∈[0,90] (sin²H+cos²H=1 cancels the
-        /// cross-terms), so no Gram-Schmidt fallback is needed. <c>up.y=sinT≥0</c> stops the image flipping
-        /// vertically as tilt approaches 90.</para>
+        /// from north; the camera orbits the look-at, south of it at heading 0. Non-local invariant: with
+        /// T = tilt, H = heading, <c>pos = alt·(−sinT·sinH, cosT, −sinT·cosH)</c>, <c>fwd = −pos/alt</c>,
+        /// <c>up = (sinH·cosT, sinT, cosH·cosT)</c>; <c>up</c> is unit and ⟂ <c>fwd</c> for tilt in [0,90], and
+        /// <c>up.y ≥ 0</c> keeps the image from flipping near 90.
         /// </summary>
         /// <param name="altitude">Camera orbit radius in metres (from <see cref="AltitudeForZoom"/>).</param>
         /// <param name="heading">Camera bearing (constraint already enforced upstream).</param>

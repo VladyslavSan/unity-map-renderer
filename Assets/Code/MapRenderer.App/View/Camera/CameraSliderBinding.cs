@@ -5,29 +5,11 @@ using MapRenderer.Unity.View.Camera;
 namespace MapRenderer.App.View.Camera
 {
     /// <summary>
-    /// The pure, engine-free two-way reconcile between an Editor authoring surface's
-    /// Zoom / Tilt / Heading sliders and the live Core <see cref="CameraProperties"/>.
-    ///
-    /// <para>Engine-free (no <c>UnityEngine</c>) so the whole binding runs headless in
-    /// <c>Tools/core-tests</c> — the MonoBehaviour shell (<c>CameraControlPanel</c>) is a thin shuttle
-    /// that owns no logic. <see cref="Reconcile"/> is the entire mechanism.</para>
-    ///
-    /// <para><b>The feedback guard:</b> per field, the rule compares the slider field to a
-    /// <b>baseline</b> (the last value the panel synced) — <b>never</b> to the live camera. If the field
-    /// differs from its baseline, the user dragged that slider ⇒ emit only that field into the patch. If
-    /// the field equals its baseline, the user is idle ⇒ pull that field from the camera. Because the idle
-    /// branch never emits a patch, a camera that moves on its own (scroll-zoom, <c>flyTo</c>) produces no
-    /// patch and the sliders simply follow it — no fight, no oscillation. Comparing the field to the live
-    /// camera instead would misread any non-panel camera motion as a user edit and revert it every frame.</para>
-    ///
-    /// <para><b>Per-field isolation:</b> only the dragged field is written; a concurrent camera change to a
-    /// different field (scroll-zoom changing Zoom while the user drags Heading) is not stomped.</para>
-    ///
-    /// <para><b>Zoom is canonical end-to-end.</b> All three quantities are compared and stored in their
-    /// native units (zoom level, degrees, degrees) — there is no metres↔zoom conversion and the binding
-    /// needs no viewport/FOV framing input. Tilt/Heading round-trip through <see cref="ConstrainedAngle"/>
-    /// so the slider snaps to the model's clamped/wrapped value; Zoom passes through (its range is bounded
-    /// by the panel's slider, not by a model constraint).</para>
+    /// The pure, engine-free two-way reconcile between an Editor authoring surface's Zoom / Tilt / Heading
+    /// sliders and the live Core <see cref="CameraProperties"/>. Non-obvious why: each field compares to a
+    /// <b>baseline</b> (the last synced value), never to the live camera. A changed field is a user drag and
+    /// emits only that field; an unchanged one follows the camera, so camera self-motion never reads as an edit.
+    /// Tilt/Heading round-trip through <see cref="ConstrainedAngle"/>; Zoom passes through in zoom levels.
     /// </summary>
     public static class CameraSliderBinding
     {

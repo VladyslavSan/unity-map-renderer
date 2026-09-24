@@ -1,8 +1,5 @@
-// MapView/MapViewLightingTests.cs — MapHost's directional light and environment-probe bootstrap (EditMode).
-//
-// Split from MapView/MapViewTests.cs by a using collision, not by size: EnvironmentLightingTests
-// imports UnityEngine.Rendering (CameraProperties), and the other four MapView files use bare
-// CameraProperties from MapRenderer.Core.Geo — the two must never share a file.
+// MapHost's directional light and environment-probe bootstrap. Its own file because UnityEngine.Rendering
+// and MapRenderer.Core.Geo both define CameraProperties, and the other MapView files use the Core one.
 //
 // Contents:
 //   DirectionalLightBootstrapTests  — MapHost.EnsureDirectionalLight adds a light only when the scene has none.
@@ -42,9 +39,8 @@ namespace MapRenderer.Tests.MapViews
             return found;
         }
 
-        // Every currently-active light of ANY type — hidden (not destroyed) for the duration of a test so a
-        // stray scene light can't satisfy the method's guard, then restored. Destroys anything the test
-        // itself introduced.
+        // Hides (does not destroy) every active light for the test, so a stray scene light can't satisfy the
+        // method's guard; the caller restores them.
         private static List<Light> HideAllActiveLights()
         {
             var hidden = new List<Light>(Object.FindObjectsByType<Light>());
@@ -146,9 +142,8 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void EnsureEnvironmentLighting_UnlitMode_LeavesDegenerateProbeUntouched()
         {
-            // The mode gate — under Unlit, the SAME degenerate-probe scenario that Lit
-            // populates above must be left untouched (no DynamicGI.UpdateEnvironment call). Unlit map
-            // geometry has no indirect-lighting term to fill, so generating a probe for it is dead work.
+            // Under Unlit, the same degenerate probe stays untouched: Unlit geometry has no indirect term, so
+            // a DynamicGI.UpdateEnvironment call would be dead work.
             var prevMode  = RenderSettings.ambientMode;
             var prevLight = RenderSettings.ambientLight;
             var prevProbe = RenderSettings.ambientProbe;

@@ -3,13 +3,11 @@ using Unity.Collections;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
-    /// The native-column capability a Burst filter evaluator reads a feature's inputs through — so a deep
-    /// evaluator depends on THIS, not on a concrete <see cref="IMvtPropertyStore"/> implementation. A
-    /// source that carries MVT's dense native representation (only <see cref="MvtLayerPropertyResolver"/>;
-    /// the seam is where another native tile source plugs in) advertises it; a source that does
-    /// not simply has no native fast-path built for it and stays on the managed <see cref="IMvtPropertyStore"/>
-    /// path. Probed as a capability, like <see cref="MapRenderer.Core.Expressions.IIndexedFeatureSource"/>
-    /// gates the key hoist — never by testing the concrete store type.
+    /// The native-column capability a Burst filter evaluator reads a feature's inputs through, so the
+    /// evaluator does not depend on a concrete <see cref="IMvtPropertyStore"/>. Only
+    /// <see cref="MvtLayerPropertyResolver"/> implements it; a source without it stays on the managed path.
+    /// Callers probe it as a capability, like <see cref="MapRenderer.Core.Expressions.IIndexedFeatureSource"/>
+    /// gates the key hoist, and never test the concrete store type.
     /// </summary>
     internal interface INativeFilterColumns
     {

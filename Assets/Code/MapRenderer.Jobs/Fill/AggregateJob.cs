@@ -7,18 +7,11 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// The fill graph's aggregate node: prefix sums over the per-polygon earcut outputs, then one pass
-    /// copying each polygon's scratch slice into the layer's merged-vertex and rebased-index arrays. Every
-    /// output list is resized to its exact total; a zero-length list is a valid, empty output.
-    ///
-    /// <para><b>Pre-sizes, but does not fill, three downstream outputs.</b> <see cref="WorldPositions"/>,
-    /// <see cref="VertexUp"/> and <see cref="Geo"/> are resized to the exact vertex total here and filled by
-    /// the tile→geo/project nodes that follow, so their <c>AsDeferredJobArray()</c> views already have the
-    /// right length when those nodes execute.</para>
-    ///
-    /// <para><b>This node sizes the INTERIOR, not the layer.</b> <see cref="FillBandJob"/> runs after it on
-    /// both arms and grows every column by the boundary band's own vertices. Nothing downstream may take a
-    /// vertex total off this job.</para>
+    /// The fill graph's aggregate node: prefix sums over the per-polygon earcut outputs, then one pass copying
+    /// each polygon's slice into the layer's merged-vertex and rebased-index arrays, each resized to its exact
+    /// total. It also pre-sizes <see cref="WorldPositions"/>, <see cref="VertexUp"/> and <see cref="Geo"/> for
+    /// the nodes that fill them. Non-local invariant: it sizes the INTERIOR only; <see cref="FillBandJob"/> then
+    /// grows every column, so nothing downstream may take a vertex total off this job.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct AggregateJob : IJob
@@ -69,9 +62,8 @@ namespace MapRenderer.Jobs.Fill
             NativeList<double2> flatWorkVerts = Buffers.FlatWorkVerts;
             NativeList<int>     flatIndexArrays = Buffers.FlatIndexArrays;
 
-            // Bound by PerPolyMergedVertexCount's OWN length, never PolyCountArr[0] — a borrowed input that
-            // SizingJob's capacity early-return leaves stale while every Buffers column is length 0. The
-            // indexer bounds check is [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")], gone in a player.
+            // Bound by PerPolyMergedVertexCount's own length, never PolyCountArr[0], which SizingJob's early
+            // return leaves stale; the indexer bounds check is gone in a player.
             int polyCount = perPolyMergedVertexCount.Length;
 
             int totalMergedVerts = 0, totalIdxCount = 0, totalForceClips = 0;

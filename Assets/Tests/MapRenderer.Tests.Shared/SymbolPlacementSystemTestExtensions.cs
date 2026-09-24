@@ -23,12 +23,11 @@ namespace MapRenderer.Tests
     internal static class SymbolPlacementSystemTestExtensions
     {
         /// <summary>
-        /// Ticks <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry using a
-        /// throwaway plan — safe because <c>GatherIntoMirror</c> copies into the native mirror before <c>Tick</c>
-        /// returns. Allocates per call, so use the fixture-owned-plan
-        /// <see cref="TickSymbols(SymbolPlacementSystem, in SceneFrame, TestSymbolPlan, SymbolTileBuffer, GlyphAtlasTexture, float, IReadOnlyList{SymbolRenderLayer}, Texture2D)"/>
-        /// overload instead inside an <c>Is.Not.AllocatingGCMemory</c> region or wherever the gather memo needs a
-        /// stable plan identity.
+        /// Ticks <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry with a
+        /// throwaway plan, which is safe because <c>GatherIntoMirror</c> copies before <c>Tick</c> returns. It
+        /// allocates per call; use the fixture-owned-plan overload inside <c>Is.Not.AllocatingGCMemory</c> or
+        /// where the gather memo needs a stable plan identity:
+        /// <see cref="TickSymbols(SymbolPlacementSystem, in SceneFrame, TestSymbolPlan, SymbolTileBuffer, GlyphAtlasTexture, float, IReadOnlyList{SymbolRenderLayer}, Texture2D)"/>.
         /// </summary>
         public static void TickSymbols(this SymbolPlacementSystem system, in SceneFrame frame,
             SymbolTileBuffer buffer, GlyphAtlasTexture atlas, IProjection projection,

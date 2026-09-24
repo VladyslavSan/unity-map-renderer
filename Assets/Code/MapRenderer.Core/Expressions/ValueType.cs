@@ -1,13 +1,9 @@
 namespace MapRenderer.Core.Expressions
 {
     /// <summary>
-    /// The runtime types of the MapLibre expression type system (public Style Spec, "Types" section).
-    /// The spec's expression value space is: null, boolean, number, string, color, array, object — plus
-    /// the "value" supertype used where any of these is accepted. We model that supertype as a parse-time
-    /// concept (it never appears as a concrete <see cref="Value"/> tag), so the concrete tags here are the
-    /// six listed runtime types.
-    ///
-    /// Clean-room: type names and the type set are taken from the public Style Spec docs only.
+    /// The runtime types of the MapLibre expression type system (public Style Spec, "Types" section):
+    /// null, boolean, number, string, color, array, object. The spec's "value" supertype is a parse-time
+    /// concept and never a concrete <see cref="Value"/> tag.
     /// </summary>
     public enum ValueType
     {

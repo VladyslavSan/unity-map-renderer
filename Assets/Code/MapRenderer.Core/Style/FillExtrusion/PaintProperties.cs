@@ -5,29 +5,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.FillExtrusion
 {
     /// <summary>
-    /// The parsed MapLibre fill-extrusion <b>paint</b> properties for a single fill-extrusion style layer.
-    ///
-    /// Each <c>fill-extrusion-*</c> key is read from the layer's <c>paint</c> sub-tree (via
-    /// <see cref="PropertyNames"/>) and collapsed into a single <see cref="StyleProperty{T}"/>: one parsed
-    /// <see cref="Expressions.Expression"/>, one typed default, and a <c>Value → T</c> projection — mirrors
-    /// <see cref="Fill.PaintProperties"/>.
-    ///
-    /// <para><b>fill-extrusion-translate is parsed via the expression engine.</b> Its value is a px
-    /// offset that (per the Style Spec) can itself be a zoom-interpolated expression, and a raw-array read
-    /// (<c>Items[0]/[1]</c>, the pattern <see cref="Fill.PaintProperties.Translate"/> still uses, since Fill
-    /// never supports a zoom-varying translate) would silently collapse a <c>["interpolate", ...]</c>
-    /// expression to <c>[0, 0]</c> instead of failing loudly. <see cref="Translate"/> instead goes through
-    /// <see cref="ExpressionParser.Parse(Json.JsonValue)"/> — via <see cref="ExpressionParser.WrapBareArrayLiterals"/>
-    /// first, since a constant translate is written as a bare <c>[x, y]</c> array, which the strict parser
-    /// otherwise rejects — with a <see cref="Value.Array"/>→<see cref="double2"/> projection; the engine
-    /// already lerps <c>Array</c>-typed values element-wise (<c>Ops/Ramps.cs</c>'s <c>Lerp</c>), so a
-    /// zoom-interpolated translate is preserved and classified rather than collapsed. Render (needing the
-    /// shared <c>PixelsToWorld</c> px→world measurement) lands alongside the mesh + shader in the same
-    /// increment. <see cref="TranslateAnchor"/> is a plain two-value string enum with no expression form,
-    /// so it carries no equivalent landmine.</para>
-    ///
-    /// Absent properties use the spec defaults; <see cref="IsInertFallback"/> is true when all are absent.
-    /// Engine-free; clean-room (public Style Spec, no MapLibre source).
+    /// The parsed MapLibre fill-extrusion <b>paint</b> properties: one <see cref="StyleProperty{T}"/> per
+    /// <c>fill-extrusion-*</c> key, as in <see cref="Fill.PaintProperties"/>. Non-obvious why:
+    /// <see cref="Translate"/> goes through the expression engine, because the spec allows a zoom-interpolated
+    /// translate that a raw <c>Items[0]/[1]</c> read would collapse to <c>[0, 0]</c>. Absent properties use
+    /// the spec defaults; <see cref="IsInertFallback"/> is true when all are absent.
     /// </summary>
     public sealed class PaintProperties
     {
@@ -171,10 +153,8 @@ namespace MapRenderer.Core.Style.FillExtrusion
                 verticalGradient = new StyleProperty<float>(1f);
             }
 
-            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the
-            // class doc) so a zoom-interpolate translate classifies as Zoom instead of collapsing to
-            // [0,0]. WrapBareArrayLiterals handles the common constant form (a bare [x,y] array, which the
-            // strict parser would otherwise reject as "operator must be a string").
+            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the class
+            // doc). WrapBareArrayLiterals admits the constant bare [x, y] form, which the strict parser rejects.
             JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);
             if (translateJson != null) anyPresent = true;
             StyleProperty<double2> translate;
@@ -197,10 +177,8 @@ namespace MapRenderer.Core.Style.FillExtrusion
                 }
                 catch
                 {
-                    // Malformed translate (parse failure, or a well-formed-but-short array like [5] whose
-                    // projection throws IndexOutOfRangeException at Constant-kind eager eval) — fall to the
-                    // spec default rather than let one bad key take down the whole layer, mirroring
-                    // VerticalGradient/Antialias's catch-all above.
+                    // A malformed translate (a parse failure, or a short array like [5] that throws at eager eval)
+                    // falls to the spec default rather than taking down the whole layer.
                     translate = new StyleProperty<double2>(new double2(0.0, 0.0));
                 }
             }

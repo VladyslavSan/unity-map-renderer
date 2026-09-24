@@ -23,19 +23,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
         internal static long DebugTotalBuildsCreated => Interlocked.Read(ref _totalBuildsCreated);
 
         /// <summary>Non-zero iff <see cref="RecordDisposed"/>'s decrement ever took <see cref="DebugLiveBuilds"/>
-        /// below zero — the hazard pooling adds: each instance's own
-        /// <c>_disposed</c> flag only guards a SECOND dispose of the SAME lease, not a stale reference
-        /// disposing an instance the pool has since re-rented to someone else (that lease's own
-        /// <c>_disposed</c> was already reset to <c>false</c> by <c>Reset</c>). Mirrors
-        /// <see cref="Tile.Processing.TileBuildGraph.DebugNegativeObservations"/>'s own idiom.</summary>
+        /// below zero, as <see cref="Tile.Processing.TileBuildGraph.DebugNegativeObservations"/> does. Pooling
+        /// adds this hazard: <c>_disposed</c> guards a second dispose of the same lease, but not a stale
+        /// reference disposing a re-rented instance, whose <c>_disposed</c> <c>Reset</c> cleared.</summary>
         internal static long DebugNegativeObservations => Interlocked.Read(ref _negativeObservations);
 
         /// <summary>Records one build renting real columns — called by each implementer's own <c>Rent</c>
-        /// factory. A source layer only reaches <c>Rent</c> once its render layer's own emptiness gate has
-        /// already passed (<c>ITileMeshRenderLayer.BuildGraphRequest</c> returns <c>null</c> otherwise), but
-        /// that gate is not the only path here: <c>TileManager.KickSourcelessBackground</c> and test fixtures
-        /// call <c>Rent</c> directly, with no render layer or gate in between. Either way, every call really
-        /// does correspond to owned columns, with nothing left to gate a second time.</summary>
+        /// factory. Every call corresponds to owned columns, so there is nothing to gate here: a render layer
+        /// reaches <c>Rent</c> only past its emptiness gate (<c>ITileMeshRenderLayer.BuildGraphRequest</c>),
+        /// and <c>TileManager.KickSourcelessBackground</c> and test fixtures call it directly.</summary>
         internal static void RecordRented()
         {
             Interlocked.Increment(ref _liveBuilds);

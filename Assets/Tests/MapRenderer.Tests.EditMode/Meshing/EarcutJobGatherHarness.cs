@@ -35,17 +35,11 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        /// <summary>Derives the visited-ring buffer (RingSelectJob's no-clip fast path — every unset caller's
-        /// path), assembles polygons (RingAssemblyJob, unmodified), sizes the flat buffers (hand-reproducing
-        /// FillMeshPipeline.cs's sizing loop — SizingJob's future job, not yet written when this was first
-        /// authored), then runs <see cref="FillGatherJob{TComparer}"/> to populate the flat vertex/hole-count/
-        /// outer-count/feature-idx outputs. Caller disposes the returned <paramref name="derived"/> buffer and
-        /// <paramref name="state"/>.
-        ///
-        /// <para>The hand-written <c>PerPolyFeatureIndex</c>/<c>PerPolyOuterCount</c> pre-sizing below (mirroring
-        /// <see cref="SizingJob"/>) is NOT incidental setup: <see cref="FillGatherJob{TComparer}"/> bounds its
-        /// own loop by <c>Buffers.PerPolyOuterCount.Length</c>, so removing it as "redundant" would silently
-        /// zero the gather loop's bound.</para></summary>
+        /// <summary>Derives the visited-ring buffer (RingSelectJob's no-clip path), assembles polygons, sizes the
+        /// flat buffers by hand as <see cref="SizingJob"/> does, then runs <see cref="FillGatherJob{TComparer}"/>.
+        /// Caller disposes <paramref name="derived"/> and <paramref name="state"/>. Non-local invariant: the
+        /// <c>PerPolyOuterCount</c> pre-sizing is load-bearing, because <see cref="FillGatherJob{TComparer}"/>
+        /// bounds its loop by <c>Buffers.PerPolyOuterCount.Length</c>.</summary>
         internal static void BuildGatherState(
             TileGeometryBuffers geometry, NativeArray<int> visitOrder,
             out TileGeometryBuffers derived, out GatherState state)
@@ -223,11 +217,8 @@ namespace MapRenderer.Tests.Meshing
         {
             int vOff = s.Buffers.VertexOffsets[pi], vLen = s.Buffers.VertexOffsets[pi + 1] - vOff;
             int outerCount = s.Buffers.PerPolyOuterCount[pi];
-            // hOff/hCap: HoleCountOffsets is sized to CAPACITY, not the real hole count — SizingJob pads
-            // a zero-hole polygon's slot to 1 (matching EarcutJob's own SortedHoleCounts contract, which
-            // needs a length-1 array even when HoleCount=0). s.PolyHoleCount[pi] is the REAL count; using
-            // the padded capacity here would reconstruct a phantom empty hole for every zero-hole polygon,
-            // silently miscounting it as holed.
+            // HoleCountOffsets holds CAPACITY (SizingJob pads a zero-hole slot to 1 for EarcutJob); read the
+            // REAL count from PolyHoleCount, or every zero-hole polygon gains a phantom empty hole.
             int hOff = s.Buffers.HoleCountOffsets[pi], hCap = s.Buffers.HoleCountOffsets[pi + 1] - hOff;
             int holeCount = s.PolyHoleCount[pi];
 
@@ -295,12 +286,10 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        /// <summary>Drives the REAL jobified fill path to get one fixture/layer's EARCUT-ONLY, tile-space
-        /// root triangles — <c>SuppressBoundaryBand = true</c>, extraction always under a non-curved
-        /// projection regardless of the caller's own target. Returns the REAL per-source-feature index
-        /// off the graph output, not a placeholder. Exemption (non-local invariant): a curved projection
-        /// makes <see cref="FillMeshGraph.Schedule"/> subdivide internally, so a curved-projection
-        /// extraction would already be post-subdivision leaves, not the roots a caller needs.</summary>
+        /// <summary>Runs the real fill path for one fixture/layer's EARCUT-ONLY tile-space root triangles
+        /// (<c>SuppressBoundaryBand = true</c>) and their real per-source-feature index. Non-local invariant:
+        /// extraction always uses a flat projection, because a curved one makes
+        /// <see cref="FillMeshGraph.Schedule"/> subdivide and return leaves, not roots.</summary>
         internal static (double2[] TileVerts, int[] TriangleIndices, int[] VertexFeatureIdx, double Extent)
             BuildEarcutRootsFromFillGraph(byte[] mvtBytes, string layerName, in TileId id)
         {

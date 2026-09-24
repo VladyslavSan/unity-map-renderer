@@ -6,12 +6,10 @@ using System;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Cache key for one decoded glyph-PBF range: the request key string that identified the fetch
-    /// (an individual font name, per <see cref="FontStackResolver"/>'s per-font cache lookups — see its
-    /// class doc for why this differs from <see cref="FontStack.RequestToken"/>) plus the 256-aligned
-    /// range base (<see cref="FontStackResolver.ComputeRangeStart"/>). Mirrors the
-    /// <see cref="Geo.TileId"/> value-equality pattern so it drops into a <c>Dictionary</c>/<c>HashSet</c>
-    /// without boxing.
+    /// Cache key for one decoded glyph-PBF range: the individual font name it was fetched under (see
+    /// <see cref="FontStackResolver"/>) plus the 256-aligned range base
+    /// (<see cref="FontStackResolver.ComputeRangeStart"/>). It has value equality, like
+    /// <see cref="Geo.TileId"/>, so it keys a <c>Dictionary</c>/<c>HashSet</c> without boxing.
     /// </summary>
     public readonly struct GlyphRangeKey : IEquatable<GlyphRangeKey>
     {

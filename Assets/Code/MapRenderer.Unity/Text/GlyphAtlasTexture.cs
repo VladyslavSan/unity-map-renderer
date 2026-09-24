@@ -1,11 +1,5 @@
-// Namespace-collision guard (fcd7145 just fixed this exact trap in a Text test): this file lives in
-// MapRenderer.Unity.Text and uses Unity.Mathematics.int2 — a top-level `using Unity.Mathematics;` +
-// unqualified `int2` is required. NEVER write the inline-qualified `Unity.Mathematics.int2` here: inside
-// a `MapRenderer.Unity.*` namespace, the leading `Unity` segment binds to the CURRENT namespace
-// (`MapRenderer.Unity`), not the global `Unity` root, so `Unity.Mathematics.int2` resolves to
-// `MapRenderer.Unity.Mathematics.int2` (CS0234: no such namespace). `MapRenderer.Unity.Text` itself does
-// not collide with any bare UnityEngine type (UnityEngine.UI.Text is nested under UnityEngine.UI, not a
-// bare `Text` this assembly's code ever references unqualified).
+// Non-obvious why: write `int2` via `using Unity.Mathematics;`, never inline `Unity.Mathematics.int2` —
+// inside `MapRenderer.Unity.*` the leading `Unity` binds to `MapRenderer.Unity` (CS0234).
 
 using System;
 using Unity.Mathematics;
@@ -17,24 +11,11 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// The Unity half of the SDF glyph atlas — wraps a
-    /// <see cref="Texture2DArray"/> (single-channel <see cref="TextureFormat.R8"/>, one array LAYER per
-    /// <see cref="GlyphAtlas"/> PAGE) and uploads each page's <see cref="GlyphAtlas.PagePixels"/> CPU
-    /// buffer to its layer via <see cref="Texture2DArray.SetPixelData{T}(T[],int,int)"/> +
-    /// <see cref="Texture2DArray.Apply()"/>, every layer sized to the atlas's (per-page) <see cref="GlyphAtlas.Size"/>.
-    /// <see cref="GlyphAtlas"/> itself stays engine-free (Core) — this is the ONLY point an atlas touches
-    /// <c>UnityEngine</c>.
-    ///
-    /// <para><b>Single-page byte-identical.</b> An atlas that never overflows a page
-    /// (<see cref="GlyphAtlas.PageCount"/> == 1, the invariant for any map that fits) uploads a
-    /// Texture2DArray with exactly ONE layer — layer 0 holds the SAME bytes a pre-Stage-M
-    /// <see cref="Texture2D"/> would have, and every <c>SymbolQuad.Page</c>/<c>BillboardVertex.Page</c> is
-    /// 0, so the shader's array sample at layer 0 is pixel-identical to a plain 2D sample. Multi-page only
-    /// activates once a SECOND page opens.</para>
-    ///
-    /// Main-thread only (like every <c>Texture2D</c>/<c>Texture2DArray</c> mutation) — <see cref="Upload"/>
-    /// must be called from the main thread, after any off-thread fetch/decode work has resumed there
-    /// (mirrors every other GPU-resource boundary in this codebase — the mesh/backend disposal contract).
+    /// The Unity half of the SDF glyph atlas: an R8 <see cref="Texture2DArray"/> with one layer per
+    /// <see cref="GlyphAtlas"/> page, each layer sized to <see cref="GlyphAtlas.Size"/>. It is the only
+    /// point where the engine-free atlas touches <c>UnityEngine</c>. A one-page atlas gives one layer, and
+    /// every glyph samples layer 0. Main-thread only: call <see cref="Upload"/> after any off-thread
+    /// fetch/decode work resumes on the main thread.
     /// </summary>
     public sealed class GlyphAtlasTexture : VerifiedDisposable
     {

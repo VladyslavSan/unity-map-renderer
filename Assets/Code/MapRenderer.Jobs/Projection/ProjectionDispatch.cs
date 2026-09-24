@@ -7,17 +7,10 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Jobs.Projection
 {
     /// <summary>
-    /// The managed side of projection polymorphism: given a (boxed) <see cref="IProjection"/>, picks the
-    /// matching <see cref="ProjectPointsJob{TProj}"/> specialisation and schedules it. Burst cannot hold a
-    /// managed <see cref="IProjection"/> or do virtual dispatch, so the concrete projection STRUCT is chosen
-    /// here (once per tile) and handed to the generic job as its type parameter.
-    ///
-    /// <para>This is the ONE place the concrete projection structs are enumerated — the type-dispatch that
-    /// replaces an enum switch (the struct type IS the discriminator). Adding a projection = its struct + one
-    /// <c>case</c> here + its <c>RegisterGenericJobType</c> line in <see cref="ProjectPointsJob{TProj}"/>.</para>
-    ///
-    /// <para>There is no synchronous entry point. Every caller schedules, including the extrusion wall
-    /// chain, so no call site needs <c>.Run()</c>.</para>
+    /// The managed side of projection polymorphism: given a (boxed) <see cref="IProjection"/>, schedules the
+    /// matching <see cref="ProjectPointsJob{TProj}"/> specialisation, because Burst cannot do virtual dispatch.
+    /// This is the one place the concrete projection structs are enumerated: a new projection needs its struct,
+    /// one <c>case</c> here, and its <c>RegisterGenericJobType</c> line in the generic job.
     /// </summary>
     public static class ProjectionDispatch
     {

@@ -33,11 +33,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary>Decodes one tile under <paramref name="scheduler"/>'s policy and hands back a
         /// <see cref="SharedDisposable{T}"/> holding the caller's ONE reference. The caller owns it: it must
-        /// reach exactly one release site.
-        ///
-        /// <para>A decoder throw becomes a <see cref="TileDecodeException"/> and faults the returned task —
-        /// nothing is minted, so a failed decode can never leak a reference. The tile address
-        /// goes IN here, at the only mint site, and is never supplied again.</para></summary>
+        /// reach exactly one release site. A decoder throw becomes a <see cref="TileDecodeException"/> and faults
+        /// the task with nothing minted, so a failed decode leaks no reference. The tile address goes in here,
+        /// at the only mint site, and is never supplied again.</summary>
         /// <param name="bytes">The encoded payload, or <see langword="null"/> for a source whose decoder
         /// carries its own payload (the GeoJSON dataset) — <see cref="ITileDecoder.Decode"/> documents it.</param>
         /// <param name="scheduler">The execution policy — <see cref="ThreadPoolWorkScheduler"/> decodes

@@ -13,26 +13,16 @@ namespace MapRenderer.Jobs.Mvt
     internal static class NativeFilterRebind
     {
         /// <summary>
-        /// Resolves <paramref name="program"/>'s <see cref="NativeFilterProgram.KeyNames"/> and
-        /// <see cref="NativeFilterProgram.LiteralStrings"/> against one tile-layer: each key name to its
-        /// <paramref name="resolver"/> key-index (-1 if absent, mirroring <c>FeatureKeyExpression</c>'s
-        /// <c>keyIndex &lt; 0</c> branch), each literal string to its
-        /// <see cref="MvtLayerPropertyResolver.ValueStrings"/> id via a full ordinal scan — never a
-        /// duplicate-tolerant partial one, since string dedup is an encoder property, not a decoder
-        /// guarantee. A literal matching zero strings resolves to -1 (a never-equal
-        /// sentinel: comparing against a real column id, always ≥0, is then statically false — byte-
-        /// identical to comparing two distinct strings). A literal matching two or more strings makes a
-        /// single-id compare unsound for this layer, so the whole rebind is refused; the caller keeps this
-        /// tile-layer on the managed path.
+        /// Resolves each key name to its <paramref name="resolver"/> key index (-1 if absent) and each literal
+        /// string to its <see cref="MvtLayerPropertyResolver.ValueStrings"/> id by a full ordinal scan, because
+        /// string dedup is an encoder property, not a decoder guarantee. A literal with no match resolves to -1,
+        /// which never equals a real id. A literal with two or more matches makes a single-id compare unsound,
+        /// so the rebind is refused and the layer stays on the managed path.
         /// </summary>
         /// <param name="program">The compiled, tile-independent program to bind.</param>
         /// <param name="resolver">The tile-layer's shared key/value tables.</param>
-        /// <param name="allocator">The <paramref name="binding"/> array's allocator. Selection runs
-        /// off the main thread during tile build, so a caller on that path must pass
-        /// <see cref="Allocator.Persistent"/> — <see cref="Allocator.TempJob"/>'s 4-frame cap counts
-        /// <b>main-thread</b> frames, which hundreds of synchronous binds on a worker thread can overrun
-        /// while the main thread keeps rendering. A main-thread caller (e.g. a test) may still pass
-        /// <see cref="Allocator.TempJob"/>.</param>
+        /// <param name="allocator">The <paramref name="binding"/> allocator: <see cref="Allocator.Persistent"/>
+        /// off the main thread, because TempJob's 4-frame cap counts main-thread frames.</param>
         /// <param name="binding">The resolved <c>slot→id</c> array, caller-owned, on success; <c>default</c>
         /// on refusal.</param>
         /// <returns>False iff a literal string resolves to two or more distinct ids in this layer.</returns>

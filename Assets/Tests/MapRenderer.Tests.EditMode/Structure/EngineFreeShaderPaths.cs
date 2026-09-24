@@ -10,10 +10,8 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Engine-free shader path resolution for tests that must compile under <c>Tools/core-tests</c>,
     /// where <c>ShaderPropertyParser</c>'s <c>UnityEditor.AssetDatabase</c>-based
-    /// <c>MapShaderPath</c> is unavailable. Resolves a shader file under <c>Shaders/Map/</c> by
-    /// filename, searching recursively — move-proof against the Lit/Unlit folder split, but only
-    /// within the repo's directory layout (unlike <c>ShaderPropertyParser</c>'s GUID-based
-    /// lookup, this does not survive the whole <c>MapRenderer.Unity</c> assembly being relocated).
+    /// <c>MapShaderPath</c> is unavailable. Resolves a shader under <c>Shaders/Map/</c> by filename,
+    /// recursively. Limitation: unlike the GUID lookup, it breaks if <c>MapRenderer.Unity</c> moves.
     /// </summary>
     internal static class EngineFreeShaderPaths
     {

@@ -5,13 +5,9 @@ namespace MapRenderer.Unity.Rendering.Materials
 {
     /// <summary>
     /// Low-level typed setters/getters for a material's forward-pass render state. Maps Unity rendering
-    /// enums → the underlying ShaderLab int properties
-    /// (<c>_ZWrite</c>/<c>_ZTest</c>/<c>_Cull</c>/<c>_SrcBlend</c>/<c>_DstBlend</c>/<c>_BlendOp</c>).
-    ///
-    /// <para>Together with <see cref="ShaderProperties.PropertyId"/> this is the ONLY place the render-state
-    /// property ids are touched — the tweakers compose these, the GUI calls the tweakers. All
-    /// setters guard with <see cref="Material.HasProperty(int)"/> so they are no-ops on a material
-    /// whose shader lacks the knob.</para>
+    /// enums → the underlying ShaderLab int properties (<c>_ZWrite</c>/<c>_ZTest</c>/<c>_Cull</c>/blend).
+    /// The tweakers compose these and the GUI calls the tweakers. All setters guard with
+    /// <see cref="Material.HasProperty(int)"/>, so they are no-ops when the shader lacks the knob.
     /// </summary>
     public static class MaterialRenderStateExtensions
     {

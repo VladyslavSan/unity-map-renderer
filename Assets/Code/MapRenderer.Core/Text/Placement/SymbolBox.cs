@@ -1,9 +1,5 @@
-// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2 — this file lives in
-// MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a (nonexistent)
-// `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the namespace-collision trap in
-// GlyphAtlasTexture.cs.
-// BLITTABLE: kept to blittable fields only, because the Burst CollisionJob takes it as a NativeArray<SymbolBox>
-// element (mirrors PlacedQuad / LineRibbonVertex).
+// TOP-LEVEL `using Unity.Mathematics;` (see the namespace-collision trap in GlyphAtlasTexture.cs).
+// BLITTABLE: the Burst CollisionJob takes it as a NativeArray<SymbolBox> element.
 
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
@@ -80,17 +76,11 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>
-        /// The tight axis-aligned bound of ONE curved-symbol glyph — the AABB of the four ROTATED cell corners,
-        /// so the collision box tracks the drawn glyph on a sloped line. Mirrors
-        /// <see cref="BillboardMath.BuildQuad"/>: same <c>textSizePx / OneEm</c> scale, same CCW rotation about
-        /// <paramref name="anchorScreenPx"/>, then grown by <paramref name="paddingPx"/> on every edge. Only
-        /// <see cref="Min"/>/<see cref="Max"/> are meaningful — the sort/flag fields live on the owning
-        /// <see cref="SymbolCandidate"/>, not the per-glyph box.
-        ///
-        /// <para><paramref name="cellSkirt"/> (<c>CurvedGlyph.CellSkirt</c>, baked px) is the transparent
-        /// border baked into <paramref name="cell"/>, and is REMOVED before the corners are built, so the
-        /// collision box bounds the icon's ink rather than its skirt. Text passes <c>0</c>, which makes every
-        /// term below an exact <c>x - 0f</c> and the text path byte-identical.</para>
+        /// The AABB of ONE curved-symbol glyph's four ROTATED cell corners, so the box tracks the glyph on a
+        /// sloped line: <see cref="BillboardMath.BuildQuad"/>'s scale and CCW rotation about
+        /// <paramref name="anchorScreenPx"/>, grown by <paramref name="paddingPx"/>. <paramref name="cellSkirt"/>
+        /// is removed first, so the box bounds icon ink; text passes 0 and stays byte-identical. Only
+        /// <see cref="Min"/>/<see cref="Max"/> are meaningful.
         /// </summary>
         public static SymbolBox BuildRotatedGlyph(
             in float2 anchorScreenPx,
@@ -120,60 +110,22 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>
-        /// The map-pitched curved glyph's collision box: the screen AABB of its FOUR PROJECTED WORLD CORNERS. A
-        /// map-pitched glyph is DRAWN as a world-metre quad lying in the ground plane at its anchor, so its
-        /// screen size foreshortens with depth; <see cref="BuildRotatedGlyph"/> has no depth term at all and
-        /// therefore over-reserves, without bound, as the symbol recedes. This builds the same frame the shader
-        /// does, displaces the four corners in it, and projects each one.
-        ///
-        /// <para>Returns <c>false</c> — meaning take <see cref="BuildRotatedGlyph"/>'s screen box, not "fail" —
-        /// when the ground frame is degenerate (zero/parallel
-        /// <paramref name="surfaceUp"/>/<paramref name="tangentRender"/>) or any corner fails to project:
-        /// behind the camera, or projecting past <see cref="SymbolScreenProjection.MaxProjectedPx"/> in a
-        /// near-plane blow-up, which would otherwise make this AABB unbounded. <paramref name="box"/> is then
-        /// untouched, so a half-built box is not expressible. <b>This is a KNOWING divergence from the
-        /// shader</b>, whose own degenerate fallback is a camera-facing METRE frame
-        /// (<c>SymbolWorldPitchAlign.hlsl</c>): in that case the box does not track the ink. Reproducing the
-        /// camera-facing frame needs the view basis in render space and a fresh handedness derivation, to serve
-        /// a state unreachable in production.</para>
-        ///
-        /// <para><b><paramref name="emScaleMetres"/> must be built as
-        /// <c>TextSizePx · CandidateEmit.CornerMetresPerLogicalPixel</c></b> — the RENDERER's own association
-        /// (<c>WorldSymbolRenderer</c> passes <c>q.TextSizePx * cornerScale</c> into
-        /// <see cref="BillboardMath.BuildWorldQuad"/>). <c>SymbolStagingMath</c>'s already-computed
-        /// <c>arcScale</c> is the mathematically equal but differently-associated
-        /// <c>TextSizePx / OneEm · metresPerLogicalPixel</c>; substituting it would make the box agree with the
-        /// quad only to a ULP instead of to the last bit, a silent loosening of the tests that compare them.</para>
-        ///
-        /// <para><b>The ŷ sense.</b> The shader displaces by
-        /// <c>off.y · SYMBOL_WORLD_MAP_Y_SIGN · _ProjectionParams.x · cross(up, x̂)</c> with
-        /// <c>off.y = −c_y</c> (the corner Y negation), so at the measured <c>_ProjectionParams.x == −1</c> the
-        /// world displacement for a y-UP corner <c>c_y</c> is <c>c_y · cross(x̂, up)</c> — which is what this
-        /// uses. <b>The CPU must not reproduce <c>_ProjectionParams.x</c>:</b> it cancels out of the DISPLAY
-        /// sense of an ordinary projection (there is no flipped target here) but not out of the shader's WORLD
-        /// displacement, so the shader's runtime read is load-bearing and this side picks the
-        /// geometrically-correct sense. If the shader is ever wrong at <c>+1</c>, the box is right and the ink
-        /// is wrong — a shader defect, not a box defect. <b>Only ONE test pins this sense</b>,
-        /// <c>MapPitchedWorldArcStagingTests.MapPitched_ProjectedBox_PutsAPositiveCellYAboveTheAnchor</c>: the
-        /// box is an AABB, and for a cell that is y-symmetric about its anchor a ŷ flip merely PERMUTES the
-        /// corner set, which an AABB is invariant under, so that test needs an off-centre cell. It also
-        /// re-derives the sense rather than importing it, so a SHARED convention error stays unobserved on the
-        /// CPU side.</para>
-        ///
-        /// <para><paramref name="cellSkirt"/> is removed BEFORE the corners are built, as
-        /// <see cref="BuildRotatedGlyph"/> does — the box bounds the icon's ink, not its transparent border.
-        /// <paramref name="paddingPx"/> stays a SCREEN-pixel grow of the final AABB: <c>text-padding</c> is a
-        /// screen-space property, and growing it in metres would make it depth-dependent.</para>
-        ///
-        /// <para>Only <see cref="Min"/>/<see cref="Max"/> are written — the sort/flag fields live on the
-        /// owning <see cref="SymbolCandidate"/>, as with <see cref="BuildRotatedGlyph"/>.</para>
+        /// The map-pitched curved glyph's collision box: the screen AABB of its four projected world corners in the
+        /// shader's ground frame, because <see cref="BuildRotatedGlyph"/> has no depth term and over-reserves as
+        /// the symbol recedes. Returns <c>false</c> (use <see cref="BuildRotatedGlyph"/>) for a degenerate frame or
+        /// a corner that fails to project or passes <see cref="SymbolScreenProjection.MaxProjectedPx"/>;
+        /// <paramref name="box"/> is then untouched. Limitation: it does not reproduce the shader's camera-facing
+        /// degenerate fallback, a state unreachable in production. Non-local invariant: the ŷ sense is
+        /// <c>c_y · cross(x̂, up)</c>, the shader's result at <c>_ProjectionParams.x == −1</c>, and only
+        /// <c>MapPitchedWorldArcStagingTests.MapPitched_ProjectedBox_PutsAPositiveCellYAboveTheAnchor</c> pins it.
+        /// The skirt is removed first; <paramref name="paddingPx"/> grows the final AABB in screen px.
         /// </summary>
         /// <param name="cell">The glyph's baked-px cell, skirt included.</param>
         /// <param name="cellSkirt">The transparent border baked into <paramref name="cell"/>, baked px.</param>
-        /// <param name="emScaleMetres">What ONE em is in WORLD METRES — see the note above on its association.</param>
-        /// <param name="rotationRadians">The constant extra rotation the renderer applies to the corners
-        /// (<c>CandidateEmit.ExtraRotationRadians</c>, i.e. <c>icon-rotate</c>). The along-line TANGENT is not
-        /// included: it is already carried by <paramref name="tangentRender"/>, which builds the frame.</param>
+        /// <param name="emScaleMetres">One em in WORLD METRES, built as <c>TextSizePx · CornerMetresPerLogicalPixel</c>
+        /// like the renderer, so the box matches the drawn quad to the bit.</param>
+        /// <param name="rotationRadians">The renderer's constant corner rotation (<c>icon-rotate</c>); the
+        /// tangent is already in <paramref name="tangentRender"/>.</param>
         /// <param name="translateDeltaMetres">The renderer's <c>text-translate</c> delta in the corners' own
         /// unit (<c>CandidateEmit.TranslateDeltaPx · CornerMetresPerLogicalPixel</c>), y-UP.</param>
         /// <param name="anchorRender">The glyph's world anchor, render space (pre-RTC).</param>
@@ -197,10 +149,8 @@ namespace MapRenderer.Core.Text.Placement
         {
             box = default;
 
-            // The ground frame, mirroring SymbolWorldGroundFrame's guards in the SAME order with the SAME constants.
-            // Guard BEFORE any normalize, both operands: a zero Up is what many test fixtures and
-            // SymbolTileBlockBaker (null PathUpRender) write; a zero tangent is what StageCurvedAnchor produces on
-            // a degenerate world chord.
+            // SymbolWorldGroundFrame's guards, same order and constants, before any normalize: fixtures and the
+            // baker write a zero Up, and a degenerate world chord gives a zero tangent.
             double3 up = new double3(surfaceUp.x, surfaceUp.y, surfaceUp.z);
             if (math.dot(up, up) < 0.5 || math.dot(tangentRender, tangentRender) < 0.5) return false;
 
@@ -208,15 +158,13 @@ namespace MapRenderer.Core.Text.Placement
             double axial = math.dot(tangentRender, up);
             if (math.abs(axial) > 1.0 - 1e-3) return false;
 
-            // Gram-Schmidt — keeps x̂ IN the surface. INERT on every Mercator fixture (up is (0,1,0) and every baked
-            // road tangent is horizontal ⇒ axial == 0 exactly), like the shader's own copy of this projection.
-            // Neither copy is exercised without a spherical curved-map fixture.
+            // Gram-Schmidt keeps x̂ in the surface. Inert on Mercator (axial == 0); only a spherical curved-map
+            // fixture would exercise it, here or in the shader.
             double3 xh = math.normalize(tangentRender - up * axial);
             double3 yh = math.cross(xh, up); // see the ŷ-sense paragraph above
 
-            // The skirt comes off FIRST, in BAKED units, so the one scale below is applied once and a skirted cell
-            // is bit-identical to the same cell pre-shrunk by it. Text carries a 0 skirt, which makes both terms an
-            // exact `x ± 0f`. Only the two corners are carried: the atlas UVs play no part in a collision box.
+            // The skirt comes off first, in baked units, so a skirted cell is bit-identical to the pre-shrunk
+            // one. Only the two corners are carried; UVs play no part in a collision box.
             var content = new SymbolQuad
             {
                 TopLeft     = cell.TopLeft     + new float2(cellSkirt, -cellSkirt),
@@ -244,9 +192,8 @@ namespace MapRenderer.Core.Text.Placement
             return true;
         }
 
-        // Displaces ONE y-UP corner in the ground frame at the anchor and projects it. The accumulation is in
-        // double3 (render space is full-scale — the float narrow happens inside TryProjectPoint, after the
-        // scene-origin subtract, as it does for every other projected symbol point).
+        // Displaces ONE y-UP corner in the ground frame at the anchor and projects it, in double3; the float
+        // narrow happens inside TryProjectPoint, after the scene-origin subtract.
         private static bool TryProjectCorner(
             in float2 cornerLocal, in double3 xh, in double3 yh, in double3 anchorRender,
             in SymbolViewTransform view, out float2 screenPx)

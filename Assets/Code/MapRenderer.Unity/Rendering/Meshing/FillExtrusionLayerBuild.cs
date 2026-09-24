@@ -97,11 +97,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (_disposed) return;
             _disposed = true;
 
-            // _write completes and frees FIRST: its job reads _ext's Roof/Walls buffers (ScheduleWrite is
-            // called with both as inputs), so disposing _ext first would free those buffers while the write
-            // job could still be in flight — ILayerMeshBuild.Dispose's own documented order.
-            // FillExtrusionGraphOutput.Dispose() IS the completion-then-free order for _ext's own two
-            // terminals (Handle.Complete() → Roof.Dispose() → Walls.Dispose()) — reused, not restated.
+            // _write completes and frees FIRST, because its job reads _ext's Roof/Walls buffers
+            // (ILayerMeshBuild.Dispose's order); _ext.Dispose() then completes its own handle before freeing.
             _write.Dispose();
             _ext.Dispose();
             _input.RingVisitOrder.Dispose();

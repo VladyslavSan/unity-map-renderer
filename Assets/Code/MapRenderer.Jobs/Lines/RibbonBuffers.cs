@@ -8,11 +8,8 @@ namespace MapRenderer.Jobs.Lines
     /// The line graph's ribbon buffers, from sizing through aggregation — the ribbon twin of
     /// <see cref="TriangulationBuffers"/>: 2 prefix-sum offset tables, 2 flat oversized-per-ring output
     /// columns, and 2 per-ring real-count columns, shared by <see cref="RibbonSizingJob"/>,
-    /// <see cref="RibbonBatchJob"/> and <see cref="RibbonAggregateJob"/>.
-    ///
-    /// <para><b>Every field is plain, not <c>[ReadOnly]</c></b>, and <b>every field must be a CREATED
-    /// container</b> — both for the reasons <see cref="TriangulationBuffers"/>'s own doc gives. Always build
-    /// a value through <see cref="Allocate"/>.</para>
+    /// <see cref="RibbonBatchJob"/> and <see cref="RibbonAggregateJob"/>. Build it only through
+    /// <see cref="Allocate"/>, for the reasons <see cref="TriangulationBuffers"/> gives.
     /// </summary>
     internal struct RibbonBuffers
     {

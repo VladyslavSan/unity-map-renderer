@@ -8,18 +8,10 @@ namespace MapRenderer.Unity.View
 {
     /// <summary>
     /// A 6-plane perspective view frustum in render space, built from the SAME pose math the renderer uses
-    /// (<see cref="CameraPoseMath"/>). Used by the tilt-aware visible-tile selector to test a tile's ground
-    /// quad against the actual pitched/rotated frustum — which the old overhead corner-unprojection could not
-    /// (it ignored tilt entirely, under-covering the far field toward the horizon).
-    ///
-    /// <para><b>Plane convention:</b> each plane is <c>(n, d)</c> with a unit <b>inward</b> normal <c>n</c>;
-    /// a point <c>x</c> is inside the half-space iff <c>dot(n, x) + d ≥ 0</c>. An AABB is <i>outside</i> the
-    /// frustum iff it lies entirely behind any one plane — the standard conservative frustum-vs-AABB test,
-    /// which (unlike a corner-in-frustum test) is correct when a coarse tile <i>contains</i> the frustum.</para>
-    ///
-    /// <para><b>Handedness-safe:</b> the four side-plane normals are built as rotations of the forward axis in
-    /// the forward-up and forward-right planes (no reliance on the sign of <c>cross(f, up)</c> — left/right are
-    /// symmetric, so the plane SET is identical either way).</para>
+    /// (<see cref="CameraPoseMath"/>); the visible-tile selector tests a tile's ground quad against it.
+    /// Each plane is <c>(n, d)</c> with a unit inward normal; <c>x</c> is inside iff <c>dot(n, x) + d ≥ 0</c>.
+    /// An AABB is outside iff it lies entirely behind one plane, correct even when a tile contains the frustum.
+    /// Side-plane normals are rotations of the forward axis, so the plane set is handedness-safe.
     /// </summary>
     public readonly struct ViewFrustum
     {
@@ -27,10 +19,8 @@ namespace MapRenderer.Unity.View
         private readonly double3 _n0, _n1, _n2, _n3, _n4, _n5;
         private readonly double  _d0, _d1, _d2, _d3, _d4, _d5;
 
-        // The frustum's own axis-aligned bounds (min/max over its 8 corners). Used as a reverse separating-axis
-        // pre-cull: a box beyond the frustum's spatial extent is rejected even when it passes all 6 planes (the
-        // classic conservative false positive — a big box diagonally past a corner isn't fully behind any one
-        // plane). Both bounds are supersets, so the pre-cull never drops a genuinely-visible tile.
+        // The frustum's AABB: a pre-cull that rejects a big box diagonally past a corner, which passes all 6
+        // planes. Both bounds are supersets, so the pre-cull never drops a visible tile.
         private readonly double3 _amin, _amax;
 
         private ViewFrustum(

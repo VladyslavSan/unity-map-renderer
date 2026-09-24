@@ -1,8 +1,5 @@
 // Text/SymbolPumpTests.cs — the pump-split's PlayMode half: symbol subsystem and tail pumping over real frames.
-//
-// Both settle genuinely off-main symbol work (extract/tail on the ThreadPool) over real PlayMode frames,
-// which a yielded EditMode frame cannot give wall-clock to (a pre-existing EditMode flake this half avoids).
-// Both carry ordinary per-test GameObject/Camera/RenderTexture [SetUp]/[TearDown], not process state.
+// Both settle off-main symbol work (extract/tail on the ThreadPool), which needs real PlayMode frames.
 //
 // Contents:
 //   SymbolSubsystemPumpTests  — PlayMode half of the pump-split — [UnityTest] yield-waits for off-main symbol extract/tail work.
@@ -40,13 +37,10 @@ namespace MapRenderer.Tests.PlayMode.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The symbol subsystem builds no fetched tile inline on the main thread, and re-uploads the 16 MB
-    /// glyph atlas at most once per pump. The worker phase runs through
-    /// <see cref="SymbolSubsystem.TryBeginBuild"/> (kick-time) plus the returned pass's
-    /// <c>RunWorkerAndHandoff</c> (pool), and <see cref="SymbolSubsystem.PumpBuilds"/> starts at most
-    /// <c>MaxBuildsPerFrame</c> ready TAILS per frame. The build-start throttle and stale-drop teeth live
-    /// with TileManager's kick — see TileSymbolKickTests. These teeth fail a shallow implementation that
-    /// builds inline or uploads per tile, and prove the cancellation path.
+    /// The symbol subsystem builds no fetched tile inline on the main thread, and re-uploads the glyph
+    /// atlas at most once per pump. The worker phase runs at kick time on the pool, and
+    /// <see cref="SymbolSubsystem.PumpBuilds"/> starts at most <c>MaxBuildsPerFrame</c> ready TAILS per
+    /// frame. The build-start throttle and stale-drop teeth are in TileSymbolKickTests.
     /// </summary>
     [TestFixture]
     public class SymbolSubsystemPumpTests
@@ -60,9 +54,8 @@ namespace MapRenderer.Tests.PlayMode.Text
         private const string FontName = "LatinFont";
         private const string SourceId = "s";
 
-        // A style with ONE symbol layer bound to source "s" (source-layer "centroids", matching the fixture
-        // tile) + a non-empty glyphs URL so SetStyle wires the glyph pipeline. The glyph SOURCE is injected
-        // via GlyphSourceFactoryOverride, so the URL itself is never fetched.
+        // ONE symbol layer over the fixture's "centroids". The glyphs URL makes SetStyle wire the glyph
+        // pipeline; GlyphSourceFactoryOverride injects the source, so the URL is never fetched.
         private static readonly string StyleJson = @"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
@@ -89,9 +82,8 @@ namespace MapRenderer.Tests.PlayMode.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            // The subsystem owns no MapMaterialSet (per-layer materials moved to
-            // SymbolRenderLayer) — this suite tests build/pump/atlas behaviour only, none of which touches
-            // materials.
+            // The subsystem owns no MapMaterialSet; per-layer materials live on SymbolRenderLayer, and this
+            // suite tests build/pump/atlas behaviour only.
             _subsystem = new SymbolSubsystem(mapCamera);
             _tileBytes = LoadUp("Assets", "Fixtures", "sample-tile.bytes");
             _latinGlyphs = LoadUp("Assets", "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes");
@@ -132,9 +124,8 @@ namespace MapRenderer.Tests.PlayMode.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
-            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
-            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
-            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            // Like TileManager.KickMeshBuild: decode on the pool; the kick owns the lease's one reference, and
+            // its `finally` release frees the tile's buffers unless a parked build acquired its own.
             byte[] bytes = _tileBytes;
             UniTask.RunOnThreadPool(() =>
             {
@@ -144,9 +135,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             }).Forget();
         }
 
-        // Production SetStyle does not walk style.Layers itself (RenderLayerFactory is the sole
-        // registry, MapView derives the list). Tests that call the subsystem directly need the equivalent
-        // extraction — kept local to the test assembly, outside the grep tooth's scope.
+        // Production SetStyle does not walk style.Layers (MapView derives the list), so tests that call the
+        // subsystem directly extract it here, outside the grep tooth's scope.
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
         {
             var result = new List<Symbol.StyleLayer>();
@@ -155,10 +145,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             return result;
         }
 
-        // ── Tooth 2: coalesced atlas upload — A's glyphs upload exactly once; a same-glyph B uploads zero ──
-        // Builds are genuinely async (decode+extract on a worker, shape back on main via
-        // SwitchToMainThread), so this is a [UnityTest] that yields — each `yield return null` ticks the
-        // player loop, the only way an off-thread build's main-thread continuation resumes.
+        // ── Coalesced atlas upload — A's glyphs upload once; a same-glyph B uploads zero ──
+        // Builds are async; only a player-loop tick (`yield return null`) resumes the main-thread shape step.
         [UnityTest]
         public IEnumerator PumpBuilds_CoalescesAtlasUpload_OncePerNewGlyphSet_ZeroWhenNoNewGlyphs()
         {
@@ -198,10 +186,8 @@ namespace MapRenderer.Tests.PlayMode.Text
         // A "has anything committed yet" poll: the winner COUNT off the store's plan-aware CollectInto shim.
         private int SymbolCount() => _subsystem.CollectedWinnerCount();
 
-        // ── Tooth 5: the symbol EXTRACT marker must fire OFF the main thread ──
-        // A main-thread-only recorder on MapRenderer.Symbol.Extract must read ZERO across a full build,
-        // while an all-thread recorder reads >=1. A regression that drops SwitchToThreadPool (extract back
-        // on main) flips mainHits to >0 and fails this.
+        // ── The symbol EXTRACT marker must fire OFF the main thread ──
+        // A main-thread-only recorder must read ZERO across a full build while an all-thread one reads >=1.
         [UnityTest]
         public IEnumerator SymbolExtract_RunsOffTheMainThread()
         {
@@ -224,12 +210,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             }
             yield return null; yield return null; // let the profiler commit accumulated samples
 
-            // ProfilerRecorder is a fixed-capacity RING (64 above). Once more than `capacity` frames have
-            // been sampled the ring wraps and `Count` is no longer a safe index bound — GetSample(capacity)
-            // throws IndexOutOfRange. The 200-frame drive loop above reaches that on a slow/loaded machine,
-            // which is what made this test fail intermittently while the product was fine. Clamp to the
-            // capacity we asked for; the samples we drop are the oldest, and both recorders sum the SAME
-            // marker, so the main-vs-any comparison stays apples-to-apples.
+            // Non-obvious why: the recorder ring wraps on a slow machine, and then `Count` is not a safe index
+            // bound. Clamp to the capacity; both recorders sum the same marker, so the comparison holds.
             long mainHits = 0, anyHits = 0;
             for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
             for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits += anyThread.GetSample(i).Count;
@@ -240,10 +222,8 @@ namespace MapRenderer.Tests.PlayMode.Text
                 "extract on the thread pool. A regression that drops SwitchToThreadPool fails this.");
         }
 
-        // ── Tooth 4: cancellation — a build suspended in glyph-fetch is cancelled by a restyle, silently ──
-        // The build hops to the pool (decode+extract) then back to main (SwitchToMainThread) before it
-        // reaches the gated glyph fetch, so this must pump frames ([UnityTest]) to get the build parked on
-        // the gate, then restyle + release the gate as cancelled.
+        // ── Cancellation — a restyle silently cancels a build suspended in glyph-fetch ──
+        // The build hops to the pool and back before the gated fetch, so only pumped frames park it there.
         [UnityTest]
         public IEnumerator RestyleMidBuild_CancelsInFlightBuild_Silently_NoDisposedStateTouch()
         {
@@ -257,8 +237,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey> { Key(tile) });
             DriveTileBytesReady(tile);
 
-            // Pump frames so the build starts, hops the pool (decode+extract), returns to main, and parks on the
-            // gated glyph fetch — the tail's prepare step (EnsureGlyphRangesAsync), now BEFORE the shape loop.
+            // Pump frames until the build parks on the gated glyph fetch — the tail's prepare step
+            // (EnsureGlyphRangesAsync), which runs BEFORE the shape loop.
             for (int f = 0; f < 60; f++) { _subsystem.PumpBuilds(); yield return null; }
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet (parked on the gated glyph fetch).");
 
@@ -274,11 +254,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "no stale labels committed after restyle.");
         }
 
-        // ── The production seam: CurrentBatch() threads CollectInto's active/departing split into the batch, so a
-        //    tile that just left cover comes back as DEPARTING records (which the placement layer fades out). Guards
-        //    the connector BETWEEN the two unit-tested sides (store split + placement fade) — where a future cleanup
-        //    could silently drop `activeCount` with every other test still green. [UnityTest] because the build hops
-        //    to the thread pool then back to main, so its symbols commit only across pumped frames. ──
+        // ── CurrentBatch() carries CollectInto's active/departing split, so a tile that left cover comes back
+        //    as DEPARTING records. Non-obvious why: this pins the connector between the two unit-tested sides. ──
         [UnityTest]
         public IEnumerator CurrentBatch_TileLeftCover_FlagsRecordsDeparting()
         {
@@ -306,9 +283,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "the tile left cover");
             Assert.AreEqual(1, _subsystem.DepartingTileCount, "…and is departing (fading out), not dropped");
 
-            // The departing set arrives via the off-main reconcile (1–4 frames later, apply-stale) — pump
-            // until the FRONT buffer reflects it (every record departing). A broken pickup/swap never flips the
-            // front, so this loop times out and the assertion below fails (the tooth still bites).
+            // The departing set arrives a few frames later via the off-main reconcile. Pump until the FRONT
+            // buffer shows every record departing; a broken pickup/swap never flips it and times out.
             SymbolGatherPlan departing = null;
             bool flipped = false;
             for (int f = 0; f < 200; f++)
@@ -323,10 +299,8 @@ namespace MapRenderer.Tests.PlayMode.Text
                 "the departing set was picked up and every record flagged departing → the placement layer fades them out instead of popping");
         }
 
-        // ── Test 3: a REAL tile event dirties the store → CurrentBatch recomputes (CollectRecomputeCount incremented)
-        //    AND the plan changes (every record now departing) — the pair to the EditMode half's clean-frame-reuse
-        //    tooth, catching a degenerate "never recompute" memo that byte-identity alone would pass. Mirrors
-        //    CurrentBatch_TileLeftCover_FlagsRecordsDeparting's departing tooth. ──
+        // ── A real tile event dirties the store → CurrentBatch recomputes AND the plan changes. It pairs with
+        //    the EditMode clean-frame-reuse tooth and catches a "never recompute" memo. ──
         [UnityTest]
         public IEnumerator CurrentBatch_TileEvent_RecomputesAndDrivesFade()
         {
@@ -350,11 +324,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, DepartingSymbolCount(active), "nothing departing while the tile is in cover");
             int recomputesBefore = _subsystem.CollectRecomputeCount;
 
-            // The real event: the tile leaves cover at t=100 → released to the warm cache AND departing-stamped
-            // (the store bumps its collect generation). CurrentBatch must SCHEDULE a fresh reconcile
-            // (CollectRecomputeCount climbs) and — a few frames later, apply-stale — the picked-up front CHANGES to
-            // all-departing. Pump until the front reflects it; a degenerate never-reschedule memo, or a broken
-            // pickup/swap, leaves the front unchanged → this loop times out and fails.
+            // The tile leaves cover at t=100 and bumps the store's collect generation. CurrentBatch must schedule
+            // a fresh reconcile, and a few frames later the picked-up front turns all-departing.
             _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
             SymbolGatherPlan departing = null;
             bool flipped = false;
@@ -485,9 +456,8 @@ namespace MapRenderer.Tests.PlayMode.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
-            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
-            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
-            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            // Like TileManager.KickMeshBuild: decode on the pool; the kick owns the lease's one reference, and
+            // its `finally` release frees the tile's buffers unless a parked build acquired its own.
             byte[] bytes = _tileBytes;
             UniTask.RunOnThreadPool(() =>
             {
@@ -498,11 +468,7 @@ namespace MapRenderer.Tests.PlayMode.Text
         }
 
         // ── The tail budget gates tail starts (behavioural, PRIMARY drive) ────────────────────────────
-        // PumpBuilds gates no worker-phase start — DriveTileBytesReady (mirroring TileManager's kick) fires
-        // both worker phases immediately, off any pump. So this drives BOTH worker phases up front, yields
-        // frames with NO pump until both land in the pool→main handoff (ReadyTailCount == 2 — a player-loop
-        // continuation, not a pump product), THEN flips the tail budget down and proves the tail-start loop
-        // is gated, which is the knob's only role.
+        // Non-obvious why: PumpBuilds gates no worker-phase start, so the tail budget gates only tail starts.
         [UnityTest]
         public IEnumerator PumpBuilds_TailStartsAreBudgeted_BacklogDrainsOnePumpAtATime()
         {
@@ -515,9 +481,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             DriveTileBytesReady(tileA);
             DriveTileBytesReady(tileB);
 
-            // Yield frames WITHOUT pumping — both worker phases run on the pool (fire-and-forget from
-            // DriveTileBytesReady, mirroring TileManager's kick task) and land in the handoff queue via the
-            // player loop, never via PumpBuilds.
+            // Yield frames WITHOUT pumping — both worker phases land in the handoff queue via the player
+            // loop, never via PumpBuilds.
             for (int f = 0; f < 200 && _subsystem.ReadyTailCount() < 2; f++) yield return null;
             Assert.AreEqual(2, _subsystem.ReadyTailCount(), "both worker phases landed in the pool→main handoff");
             Assert.AreEqual(0, _subsystem.TailsStartedLastPump, "no PumpBuilds call has run yet");
@@ -564,9 +529,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "still no stale labels committed after restyle");
         }
 
-        // ── The finer variant — cancel DURING the tail loop (after the tail has STARTED and parked on a
-        //    gated glyph fetch), not just between phases. Partial symbols must never reach CompleteBuild:
-        //    the whole-loop-then-ct-check-then-commit order gates it. ─────────────────────────────────────
+        // ── Cancel DURING the tail, after it started and parked on a gated glyph fetch. The
+        //    whole-loop, then ct check, then commit order keeps partial symbols from CompleteBuild. ─────────
         [UnityTest]
         public IEnumerator SetStyle_DuringTailExecution_CancelsSilently_NoPartialCommit()
         {

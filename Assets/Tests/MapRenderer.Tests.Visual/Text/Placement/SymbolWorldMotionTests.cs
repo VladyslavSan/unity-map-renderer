@@ -1,14 +1,5 @@
-// World-space symbol motion and curved-path GPU/visual acceptance tests.
-//
-// Split by the bare-`Object` using collision (System.Object vs UnityEngine.Object,
-// CS0104): SymbolWorldMotionTests.cs holds the System-importing (or neutral) members,
-// SymbolWorldRenderTests.cs holds the bare-Object users — the two may not merge.
-// SymbolLayerOrderSnapshotTests moved OUT of this topic entirely, to
-// Rendering/LayerOcclusionTests.cs: all four of its tests pin draw order / render-
-// layer occlusion (docs/commit-conventions.md), not text placement geometry.
-// CurvedTextOnPathRenderTests aliases `TextAnchor` to MapRenderer.Core.Text.TextAnchor
-// (UnityEngine also declares one); no other file in either destination references
-// TextAnchor at all, so the alias is inert for them.
+// World-space symbol motion and curved-path GPU/visual acceptance tests. Split by the CS0104 bare-`Object`
+// collision: SymbolWorldRenderTests.cs holds the bare-Object users, so the two may not merge.
 //
 // Contents:
 //   WorldSymbolAbRenderSnapshotTests  — Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
@@ -43,22 +34,12 @@ using System.Text;
 namespace MapRenderer.Tests.Text.Placement
 {
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
-    // NOT registered in core-tests.csproj. Modeled on SymbolAtlasOrientationSnapshotTests (same fixture glyph,
-    // same headless-readback caveats) but does NOT touch that file — this is the GPU A/B equivalence tooth,
-    // short-named T2 by the tests that model against it, rendering the SAME real glyph through BOTH the OLD
-    // SymbolPlacementSystem.Tick, exactly like the orientation test) and the NEW world-anchored path (a one-off
-    // WorldBillboardMeshBuilder mesh presented through Map/Symbol/TextWorld).
+    // NOT registered in core-tests.csproj. The GPU A/B equivalence tooth: the SAME real glyph through a real
+    // SymbolPlacementSystem.Tick and through a one-off WorldBillboardMeshBuilder mesh on Map/Symbol/TextWorld.
     //
-    // Y RECONCILIATION (resolved empirically, see WorldSymbolInkAnalysis):
-    // the headless camera→RenderTexture readback is vertically mirrored vs on-screen for EVERY path (Unity's
-    // well-known render-to-texture flip is a property of the RT-readback route, not of any one shader's
-    // math — see SymbolAtlasOrientationSnapshotTests' header). The OLD path's shader additionally bakes an
-    // on-screen calibration flip (`ndc.y = -ndc.y`) that only cancels correctly for the on-screen route; the
-    // NEW path's stock `TransformObjectToHClip` carries no such calibration. Both raw readbacks are therefore
-    // put through the SAME `FlipRowsVertically` un-mirror before comparison (mirrors the orientation test's own
-    // treatment) and BOTH must land upright + centered; if the NEW path lands mirrored relative to the OLD
-    // path after that un-mirror, the corner-emit convention below (Offset.y / UV.y sign) is the fix point —
-    // see the RESOLVED CONVENTION note on <see cref="BuildOneGlyphWorldMesh"/>.
+    // Non-obvious why: the headless camera→RenderTexture readback is vertically mirrored for EVERY path, so
+    // both readbacks go through the SAME `FlipRowsVertically` and must land upright and centred. A mirrored
+    // result is fixed at the corner emit (see BuildOneGlyphWorldMesh), never in the shader.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // WorldSymbolAbRenderSnapshotTests — Unity EditMode only
@@ -125,9 +106,8 @@ namespace MapRenderer.Tests.Text.Placement
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
             const float textSizePx = 220f;
 
-            // point text now draws through the world path — a realistic containing tile keeps
-            // the AnchorLocal bake float32-safe (TileKey=0 is ~2e7m away, see
-            // SymbolAtlasOrientationSnapshotTests' identical note).
+            // Point text draws through the world path, so a realistic containing tile keeps the AnchorLocal
+            // bake float32-safe; TileKey=0 is ~2e7 m away.
             long tileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14);
             var buffer = new SymbolTileBuffer();
             TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
@@ -136,9 +116,8 @@ namespace MapRenderer.Tests.Text.Placement
             Color32[] oldPixels;
             Color32[] newPixels;
 
-            // ── OLD path: a real SymbolPlacementSystem.Tick, which for a point symbol produces the WORLD
-            // path's output — this arm is real-Tick-vs-scaffold, not a literal screen-space "old". Needs its
-            // own world base material. ────────────────────────────────────────────────
+            // ── OLD arm: a real Tick, which gives a point symbol the WORLD path, so this is real Tick vs
+            // scaffold. It needs its own world base material. ────────────────────────
             using (var system = new SymbolPlacementSystem(mapCamera,
                        worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld"))))
             using (var snapOld = new SnapshotRenderer(Size, Size))
@@ -171,10 +150,8 @@ namespace MapRenderer.Tests.Text.Placement
                 meshFilter.sharedMesh = worldMesh;
                 meshRenderer.sharedMaterial = worldMaterial;
 
-                // Level-2 placement: AnchorLocal is baked relative to the anchor itself (tileOrigin
-                // == anchorRender, so AnchorLocal == 0) — a one-symbol test mesh has no real tile to bake
-                // against, so the anchor doubles as its own bake origin. The object's position/rotation
-                // carry the rest, identically to how a real tile mesh is placed.
+                // Level-2 placement: the anchor is its own bake origin (AnchorLocal == 0), and the object's
+                // position and rotation carry the rest, as for a real tile mesh.
                 float3 objectPos = FloatingOrigin.TileToSceneRebased(anchorRender, frame.SceneOriginRender, frame.Rebase);
                 presenterGo.transform.position = new Vector3(objectPos.x, objectPos.y, objectPos.z);
                 presenterGo.transform.rotation = Quaternion.identity; // frame.Rebase is float3x3.identity on Mercator
@@ -216,10 +193,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.That((oldMinCol + oldMaxCol) * 0.5f, Is.EqualTo(Size * 0.5f).Within(Size * 0.15f), "OLD path horizontal placement.");
             Assert.That((newMinCol + newMaxCol) * 0.5f, Is.EqualTo(Size * 0.5f).Within(Size * 0.15f), "NEW path horizontal placement.");
 
-            // (3) Equivalence — explicit numeric bounds (no vague "AA tolerance"):
-            //   - ink centroid within 6px (row and col) of each other;
-            //   - ink bbox corners within 8px of each other;
-            //   - changed-pixel fraction (R channel, >24 threshold) under 5% of the frame.
+            // (3) Equivalence: centroids within 6 px, bbox corners within 8 px, and under 5% of pixels changed
+            // (R channel, >24).
             Assert.That(newCentroidRow, Is.EqualTo(oldCentroidRow).Within(6f), "ink centroid row must match within 6px.");
             Assert.That(newCentroidCol, Is.EqualTo(oldCentroidCol).Within(6f), "ink centroid col must match within 6px.");
             Assert.That(newMinRow, Is.EqualTo(oldMinRow).Within(8), "ink bbox top edge must match within 8px.");
@@ -232,23 +207,12 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>
-        /// Builds a one-glyph world-anchored <see cref="Mesh"/> straight from a real <see cref="SymbolQuad"/> —
-        /// the test-scaffold analogue of <see cref="BillboardMath.BuildQuad"/>. Production owns the real
-        /// per-tile emit; this helper exists only so these teeth can exercise
-        /// <see cref="WorldBillboardMeshBuilder"/> against a genuine glyph. AnchorLocal is
-        /// <see cref="float3.zero"/> for every corner (the mesh's
-        /// object-space origin IS the anchor — see the call site's placement comment); only the corner
-        /// <c>Offset</c> varies per vertex, mirroring <c>BillboardMath.BuildQuad</c>'s unrotated
-        /// anchor-relative corners exactly (same TL/TR/BR/BL UV mapping, no flip). <b>RESOLVED Y CONVENTION
-        /// (empirical, see this file's header):</b> a direct, unflipped carry-over of the OLD path's
-        /// Offset sign rendered the glyph UPSIDE DOWN after the shared un-mirror (confirmed by a failing
-        /// run of the A/B tooth below — the OLD path's
-        /// SymbolPassVertex bakes an extra <c>ndc.y = -ndc.y</c> on-screen calibration flip that the NEW
-        /// path's stock MVP has no equivalent of (SymbolTextWorld_ForwardPass.hlsl's header). The resolved
-        /// fix point is the emit: <c>Offset.y</c> is negated here (UV stays attached to
-        /// its original corner) — a vertical mirror of each corner's SCREEN position while the TEXTURE
-        /// content it samples stays put, which is exactly the missing flip. Never move this into the shader
-        /// (that would re-import the hack MVP exists to remove).
+        /// Builds a one-glyph world-anchored <see cref="Mesh"/> from a real <see cref="SymbolQuad"/> — the
+        /// test-scaffold analogue of <see cref="BillboardMath.BuildQuad"/>, so these teeth exercise
+        /// <see cref="WorldBillboardMeshBuilder"/> on a genuine glyph. AnchorLocal is zero; only the corner
+        /// <c>Offset</c> varies. Non-obvious why: the stock MVP has no on-screen <c>ndc.y</c> flip, so
+        /// <c>Offset.y</c> is negated while UV stays on its corner; unflipped, it renders upside down. Never move
+        /// this into the shader.
         /// </summary>
         private static Mesh BuildOneGlyphWorldMesh(in SymbolQuad quad, float textSizePx, float3 colorRgb)
         {
@@ -308,20 +272,10 @@ namespace MapRenderer.Tests.Text.Placement
             };
     }
 
-    // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. Fixture/
-    // harness modeled on WorldSymbolAbRenderSnapshotTests (its T2) but does NOT touch that file. This is the world-anchor
-    // MOTION regression tooth: build the NEW world-anchored mesh ONCE (frozen — AnchorLocal never rebaked), then
-    // PAN the camera (a new look-at longitude) and re-render the SAME frozen mesh with only the per-frame
-    // object transform updated (FloatingOrigin.TileToSceneRebased against the panned SceneFrame) — the glyph
-    // must track its WORLD anchor, landing near the ANALYTIC expected screen position
-    // (SymbolScreenProjection.TryProjectPoint at
-    // the new pose), not stay pinned to its original screen pixel.
-    //
-    // NOT VACUOUS, measured. A screen-space mesh whose vertex stage never reads the camera transform renders
-    // at the IDENTICAL screen pixel after a pan without a second Tick. Pointed at such a mesh, this tooth
-    // reads a byte-identical ink count across the 0.5deg pan and a screen delta of EXACTLY (0.0, 0.0)
-    // against an ANALYTIC expected delta of (-182.0, 0.0). The check is not committed as a failing test —
-    // see AGENTS.md's regression-test convention.
+    // Unity EditMode only — the world-anchor MOTION tooth. The world-anchored mesh is built ONCE and frozen,
+    // the camera PANS, and only the object transform updates. The glyph must land near the ANALYTIC screen
+    // position (SymbolScreenProjection.TryProjectPoint), not stay on its old pixel. Non-obvious why: the tooth is
+    // not vacuous, because a screen-space mesh reads a (0, 0) delta against the expected (-182, 0).
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // WorldSymbolMotionTests — Unity EditMode only
@@ -379,9 +333,8 @@ namespace MapRenderer.Tests.Text.Placement
             var mapCamera = new MapCamera(uCam, new CameraProperties(lookAt0, zoom: 8.0, heading: 0.0, tilt: 0.0));
 
             {
-                // The FROZEN world anchor — a real-world render-space point, computed ONCE. AnchorLocal is
-                // baked to float3.zero (the mesh's object-space origin IS the anchor, mirrors WorldSymbolAbRenderSnapshotTests'
-                // BuildOneGlyphWorldMesh) so the object's transform alone carries the anchor's placement.
+                // The FROZEN world anchor, computed ONCE. AnchorLocal is zero, so the object's transform alone
+                // carries the anchor's placement.
                 SceneFrame frame0 = new SceneFrame
                 {
                     SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }),
@@ -426,13 +379,8 @@ namespace MapRenderer.Tests.Text.Placement
                         out float2 anchorScreen0, out _),
                     "anchor must project in front of the camera at pose 0.");
 
-                // ── Pan: a new look-at longitude, same zoom/heading/tilt — the SAME frozen mesh (and its
-                // baked AnchorLocal) is reused; only the per-frame object transform is recomputed against
-                // the new SceneFrame, mirroring exactly how a real tile renderer re-places a tile mesh
-                // each frame (FloatingOrigin.TileToSceneRebased), never rebuilding the mesh itself. ─────
-                // 0.5deg — a modest pan (a 10deg pan pushed the anchor entirely off the 512px frame, 0
-                // ink; this magnitude keeps it on-screen while still producing a >50px expected shift,
-                // verified below).
+                // ── Pan 0.5° in longitude; the frozen mesh is reused and only its object transform is
+                // recomputed. 0.5° stays on the 512 px frame and still shifts > 50 px (asserted below). ─────
                 var lookAt1 = new GeoCoordinate3D { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude + 0.5, Altitude = 0.0 };
                 mapCamera.SetProperties(new CameraProperties(lookAt1, zoom: 8.0, heading: 0.0, tilt: 0.0));
                 mapCamera.SyncToCamera();
@@ -463,18 +411,14 @@ namespace MapRenderer.Tests.Text.Placement
                         out float2 anchorScreen1, out _),
                     "anchor must project in front of the camera at pose 1.");
 
-                // ── The analytic expected shift (Offset is a fixed additive clip-space term that cancels
-                // exactly in a delta — see SymbolTextWorld_ForwardPass.hlsl's pinned math and
-                // WorldBillboardRtcAlgebraTests/T1's identical reasoning — so the glyph's screen delta must
-                // equal the ANCHOR's screen delta, independent of the constant glyph-corner offset). ──────
+                // ── The analytic shift: Offset is a fixed additive clip-space term that cancels in a delta, so
+                // the glyph's screen delta equals the ANCHOR's (see WorldBillboardRtcAlgebraTests). ──────────
                 float2 expectedDeltaScreen = anchorScreen1 - anchorScreen0;
                 Assert.Greater(math.abs(expectedDeltaScreen.x) + math.abs(expectedDeltaScreen.y), 50f,
                     "the pan must produce a nontrivial expected screen shift, or this tooth is vacuous.");
 
-                // Ink-space delta: col tracks screen X directly (flip-invariant axis, mirrors WorldSymbolAbRenderSnapshotTests'
-                // horizontal-centering check); row is top-origin after FlipRowsVertically while screen Y is
-                // bottom-origin (SymbolScreenProjection's y-up convention), so a screen-Y increase (glyph
-                // moves UP) is a row DECREASE — the sign flips between the two deltas.
+                // Col tracks screen X directly. Rows are top-origin after the flip and screen Y is bottom-origin,
+                // so a screen-Y increase is a row DECREASE.
                 float actualDeltaCol = centroidCol1 - centroidCol0;
                 float actualDeltaRowAsScreenY = centroidRow0 - centroidRow1;
 
@@ -485,15 +429,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── The motion tooth above pans LONGITUDE only — no tooth
-        //    isolated the anchor's VERTICAL GPU projection. Pans LATITUDE at fixed longitude instead, pinning
-        //    anchor-Y against the SAME analytic SymbolScreenProjection delta the longitude case pins anchor-X
-        //    against — a hypothetical anchor-Y mirror-about-center would pass the longitude case but fail
-        //    this one. RED-VERIFIED like the longitude case: a frozen OLD screen-space mesh (which ignored
-        //    the camera transform entirely, per the retired shader's header) stays pinned at its
-        //    original screen pixel after the pan, so it fails this assertion exactly as it fails the
-        //    longitude one (confirmed by the same manual swap-in-old-mesh check documented at this file's
-        //    header, applied to a latitude pan). ──
+        // ── The LATITUDE pan pins anchor-Y against the same analytic delta, which a longitude pan cannot:
+        //    an anchor-Y mirror about the centre passes the longitude case and fails this one. ──
         [Test]
         public void WorldPath_TracksWorldAnchor_AfterLatitudeCameraPan()
         {
@@ -509,13 +446,8 @@ namespace MapRenderer.Tests.Text.Placement
             TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, layoutQuads);
             Assert.AreEqual(1, layoutQuads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
             SymbolQuad quad = layoutQuads[0];
-            // SMALLER than the longitude case's 220px — a latitude pan
-            // shifts the glyph vertically by ~200px (Mercator Y-distortion at lat 30 makes this larger than
-            // the longitude case's ~182px horizontal shift), and a 220px glyph risked PARTIAL vertical
-            // clipping against the 512px frame, biasing the ink-centroid measurement (not the underlying
-            // projection — the original 30px-widened bound's root cause). A small glyph keeps the full ink
-            // footprint safely in-frame at both poses, so the tight ~12px bound (matching the longitude case)
-            // holds on the true measurement, not a clipping artifact.
+            // Smaller than the longitude case's glyph: the ~200 px vertical shift would clip a large glyph at
+            // the frame edge and bias the centroid. The whole ink stays in frame, so the ~12 px bound holds.
             const float textSizePx = 60f;
 
             var camGo = Track(new GameObject("WorldSymbolMotionLat_TestCamera"));
@@ -633,15 +565,10 @@ namespace MapRenderer.Tests.Text.Placement
             presenterGo.transform.rotation = Quaternion.identity; // frame.Rebase is float3x3.identity on Mercator
         }
 
-        /// <summary>Builds a one-glyph world-anchored <see cref="Mesh"/> straight from a real
-        /// <see cref="SymbolQuad"/> — the test-scaffold analogue of <see cref="BillboardMath.BuildQuad"/>
-        /// (duplicated from WorldSymbolAbRenderSnapshotTests.BuildOneGlyphWorldMesh, not shared — a private
-        /// per-file helper, same reasoning as this file's AtlasMetrics shim). AnchorLocal is
-        /// <see cref="float3.zero"/> for every corner; only the corner <c>Offset</c> varies, mirroring
-        /// <c>BillboardMath.BuildQuad</c>'s unrotated anchor-relative corners. <b>Same RESOLVED Y
-        /// CONVENTION as WorldSymbolAbRenderSnapshotTests</b> (see that file's identical helper for the
-        /// full empirical rationale): <c>Offset.y</c> is negated per corner; UV stays attached to its
-        /// original corner.</summary>
+        /// <summary>Builds a one-glyph world-anchored <see cref="Mesh"/> from a real <see cref="SymbolQuad"/>,
+        /// a private copy of WorldSymbolAbRenderSnapshotTests.BuildOneGlyphWorldMesh. AnchorLocal is zero,
+        /// and <c>Offset.y</c> is negated per corner with UV left on its corner, for the same reason as
+        /// there.</summary>
         private static Mesh BuildOneGlyphWorldMesh(in SymbolQuad quad, float textSizePx, float3 colorRgb)
         {
             float scale = textSizePx / TextQuadLayout.OneEm;
@@ -709,32 +636,14 @@ namespace MapRenderer.Tests.Visual
     //
     // THE HEADLINE ARM: a curved road symbol's ink sits ON the road, at tilt 0.
     //
-    // WHY THIS FILE EXISTS. The maintainer's very first reported defect was that road symbols render "not on the
-    // road geometry itself but with some offset, below or above the road" — and it reproduces at tilt 0, so it is
-    // not a pitch defect at all. The cause is a producer one: CurvedTextLayout baked every cell BASELINE-relative
-    // while the point path applied TextQuadLayout's optical-centre shift. The earlier gate was structurally blind
-    // to it: every downstream curved fixture HAND-BUILDS its CurvedGlyph.Cell, and the two rendered curved
-    // fixtures borrow the POINT layout as a quad factory. These teeth take their cell from the REAL curved
-    // producer, which is the whole point of them.
-    //
-    // WHY TILT 0 IS THE RIGHT POSE, not a weaker one. This is where the maintainer sees the defect, and it is
-    // also where the reading is cleanest: at tilt 0 with the road at screen angle 0° the road is one screen row,
-    // so "off the road" is exactly "off in screen rows". No tilt-dependent convexity, no collision-box-vs-world
-    // question (the collision-box teeth own that), and the arm is falsifiable exactly where the bug was reported.
-    //
-    // EXTREMES, NOT CENTROIDS. Both teeth read minRow/maxRow, never a centroid. A centroid is a faithful position
-    // reading at tilt 0 only (MapPitchedGlyphSizeTiltZeroTests' header states why, and a 12.41 px
-    // convexity gap appears the moment tilt is non-zero); bounding-box extremes project exactly and carry the
-    // reading these teeth need — the ink band's MID-ROW — without borrowing that caveat at all.
-    //
-    // '5' IS THE GLYPH, AND THAT IS LOAD-BEARING. It is baseline-resting AND exactly one nominal cap height tall
-    // on the committed fixture (CurvedTextCentringTests' T1 asserts both from the entry itself), so its ink
-    // band is EXACTLY symmetric about the anchor after the fix. That is what lets Curved-T4 carry a derived bound rather
-    // than a fitted one: the residual is rasterisation + SDF-threshold error only. A glyph with a descender would
-    // need a per-glyph ink-bounds correction, and the tooth would then be measuring its own arithmetic.
-    //
-    // NO METRE LITERALS: every world length here is a multiple of `scene.MetresPerDevicePixel`, the same rule
-    // TiltedGroundScene's consumers all enforce — a bare metre literal is sub-pixel at this pose.
+    // Non-obvious why: a cell baked BASELINE-relative, while the point path applies TextQuadLayout's
+    // optical-centre shift, renders off the road even at tilt 0. Fixtures that hand-build CurvedGlyph.Cell or
+    // borrow the POINT layout cannot see that, so these teeth take their cell from the REAL curved producer.
+    // At tilt 0 and screen angle 0° the road is one screen row, so "off the road" is "off in rows". Both teeth
+    // read the ink band's MID-ROW from minRow/maxRow, never a centroid. '5' is baseline-resting and one cap
+    // height tall (CurvedTextCentringTests asserts both), so its band is symmetric about the anchor and
+    // Curved-T4's bound is derived, not fitted.
+    // NO METRE LITERALS: every world length is a multiple of `scene.MetresPerDevicePixel`.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // CurvedTextOnPathRenderTests — Unity EditMode only
@@ -752,12 +661,9 @@ namespace MapRenderer.Tests.Visual
         private const double RoadHalfLengthRulerUnits = 200.0;
 
         /// <summary>
-        /// Row-agreement bound, in device pixels. DERIVED, not fitted: for '5' the cap band is exactly
-        /// symmetric about the anchor in cell coordinates (<c>CurvedTextCentringTests</c> T1, with its
-        /// fixture preconditions), so the only residual left in a rendered reading is rasterisation plus the
-        /// SDF alpha threshold — sub-pixel on each edge, and the two edges enter the mid-row averaged. 4.0
-        /// device px is 0.6 BAKED px at this text size. The defect this file exists for reads
-        /// <c>17.5 · 160/24 = 116.67 px</c>, a 29× discrimination margin.
+        /// Row-agreement bound, in device pixels. DERIVED, not fitted: '5' is symmetric about the anchor
+        /// (<c>CurvedTextCentringTests</c>), so only rasterisation and the SDF threshold remain, sub-pixel per
+        /// edge. 4.0 device px is 0.6 BAKED px here; a baseline-relative cell reads 116.67 px, a 29× margin.
         /// </summary>
         private const double RowTolerancePx = 4.0;
 
@@ -771,26 +677,11 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>Curved-T4 — a curved symbol's ink is centred on the road it is drawn along, at tilt 0.</b> Proves the
-        /// maintainer's reported defect is gone, in the pose they reported it in, measured from a REAL
-        /// <see cref="CurvedTextLayout"/> cell rendered through the real placement system and the real shader.
-        ///
-        /// <para><b>The oracle shares no code with the arm under test.</b> It is the road anchor's own screen
-        /// row, obtained by projecting the anchor with the fixture's camera
-        /// (<c>UnityCamera.WorldToScreenPoint</c>) and converting to the top-down row convention the ink
-        /// analysis reads in. It does not come from the cell, from
-        /// <c>TextQuadLayout.OpticalCentreBelowReferencePx</c>, or from anything this tooth's own arm edits:
-        /// a reference drawn from the arm under test cancels the very defect it is meant to expose.</para>
-        ///
-        /// <para><b>Why the mid-row of the ink bbox is the right measurement.</b> Cell y = 0 IS the point on
-        /// the path: both consumers map the cell linearly and homogeneously about the anchor
-        /// (<c>BillboardMath.BuildWorldQuad</c>, <c>SymbolBox.BuildRotatedGlyph</c>), so zero maps to zero
-        /// under every branch. '5' being exactly cap-height and baseline-resting, its ink band is symmetric
-        /// about that zero, and the rendered band's midpoint must therefore land on the anchor's row.</para>
-        ///
-        /// <para>RED recipe: remove the shift (the earlier code) ⇒ 116.7 px. Apply it twice ⇒ 116.7 px the
-        /// other way. Negate it ⇒ 233 px. The measured residual is printed on every run as a drift
-        /// baseline.</para>
+        /// <b>Curved-T4 — a curved symbol's ink is centred on the road it is drawn along, at tilt 0,</b> from a
+        /// REAL <see cref="CurvedTextLayout"/> cell through the real placement system and shader.
+        /// Non-obvious why: the oracle is the anchor's row from <c>UnityCamera.WorldToScreenPoint</c>, sharing
+        /// no code with the cell. Cell y = 0 maps to the path point in every consumer, and '5' is symmetric
+        /// about it, so the ink band's mid-row lands on the anchor row. No shift reads 116.7 px off.
         /// </summary>
         [Test]
         public void CurvedTextInk_SitsOnTheRoad_AtTiltZero()
@@ -816,22 +707,10 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>Curved-T5 — a curved symbol and a centre-anchored POINT symbol of the same glyph sit the same way on
-        /// the same anchor, rendered.</b> The render-level statement of the requirement that the two producers
-        /// have the same optical relationship to their anchor.
-        ///
-        /// <para><b>Worth its cost even beside Curved-T4, for two distinct reasons.</b> (1) The point arm shares
-        /// NO code with the curved producer — <c>TextQuadLayout</c>'s centre shift was fixed by a different
-        /// stage, is pinned by <c>TextVerticalCentringTests</c>, and is untouched here, so this is
-        /// an independent reference rather than a self-derivation. (2) It is INVARIANT to any mistake in
-        /// Curved-T4's row/flip convention: both arms are read through the identical scan, so a convention error
-        /// cancels here and cannot make this tooth green for the wrong reason. Curved-T4 and Curved-T5 failing together
-        /// means the shift is wrong; Curved-T4 alone failing means the row convention is.</para>
-        ///
-        /// <para>Both arms render at the same <see cref="TextSizePx"/>, from the same atlas, at the same
-        /// world anchor, in the same scene and camera — the pair differs in the PRODUCER and nothing else.</para>
-        ///
-        /// <para>RED recipe: identical to Curved-T4's — every injection that moves the curved cell moves this by
-        /// the same 116.7 px, because the point arm does not move at all.</para>
+        /// the same anchor, rendered.</b> The pair differs only in the PRODUCER. Non-obvious why: beside
+        /// Curved-T4, the point arm shares no code with the curved producer (<c>TextVerticalCentringTests</c>
+        /// pins it), and one scan reads both arms, so a row-convention error cancels. Both failing means the
+        /// shift is wrong; Curved-T4 alone failing means the row convention is.
         /// </summary>
         [Test]
         public void CurvedTextInk_MatchesThePointPathTwin_AtTiltZero()
@@ -881,13 +760,8 @@ namespace MapRenderer.Tests.Visual
         /// Renders the same glyph twice through ONE scene and ONE camera — once as a CURVED along-line symbol
         /// whose cell comes from the real <see cref="CurvedTextLayout"/>, once as a centre-anchored POINT
         /// symbol whose quads come from <see cref="TextQuadLayout"/> — and also returns the road anchor's own
-        /// projected screen row.
-        ///
-        /// <para>'5' is built here rather than reusing <c>WorldCurvedAbRenderSnapshotTests.BuildGlyphF</c>:
-        /// that helper hands back a POINT-layout quad for 'F', and this file needs both the curved producer's
-        /// own output and a glyph whose ink band is exactly symmetric about the anchor (the header explains
-        /// why '5' and not 'F'). The shaped run is built directly from <see cref="PositionedGlyph"/> — both
-        /// layouts step the pen by the atlas entry's own advance, so no shaper/metrics adapter is involved.</para>
+        /// projected screen row. The run is built directly from <see cref="PositionedGlyph"/>, because both
+        /// layouts step the pen by the atlas entry's own advance.
         /// </summary>
         private static void MeasureBothArms(out RowReading curved, out RowReading point, out double anchorRow)
         {
@@ -947,10 +821,8 @@ namespace MapRenderer.Tests.Visual
                 double3 origin = frame.SceneOriginRender;
                 double mpp = scene.MetresPerDevicePixel;
 
-                // The road, in the render-space XZ plane, at screen angle 0° (east = X; the flat local
-                // approximation is exact enough at zero tilt and zero heading). At this pose a screen-
-                // horizontal road makes "off the road" exactly "off in screen rows". NO metre literals —
-                // every length is a multiple of the frame ruler.
+                // The road along east = X at screen angle 0°, so "off the road" is "off in screen rows". NO metre
+                // literals: every length is a multiple of the frame ruler.
                 double halfLen = RoadHalfLengthRulerUnits * mpp;
                 var dir = new double3(1.0, 0.0, 0.0);
                 double3 pathA = origin - dir * halfLen;
@@ -996,16 +868,10 @@ namespace MapRenderer.Tests.Visual
                 curved = RenderArm(scene, system, plan, snapshot, texture, in frame, curvedBuffer, "curved");
                 point  = RenderArm(scene, system, plan, snapshot, texture, in frame, pointBuffer,  "point");
 
-                // The oracle. The anchor is the road's midpoint, which is the scene origin, which is Unity
-                // world Vector3.zero after RTC.
-                //
-                // The row convention, derived link by link rather than assumed:
-                // (1) the frame is BOTTOM-UP (row 0 is the bottom scanline, Unity's native ReadPixels
-                // convention); (2) FlipRowsVertically turns it top-down, which is what AnalyzeInk scans;
-                // (3) WorldToScreenPoint's y is bottom-up in device pixels. So a top-down row r is bottom-up
-                // row (SizePx-1-r), whose centre is at screen y = SizePx - r - 0.5, giving r = SizePx - 0.5 - y.
-                // The half-pixel is two orders below the bound and is written out rather than dropped so the
-                // convention is legible. Curved-T5 is the control that does not depend on any of this.
+                // The oracle: the road's midpoint is the scene origin, Unity world Vector3.zero after RTC.
+                // Non-obvious why: r = SizePx - 0.5 - y, because the frame is bottom-up, FlipRowsVertically makes
+                // it top-down for AnalyzeInk, and WorldToScreenPoint's y is bottom-up with pixel centres at +0.5.
+                // Curved-T5 is the control that does not depend on this convention.
                 Vector3 anchorScreen = scene.UnityCamera.WorldToScreenPoint(Vector3.zero);
                 anchorRow = SizePx - 0.5 - anchorScreen.y;
             }
@@ -1051,21 +917,10 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — render tests requiring a GPU context (VisualScene/SnapshotRenderer).
     // NOT included in Tools/core-tests/core-tests.csproj.
     //
-    // The product-observing tooth for the symbol text-color carrier split: every other tooth in
-    // SymbolTextColorCarrierTests shares a CPU model of the fragment (`vertex × uniform`) with the code it
-    // checks — a model that would agree with a plausible wrong port just as readily as with the real one. This
-    // reads the rendered pixel itself, through the full production path (VisualScene → real MapView →
-    // SymbolRenderLayer's per-layer material → the real shader).
-    //
-    // Two arms differing ONLY in `text-color` — grey #808080 and white #ffffff — same glyph, same anchor. The
-    // ratio grey/white must land at linear(0.5019) ≈ 0.2158: the authored multiplier, applied ONCE. Landing
-    // on its square (≈0.0466) means both carriers hold the colour; landing on 1.0 means the vertex carries
-    // white and the uniform never reached the fragment.
-    //
-    // This tooth is an INVARIANT, not a regression check: it must pass against the UNMODIFIED tree too (the
-    // colour then rides the vertex stream alone, with no uniform in the picture at all) and pass again once
-    // the two-carrier split lands. A RED baseline means the harness resolved the wrong material — see the
-    // stage plan's escalation note before touching this file.
+    // Non-obvious why: SymbolTextColorCarrierTests shares a CPU model of the fragment with the code it checks,
+    // so this reads the rendered pixel through the full production path. Two arms differ ONLY in `text-color`
+    // (#808080, #ffffff). grey/white must be linear(0.5019) ≈ 0.2158, applied ONCE: its square (≈0.0466)
+    // means both carriers hold the colour, and 1.0 means the uniform never reached the fragment.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolTextColorRenderTests — Unity EditMode only
@@ -1080,9 +935,8 @@ namespace MapRenderer.Tests.Visual
         private const double TextSizePx  = 220.0;
         private const int    SizePx      = 256;
 
-        // Half-size of the box sampled for the LINEAR colour average — small enough to sit well inside the
-        // glyph's solid interior (mirrors PaintColorRenderTests' "sample box comfortably inside" pattern),
-        // once centred on the measured ink centroid rather than an assumed screen position.
+        // Half-size of the LINEAR colour sample box, small enough to sit inside the glyph's solid interior
+        // once centred on the measured ink centroid.
         private const int SampleHalf = 3;
 
         private static byte[] _glyphBytes;
@@ -1129,9 +983,8 @@ namespace MapRenderer.Tests.Visual
             using var whiteScene = BuildScene("#ffffff");
             VisualFrame whiteFrame = whiteScene.Render(SizePx);
 
-            // Locate the glyph from the white arm's own render — no assumed screen position. The box then
-            // reused for the grey arm too, since both arms share IDENTICAL geometry (colour is the only
-            // difference), so the same rectangle samples the same glyph pixels in both.
+            // Locate the glyph from the white arm's render. Both arms share IDENTICAL geometry, so the same box
+            // samples the same pixels in the grey arm.
             whiteFrame.InkStatsIn(0, 0, whiteFrame.Width, whiteFrame.Height, out double2 centroid, out int inkCount);
             TestContext.WriteLine($"[SymbolTextColorRender] white ink centroid={centroid} count={inkCount}");
             Assert.Greater(inkCount, 0, "the white arm must render some ink to locate the glyph from.");
@@ -1152,10 +1005,8 @@ namespace MapRenderer.Tests.Visual
             TestContext.WriteLine($"[SymbolTextColorRender] white={whiteSample} grey={greySample} ratio={ratio} " +
                                    $"expected~={expected} squared~={squared}");
 
-            // The ratio construction cancels any factor common to BOTH arms — a shader edit that scales
-            // every text pixel would leave the ratio (and this tooth) green over a real defect. Assert the
-            // white arm's absolute intensity first, so a bad denominator (partial coverage, not colour)
-            // reports as a bad denominator rather than a confusing ratio.
+            // The ratio cancels any factor common to both arms, so assert the white arm's absolute intensity
+            // first; a bad denominator then reports as itself, not as a confusing ratio.
             for (int c = 0; c < 3; c++)
                 Assert.That(whiteSample[c], Is.EqualTo(1.0).Within(0.02),
                     $"the white reference arm must render at full linear intensity. whiteSample={whiteSample}. " +
@@ -1198,26 +1049,13 @@ namespace MapRenderer.Tests.Visual
     // SymbolPlacementSystem.Tick), mesh readback through the live camera.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // The FIXTURE arm (Fixture-T1…Fixture-T5): the assertions the apparatus was built for and deferred.
-    // Read `OffLookAtSymbolScene`'s header first; `OffLookAtSymbolFixtureTests` (M1–M13) is the
-    // apparatus' own acceptance suite and every tooth there still passes unchanged.
+    // The FIXTURE arm (Fixture-T1…Fixture-T5) over OffLookAtSymbolScene (read its header first). `text-size`
+    // under `*-pitch-alignment: map` means X px TOP-DOWN: a glyph advance is one fixed world length, so letters
+    // and spacing foreshorten together, as `line-width` does.
     //
-    // THE MODEL, SETTLED, NOT RE-DERIVED HERE: `text-size` under `*-pitch-alignment: map` means X px TOP-DOWN.
-    // A glyph advance is fixed ONCE as a world length and the perspective divide does the rest, so letters AND
-    // letter spacing foreshorten together — the same principle as `line-width`.
-    //
-    // THE TRAP THESE TEETH EXIST TO AVOID. `CrossNear`/`CrossFar` are ISO-DEPTH inherently, and for an
-    // iso-depth symbol a true per-glyph WORLD walk and a screen walk scaled by ONE per-symbol constant produce
-    // IDENTICAL output — and that second thing is the screen-walk model these teeth exist to reject. A change
-    // can be green on all 14 apparatus teeth while re-implementing the bug. Fixture-T2/T3/T4 live on the RECEDING
-    // (depth-spanning) arm and carry the falsifiability; Fixture-T1 is the inherited regression tooth and Fixture-T5
-    // is the DPR tooth.
-    //
-    // ORACLE HYGIENE. `AdvanceWorldMetres` is `AdvanceBakedPx` and `TextSizePx` (fixture constants), `OneEm` (a
-    // unit definition), and `MapCamera.MetresPerDevicePixel × Config.DevicePixelRatio` (the frame ruler, whose
-    // DPR factor the fixture applies from its OWN constant — never read back out of production, or the two sides
-    // would drop it together and Fixture-T5 would be vacuous). Nothing measured feeds it. Where a tooth projects through
-    // the live camera (Fixture-T3) the only measured input is a POSITION; the LENGTH projected is always the constant.
+    // Non-obvious why: the cross arm is iso-depth, where a per-glyph WORLD walk equals a screen walk scaled by
+    // one constant, so Fixture-T2/T3/T4 on the RECEDING arm carry the falsifiability. The oracle
+    // `AdvanceWorldMetres` uses only fixture constants and the camera ruler, never a measured length.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MapPitchedWorldArcLayoutTests — Unity EditMode only
@@ -1248,19 +1086,10 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>Fixture-T1 — THE REGRESSION TOOTH the whole epic was chasing.</b> Proves: the cross-azimuth pair's
-        /// mean screen spacing halves when the view depth doubles — far/near reads 0.500, where the earlier
-        /// screen-constant layout read 1.0000.
-        ///
-        /// <para>It is a RATIO of two readings from ONE frame and ONE symbol pair, so any uniform scale error
-        /// (OneEm, TextSizePx, mpp, DPR, atlas scale, a wrong P11) multiplies both and CANCELS. Only the depth
-        /// dependence survives, which is exactly the question.</para>
-        ///
-        /// <para><b>Does NOT prove that spacing foreshortens per-GLYPH rather than per-LABEL.</b> Both symbols
-        /// are iso-depth, so a screen walk scaled by one per-symbol constant passes this tooth. That is what
-        /// Fixture-T2 is for, and why Fixture-T1 alone would not be an acceptable set.</para>
-        ///
-        /// <para>RED-verify: injection I1 (force <c>worldArc = false</c>) — reads 1.0000.</para>
+        /// <b>Fixture-T1 — the regression tooth.</b> The cross-azimuth pair's mean screen spacing halves when
+        /// the view depth doubles: far/near reads 0.500, and a screen-constant layout (<c>worldArc = false</c>)
+        /// reads 1.0000. A uniform scale error cancels in the ratio. Limitation: both symbols are iso-depth, so
+        /// a per-symbol constant passes; Fixture-T2 closes that.
         /// </summary>
         [Test]
         public void CrossAzimuthPair_ScreenSpacing_HalvesWithDepth()
@@ -1288,23 +1117,9 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>Fixture-T2 — THE HEADLINE TOOTH.</b> Proves: EVERY gap of ALL FOUR curved symbols — 16 gaps across two
         /// directions and two depths — measures <c>AdvanceWorldMetres</c> in the world, within 1 %. That is
-        /// the model stated directly: one glyph advance is one fixed world length, everywhere in the frame.
-        ///
-        /// <para><b>Why it is not self-referential:</b> the comparand is two fixture constants, a unit
-        /// definition and the frame ruler. Nothing measured. The MEASURAND is the staged world anchors read
-        /// back off the built meshes.</para>
-        ///
-        /// <para><b>Why a per-symbol constant cannot pass it — the iso-depth trap closed.</b> On the RECEDING
-        /// arms a screen-uniform walk (or a world walk scaled by one per-symbol constant, which is the same
-        /// thing) produces world gaps that GROW along the symbol as depth increases, reading well over the
-        /// oracle at the far end. Against a 1 % bound that is enormous. The cross arms cannot see this; the
-        /// receding arms are where the tooth has teeth.</para>
-        ///
-        /// <para>Both roads are straight two-vertex segments, so chord distance IS arc distance and the
-        /// expectation is exact to float — the 1 % is headroom for the RTC bake's float narrowing, not for
-        /// model slop.</para>
-        ///
-        /// <para>RED-verify: injection I1 (force <c>worldArc = false</c>).</para>
+        /// the model stated directly. Non-obvious why: on the RECEDING arms a per-symbol constant makes world
+        /// gaps GROW with depth, so it fails. The roads are straight two-vertex segments, so chord equals
+        /// arc, and the 1 % is headroom for the RTC bake's float narrowing only.
         /// </summary>
         [Test]
         public void EveryCurvedGap_MeasuresOneWorldAdvance_AtBothDepths_BothDirections()
@@ -1322,20 +1137,10 @@ namespace MapRenderer.Tests.Visual
         /// each receding symbol, the expectation is
         /// <c>|ProjectPx(A_i + d̂·AdvanceWorldMetres) − ProjectPx(A_i)|</c>, where <c>A_i</c> is glyph
         /// <c>i</c>'s MEASURED world position and <c>d̂</c> is the fixture's own road direction. The measured
-        /// screen gap must match it within 3 %.
-        ///
-        /// <para><b>Discipline:</b> the only measured input is a POSITION. The LENGTH projected is the fixture
-        /// constant — the exact analogue of <c>OracleAtDepth</c> taking only <c>w</c>. A spacing is never fed
-        /// back in.</para>
-        ///
-        /// <para><b>Why not a closed form.</b> <c>spacingWorld·|P11|·H/(2w)</c> is the PERPENDICULAR span; a
-        /// receding displacement's perpendicular component is <c>L·cos θ</c>, so on this arm the closed form
-        /// inherently reads far low. Projecting the two real endpoints through the live camera is exact
-        /// at any depth AND any direction, needs no <c>cos θ</c>, and imports no second-order correction. The
-        /// closed-form number is REPORTED alongside so the substitution is auditable.</para>
-        ///
-        /// <para>Proves: the screen reading a later stage (the render arm) will consume is the projection of a
-        /// world-welded advance. RED-verify: injection I1.</para>
+        /// screen gap must match it within 3 %. The only measured input is a POSITION; the projected LENGTH is
+        /// the constant. Non-obvious why: the closed form <c>spacingWorld·|P11|·H/(2w)</c> is the PERPENDICULAR
+        /// span and reads far low on a receding road, so both endpoints are projected (the closed form is
+        /// reported alongside).
         /// </summary>
         [Test]
         public void RecedingGaps_ProjectAsAWorldWeldedAdvance_ThroughTheLiveCamera()
@@ -1353,9 +1158,8 @@ namespace MapRenderer.Tests.Visual
                 for (int g = 0; g + 1 < m.Glyphs.Length; g++)
                 {
                     double3 a = m.Glyphs[g].WorldUnity;
-                    // A DIRECTION taken from the measurement, never a length: the road runs along ±ĝ and
-                    // which sign is a fact about how the symbol was laid out, not about how far apart the
-                    // glyphs are.
+                    // Only a DIRECTION comes from the measurement, never a length: the sign of ±ĝ is a layout
+                    // fact, not a spacing.
                     double sign = math.sign(math.dot(m.Glyphs[g + 1].WorldUnity - a, f.RecedingDir));
                     double3 b = a + f.RecedingDir * (sign * f.AdvanceWorldMetres);
                     double projectedPx = math.length(
@@ -1385,17 +1189,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>Fixture-T4 — the cheapest discriminating reading here.</b> Proves: along each receding
         /// symbol, screen gaps decrease STRICTLY with view depth, and on <c>RecedingNear</c> the nearest gap is
-        /// more than 1.10× the farthest.
-        ///
-        /// <para>Model-discriminating on its own and with no oracle at all: a screen-constant walk gives
-        /// UNIFORM gaps (ratio 1.000, no monotonicity), so this cannot pass on the earlier layout. It is the
-        /// tooth that survives even if every closed form and every ruler in the fixture were wrong.</para>
-        ///
-        /// <para>Ordered by DEPTH rather than by glyph index: which end of the road glyph 0 sits at is a
-        /// layout detail (the keep-upright walk direction), and a tooth that assumed one would be pinning the
-        /// wrong thing.</para>
-        ///
-        /// <para>RED-verify: injection I1 — gaps go uniform and both clauses fail.</para>
+        /// more than 1.10× the farthest. It needs no oracle: a screen-constant walk gives UNIFORM gaps. Gaps
+        /// are ordered by DEPTH, not glyph index, because the keep-upright walk decides which end glyph 0 is.
         /// </summary>
         [Test]
         public void RecedingGaps_ShrinkStrictlyWithDepth()
@@ -1452,22 +1247,9 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>Fixture-T5 — the DPR tooth.</b> Fixture-T2 re-run on a fixture built at
         /// <c>DevicePixelRatio = 2</c>: every gap of every curved symbol must still measure
-        /// <c>AdvanceWorldMetres</c>, the SAME number of metres as at DPR 1.
-        ///
-        /// <para><b>The expectation is NOT "twice the DPR-1 value".</b> The altitude framing uses
-        /// <c>ViewportLogicalPx</c>, so at DPR 2 the orbit radius halves and <c>MetresPerDevicePixel</c>
-        /// halves with it — leaving <c>metresPerLogicalPixel</c>, and therefore the advance in metres,
-        /// INVARIANT. What does change is that a fixed world length projects to twice as many device px.
-        /// Writing "2×" here would encode the wrong law.</para>
-        ///
-        /// <para><b>What it catches.</b> <c>TextSizePx</c> is LOGICAL px while
-        /// <c>MapCamera.MetresPerDevicePixel</c> is per DEVICE px by its own doc. A production ruler that
-        /// dropped the <c>× DevicePixelRatio</c> would be half the correct value at DPR 2 — so the measured
-        /// world gap reads 0.5× here and exactly 1.0× at DPR 1, where the omission is invisible and no
-        /// self-referential oracle could see it either.</para>
-        ///
-        /// <para>RED-verify: injection I2 (drop <c>* _camera.DevicePixelRatio</c> in
-        /// <c>SymbolPlacementSystem</c>) — DPR 1 stays green, this reads 0.5×.</para>
+        /// <c>AdvanceWorldMetres</c>, the SAME metres as at DPR 1 (not twice: <c>MetresPerDevicePixel</c>
+        /// halves at DPR 2). Non-obvious why: <c>TextSizePx</c> is LOGICAL px, so a ruler that dropped
+        /// <c>× DevicePixelRatio</c> in <c>SymbolPlacementSystem</c> reads 0.5× here and 1.0× at DPR 1.
         /// </summary>
         [Test]
         public void EveryCurvedGap_MeasuresTheSameWorldAdvance_AtDevicePixelRatioTwo()
@@ -1535,30 +1317,13 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — the tilted point-symbol fixture.
-    // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: drives a real MapViewComponent
-    // through the geojson→symbol pipeline and a live SymbolPlacementSystem).
+    // Unity EditMode only — the tilted point-symbol fixture. Two point features with IDENTICAL text ("A") at
+    // distinct mid-tile coordinates, under a tilt=45° camera: the geojson→symbol pipeline must land ink where
+    // the camera projects the authored coordinate. Text point-symbols only.
     //
-    // Two point features, IDENTICAL text ("A"), DISTINCT lon/lat, mid-tile, under a tilt=45° camera. Proves the
-    // geojson→symbol pipeline lands ink where the camera actually projects the authored coordinate — the FIRST
-    // proof of point-symbol positional correctness in this kit. Text point-symbols only: no icons, no
-    // line/curved placement, no seam interaction, no perspective-foreshortening suite.
-    //
-    // THE ORACLE. `PredictedScreenPx` is NOT `IProjection.GroundToScreen` — that method is documented as exact
-    // only at tilt=0 ("Exact inverse of ScreenToGround at zero tilt") and its Web-Mercator
-    // implementation carries no tilt term at all (WebMercatorProjection.cs:98-132), so at this fixture's tilt=45°
-    // it would inherently predict the WRONG screen position, not merely imprecisely. The oracle instead
-    // re-derives the two-line formula `MapView.BuildSceneFrame` uses (`SceneOriginRender = proj.Project(lookAt)`)
-    // from PUBLIC API only (`MapCamera.Projection` / `MapCamera.CurrentProperties`), then projects the resulting
-    // Unity-world point through the LIVE camera's own matrix (`GroundRuler.ProjectPx` → `WorldToScreenPoint`) —
-    // the same "project a KNOWN world point through the live camera" oracle discipline `OffLookAtSymbolScene`
-    // established (`GroundRuler.cs`'s own doc: "a second implementation of the projection inside the test is the
-    // thing most likely to be wrong"). This is shared reference infra (projection + camera-pose bookkeeping), not
-    // the mechanism under test (SymbolFeatureExtractor / SymbolPlacementSystem).
-    //
-    // NO FLIP. VisualFrame.Pixels is bottom-left origin (SnapshotRenderer's own doc); Camera.WorldToScreenPoint
-    // is also bottom-left, +y up. InkStatsIn's window coordinates and the oracle's predicted px therefore compare
-    // directly, with no coordinate conversion anywhere in this file.
+    // Non-obvious why: the oracle is not `IProjection.GroundToScreen`, which is exact only at tilt 0. The oracle
+    // rebuilds `SceneOriginRender = proj.Project(lookAt)` from public API and projects through the LIVE camera
+    // (`GroundRuler.ProjectPx`). NO FLIP: VisualFrame.Pixels and WorldToScreenPoint are both bottom-left.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GeoJsonPointSymbolFixtureTests — Unity EditMode only
@@ -1570,13 +1335,8 @@ namespace MapRenderer.Tests.Visual
         // ── The proof geometry: one tile, two mid-tile points, generous margins on every side ──────────
         private static readonly TileId ProofTile = new TileId { Z = 6, X = 40, Y = 25 };
 
-        // Tile-local unit-square coordinates. Separated in LONGITUDE (U) at a SHARED latitude (V): at
-        // heading=0 the camera's cross-azimuth (iso-view-depth) axis is east/west
-        // (CameraPoseMath.ComputeRelativePose: pos = (0, alt·cosT, -alt·sinT) at heading 0, so the receding
-        // direction is north/south) — so both anchors sit at very nearly the SAME view depth, keeping the
-        // glyph's systematic ink-centroid bias the SAME vector for both symbols (what the residual-agreement
-        // clause of T-Pos needs). 0.30/0.70 are each ≥25% of the tile's extent from every edge (asserted, not
-        // assumed — AssertMidTileFence).
+        // Tile-local, separated in LONGITUDE: at heading 0 east/west is iso-depth, so both glyphs share one
+        // centroid bias (T-Pos). AssertMidTileFence asserts ≥25% clearance from every edge.
         private const double PointAU = 0.30, PointBU = 0.70, PointV = 0.50;
         private const double MidTileFenceMinFraction = 0.25;
 
@@ -1586,36 +1346,22 @@ namespace MapRenderer.Tests.Visual
         private const double TiltDeg    = 45.0;
         private const int    SizePx     = 512;
 
-        // Half-size of the predicted-anchor ink window, px — generous around a single 32px-text-size glyph
-        // cell (measured ~19px wide, ~355 ink px) so a real but small placement error still lands the ink
-        // inside the window. This is a PRESENCE FLOOR ONLY (T-Present's job) — 80px is far wider than the
-        // real cell on purpose, since T-Pos's own tight tolerance N is what actually bounds the position; do
-        // not read WindowHalfPx as a position claim.
+        // Half-size of the predicted-anchor ink window, px: a PRESENCE floor only (T-Present), far wider than
+        // the ~19 px cell. T-Pos's tolerance bounds the position, not this.
         private const int WindowHalfPx = 80;
 
-        // T-Pos: N, the ink-centroid-to-predicted-anchor tolerance, px. Tuned from the MEASURED residual
-        // (printed by every T-Pos run via TestContext.WriteLine): a first green run measured |residualA|
-        // =1.28px, |residualB|=1.35px — the systematic text-anchor/glyph-metric offset an ink reading
-        // carries (this is not OffLookAt's 2px GEOMETRY bound; that reads staged vertex positions, not
-        // rendered ink). N=5px is a ~3.7x margin over the observed max, tight enough to catch a real
-        // placement defect (RED-verified at a >=40px injected offset) while tolerant of ordinary
-        // cross-machine AA/rasterization jitter.
+        // T-Pos: the ink-centroid-to-anchor tolerance, px. Residuals of ~1.3 px (printed each run) are the
+        // glyph-metric bias of an ink reading; 5 px is ~3.7× that and still catches a real misplacement.
         private const double PositionToleranceN = 5.0;
 
-        // The two symbols' residual VECTORS (identical text ⇒ identical systematic bias) must agree within a
-        // few px — the sharper clause that isolates a real per-symbol placement error from the shared bias,
-        // which the plain distance-to-anchor bound alone cannot (both could be biased by the same amount in
-        // the same direction and still individually pass while genuinely wrong relative to each other — not
-        // this fixture's failure mode, but the clause exists for exactly that discrimination). Measured
-        // agreement on the same green run: 0.12px; 2.0px leaves a wide margin for jitter while staying far
-        // tighter than PositionToleranceN.
+        // The two residual VECTORS share one bias (identical text), so they must agree within 2 px. That
+        // separates a per-symbol placement error from the shared bias, which the distance bound cannot.
         private const double ResidualAgreementToleranceN = 2.0;
 
         private const int OnScreenMarginPx = 20;
 
-        // Anti-blob floors/ceilings for T-Distinct — tooth membership is not coverage — tuned
-        // from a measured green run: inkBetween=0, whole-frame filled fraction=0.27%. Not exactly zero, to
-        // tolerate ordinary AA fringe.
+        // Anti-blob bounds for T-Distinct: a green frame reads no ink between the symbols and 0.27% filled.
+        // They are not zero, to tolerate AA fringe.
         private const int    BetweenBandInkFloor    = 2;
         private const double WholeFrameFillCeiling  = 0.01;
 
@@ -1746,9 +1492,7 @@ namespace MapRenderer.Tests.Visual
             TestContext.WriteLine($"T-Present/T-Pos: predA={predA} inkA={inkA} centroidA={centroidA}");
             TestContext.WriteLine($"T-Present/T-Pos: predB={predB} inkB={inkB} centroidB={centroidB}");
 
-            // ── T-Present: the predicted window must actually carry ink. RED-verify: rendering
-            // BuildEmptyScene() through this same window logic must yield inkA == inkB == 0 (T-Neg is this
-            // tooth's own negative control). ──────────────────────────────
+            // ── T-Present: the predicted window must carry ink; T-Neg is its negative control. ─────────────
             Assert.Greater(inkA, 0, "label A's predicted window carries no ink — the label did not reach the screen");
             Assert.Greater(inkB, 0, "label B's predicted window carries no ink — the label did not reach the screen");
 
@@ -1836,13 +1580,8 @@ namespace MapRenderer.Tests.Visual
             using var scene = BuildEmptyScene();
             VisualFrame frame = scene.Render(SizePx);
 
-            // NOT frame.Coverage().IsBlank: SnapshotCoverage.IsBlank fires at >=97% BACKGROUND fraction
-            // (SnapshotCoverage.cs), but two small glyph cells cover well under 1% of a 512x512 frame (the
-            // POSITIVE fixture measured 0.27% filled) — IsBlank would read TRUE on the positive frame too,
-            // making this control vacuous (one instrument's blind spot does not transfer to another: G-V0's
-            // fill negative control legitimately used IsBlank because a fill covers tens of percent of the
-            // frame; that does not transfer to an instrument reading two glyph cells). InkStatsIn over the
-            // WHOLE frame reads the same background predicate at the granularity this fixture needs.
+            // Not Coverage().IsBlank: it fires at >=97% background, which the positive frame (0.27% filled)
+            // also meets. Whole-frame InkStatsIn reads the same predicate at the needed granularity.
             frame.InkStatsIn(0, 0, frame.Width, frame.Height, out _, out int inkTotal);
             TestContext.WriteLine($"T-Neg: inkTotal={inkTotal}");
             Assert.AreEqual(0, inkTotal,
@@ -1852,11 +1591,8 @@ namespace MapRenderer.Tests.Visual
                 "'rendered anything at all'. Layer PRESENT + source EMPTY (rather than 'no layer') pins that " +
                 "the authored POINTS produced the ink, not the layer's mere existence.");
 
-            // Non-vacuous control: because ExpectSymbolQuads(0) makes SpinUntilSymbolsReady exit on its FIRST
-            // iteration (0 >= 0), a zero-ink frame here is ALSO what "the pipeline never staged anything,
-            // positive or negative" would look like — a broken glyph/extraction path would pass the inkTotal
-            // check above too. LastInputSymbolCount == 0 is what proves the zero-ink frame reflects a
-            // genuinely EMPTY points source rather than a pipeline that produced no symbols for any input.
+            // ExpectSymbolQuads(0) exits the spin at once, so a broken pipeline also gives zero ink.
+            // LastInputSymbolCount == 0 proves the points source was genuinely EMPTY.
             int inputSymbolCount = frame.MapView.View.SymbolPlacementSystem.LastInputSymbolCount;
             Assert.AreEqual(0, inputSymbolCount,
                 $"the empty points source must feed exactly 0 labels into placement (got {inputSymbolCount})");

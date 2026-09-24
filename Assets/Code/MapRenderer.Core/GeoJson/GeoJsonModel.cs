@@ -15,25 +15,11 @@ namespace MapRenderer.Core.GeoJson
     }
 
     /// <summary>
-    /// One parsed RFC 7946 feature, still geodetic. Multi* geometries are FLATTENED here, because
-    /// <see cref="TileGeometryType"/> — like the MVT spec it mirrors — draws no Multi* distinction:
-    /// <list type="table">
-    /// <item><term>Point / MultiPoint</term><description><c>Point</c>; N paths of one coordinate each, the
-    /// shape <c>MvtDecodeJob</c> produces for a MoveTo with count &gt; 1</description></item>
-    /// <item><term>LineString / MultiLineString</term><description><c>LineString</c>; N paths</description></item>
-    /// <item><term>Polygon / MultiPolygon</term><description><c>Polygon</c>; rings concatenated, with
-    /// <see cref="PolygonRingCounts"/> carrying the per-polygon grouping</description></item>
-    /// </list>
-    /// <para>The three paragraphs below are non-local invariants. Coordinates are geodetic and latitude-first
-    /// (<see cref="GeoCoordinate"/>): RFC 7946 §3.1.1 positions are longitude-first on the wire, and
-    /// <see cref="GeoJsonParser"/> swaps them once.</para>
-    /// <para>Ring winding encodes ROLE, not authorship. RFC 7946 §3.1.6 gives role by position and tells
-    /// parsers not to reject non-conforming winding, so the parser re-orients each polygon's rings: the
-    /// exterior and its holes get opposite shoelace signs, with the exterior CW-on-screen in tile space.
-    /// <c>RingAssemblyJob</c> classifies by sign.</para>
-    /// <para>It IS the evaluation surface (<see cref="IFeature"/>), as <c>MvtFeature</c> is for MVT, so no
-    /// per-feature adapter is allocated. Slicing carries the feature BY REFERENCE into every tile it touches,
-    /// so filters and expressions read the authored properties, never a copy that could drift.</para>
+    /// One parsed RFC 7946 feature, still geodetic, with Multi* flattened as in MVT: points and lines become N
+    /// paths; polygons concatenate rings, grouped by <see cref="PolygonRingCounts"/>. Non-local invariant:
+    /// coordinates are latitude-first (<see cref="GeoJsonParser"/> swaps RFC §3.1.1 once), and ring winding
+    /// encodes role (exterior CW-on-screen in tile space, holes opposite) for <c>RingAssemblyJob</c>. It is the
+    /// <see cref="IFeature"/> itself, carried by reference into every tile, so filters read authored properties.
     /// </summary>
     public sealed class GeoJsonFeature : IFeature
     {

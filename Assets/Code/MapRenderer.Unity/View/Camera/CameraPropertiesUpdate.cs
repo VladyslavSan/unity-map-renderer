@@ -3,15 +3,10 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.View.Camera
 {
     /// <summary>
-    /// A nullable PATCH struct. Every field is optional; only non-null fields are applied
-    /// to the current <see cref="CameraProperties"/> by <see cref="ApplyTo"/>. Engine-free.
-    ///
-    /// <para>A <c>struct</c>, so the Duration==0 (instant/jumpTo) fast path allocates zero bytes on the
-    /// heap.</para>
-    ///
-    /// <para><b>Zoom is the only scale field</b> — zoom is canonical and altitude is derived from it
-    /// (<see cref="CameraPoseMath.AltitudeForZoom"/>), so there is nothing to patch in the other
-    /// direction.</para>
+    /// A nullable PATCH struct: <see cref="ApplyTo"/> applies only its non-null fields to the current
+    /// <see cref="CameraProperties"/>. Engine-free. A <c>struct</c>, so the Duration==0 (jumpTo) fast path
+    /// allocates nothing on the heap. Zoom is the only scale field, because altitude derives from it
+    /// (<see cref="CameraPoseMath.AltitudeForZoom"/>).
     /// </summary>
     public struct CameraPropertiesUpdate
     {

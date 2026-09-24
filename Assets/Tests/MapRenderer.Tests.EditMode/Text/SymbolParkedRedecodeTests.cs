@@ -31,57 +31,17 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text
 {
     /// <summary>
-    /// The sprite-PARKED path end-to-end: the one production site where the decode model's
-    /// hardest promise is kept or broken.
-    ///
-    /// <para><b>What this tooth proved, and what it proves now.</b> Under the scoped lease a parked
-    /// build was dispatched long after its kick's scope had closed and freed the tile, so it RE-decoded —
-    /// one extra decode, accepted and measured here. Under the reference count the park takes
-    /// its own reference while the kick's is still live, so the tile survives the whole
-    /// <c>SetStyle</c>→<c>SpritesSettled</c> window and the drain reads the SAME decoded tile. Two
-    /// assertions therefore INVERT — the decode count 2 → 1, and the kick's tile disposed-while-parked
-    /// 1 → 0 — and the inversion is the proof the new model works, not a regression. The symbol differential
-    /// they exist to protect is unchanged. <b>The fixture keeps its name</b> — other docs cite it — though
-    /// "Redecode" does not name today's mechanism: it names the cost this tooth once measured, and now
-    /// measures the absence of.</para>
-    ///
-    /// <para><b>The differential.</b> Two arms over the same bytes, style, camera and sprite fixture: one
-    /// whose sprite fetch is gated open at kick time (parks) and one whose fetch has already settled (never
-    /// parks). Their committed baked blocks must be column-equal (<c>BlockColumnHash.AssertColumnsEqual</c>,
-    /// 4.4b). A parked build that
-    /// produced subtly different geometry — a stale extent, a mis-stamped TileId — moves the symbols; nothing
-    /// else in the suite would see it. (A buffer read after FREE surfaces differently: production catches the
-    /// throw in <c>RunSymbolWorkerAndHandoff</c> and logs a warning, so the observable is a commit of ZERO
-    /// symbols, caught by the count assertion rather than the differential. Both review arms confirmed that
-    /// empirically.)</para>
-    ///
-    /// <para><b>Vacuity guards, both directions.</b> The park is reachable only through
-    /// <c>TryBeginBuild</c> while <c>SpritesSettled</c> is false, so a fixture whose sprites happen to be
-    /// settled would silently compare un-parked against un-parked and assert nothing. The parked arm
-    /// therefore asserts the queue actually received an entry, and that the kick's tile is <b>still alive</b>
-    /// while the build sits parked — which is what makes the later read a share rather than a
-    /// use-after-free. The oracle arm's mirror guard had to be REPLACED rather than renumbered: it was
-    /// "the oracle decoded once" against the parked arm's two, and under the reference count BOTH are one,
-    /// so the old form stops discriminating and would go quietly vacuous. Its first replacement — a
-    /// disposal-count differential sampled after the pump — did not discriminate either: a forced park on
-    /// the settled path enqueues, drains on the very next pump, commits, and leaves that count reading
-    /// exactly what "never parked" reads. The guard now reads the pass's OWN park decision at
-    /// <c>TryBeginBuild</c> completion, before a frame is pumped, which is the only moment nothing
-    /// downstream can undo.</para>
-    ///
-    /// <para><b>And the parked reference's PRE-CONSUMER exits.</b> Three further teeth at the bottom of the
-    /// fixture drive the ways a parked entry can stop being reachable by the mouth meant to consume it — a
-    /// restyle whose drain lands between the park's token check and its enqueue, a cancellation with no
-    /// drain, and a fault between the dequeue and the worker starting. None of the three was covered before
-    /// this fixture — each was declared unreachable or left unobserved; each frees an
-    /// <c>Allocator.Persistent</c> tile or leaks it.</para>
-    ///
-    /// <para><b>And the drain runs OFF the main thread.</b> The decode does not say so — there is only
-    /// one, and it is the kick's — so the instrument moved to the EXTRACT: the probe records the thread of
-    /// every layer read, and a layer is read only inside a worker pass. Replacing <c>PumpBuilds</c>'
-    /// <c>RunOnThreadPool</c> with a direct call would move the whole extract onto the frame thread; the
-    /// sibling parity tooth pins the <i>tail</i> on main and cannot see that.</para>
+    /// The sprite-PARKED path end-to-end. The park takes its own tile reference while the kick's is still
+    /// live, so the tile survives the <c>SetStyle</c>→<c>SpritesSettled</c> window and the drain reads the
+    /// SAME decoded tile: one decode, and the kick's tile stays alive while parked. The fixture keeps
+    /// "Redecode" in its name because other files cite it; the name is the cost this fixture shows is absent.
     /// </summary>
+    /// <remarks>
+    /// Non-obvious why: a parked build with a stale extent or a mis-stamped TileId moves the symbols and no
+    /// other test sees it, so a parked arm and a never-parked arm must commit column-equal blocks. Each arm
+    /// reads its own park decision at <c>TryBeginBuild</c>, because every count reads the same for "never
+    /// parked" and "parked, then drained".
+    /// </remarks>
     [TestFixture]
     public class SymbolParkedRedecodeTests
     {
@@ -89,10 +49,8 @@ namespace MapRenderer.Tests.Text
         private const string FontName = "LatinFont";
         private static readonly TileId Tile0 = new TileId { Z = 3, X = 0, Y = 0 };
 
-        // Same shape as SymbolSpriteReadinessTests' style: a root `sprite` URL (so a fetch exists to gate at
-        // all) and one symbol layer carrying BOTH icon-image and text-field over the fixture's "centroids"
-        // source-layer — icons are what parking exists to wait for, so a text-only style would park for no
-        // observable difference.
+        // A root `sprite` URL gives the test a fetch to gate. The layer carries an icon because icons are
+        // what parking waits for; a text-only style would park with no observable difference.
         private static readonly string StyleJson = @"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
@@ -103,10 +61,8 @@ namespace MapRenderer.Tests.Text
             ]
         }".Replace('\'', '"');
 
-        // The style a restyle lands on in the post-drain-race tooth: no symbol layers and no `glyphs` URL,
-        // so SetStyle leaves `_builder` null and PumpBuilds returns at its very first line, FOREVER. That is
-        // not an exotic choice — it is what makes the stranded-entry leak permanent rather than merely late,
-        // and it is the case the race's fix has to cover.
+        // No symbol layers and no `glyphs` URL: SetStyle leaves `_builder` null and PumpBuilds returns at once,
+        // so only the discard funnel can free a parked entry and a stranded one leaks permanently, not late.
         private static readonly string NoGlyphStyleJson = @"{ 'version': 8, 'layers': [] }".Replace('\'', '"');
 
         private GameObject _camGo;
@@ -118,15 +74,11 @@ namespace MapRenderer.Tests.Text
         private byte[] _latinGlyphs;
         private string _spriteJson;
         private byte[] _spritePng;
-        // SpritesSettled's deadline clock, frozen and NEVER advanced (mirrors SymbolSpriteReadinessTests'
-        // review fix). The parked arm holds its gate open across 60 pumped frames; on the real
-        // realtimeSinceStartup a slow batch machine can cross SpriteFetchDeadlineSeconds inside that window,
-        // drain the queue, and fail the "it actually parked" precondition looking exactly like a real
-        // regression. Frozen, the only thing that can settle the fetch is the gate this test controls.
+        // SpritesSettled's deadline clock, frozen: on a real clock a slow machine can cross
+        // SpriteFetchDeadlineSeconds in 60 frames and settle the fetch, so only the test's gate may settle it.
         private double _simulatedNow;
-        // Production catches a failed symbol build and logs it rather than propagating, on whichever thread
-        // the build ran — hence the gate. Only the build-failure message is collected; ambient engine
-        // warnings are not this tooth's business.
+        // Production logs a failed symbol build on whichever thread it ran, hence the lock. Only the
+        // build-failure message is collected, not ambient engine warnings.
         private readonly object _logGate = new object();
         private readonly List<string> _buildFailureLogs = new List<string>();
 
@@ -206,14 +158,11 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        /// <summary>Mirrors <c>TileManager.KickMeshBuild</c> more closely than the other symbol fixtures'
-        /// drive helpers do, and the difference is load-bearing here: the real kick decodes on the pool,
-        /// owns the ONE reference the lease is born with, reads the tile for the MESH pass, and releases in a
-        /// <c>finally</c> — so whether the tile survives the park is decided by whether the park took its own
-        /// reference, exactly as in production.
-        ///
-        /// <para><paramref name="kickTile"/> receives the tile the mesh pass read, so a later assertion can
-        /// state that the parked drain read the SAME instance rather than inferring it from a count.</para></summary>
+        /// <summary>Mirrors <c>TileManager.KickMeshBuild</c>: decodes on the pool, owns the lease's first
+        /// reference, reads the tile for the mesh pass, and releases in a <c>finally</c>. So the tile
+        /// survives the park only if the park took its own reference, as in production.
+        /// <paramref name="kickTile"/> receives the tile the mesh pass read, so an assertion can check that
+        /// the parked drain read the SAME instance.</summary>
         private static void DriveKick(SymbolSubsystem subsystem, TileId tile, byte[] bytes,
             ITileDecoder decoder, IDecodedTile[] kickTile = null, bool[] parked = null)
         {
@@ -233,20 +182,11 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        /// <summary>The pass's OWN park decision, read straight off the object <c>TryBeginBuild</c> returned
-        /// and before a single frame is pumped.
-        ///
-        /// <para><b>Why this and not a count.</b> Every count-shaped reading of "did it park" is taken after
-        /// the fact and can be produced by a build that parked and then drained: <c>PendingSpriteCount</c>
-        /// reads 0 for an arm that DID park, because <c>PumpBuilds</c> empties a settled queue on its first
-        /// call, and the disposal count reads 1 for the same reason — the drain releases. A forced park on
-        /// the settled path would therefore enqueue, drain, commit, and leave every one of those guards
-        /// green. The park decision itself is the only reading taken BEFORE anything can undo it.</para>
-        ///
-        /// <para>Reflection, not a production seam: the decision is a private field of a private nested
-        /// class and exposing it would be a member with no production caller (the test-code-bloat rule).
-        /// Reflection into this assembly's internals is already the house instrument — eight-plus fixtures
-        /// here do it, including <c>Jobs/DecodedTileOwnershipTests</c>.</para></summary>
+        /// <summary>The pass's OWN park decision, read off the object <c>TryBeginBuild</c> returned, before
+        /// a frame is pumped. Non-obvious why: every count reads the same for a build that parked and then
+        /// drained (<c>PendingSpriteCount</c> 0, disposal count 1), so only this reading precedes any undo.
+        /// It uses reflection because the field is private to a private nested class, and exposing it
+        /// would add a member with no production caller.</summary>
         private static bool WasParked(ISymbolTileWorkerPass pass)
         {
             FieldInfo field = pass.GetType().GetField("_parked", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -313,9 +253,8 @@ namespace MapRenderer.Tests.Text
             _parkedSubsystem = NewSubsystem(_ => gate.Task);
             DriveKick(_parkedSubsystem, Tile0, _tileBytes, parkedProbe, kickTile, parkedDecision);
 
-            // Vacuity guard 0 — read at TryBeginBuild completion, before a frame is pumped and before
-            // anything downstream can undo it. This is the arm's DEFINING property and the mirror of the
-            // oracle arm's guard below; the count-shaped guards that follow all sample after the fact.
+            // Vacuity guard 0 — read before a frame is pumped, so nothing downstream can undo it. It mirrors
+            // the oracle arm's guard below; the count-shaped guards that follow all sample after the fact.
             Assert.IsTrue(parkedDecision[0],
                 "PRECONDITION: this arm's build must have PARKED at TryBeginBuild — its sprite fetch is held " +
                 "open, so SpritesSettled is false and the settled branch must not have been taken. If this " +
@@ -335,11 +274,8 @@ namespace MapRenderer.Tests.Text
                 "fetch settled before the kick and this differential compares un-parked against un-parked.");
             Assert.IsNull(Collect(_parkedSubsystem), "…and a parked build must commit nothing while gated");
 
-            // Vacuity guard 2, INVERTED — the kick's tile is STILL ALIVE while the build sits parked. This
-            // is the fact that makes the drain's read a share rather than a use-after-free, and it is the
-            // exact statement the old form denied: it asserted 1 here, because the kick's scope had closed
-            // and freed the tile. A 1 now means the park did NOT acquire a reference and the drain is about
-            // to read freed memory.
+            // Vacuity guard 2 — the kick's tile is STILL ALIVE while parked, so the drain's read is a share, not
+            // a use-after-free. A disposal here means the park did not acquire a reference.
             Assert.AreEqual(1, parkedProbe.DecodeCount, "the kick decoded once (at the fetch, before the lease existed)");
             Assert.AreEqual(0, parkedProbe.DisposedCount,
                 "the PARKED REFERENCE is what keeps the kick's tile alive across the whole " +
@@ -368,26 +304,15 @@ namespace MapRenderer.Tests.Text
                 "that second decode is what the reference count deletes. A 2 here means the park is no longer " +
                 "holding its reference across the sprite-settle window; do not 'restore' this to 2.");
 
-            // Strictly stronger than the count, and the statement no count can make: the drain read the SAME
-            // IDecodedTile INSTANCE the kick read. A layer is read only inside a worker pass — DriveKick's
-            // mesh read touches `Tile` and never `GetLayer` — so a layer read recorded against decode 0 can
-            // only be the parked drain's extract, running over the kick's own tile.
+            // The drain read the kick's own tile: only a worker pass reads a layer (DriveKick's mesh read never
+            // calls GetLayer), so a layer read against decode 0 is the parked drain's extract.
             Assert.Greater(parkedProbe.LayerReadThreadIds.Count, 0,
                 "the parked drain's extract must have read the layers OF THE KICK'S TILE (decode 0 is the " +
                 "only decode there is). Zero layer reads would mean the extract never ran, and the label " +
                 "assertions above would be measuring something else entirely.");
 
-            // The drain's WORKER PHASE stays off the main thread. PumpBuilds dispatches it through
-            // SymbolSubsystem.WorkScheduler (ThreadPoolWorkScheduler by default — this fixture never overrides
-            // it); turning that into a direct call would move the whole extract onto the main thread — a
-            // frame-time regression the sibling parity tooth cannot see, because it pins the TAIL on main and
-            // says nothing about the phase before it.
-            //
-            // THE INSTRUMENT IS THE EXTRACT, not decode index 1: under the reference count there is no
-            // decode 1 — the drain's would-be re-decode. The reading is the EXTRACT's thread, taken
-            // from the layer reads recorded above: every one of them happens inside a worker pass, and the
-            // only worker pass that runs for this arm is the parked drain's (DriveKick's mesh read touches
-            // `Tile` and never a layer). Same property, new reading, its own falsifier.
+            // The drain's worker phase stays off the main thread. The layer reads above are its only thread
+            // record; the sibling parity tooth pins only the TAIL on main and cannot see an extract moved there.
             Assert.AreEqual(mainThreadId, Thread.CurrentThread.ManagedThreadId,
                 "precondition: the assertion below compares against the thread this test body runs on, so " +
                 "that thread must still BE the main thread here — otherwise the comparison is against a " +
@@ -409,12 +334,8 @@ namespace MapRenderer.Tests.Text
             for (int f = 0; f < 10; f++) { _oracleSubsystem.PumpBuilds(); yield return null; } // let the fetch land
             DriveKick(_oracleSubsystem, Tile0, _tileBytes, oracleProbe, null, oracleDecision);
 
-            // THE MIRROR GUARD, taken at the only moment that can distinguish "never parked" from "parked
-            // and drained". Sampled here — at TryBeginBuild completion, before PumpBuilds runs — a forced
-            // park on the settled path fails immediately. Sampled after the pump, as the count-shaped
-            // guards below are, that same forced park would enqueue, drain on the very next PumpBuilds,
-            // commit, and leave DecodeCount == 1, PendingSpriteCount == 0 and DisposedCount == 1: all three
-            // green, all three blind. Keep this assertion FIRST and keep it here.
+            // THE MIRROR GUARD: only before PumpBuilds runs does "never parked" differ from "parked and drained".
+            // After the pump every count reads the same for both. Keep this assertion FIRST and keep it here.
             Assert.IsFalse(oracleDecision[0],
                 "PRECONDITION: the oracle arm's sprite fetch was already settled at kick time, so " +
                 "TryBeginBuild must have taken the SETTLED branch and parked NOTHING. A true here means both " +
@@ -424,20 +345,8 @@ namespace MapRenderer.Tests.Text
 
             SymbolTileBlock unparked = Collect(_oracleSubsystem);
 
-            // Vacuity guard 3: `oracleProbe.DecodeCount == 1` cannot discriminate on its own — under the
-            // reference count BOTH arms decode once, so that alone would sit here green and vacuous forever.
-            // The differential instead is the LIFETIME, which still differs sharply between the arms:
-            //
-            //   parked arm  — DisposedCount 0 immediately after its kick settles (asserted above): the park's
-            //                 reference is holding the tile open.
-            //   oracle arm  — DisposedCount 1 at the same point: nothing parked, so the kick's finally was
-            //                 the last release and the tile is gone.
-            //
-            // Plus the direct statement that this arm never parked at all. PendingSpriteCount cannot serve
-            // alone here in either position: after the pump it reads 0 even for an arm that DID park, because
-            // PumpBuilds drains a settled queue on its first call (review arm 1's NIT 2); before the pump it
-            // reads 0 for an arm that WOULD park, because the enqueue happens on the pool thread DriveKick
-            // only just dispatched. Paired with the dispose count, which no race can undo, it is decisive.
+            // Vacuity guard 3: both arms decode once, so the decode count cannot tell them apart. The tile's
+            // lifetime can: the parked arm reads DisposedCount 0 after its kick, the oracle arm reads 1.
             Assert.AreEqual(1, oracleProbe.DecodeCount,
                 "sanity: the oracle arm decoded once (both arms do now — this is no longer the differential)");
             Assert.AreEqual(0, _oracleSubsystem.PendingSpriteCount(),
@@ -465,11 +374,8 @@ namespace MapRenderer.Tests.Text
                 "sprite atlas can change, so a text-only differential would be green under a parked drain " +
                 "that lost the atlas entirely.");
 
-            // ── Lifetime, asserted LAST. Not stylistic ordering: the pool thread enqueues the handoff and
-            // only THEN releases its reference, so the main thread can complete the whole tail and reach an
-            // earlier-placed balance assertion in the microseconds before the tile is disposed — a false RED
-            // on a loaded machine (review arm 1's NIT 1). By here the pumping above has long since closed
-            // that window.
+            // ── Lifetime, asserted LAST: the pool thread enqueues the handoff BEFORE it releases, so an earlier
+            // balance check can run before the dispose and red falsely on a loaded machine.
             yield return null;
             Assert.AreEqual(0, parkedProbe.UnbalancedCount,
                 $"every decoded tile on the PARKED path must be disposed exactly once — " +
@@ -480,14 +386,8 @@ namespace MapRenderer.Tests.Text
                 "double free), and the count catches both.");
             Assert.AreEqual(0, oracleProbe.UnbalancedCount, "…and the un-parked arm leaks nothing either");
 
-            // A use-after-free inside the worker is swallowed by production into a Debug.LogWarning, so
-            // without this the failure would surface only as a bare "0 symbols" count mismatch. This makes it
-            // name itself.
-            //
-            // Watching for THAT message rather than calling LogAssert.NoUnexpectedReceived(): the blanket
-            // form fails on ambient engine noise unrelated to the code under test — it tripped on URP's
-            // "the output Render Texture must have a depth buffer" warning, emitted by the test camera during
-            // the frame pumps. A tooth that reds on the harness is worse than no tooth.
+            // Production turns a worker use-after-free into a Debug.LogWarning; this names it. Not the blanket
+            // LogAssert.NoUnexpectedReceived(): the test camera emits unrelated URP depth-buffer warnings.
             lock (_logGate)
                 CollectionAssert.IsEmpty(_buildFailureLogs,
                     "production swallows a failed symbol build into a warning and commits nothing, so a " +
@@ -498,18 +398,11 @@ namespace MapRenderer.Tests.Text
         // ── The parked queue's DISCARD mouth ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>Funnel 4 — a parked build thrown away by a restyle must release the reference it took.</b>
-        ///
-        /// <para>This is the leak the park's own acquire creates. A parked entry now holds a live decoded
-        /// tile across the whole <c>SetStyle</c>→<c>SpritesSettled</c> window — that is the point, and it is
-        /// what deletes the re-decode — but a restyle that arrives during that window drops the entry
-        /// without ever dispatching it. Dequeueing it is not enough: <c>DrainAndDiscardParkedBuilds</c> has
-        /// to dispose the entry's reference, or the tile's <c>Allocator.Persistent</c> buffers are freed by
-        /// nothing at all. The funnel is one method so this obligation has one home; split across two bare
-        /// <c>while (TryDequeue(out _)) { }</c> loops it was two places to forget it.</para>
-        ///
-        /// <para><b>RED injection:</b> delete <c>dropped.Decode.Release()</c> from
-        /// <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>.</para>
+        /// <b>A parked build thrown away by a restyle must release the reference it took.</b> A parked entry
+        /// holds a live decoded tile across the <c>SetStyle</c>→<c>SpritesSettled</c> window, and a restyle
+        /// drops it without a dispatch. <c>DrainAndDiscardParkedBuilds</c> must release the entry's reference,
+        /// or nothing frees the tile's <c>Allocator.Persistent</c> buffers.
+        /// <para><b>RED injection:</b> delete <c>dropped.Decode.Release()</c> from that method.</para>
         /// </summary>
         [UnityTest]
         public IEnumerator AParkedBuildDroppedByARestyle_ReleasesItsDecodeReference()
@@ -558,16 +451,7 @@ namespace MapRenderer.Tests.Text
         }
 
         // ── The parked reference's PRE-CONSUMER exits ─────────────────────────────────────────────────
-        //
-        // Three ways a parked entry's reference can stop being reachable by the mouth that was supposed to
-        // consume it. The FIRST of these is retired — a post-drain restyle race modelled by a same-thread
-        // interposing handle (`AcquireInterposingHandle`, since deleted) — because the atomic park
-        // (`TryParkBuild`, gated by `_parkGate`) makes that exact interleaving IMPOSSIBLE: the ct-check and
-        // the Acquire() now run behind the SAME lock the abandon-drain takes, so a canceller's cancel-then-
-        // drain can never land between them. Its successor is the gate-exclusion rendezvous tooth just
-        // below — it proves the STRONGER property (the window is closed, not merely "closed and released in
-        // time"). The remaining two are unchanged: the cancellation the drain's ct-drop was written for, and
-        // any throw between the dequeue and the worker starting.
+        // The tests below drive three exits: a gate-blocked park, a drainless cancel, a dequeue-to-worker throw.
 
         /// <summary>Parks exactly one build on the CALLING thread and hands back the lease whose creator
         /// reference the caller still owns — the deterministic stand-in for <c>DriveKick</c>'s pool task,
@@ -603,16 +487,10 @@ namespace MapRenderer.Tests.Text
             return field.GetValue(subsystem);
         }
 
-        /// <summary>Reflects the refcount field (named <c>_refs</c> on both <c>DecodedTileLease</c> —
-        /// and its successor <c>SharedDisposable&lt;T&gt;</c>) directly off <paramref name="handle"/>'s
-        /// own runtime type, so this reading survives the type swap untouched: 1 means only the creator's
-        /// reference is live (nothing has Acquired), 2 means exactly one more has (Acquire() ran).
-        ///
-        /// <para>Substitutes for a <c>probe.AcquireCount</c>: a decoder-level probe cannot
-        /// see <c>Acquire()</c> at all (it runs on the wrapping HANDLE, never on the <see cref="IDecodedTile"/>
-        /// the decoder produces), and a handle-wrapping test double (the retired <c>AcquireInterposingHandle</c>
-        /// shape) cannot survive the move — <c>SharedDisposable&lt;T&gt;</c> is a sealed concrete class with no
-        /// interface left to implement. Reading the refcount directly needs neither.</para></summary>
+        /// <summary>Reflects the <c>_refs</c> refcount off <paramref name="handle"/>'s runtime type: 1 means
+        /// only the creator's reference is live, 2 means one <c>Acquire()</c> ran. Non-obvious why: a decoder
+        /// probe cannot see <c>Acquire()</c>, which runs on the handle, and <c>SharedDisposable&lt;T&gt;</c> is
+        /// a sealed class that no test double can wrap.</summary>
         private static int RefsOf(object handle)
         {
             FieldInfo field = handle.GetType().GetField("_refs", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -624,32 +502,18 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// <b>The gate-exclusion tooth, successor to
-        /// the retired <c>AParkEnqueuedAfterItsCancellersDrain_ReleasesItsReference</c>.</b>
-        ///
-        /// <para>That tooth modelled a race — a same-thread interposing handle running a reentrant restyle
-        /// between the park's <c>Acquire()</c> and its <c>Enqueue</c> — that the atomic park
-        /// (<c>TryParkBuild</c>, gated by <c>_parkGate</c>) now makes IMPOSSIBLE: both the ct-check and the
-        /// <c>Acquire()</c> run behind the SAME lock <c>DrainAndDiscardParkedBuilds</c> takes, so there is no
-        /// window left between them for a canceller to land in. Modelling an impossible race would prove
-        /// nothing; this tooth proves the stronger replacement property directly — that the park genuinely
-        /// cannot acquire a reference while the gate is held elsewhere.</para>
-        ///
-        /// <para><b>The rendezvous, and why it is deterministic rather than a timing race.</b> The main
-        /// thread takes <c>_parkGate</c> BEFORE starting the background park, so the background thread
-        /// cannot get past its <c>lock (_parkGate)</c> statement until the main thread releases it — there is
-        /// no interleaving in which it could. Polling <see cref="Thread.ThreadState"/> for a SUSTAINED
-        /// <c>WaitSleepJoin</c> only waits for the OS to schedule the background thread far enough to reach
-        /// that statement; it does not race it. Once observed blocked, reading the refcount is safe under
-        /// EITHER the correct code (the background thread cannot have executed <c>Acquire()</c> — it is
-        /// behind the very lock it is blocked on) or the injected defect (injection A moves <c>Acquire()</c>
-        /// OUTSIDE the gate, so by the time the thread blocks — now only for the Enqueue — the acquire has
-        /// ALREADY run). Either way the read is stable at the moment it is taken; nothing races it.</para>
-        ///
-        /// <para><b>RED injection (verified — see the dev report):</b> move <c>Acquire()</c> (and the
-        /// <c>ct</c> check) OUTSIDE <c>lock (_parkGate)</c> in <c>TryParkBuild</c> → <c>RefsOf(lease)</c>
-        /// reads 2 while the main thread holds the gate, where this tooth asserts 1 → RED.</para>
+        /// <b>The park cannot acquire a reference while <c>_parkGate</c> is held elsewhere.</b>
+        /// <c>TryParkBuild</c> runs its ct-check and <c>Acquire()</c> behind the same lock
+        /// <c>DrainAndDiscardParkedBuilds</c> takes, so no canceller can land between them.
+        /// <para><b>RED injection:</b> move <c>Acquire()</c> and the ct-check outside the lock →
+        /// <c>RefsOf(lease)</c> reads 2 while the main thread holds the gate.</para>
         /// </summary>
+        /// <remarks>
+        /// Non-obvious why: the rendezvous is deterministic, as the main thread takes the gate BEFORE it starts the
+        /// background park, so polling for a sustained <c>WaitSleepJoin</c> only waits for the OS to schedule
+        /// that thread. Once it blocks, the refcount is stable: behind the lock with the correct code, or
+        /// already acquired with the injected defect.
+        /// </remarks>
         [Test]
         public void AParkBlockedByTheAbandonDrainGate_AcquiresNothingUntilItHoldsTheGate()
         {
@@ -670,14 +534,8 @@ namespace MapRenderer.Tests.Text
                 bg = new Thread(() => pass.RunWorkerAndHandoff(lease)) { IsBackground = true };
                 bg.Start();
 
-                // THE RENDEZVOUS (see the summary above for why this is deterministic, not a timing race).
-                // KEPT out of the zero-busy-wait conversion (design doc "Open findings"): this
-                // is not a UniTask completion wait, so there is no kernel event to park WaitOffPlayerLoop on.
-                // It polls raw Thread.ThreadState — a transition this process cannot subscribe to — and the
-                // Sleep(2) dwell is load-bearing: it confirms the blocked state is SUSTAINED, not transient,
-                // which is the precondition the trailing Assert.IsTrue(blocked, ...) needs to be non-vacuous.
-                // A signal-before-lock handshake would only prove "about to block", weakening that
-                // precondition — the exact disarmed-tooth failure mode this stage exists to avoid.
+                // THE RENDEZVOUS: a poll, because a ThreadState change has no event to wait on. The Sleep(2) dwell
+                // confirms the block is SUSTAINED; a signal-before-lock handshake proves only "about to block".
                 bool blocked = false;
                 for (int i = 0; i < 2000 && !blocked; i++)
                 {
@@ -723,18 +581,10 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// <b>The stress balance test — many concurrent park / cancel / drain
-        /// cycles over <see cref="LeaseProbeDecoder"/>, asserting <c>UnbalancedCount == 0</c> under every
-        /// interleaving.</b>
-        ///
-        /// <para>Designed so it can go RED only on a REAL imbalance — a missed release (leak) or a double
-        /// release (double-free) — never on timing: it makes no assertion about queue depth or ordering
-        /// MID-flight, only the TERMINAL balance once every dispatched pool worker has finished and a final
-        /// sweep has discarded whatever is left. Every build parks (the sprite fetch never settles for the
-        /// whole test), so every reference this drives ends up either (a) refused by the gate — nothing ever
-        /// acquired — (b) acquired and later discarded by one of the interleaved restyles'
-        /// <c>DrainAndDiscardParkedBuilds</c> calls, or (c) acquired and left for the FINAL sweep's drain to
-        /// discard — never a fourth, unaccounted-for state.</para>
+        /// <b>Many concurrent park / cancel / drain cycles leave <c>UnbalancedCount == 0</c>.</b> It asserts
+        /// only the TERMINAL balance, after every worker finished and a final sweep ran, so only a real leak or
+        /// double release can red it, not timing. Every build parks, so each reference is refused by the gate,
+        /// discarded by an interleaved restyle, or discarded by the final sweep.
         /// </summary>
         [Test]
         public void ParkCancelDrainStress_NeverImbalancesUnderAnyInterleaving()
@@ -754,18 +604,16 @@ namespace MapRenderer.Tests.Text
                 var lease = new SharedDisposable<IDecodedTile>(probe.Decode(Tile0, _tileBytes));
                 var worker = new Thread(() =>
                 {
-                    // Mirrors DriveKick / production's kick lambda: the pool thread's own reference is
-                    // released in a finally, exactly as KickMeshBuild's would be — independent of whatever
-                    // the park does with its OWN (separate) reference.
+                    // Like the production kick lambda, the worker releases its own reference in a finally,
+                    // whatever the park does with its separate one.
                     try { pass.RunWorkerAndHandoff(lease); }
                     finally { lease.Release(); }
                 }) { IsBackground = true };
                 workers.Add(worker);
                 worker.Start();
 
-                // Periodically race a cancel+drain against the in-flight pool workers — the real
-                // interleaving TryParkBuild's gate exists to make safe: SetStyle always cancels _buildCts
-                // strictly before it drains _pendingSpriteQueue, exactly like every production canceller.
+                // Race a restyle against the in-flight workers: SetStyle cancels _buildCts, then drains the
+                // parked queue — the interleaving TryParkBuild's gate makes safe.
                 if ((i & 3) == 0)
                 {
                     StyleDocument restyled = StyleParser.Parse(StyleJson);
@@ -793,15 +641,9 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// <b>The drain's ct-drop mouth, driven at runtime.</b>
-        ///
-        /// <para>This was pinned STRUCTURALLY on the claim that no test could reach it, because every
-        /// production canceller drains in the same call it cancels in. The claim is false: the cancellation
-        /// source is a private field, and reflecting it to cancel WITHOUT draining is exactly the state a
-        /// pool-vs-main race produces — reflection into this assembly is the house instrument, not a
-        /// production seam. A count of <c>Dispose()</c> spellings could never see whether this mouth
-        /// actually releases; this does.</para>
-        ///
+        /// <b>The drain's ct-drop mouth releases the entry it drops.</b> Every production canceller drains in
+        /// the same call, so the test reflects the private cancellation source and cancels WITHOUT a drain —
+        /// the state a pool-vs-main race produces.
         /// <para><b>RED injection:</b> delete <c>pending.Decode.Release()</c> from <c>PumpBuilds</c>'
         /// <c>if (pending.Ct.IsCancellationRequested)</c> arm.</para>
         /// </summary>
@@ -839,20 +681,9 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// <b>The dequeue → worker-start window: a fault after the entry has left the queue and before the
-        /// delegate that owns its release exists.</b>
-        ///
-        /// <para><c>TryDequeue</c> takes the queue's reference away, and for a dispatched entry the ONLY
-        /// release lives inside a lambda that has not started. Everything in between — building one
-        /// processor per layer index, the dispatch itself — runs unguarded, so any throw there leaves the
-        /// reference with no owner at all. The drive faults the processor construction by mutating the very
-        /// <c>List&lt;int&gt;</c> instance the parked entry carries, which is reachable through the
-        /// subsystem's private source→layers map.</para>
-        ///
-        /// <para>The tooth lets the exception PROPAGATE (production does; swallowing it here
-        /// would be a behaviour change, not a fix) and asserts only that the reference was released on the
-        /// way out.</para>
-        ///
+        /// <b>A fault after the dequeue and before the worker exists still releases the reference.</b> The
+        /// only other release lives in a lambda that has not started. The drive mutates the layer-index list
+        /// the parked entry carries, so processor construction throws; the exception propagates, as in production.
         /// <para><b>RED injection:</b> delete the <c>try/finally</c> ownership guard around the parked
         /// drain's processor construction and dispatch in <c>PumpBuilds</c>.</para>
         /// </summary>

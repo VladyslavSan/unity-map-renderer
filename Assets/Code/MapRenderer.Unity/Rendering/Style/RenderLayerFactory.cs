@@ -10,27 +10,23 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Maps a parsed <see cref="StyleLayer"/> subtype to its runtime <see cref="IRenderLayer"/> — the ONE
-    /// registry the render pipeline consults: adding a layer type is one new <see cref="IRenderLayer"/> class
-    /// plus one arm here, with no edit to the layer set, the backends or the tile consume loop. It supports
-    /// <c>background</c>, <c>fill</c>, <c>line</c>, <c>fill-extrusion</c>, and <c>symbol</c> with a <c>source</c>.
-    /// A layer it does not create takes no slot; <see cref="Create"/>'s <c>reason</c> says why
-    /// (<see cref="LayerSkipReason"/>).
+    /// registry the render pipeline consults: a new layer type is one <see cref="IRenderLayer"/> class plus one
+    /// arm here. It supports <c>background</c>, <c>fill</c>, <c>line</c>, <c>fill-extrusion</c>, and
+    /// <c>symbol</c> with a <c>source</c>. A layer it does not create takes no slot, and
+    /// <see cref="Create"/>'s <see cref="LayerSkipReason"/> says why.
     /// </summary>
     internal static class RenderLayerFactory
     {
         /// <summary>Creates the render layer for <paramref name="layer"/> at global slot
-        /// <paramref name="drawIndex"/>, or <c>null</c> with <paramref name="reason"/> set to why (left at
-        /// <see cref="LayerSkipReason.None"/> when a real layer comes back) — see the class doc for which
-        /// kinds are supported. <paramref name="reason"/> is what lets
-        /// <see cref="RenderLayerSet.Build"/> collect a style-load compatibility summary instead of silently
-        /// dropping the layer.</summary>
+        /// <paramref name="drawIndex"/>, or <c>null</c> with <paramref name="reason"/> set to why
+        /// (<see cref="LayerSkipReason.None"/> for a real layer). <see cref="RenderLayerSet.Build"/> collects
+        /// the reasons into a style-load compatibility summary.</summary>
         public static IRenderLayer Create(
             StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex,
             out LayerSkipReason reason, Transform parent = null)
         {
-            // Before the kind switch: `visibility: none` takes no slot for THIS style load. Non-local
-            // invariant: a restyle can still flip it back on in place — SurvivingLayerGate strips
-            // layout.visibility from its comparison, so a surviving layer is never rebuilt for this alone.
+            // `visibility: none` takes no slot for THIS style load. A restyle can still flip it on in place:
+            // SurvivingLayerGate ignores layout.visibility, so it never rebuilds a layer for that alone.
             if (layer is { Visible: false })
             {
                 reason = LayerSkipReason.Hidden;
@@ -49,9 +45,8 @@ namespace MapRenderer.Unity.Rendering.Style
             {
                 Fill.StyleLayer f                          => WithMaterialReason(FillRenderLayer.TryCreate(f, settings, initialZoom, drawIndex)),
                 Line.StyleLayer l                           => WithMaterialReason(LineRenderLayer.TryCreate(l, settings, initialZoom, drawIndex)),
-                // The Source != null guard mirrors SymbolSubsystem.SetStyle's skip, keeping the 1:1
-                // slot↔subsystem-ordinal mapping the subsystem relies on (Create never returns null, unlike
-                // TryCreate). Only the GameObject-bearing symbol presenter receives the Hierarchy parent.
+                // Source != null mirrors SymbolSubsystem.SetStyle's skip, which keeps the 1:1 slot↔subsystem
+                // ordinal mapping. Only it takes `parent`, which SymbolRenderLayer does not use at present.
                 Symbol.StyleLayer s when s.Source != null   => (SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex, parent), LayerSkipReason.None),
                 // A source-less symbol layer has nothing to place — by design, not a compatibility gap.
                 Symbol.StyleLayer                           => ((IRenderLayer)null, LayerSkipReason.GenuinelyUnpainted),
@@ -92,13 +87,11 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// The ONE registry of "which style layers fetch MVT tiles" —
-        /// <see cref="Map.MapView.BuildSourceSpecs"/> derives its source-ids from this predicate instead of
-        /// re-walking <c>style.Layers</c>. True iff <paramref name="layer"/> is an MVT-fetching kind (fill,
-        /// line, symbol, fill-extrusion), is not hidden, is not authored fully-transparent, AND declares a
-        /// non-empty <c>source</c> — a source read by nothing that draws must not be fetched or decoded, and
-        /// excluding raster/circle/hillshade/unknown kinds keeps non-MVT bytes out of the MVT decode. A pure
-        /// predicate: never touches the active <see cref="RenderLayerSet"/> or any material state.
+        /// The ONE registry of "which style layers fetch MVT tiles"; <see cref="Map.MapView.BuildSourceSpecs"/>
+        /// derives its source-ids from it. True iff <paramref name="layer"/> is fill, line, symbol or
+        /// fill-extrusion, is visible, is not authored fully-transparent, AND declares a non-empty
+        /// <c>source</c>. So nothing fetches a source no drawing layer reads, and non-MVT bytes stay out of
+        /// the MVT decode. A pure predicate with no material or layer-set state.
         /// </summary>
         internal static bool TryGetFetchSource(StyleLayer layer, out string sourceId)
         {
@@ -132,12 +125,10 @@ namespace MapRenderer.Unity.Rendering.Style
         UnsupportedKind,
 
         /// <summary>The layer's kind IS supported, but its base material is unconfigured on the active
-        /// <see cref="Materials.MapMaterialSet"/> — a configuration error, not a missing feature. On the
-        /// <c>MapView.SetStyle</c> path this is reachable only through <c>FillExtrusionMaterial</c>, since
-        /// <c>MapMaterialSet.Validate</c> already throws for an unassigned Fill/Line base; it fires for
-        /// those two only when <see cref="RenderLayerFactory.Create"/> is called directly (e.g. a test)
-        /// against a set that skipped <c>Validate</c>. Never fires for symbol: <see cref="SymbolRenderLayer.Create"/>
-        /// never returns <c>null</c>.</summary>
+        /// <see cref="Materials.MapMaterialSet"/> — a configuration error, not a missing feature. Through
+        /// <c>MapView.SetStyle</c> only <c>FillExtrusionMaterial</c> reaches it, because
+        /// <c>MapMaterialSet.Validate</c> throws for an unassigned Fill/Line base. Never for symbol:
+        /// <see cref="SymbolRenderLayer.Create"/> never returns <c>null</c>.</summary>
         MaterialUnconfigured,
 
         /// <summary>The layer is a supported kind that has nothing to paint by design (a <c>symbol</c>

@@ -6,19 +6,10 @@ using MapRenderer.Core.Geometry;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// The line graph's ribbon aggregate node: walks rings IN RING ORDER, appending each ring's REAL (not
-    /// oversized-capacity) vertex and index span from <see cref="RibbonBuffers"/>' flat columns into the
-    /// graph's output lists, applying the 2nd/3rd winding swap and the running <c>offset</c> rebase.
-    /// <see cref="RibbonBatchJob"/> writes RAW, ring-local, unswapped bytes; this node is where they become
-    /// the graph's globally-offset, winding-correct output.
-    ///
-    /// <para><b>The overflow rule lives here, not in the parallel node.</b> The
-    /// <c>MaxOutputVertices</c> check breaks out of the ring loop, which is an order-dependent early stop.
-    /// Parallel rings all compute regardless; this serial node applies the test in ring order and stops at
-    /// the same ring every run, which is what keeps the output bit-exact.</para>
-    ///
-    /// <para>No unconditional <see cref="LineGraphCounts.Ok"/> reset — see <see cref="Execute"/>'s own
-    /// comment for why.</para>
+    /// The line graph's ribbon aggregate node: in ring order, appends each ring's real vertex and index span
+    /// from <see cref="RibbonBuffers"/> to the output lists, with the 2nd/3rd winding swap and the offset
+    /// rebase. Non-obvious why: the <c>MaxOutputVertices</c> stop lives here, not in the parallel node,
+    /// because only a serial walk stops at the same ring every run, which keeps the output bit-exact.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct RibbonAggregateJob : IJob
@@ -38,9 +29,8 @@ namespace MapRenderer.Jobs.Lines
             OutVertices.Clear();
             OutVertexFeatureIdx.Clear();
             OutIndices.Clear();
-            // No unconditional Error.Value = Ok reset here: AllocateError already hands out a
-            // zero-initialised reference, RibbonSizingJob shares that SAME reference, and this node runs
-            // after it — a reset would discard a sizing-stage error.
+            // No Error reset: it starts zeroed and RibbonSizingJob, which runs first, shares it, so a reset
+            // would discard a sizing error.
 
             NativeList<int> ringVertexOffsets = Buffers.RingVertexOffsets;
             NativeList<int> ringIndexOffsets  = Buffers.RingIndexOffsets;
@@ -49,9 +39,8 @@ namespace MapRenderer.Jobs.Lines
             NativeList<int> perRingVertexCount = Buffers.PerRingVertexCount;
             NativeList<int> perRingIndexCount  = Buffers.PerRingIndexCount;
 
-            // Bound by PerRingVertexCount's OWN length, never RingSubOffsets.Length - 1 — a borrowed input
-            // that RibbonSizingJob's early return leaves stale while both per-ring columns are length 0. The
-            // indexer bounds check is [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")], gone in a player.
+            // Bound by PerRingVertexCount's own length, never the borrowed RingSubOffsets, which a sizing
+            // early return leaves stale; a player build has no indexer bounds check to catch that.
             int ringCount = perRingVertexCount.Length;
 
             for (int r = 0; r < ringCount; r++)

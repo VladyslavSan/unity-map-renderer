@@ -1,12 +1,5 @@
-// Style/StyleTransitionTests.cs — the transition inside the binding for
-// all-survivors, ZoomStyleApplier's integration contract, symbol layers surviving the restyle gate, the
-// fade gate as driven by a real MapViewComponent, and MapView.SetStyle's full-rebuild commit atomicity.
-// Unity EditMode only — real Materials via MaterialFactory/MapMaterialSet, real RenderLayerSet; not in
-// core-tests.csproj.
-//
-// StyleRestyleTests.cs/StyleShieldTests.cs (Core-expressions-side, bare `Color` = Core.Expressions')
-// stay separate: this file's bare `Color`/`Object` mean UnityEngine's (CS0104 otherwise) — see
-// docs/conventions-short.md's "Plain-import collisions" note.
+// Style/StyleTransitionTests.cs — Unity EditMode only (real Materials, real RenderLayerSet; not in core-tests).
+// Bare `Color`/`Object` here are UnityEngine's, so Core-expressions-side Style files stay separate (CS0104).
 //
 // Contents:
 //   StyleTransitionBindingTests  — the transition inside the binding, all-survivors path.
@@ -65,9 +58,8 @@ namespace MapRenderer.Tests.Style
 
         private static RenderLayerSet BuildFillSet(StyleDocument style, double initialZoom = 0.0)
         {
-            // NOT `using` — this factory returns the set to the caller, who owns disposal. A `using`
-            // here disposes it before the caller ever touches it (a `using`-on-an-escaping-return bug,
-            // not the "dies with the method" shape `using` is for).
+            // NOT `using`: this factory returns the set, and the caller owns disposal. A `using` here
+            // would dispose it before the caller touches it.
             var set = new RenderLayerSet();
             set.Build(style, initialZoom, MapMaterialSetTestUtil.Load());
             return set;
@@ -130,10 +122,8 @@ namespace MapRenderer.Tests.Style
             const double duration = 1.0;
             set.TryRestyleInPlace(oldStyle, newStyle, new StyleTransition { DurationSeconds = duration }, 0.0);
 
-            // Oracles, not a raw (float) cast: Material.SetColor/GetColor round-trips through a gamma
-            // conversion this project does not otherwise invert in C#, so a raw cast can differ from the
-            // material read-back by ~1 ULP — noise from the INSTRUMENT, not from ApplyZoom. A fresh build
-            // of the SAME style goes through the identical round-trip, so it cancels exactly.
+            // Oracles, not a raw cast: SetColor/GetColor round-trips through a gamma conversion (~1 ULP of
+            // instrument noise). A fresh build of the SAME style takes the identical round-trip.
             Color oracleA = BuildFillSet(oldStyle)[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
             Color oracleB = BuildFillSet(newStyle)[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
 
@@ -299,9 +289,8 @@ namespace MapRenderer.Tests.Style
             var oldStyle = FillStyle($@"""fill-color"": {Rgba(ColorA)}");
             var newStyle = FillStyle($@"""fill-color"": {Rgba(ColorB)}");
 
-            // Oracle: a FRESH build straight onto newStyle never transitions (tooth 10's own guarantee) —
-            // this is what "the same frame, as today's path" means, and it can't go stale the way a
-            // captured-at-a-past-commit snapshot would.
+            // Oracle: a FRESH build straight onto newStyle does not transition, and unlike a captured
+            // snapshot it cannot go stale.
             using var oracleSet = BuildFillSet(newStyle);
             Color oracle = oracleSet[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
 
@@ -315,10 +304,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── 13-15. Alloc-free at every phase — the loop the 5 per-commit teeth cannot see ────
-        // MinimalStyle() (the 5 existing per-commit teeth) has one Constant fill-color and arms no
-        // transition, so those teeth measure a loop that iterates zero entries (proved by
-        // putting a live `new float[4]` in it: all five stayed green). These three measure the SAME
-        // ZoomStyleApplier.ApplyZoom with >=3 colour + >=2 float + >=1 device-px binding actually easing.
+        // MinimalStyle() arms no transition; these run ApplyZoom with >=3 colour, >=2 float, >=1 device-px easing.
 
         private static ZoomStyleApplier MixedApplier(out Material mat, bool retarget, double now,
             double duration = 1.0)
@@ -381,18 +367,13 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── 18 / 20. Symbol paint / source changes still take the rebuild path ───────────────
-        // (mesh-affecting and data-driven cases are in RestyleSurvivorGateTests.cs; these two need a
-        // second Build call — the actual "today's path" MapView takes on refusal — to observe
-        // the material reference actually moving.)
+        // These two need a second Build call, the path MapView takes on refusal, to see the material move.
 
         /// <summary>
-        /// <c>text-opacity</c> is the symbol paint key that still refuses a symbol paint change (the general
-        /// case is the rebuild path). Constant <c>text-color</c> takes the in-place path instead (see
-        /// <see cref="SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives"/> below) and so cannot carry
-        /// this guard. <c>text-opacity</c> ALWAYS bakes into the vertex stream (<c>SymbolPaint.Opacity</c>),
-        /// so it is NOT a gate key — the Fork-A hazard class, approached from the refusing side. RED-verify:
-        /// add <c>text-opacity</c> to <c>SurvivingLayerGate.TransitionablePaintKeys</c> — the gate then
-        /// wrongly accepts.
+        /// A <c>text-opacity</c> change refuses and rebuilds: it bakes into the vertex stream
+        /// (<c>SymbolPaint.Opacity</c>), so it is NOT a gate key. Constant <c>text-color</c> takes the
+        /// in-place path instead (<see cref="SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives"/>).
+        /// Adding <c>text-opacity</c> to <c>SurvivingLayerGate.TransitionablePaintKeys</c> reds this.
         /// </summary>
         [Test]
         public void SymbolPaintChange_TakesTheRebuildPath()
@@ -418,12 +399,9 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// A Constant symbol <c>text-color</c> change takes the IN-PLACE path, because the key IS in
-        /// <c>TransitionablePaintKeys</c>. It carries a clause nothing else in the suite observes: the material
-        /// reference must not move, which is what <c>MapView</c>'s skip of <c>Layers.Build</c> depends on.
-        /// RED (clause 1): revert <c>SurvivingLayerGate</c>'s two new symbol keys — <c>TryRestyleInPlace</c>
-        /// then refuses and the <c>IsTrue</c> fires. Clause 2 has no separate injection:
-        /// <see cref="SymbolRenderLayer.WorldTextMaterial"/> has no setter, so no production code path can
-        /// reassign it — this assertion pins that structural guarantee, not an injectable regression.
+        /// <c>TransitionablePaintKeys</c>. Only this tooth sees that the material reference does not move,
+        /// which <c>MapView</c>'s skip of <c>Layers.Build</c> depends on. Limitation: that clause has no RED
+        /// injection, because <see cref="SymbolRenderLayer.WorldTextMaterial"/> has no setter.
         /// </summary>
         [Test]
         public void SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives()
@@ -476,12 +454,8 @@ namespace MapRenderer.Tests.Style
             using var set = BuildFillSet(oldStyle);
             Material before = set[0].Material;
 
-            // A source's tiles[] url lives on the ROOT, not inside a layer, so SurvivingLayerGate's own
-            // root-minus-layers comparison (edit 9) already refuses here — TileManager.SourcesUnchanged
-            // (edit 11/12) exists for the narrower case this document pair does NOT hit: a raw `sources`
-            // object that stays byte-identical while a url source RESOLVES differently (a TileJSON fetch),
-            // which needs a live TileManager to exercise and is out of scope for this fixture. Either
-            // conjunct refusing is the observable contract this tooth pins: a source change rebuilds.
+            // A source's tiles[] url lives on the ROOT, so the gate's root comparison refuses here: a source
+            // change rebuilds.
             Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
                 "a changed source url must refuse the gate.");
             set.Build(newStyle, 0.0, MapMaterialSetTestUtil.Load()); // today's path, as MapView takes it
@@ -519,17 +493,9 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="ZoomStyleApplier"/> integration tests.
-    ///
-    /// Acceptance criteria verified:
-    ///   1. No mesh rebuild: a line mesh reference is unchanged while the width uniform changes across zooms.
-    ///   2. Premultiplied-alpha color uniform matches spec values (via Core evaluator).
-    ///   3. Per-layer distinct Material instances and ordered queues.
-    ///   4. Allocation gate: <c>ApplyZoom</c> with SWEEPING zoom allocates zero GC bytes
-    ///      (Unity-side full path including Material.SetFloat/SetColor).
-    ///
-    /// Drives the live <see cref="RenderLayerSet"/> / <see cref="MaterialFactory"/> path — the
-    /// production "style → GPU layers" machinery.
+    /// <see cref="ZoomStyleApplier"/> over the live <see cref="RenderLayerSet"/> / <see cref="MaterialFactory"/>
+    /// path: no mesh rebuild across zooms, premultiplied-alpha colour uniforms, distinct per-layer Materials
+    /// with ordered queues, and zero GC bytes for <c>ApplyZoom</c> over a SWEEPING zoom.
     /// </summary>
     [TestFixture]
     public class ZoomStyleApplierTests : BaseTestFixture
@@ -562,10 +528,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ApplyZoom_LineWidth_MeshReferenceUnchanged_WhileWidthChanges()
         {
-            // The build-once / restyle-via-uniforms invariant: a line mesh is built ONCE and never
-            // rebuilt when zoom changes — only the material's width uniform is pushed. We bind a
-            // line material to an applier and assert the (separately-built) mesh reference held by a
-            // MeshFilter is unchanged across ApplyZoom calls while _Width tracks the zoom expression.
+            // Build-once / restyle-via-uniforms: across ApplyZoom calls the MeshFilter's mesh reference stays
+            // the same while _Width tracks the zoom expression.
             Material lineMat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
 
             var lineMesh = Track(SyntheticLineMesh.BuildFromPoints(
@@ -670,10 +634,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── 4. No per-frame GC allocation (SWEEPING zoom) ─────────────────────────
-        //
-        // The zoom is SWEPT across different values each iteration (not held constant) so the
-        // evaluator's full interpolation path is exercised on every call.  A constant zoom would
-        // let Unity/JIT detect invariant computation and hoist it, making the gate toothless.
+        // A SWEPT zoom runs the full interpolation path; a constant one could let the JIT hoist it.
 
         [Test]
         public void ApplyZoom_SweepingZoom_FloatBinding_AllocatesZeroGCMemory()
@@ -1009,13 +970,8 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// <c>StyleFrameInputs.Transition</c> drives the gate, and <c>MapView</c> passes its own
-        /// <c>StyleTransition</c> into it every frame. Without this tooth a hard-coded default inside
-        /// <c>RenderLayerSet</c> and a genuinely threaded value are indistinguishable — every other fade
-        /// tooth passes either way.
-        ///
-        /// <para>The asserted quantity is how many frames the gate needs to settle: at
-        /// <c>Instant</c> the ease has zero duration and lands on its target in the FIRST
-        /// <c>ApplyZoom</c>, which the 0.30 s default cannot do in one frame at any plausible clock.</para>
+        /// <c>StyleTransition</c> into it every frame; every other fade tooth passes with a hard-coded default.
+        /// At <c>Instant</c> the gate settles in the FIRST <c>ApplyZoom</c>, which the 0.30 s default cannot.
         /// </summary>
         [Test]
         public void GateTransition_IsThreadedFromMapView()
@@ -1049,13 +1005,9 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// End-to-end, through the real view and the real Entities backend: a layer settled out of its zoom
-        /// range submits NO draw item, and a layer mid-fade still submits one.
-        ///
-        /// <para>Exempt from the length limit for an ordering fact no single body shows: the draw gate is
-        /// pushed beside <c>RenderLayerSet.ApplyZoom</c>, so the two halves — the fade this reads and
-        /// the gate the backend applies — must agree within ONE frame. The clock is driven through
-        /// <c>NowSecondsOverride</c> rather than wall time, so the mid-fade frame is a chosen instant and
-        /// not a race.</para>
+        /// range submits NO draw item, and a layer mid-fade still submits one. Non-local invariant: the draw
+        /// gate is pushed beside <c>RenderLayerSet.ApplyZoom</c>, so the fade and the backend gate agree within
+        /// ONE frame. <c>NowSecondsOverride</c> drives the clock, so the mid-fade frame is not a race.
         /// </summary>
         [Test]
         public void GatedLayer_SubmitsNoDraw_WhileAFadingOneStillDoes()
@@ -1113,13 +1065,9 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// Crossing a layer's <c>minzoom</c> rebuilds no tile and destroys no mesh.
-        ///
-        /// <para><b>A DESIGN FENCE, not a tooth on new code.</b> Fade is a pure material uniform — it
-        /// touches no <c>PreparedKey</c> and no mesh — so no implementation following this stage's design
-        /// can fail it, and it has no single-site RED. It fails the day someone re-implements the gate the
-        /// rejected way, by filtering <c>TileManager.ComputeDenseLayerIds</c> on the zoom predicate. Never
-        /// read its green as evidence that the gate itself works.</para>
+        /// Crossing a layer's <c>minzoom</c> rebuilds no tile and destroys no mesh. Limitation: this is a
+        /// design fence with no single-site RED. It fails only if the gate filters
+        /// <c>TileManager.ComputeDenseLayerIds</c> on zoom; its green does not show that the gate works.
         /// </summary>
         [Test]
         public void ZoomCrossing_RebuildsNoTile()
@@ -1252,19 +1200,10 @@ namespace MapRenderer.Tests.Style
         // ── the old style stays fully live ────────────────────────────────────────────────────
 
         /// <summary>An abort at <c>IdentityCommitted</c> must leave the PREVIOUS style fully live —
-        /// its layers, its materials, its baked meshes and its cache token. This is the only site where
-        /// the old style's liveness can be asserted: every later phase runs at or after <c>Layers.Build</c>, which has
-        /// already destroyed the old materials.
-        /// <para>The slot-id clause compares against A's ids captured before the call, not against
-        /// <c>_style</c> — the field that just moved, which would make the assertion circular. The
-        /// <c>GetTileMeshes</c> reads are not an accessor artefact: that walk hides a record only when
-        /// <c>_sources.Count</c> has shrunk, and <c>_sources.Rebuild</c> is step 2 of
-        /// <c>TileManager.SetSources</c>, which this abort never reaches.</para>
-        /// <para><b>RED recipe:</b> insert
-        /// <c>if (!inPlace) Layers.Build(style, Camera.CurrentProperties.Zoom, materialSet);</c> immediately
-        /// before <c>_style = style;</c> in <c>MapView.SetStyle</c>. <c>Build</c> clears and disposes the old
-        /// layers first, so every captured Material is destroyed by phase 1. Gating on the already-computed
-        /// <c>inPlace</c> keeps every in-place test untouched.</para></summary>
+        /// its layers, materials, baked meshes and cache token. Non-local invariant: this is the only phase
+        /// that can assert it, because every later phase runs after <c>Layers.Build</c> destroys the old
+        /// materials. Slot ids compare against A's ids captured before the call, not the moved <c>_style</c>.
+        /// RED: call <c>Layers.Build</c> when <c>!inPlace</c> just before <c>_style = style;</c>.</summary>
         [Test]
         public void AbortAtIdentityCommit_LeavesTheOldStyleFullyLive()
         {
@@ -1338,15 +1277,10 @@ namespace MapRenderer.Tests.Style
         // ── an aborted rebuild is not absorbed by the retry ───────────────────────────────────
 
         /// <summary>An abort at <c>MaterialMemoWritten</c> must not be absorbed by the NEXT call's
-        /// in-place gate. Driven through the MaterialSet lever rather than a style edit, because that is the
-        /// only lever that moves <c>MaterialSnapshot</c> under byte-identical style content — which is what
-        /// makes the memo the deciding conjunct.
-        /// <para>Clause 5 is what makes this a property tooth rather than a count tooth: the cache token
-        /// encodes the layer-numbering fold, so it is red under absorption (never rewritten) and green under
-        /// a real rebuild, whatever the memo's ordering.</para>
-        /// <para><b>RED recipe:</b> none needed — this is RED against the un-fixed tree, on clauses 4 and 5.
-        /// It goes green with <c>_committedStyle</c> nulled for the duration of the call, which forces the
-        /// rebuild arm after any abort.</para></summary>
+        /// in-place gate. The MaterialSet lever is the only one that moves <c>MaterialSnapshot</c> under
+        /// byte-identical style content, which makes the memo the deciding conjunct. Clause 5 reads the cache
+        /// token, which encodes the layer-numbering fold: red under absorption, green under a real rebuild.
+        /// </summary>
         [Test]
         public void AbortAtMaterialMemoWrite_IsNotAbsorbedByTheRetryInPlaceGate()
         {
@@ -1394,14 +1328,9 @@ namespace MapRenderer.Tests.Style
             }
         }
         /// <summary>An abort at any phase from <c>LayersBuilt</c> on must not be absorbed by the
-        /// next call's in-place gate. One body over three phases — one property, one root cause, one
-        /// mechanism: the live layers are the aborted call's, so the retry's per-layer gate compares the new
-        /// document against itself and every layer "survives".
-        /// <para>Which clause carries the RED differs by phase only because the amount of committed state
-        /// does: at <c>LayersBuilt</c> both the token clause and the mesh clause red; at
-        /// <c>StyleTokenWritten</c> and <c>SymbolStyleApplied</c> the token has already moved, so the mesh
-        /// clause carries it alone.</para>
-        /// <para><b>RED recipe:</b> none needed — RED against the un-fixed tree at all three phases.</para>
+        /// next call's in-place gate: the live layers are the aborted call's, so the retry would compare the
+        /// new document against itself. At <c>LayersBuilt</c> both the token and mesh clauses catch it; at
+        /// later phases the token has moved, so the mesh clause catches it alone.
         /// </summary>
         [TestCase(CommitPhase.LayersBuilt)]
         [TestCase(CommitPhase.StyleTokenWritten)]
@@ -1464,20 +1393,11 @@ namespace MapRenderer.Tests.Style
         // ── no husk, no leak, no double-free ──────────────────────────────────────────────────
 
         /// <summary>An abort inside <c>TileManager.SetSources</c>' per-record teardown loop must leave
-        /// no HALF-torn-down record behind (C1), and must leak nothing (C2).
-        /// <para><b>Both C1 clauses stay meaningful.</b> <c>SetSources</c> drops each record from
-        /// <c>_loaded</c> BEFORE tearing that record down, one at a time, so after an abort the records the
-        /// loop never reached are still there and INTACT. C1a therefore inspects real entries rather than an
-        /// empty set, and C1b pins exactly that: some records remain, and strictly fewer than before.</para>
-        /// <para><b>C2 cannot stand in for C1:</b> a husk's second <c>decode.Release()</c> takes
-        /// <c>remaining == -1</c>, which leaves <c>DebugLiveCount</c> untouched and
-        /// <c>DebugNegativeObservations</c> at 0, and its own assert is <c>System.Diagnostics.Debug</c>,
-        /// invisible to NUnit.</para>
-        /// <para><b>RED recipe for C2:</b> comment out <c>DestroyTrackedMeshes(ref lt);</c> in
-        /// <c>TileManager.RenderTeardownRecord</c> — records leak their meshes and the post-teardown count
-        /// exceeds the baseline. That is the single teardown funnel, so it is a broad site: run filtered.
-        /// C1a reds with no injection against a teardown that tears a record down while it is still in
-        /// <c>_loaded</c>.</para></summary>
+        /// no HALF-torn-down record behind (C1), and must leak nothing (C2). <c>SetSources</c> drops each
+        /// record from <c>_loaded</c> BEFORE tearing it down, so unreached records stay INTACT and C1 inspects
+        /// real entries. Non-obvious why: C2 cannot stand in for C1, because a husk's second
+        /// <c>decode.Release()</c> moves no counter and asserts only through <c>System.Diagnostics.Debug</c>.
+        /// </summary>
         [Test]
         public void AbortMidRecordTeardown_LeavesNoHuskAndLeaksNothing()
         {
@@ -1560,19 +1480,10 @@ namespace MapRenderer.Tests.Style
         // ── the no-blank-window bound ─────────────────────────────────────────────────────────
 
         /// <summary>Across the rebuild-arm commit sequence, the live layer-material count never drops
-        /// below <c>min(N_old, N_new)</c> — a LOWER BOUND at every phase, never an equality. This is the
-        /// no-blank-window statement this seam can hold. The intuitive statement "a correct implementation
-        /// transiently holds both sets" is false here, because all six probes are on the rebuild arm and
-        /// <c>RenderLayerSet.Build</c> calls <c>ClearLayers()</c> first.
-        /// <para>On this drive <c>N_old == N_new == 3</c>, so the <c>min()</c> is decoration — the bound
-        /// exercised is <c>&gt;= 3</c>. The <c>min</c> form is what makes the property true in general. If a
-        /// fixture with <c>N_new &lt; N_old</c> ever reaches the rebuild arm, extend this drive rather than
-        /// writing a second tooth.</para>
-        /// <para><b>RED recipe</b>, two, one per clause. Clause 1: insert
-        /// <c>Layers.Build(null, Camera.CurrentProperties.Zoom, materialSet);</c> immediately before the
-        /// <c>MaterialMemoWritten</c> probe in <c>MapView.SetStyle</c> — the live count reads 0 at that phase
-        /// while the END STATE is identical, so no other test observes it. Clause 2: delete the
-        /// <c>StyleTokenWritten</c> probe invocation.</para></summary>
+        /// below <c>min(N_old, N_new)</c>, a LOWER BOUND at every phase. Both sets are not held at once,
+        /// because <c>RenderLayerSet.Build</c> calls <c>ClearLayers()</c> first. Here N_old == N_new == 3.
+        /// Clause 1 is the only observer of a <c>Layers.Build(null, …)</c> before the
+        /// <c>MaterialMemoWritten</c> probe, whose end state is identical.</summary>
         [Test]
         public void EveryCommitPhase_KeepsAtLeastTheSmallerLiveMaterialCount()
         {

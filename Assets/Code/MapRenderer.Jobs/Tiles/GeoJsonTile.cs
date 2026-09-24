@@ -11,17 +11,10 @@ namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>
     /// The second production <see cref="ITileLayer"/> — one GeoJSON dataset's geometry as it falls inside one
-    /// tile. Everything a consumer reads off it is the same shape <c>MvtLayer</c> presents: a
-    /// GeoJSON tile must be indistinguishable downstream from an MVT one.
-    ///
-    /// <para><b>The parsed feature IS the evaluation surface.</b> <see cref="Features"/> holds the
-    /// <see cref="GeoJsonFeature"/>s the slicer carried through by reference, in slice order — not adapters
-    /// over them. Filters and expressions therefore read the authored properties directly.</para>
-    ///
-    /// <para><b>One layer, no name matching.</b> A geojson source has no sub-layers, so a style layer's
-    /// <c>source-layer</c> is not used against it (Style Spec: required for vector sources, unused for
-    /// geojson) — see <see cref="GeoJsonTile.GetLayer"/>. <see cref="Name"/> is diagnostic only; nothing
-    /// resolves against it.</para>
+    /// tile, in <c>MvtLayer</c>'s shape, so a GeoJSON tile is indistinguishable downstream from an MVT one.
+    /// <see cref="Features"/> holds the sliced <see cref="GeoJsonFeature"/>s themselves, not adapters, so
+    /// filters read the authored properties directly. A geojson source has one layer and ignores
+    /// <c>source-layer</c> (<see cref="GeoJsonTile.GetLayer"/>), so <see cref="Name"/> is diagnostic only.
     /// </summary>
     public sealed class GeoJsonTileLayer : ITileLayer, IDisposable
     {
@@ -74,11 +67,9 @@ namespace MapRenderer.Jobs.Tiles
     }
 
     /// <summary>
-    /// One tile's worth of a GeoJSON dataset: zero or one <see cref="GeoJsonTileLayer"/>.
-    ///
-    /// <para><b>Zero layers, never a layer with zero features.</b> An empty slice yields a layer-less tile,
-    /// which keeps <c>FeatureCount == Features.Count</c> trivially true and keeps
-    /// <see cref="GetLayer"/> honest — "my sole layer" has to actually exist to be returned.</para>
+    /// One tile's worth of a GeoJSON dataset: zero or one <see cref="GeoJsonTileLayer"/>. An empty slice
+    /// yields a layer-less tile, never a layer with zero features, so <see cref="GetLayer"/> returns a real
+    /// layer or null.
     /// </summary>
     public sealed class GeoJsonTile : IDecodedTile
     {
@@ -87,49 +78,20 @@ namespace MapRenderer.Jobs.Tiles
         internal GeoJsonTile(GeoJsonTileLayer layer) => _layer = layer;
 
         /// <summary>Returns the tile's sole layer, <b>whatever the name</b> (including null/empty), or null
-        /// when the slice was empty.
-        ///
-        /// <para>This is conformance, not tolerance: the Style Spec says <c>source-layer</c> is required for
-        /// vector sources and unused for geojson ones, so a geojson tile has nothing to match a name against.
-        /// It is also where the accommodation for an absent <c>source-layer</c> lives:
-        /// <c>SourceLayerResolver</c> does not short-circuit on one, so each tile answers for its own
-        /// format (<c>MvtTile.GetLayer</c> keeps returning null for an empty name).</para>
-        ///
-        /// <para>Consequence, stated: a style layer naming a bogus <c>source-layer</c> over a geojson source
-        /// still resolves. That is the spec's answer; match-or-null would instead give a fixture author a
-        /// silent-empty failure mode for a key the spec says is ignored.</para></summary>
+        /// when the slice was empty. Non-obvious why: the Style Spec leaves <c>source-layer</c> unused for
+        /// geojson sources, so a bogus name still resolves. <c>SourceLayerResolver</c> passes an absent name
+        /// through, so each tile answers for its own format (<c>MvtTile.GetLayer</c> returns null).</summary>
         public ITileLayer GetLayer(string name) => _layer;
 
         public void Dispose() => _layer?.Dispose();
     }
 
     /// <summary>
-    /// The GeoJSON <see cref="ITileDecoder"/>: a closure over a projected dataset and its slice options that
-    /// turns a <see cref="TileId"/> into a decoded tile. <b>There are no bytes</b> — <c>Decode</c>'s
-    /// <c>bytes</c> parameter is always null here, which <see cref="ITileDecoder.Decode"/> documents.
-    ///
-    /// <para><b>The slice IS the decode.</b> Sitting behind <see cref="ITileDecoder"/> is what makes a
-    /// GeoJSON tile obey exactly the same lifetime as an MVT one: <c>TileDecodeDispatch.DecodeAsync</c> runs
-    /// this on the pool at fetch completion, mints one reference-counted handle over the result, and the
-    /// native buffers it allocates are freed at the last release. Nothing here needs to know which source
-    /// kind it serves.</para>
-    ///
-    /// <para>Slicing is a pure function of (dataset, tile, options), so two decodes of the same tile produce
-    /// identical results — the exact analogue of re-decoding from retained bytes. Under the reference count a
-    /// production tile decodes once, but the property is what makes a second <c>GetTile</c> for the same tile
-    /// well defined.</para>
-    ///
-    /// <para><b>ONE decoder serves every tile of the source, and the lease's lock is per HANDLE</b>, so two
-    /// pool threads can be inside <see cref="Decode"/> at once. That is safe and must stay safe: the dataset
-    /// and the options are immutable after construction, every list and array here is allocated per call,
-    /// and nothing this reaches holds mutable static state. MVT gets the same property for free by minting a
-    /// decoder per encoding; this one has it only because its state is immutable, so an edit that
-    /// memoized anything onto a field would break it silently.</para>
-    ///
-    /// <para><b>THE NAMED FENCE.</b> The paths handed to <see cref="PathGeometryMaterializer"/> are
-    /// tile-local <c>double2</c> in <c>[−b, extent+b]</c>, Y-down, quantized to integers — never geodetic,
-    /// never projected. Ring assembly's and earcut's thresholds are calibrated to tile-integer magnitude;
-    /// degrees are a different scale entirely.</para>
+    /// The GeoJSON <see cref="ITileDecoder"/>: slices a projected dataset into one tile. Behind the interface
+    /// its tile has an MVT tile's lifetime; <c>bytes</c> is always null. Non-local invariant: one decoder
+    /// serves every tile, so two threads can run <see cref="Decode"/> at once; a field memo breaks this.
+    /// Paths to <see cref="PathGeometryMaterializer"/> are tile-local integers in <c>[−b, extent+b]</c>, Y-down,
+    /// never degrees (docs/tile-geometry-ir-design.md § "Invariants the mechanism must hold").
     /// </summary>
     public sealed class GeoJsonTileDecoder : ITileDecoder
     {

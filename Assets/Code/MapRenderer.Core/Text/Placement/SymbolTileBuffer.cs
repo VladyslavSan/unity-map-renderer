@@ -7,23 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// One build's per-symbol placement input, held as
-    /// a REUSED buffer instead of a fresh managed carrier list per tile — <see cref="Symbols"/>
-    /// (one <see cref="ShapedSymbol"/> per successfully-shaped symbol; the list is dense, since a per-symbol build
-    /// failure is skipped rather than recorded)
-    /// plus the pooled variable-length sub-lists every symbol's spans index into: <see cref="Quads"/> (point
-    /// text/icon), <see cref="Glyphs"/> (curved text/icon), <see cref="Anchors"/> (curved along-line anchors),
-    /// <see cref="Path"/>/<see cref="PathUp"/> (curved world path, index-parallel).
-    ///
-    /// <para><b>Lifetime — one instance per IN-FLIGHT build, not a shared field.</b> Builds interleave on the
-    /// main thread (<c>SymbolSubsystem</c>'s tail pump awaits glyph fetches), so a single reused instance
-    /// shared across concurrent builds would corrupt both — this type is NOT a singleton;
-    /// <c>SymbolSubsystem</c> pools whole instances per build, <see cref="Clear"/>ing and returning one
-    /// only once its bake has consumed it.</para>
-    ///
-    /// <para><b>Pairing adjacency.</b> One build's ENTIRE symbol set — every layer's contribution — must land in
-    /// the SAME <see cref="SymbolTileBuffer"/>, in emission order, or <see cref="SymbolPairing"/>'s
-    /// owner-at-<c>i+1</c> resolution breaks.</para>
+    /// One build's per-symbol placement input in a reused buffer: dense <see cref="Symbols"/> plus the pooled
+    /// sub-lists their spans index (<see cref="Quads"/>, <see cref="Glyphs"/>, <see cref="Anchors"/>, and the
+    /// index-parallel <see cref="Path"/>/<see cref="PathUp"/>). Non-local invariant: builds interleave on the
+    /// main thread, so <c>SymbolSubsystem</c> pools one instance per in-flight build and returns it after its
+    /// bake; and one build's whole symbol set lands here in emission order for <see cref="SymbolPairing"/>.
     /// </summary>
     public sealed class SymbolTileBuffer
     {
@@ -102,11 +90,9 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>Appends <paramref name="path"/> (may be null) onto <see cref="Path"/> and a length-matched
-        /// <paramref name="pathUp"/> onto <see cref="PathUp"/>, padding any short/missing up-vector with
-        /// <see cref="double3.zero"/> (a bug signal downstream, not a supported state) so the two pools stay
-        /// index-parallel. Returns the
-        /// span a symbol's <see cref="ShapedSymbol.PathStart"/>/<see cref="ShapedSymbol.PathCount"/> should
-        /// carry.</summary>
+        /// <paramref name="pathUp"/> onto <see cref="PathUp"/>, padding a missing up-vector with
+        /// <see cref="double3.zero"/> so the pools stay index-parallel. Returns the span for
+        /// <see cref="ShapedSymbol.PathStart"/>/<see cref="ShapedSymbol.PathCount"/>.</summary>
         public int AppendPath(double3[] path, double3[] pathUp, out int count)
         {
             int start = Path.Count;

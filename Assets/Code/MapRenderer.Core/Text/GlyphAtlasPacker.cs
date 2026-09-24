@@ -6,20 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Deterministic shelf (row) packer for the SDF glyph atlas. Cells are packed left-to-right into
-    /// the current "shelf" (row); a cell that does not fit the remaining shelf width closes that shelf
-    /// and opens a new one directly beneath it, sized to the tallest cell placed on it.
-    ///
-    /// <para><b>Growth policy — width fixed, height grows by shelf.</b> The atlas <see cref="Width"/> is
-    /// fixed at construction (default <see cref="DefaultWidth"/>, chosen comfortably wider than any real
-    /// SDF glyph cell) and never changes afterward; only <see cref="Height"/> grows, one shelf at a
-    /// time, as cells are packed. This is deliberate, not a missing feature: <see cref="GlyphAtlas.Pixels"/>
-    /// is a row-major buffer whose stride is the atlas width. Widening the atlas after any pixel has
-    /// been blitted would change every row's stride and invalidate every previously packed cell's byte
-    /// offsets, forcing a full re-blit of everything already packed. Growing only the height leaves
-    /// every existing row's byte layout untouched — a height grow is a pure append (see
-    /// <see cref="GlyphAtlas"/>'s row-preserving resize). A cell wider than the fixed atlas width throws:
-    /// a documented limit, not expected for real font glyph cells at any reasonable atlas width.</para>
+    /// Deterministic shelf (row) packer for the SDF glyph atlas: cells pack left-to-right into the current
+    /// shelf, and a cell that does not fit closes it and opens a new shelf beneath, as tall as its tallest
+    /// cell. Non-obvious why: <see cref="Width"/> is fixed and only <see cref="Height"/> grows, because
+    /// <see cref="GlyphAtlas.Pixels"/> is row-major with the width as stride, so a height grow is a pure
+    /// append that moves no packed cell. A cell wider than the atlas throws.
     /// </summary>
     public sealed class GlyphAtlasPacker
     {
@@ -35,10 +26,8 @@ namespace MapRenderer.Core.Text
         private int _shelfNextX;
 
         /// <param name="width">Fixed atlas width in pixels.</param>
-        /// <param name="fixedHeight">0 (default) = classic height-grows-by-shelf atlas; a positive value =
-        /// a FIXED-capacity atlas of exactly this height, whose <see cref="Size"/> never changes and which
-        /// reports overflow via <see cref="TryPack"/> instead of growing (a big fixed atlas keeps every
-        /// tile's baked UVs valid).</param>
+        /// <param name="fixedHeight">0 (default) = height grows by shelf; a positive value = a fixed height that
+        /// reports overflow via <see cref="TryPack"/> instead of growing, so baked UVs stay valid.</param>
         public GlyphAtlasPacker(int width = DefaultWidth, int fixedHeight = 0)
         {
             if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width), "atlas width must be positive");

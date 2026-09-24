@@ -1,19 +1,11 @@
 namespace MapRenderer.Core.Expressions.Ops
 {
     /// <summary>
-    /// The constant-key <c>get</c>/<c>has</c> fast form: <c>["get","name"]</c> / <c>["has","name"]</c>
-    /// where the key is a bare JSON string, parsed by <see cref="ExpressionParser"/> instead of the
-    /// dynamic-key <c>FeatureDataExpression</c> closure. Carries <see cref="_slot"/>, its position in the
-    /// owning <see cref="ExpressionParser"/>'s key layout — the string→id key hoist's per-filter index a
-    /// bind site (<c>FeatureSelector</c>) resolves once per layer into <see cref="EvaluationContext.KeyBinding"/>,
-    /// instead of this node hashing <see cref="_key"/> on every feature.
-    ///
-    /// <para><b>Two paths, same result.</b> With a non-null binding AND an <see cref="IIndexedFeature"/>
-    /// feature, <see cref="Evaluate"/> reads <c>binding[_slot]</c> (O(1), no hash) and answers via
-    /// <see cref="IIndexedFeature.TryGetPropertyByKeyIndex"/>. Otherwise it falls back to
-    /// <see cref="IFeature.TryGetProperty(string, out Value)"/> — byte-identical to what the retired
-    /// closure computed, and the ONLY path for GeoJSON/test doubles, none of which implement
-    /// <see cref="IIndexedFeature"/>.</para>
+    /// The constant-key <c>get</c>/<c>has</c> fast form (<c>["get","name"]</c>, key a bare JSON string).
+    /// <see cref="_slot"/> is its index in the parser's key layout, which <c>FeatureSelector</c> resolves once
+    /// per layer into <see cref="EvaluationContext.KeyBinding"/>. With a binding and an
+    /// <see cref="IIndexedFeature"/>, <see cref="Evaluate"/> reads <c>binding[_slot]</c> with no hash;
+    /// otherwise it falls back to <see cref="IFeature.TryGetProperty(string, out Value)"/>, same result.
     /// </summary>
     public sealed class FeatureKeyExpression : Expression
     {
@@ -43,9 +35,8 @@ namespace MapRenderer.Core.Expressions.Ops
                 throw new ExpressionEvaluationException(
                     _isHas ? "has: no feature in context." : "get: no feature in context.");
 
-            // The int path: only taken when a bind site resolved this filter's key layout AND the feature
-            // is index-capable. binding[_slot] is a SLOT read, never binding.Length (the oversized-array
-            // pooling rule) — a rented buffer may be longer than this filter's layout.
+            // The int path needs a resolved key layout and an index-capable feature. Read binding[_slot], never
+            // binding.Length: a rented buffer may be longer than this filter's layout.
             if (context.KeyBinding != null && context.Feature is IIndexedFeature indexed)
             {
                 int keyIndex = context.KeyBinding[_slot];

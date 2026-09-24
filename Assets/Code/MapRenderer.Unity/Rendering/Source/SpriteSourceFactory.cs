@@ -7,18 +7,13 @@ namespace MapRenderer.Unity.Rendering.Source
     /// <summary>
     /// The seam that builds a sprite <see cref="ISpriteSource"/> from a style document's root
     /// <c>sprite</c> URL (<see cref="StyleDocument.Sprite"/>) — mirrors <see cref="GlyphSourceFactory"/>
-    /// for glyphs. DIVERGES from <see cref="GlyphSourceFactory"/> on the missing-URL case: a style with no
-    /// <c>sprite</c> is common (icons are optional, unlike glyphs), so a null/absent URL returns
-    /// <c>null</c> here rather than throwing — callers treat a null source as "no sprites for this style"
-    /// instead of a construction-time failure.
+    /// for glyphs, except that a missing URL returns <c>null</c> instead of throwing. Icons are
+    /// optional, so callers treat a null source as "no sprites for this style".
     /// </summary>
     internal static class SpriteSourceFactory
     {
-        // Process-wide "warn once" latch. INTERNAL rather than private so a test can clear it in setup:
-        // the sprite fetch is not gated on a style having symbol layers (fill-pattern resolves against the
-        // same sheet), so this is reachable from many styles, and whether the latch is still unset by the
-        // time any one test runs depends on test ORDER. Broadening private → internal is the conventions'
-        // sanctioned test footprint; without it a test passes or fails according to what ran before it.
+        // Process-wide "warn once" latch. Internal so a test can clear it in setup; otherwise a
+        // test's result depends on which styles earlier tests loaded.
         internal static bool WarnedMissingUrl;
 
         /// <summary>

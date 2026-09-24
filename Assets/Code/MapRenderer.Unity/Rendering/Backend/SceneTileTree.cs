@@ -10,28 +10,16 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Rendering.Backend
 {
     /// <summary>
-    /// The generic root → per-tile-container scene-organization unit shared by every GameObject-based draw
-    /// path that groups its output by tile: one backend-root <see cref="GameObject"/>, one named container
-    /// (<c>"Tile z/x/y"</c>) per live <see cref="TileId"/>, positioned + oriented by the floating-origin
-    /// rebase and refreshed <b>once per tile per frame</b> — never per child. Callers attach their own
-    /// per-tile children (a layer mesh, a symbol layer node, …) under <see cref="GetOrCreateTileNode"/>'s
-    /// returned <see cref="Transform"/> and register/release them via <see cref="AddChild"/> /
-    /// <see cref="ReleaseChildFrom"/> so the container is torn down once its last child is gone.
-    ///
-    /// <para>Extracted from <see cref="GameObjects.TileRenderer"/> (the original "good tree": backend root →
-    /// per-tile container → per-layer child, <c>GetOrCreateContainer</c> + the <c>Rebuild</c> transform loop
-    /// + the blink-fix cache + the container refcount teardown) so it can be reused verbatim by a second
-    /// caller — the world-anchored symbol draw path, which owns its OWN instance ("Map Symbols" root) so
-    /// symbols are organized identically to tile fills regardless of which tile backend is drawing them
-    /// (Entities/BRG draw tile fills GameObject-free, so there is no tile-backend container to piggyback on;
-    /// see the symbol-draw-backend-rework design).</para>
+    /// Root → per-tile-container scene tree shared by every GameObject draw path that groups output by tile:
+    /// one root, one <c>"Tile z/x/y"</c> container per live <see cref="TileId"/>, placed by the floating-origin
+    /// rebase once per tile per frame, never per child. Callers parent children under
+    /// <see cref="GetOrCreateTileNode"/> and register them via <see cref="AddChild"/> and
+    /// <see cref="ReleaseChildFrom"/>; a container goes with its last child. The symbol path has its own.
     /// </summary>
     internal sealed class SceneTileTree : VerifiedDisposable
     {
-        // One per live tile: the container its callers' children are grouped under, so the scene Hierarchy
-        // shows a per-tile tree. Carries the tile's projected SW-corner render origin so Rebuild can
-        // reposition the whole subtree by writing only the container transform, plus a child refcount so the
-        // container is destroyed once its last caller-registered child is gone.
+        // One per live tile. Rebuild moves the whole subtree by writing only this container's transform from
+        // TileOriginRender; ChildCount frees the container when its last registered child is gone.
         private struct TileNode
         {
             public GameObject Go;
@@ -42,37 +30,22 @@ namespace MapRenderer.Unity.Rendering.Backend
         private readonly Dictionary<TileId, TileNode> _nodes = new Dictionary<TileId, TileNode>();
         private          GameObject                   _root;
 
-        // Last scene frame seen by Rebuild, null until the first one — identical blink-fix rationale to
-        // GameObjects.TileRenderer: GetOrCreateTileNode may be called AFTER Rebuild within the same frame;
-        // caching the frame lets a freshly-created container be positioned immediately instead of blinking at
-        // the world origin for a frame until the NEXT Rebuild repositions it.
+        // Last frame seen by Rebuild (null before the first). A container created after Rebuild in the same
+        // frame is placed from it at once, instead of blinking at the world origin until the next Rebuild.
         private SceneFrame? _lastFrame;
 
-        // Tile containers recycle rather than churn: a zoom step replaces the WHOLE cover at once, so the
-        // create/destroy burst is per-transition, not per-frame. Bare GameObjects (no components), so the win
-        // here is smaller than the symbol path's leaves — and the per-rent `$"Tile {tileId}"` name is not saved
-        // either (a container is named for the tile it holds, so it renames on every rent).
-        //
-        // A released container parks under _poolRoot, an INACTIVE root of this tree's own. The reparent is
-        // mandatory: ObjectPool is scene-unaware — Release only files the reference away — so without it the
-        // GameObject stays under _root, and `Root`'s child set is this type's published meaning ("the live
-        // tiles"). It must not be `SetParent(null)` either: that promotes the container to a SCENE-ROOT
-        // object, live in the Hierarchy and still active, keeping its last tenancy's name ("Tile 14/8192/5461")
-        // so it is indistinguishable from a live container — a debugging hazard in the very backend whose
-        // purpose is Inspector debuggability.
-        //
-        // _poolRoot is a CHILD of _root rather than a second scene root: everything this tree owns then sits
-        // under one top-level object. NodeCount, not _root.childCount, is the live-tile quantity — see the
-        // note on NodeCount.
+        // Inactive parent for released containers; the pool recycles them because a zoom step replaces the whole
+        // cover at once. Non-obvious why: ObjectPool does not reparent, so a released container left in place
+        // stays under _root as a fake live tile, and SetParent(null) makes it an active scene root that keeps
+        // its old "Tile z/x/y" name. It is a child of _root so the tree has one top-level object.
         private GameObject _poolRoot;
 
         private readonly ObjectPool<GameObject> _containerPool;
 
         public SceneTileTree(string rootName)
         {
-            // HideFlags.DontSave on everything this tree owns: it is all built at runtime from tiles and has
-            // no business being serialized into a scene. It also means Unity will not destroy these on scene
-            // load — teardown is Dispose's job, which VerifiedDisposable's finalizer reports if it is missed.
+            // DontSave: runtime objects never serialize into a scene, and scene load does not destroy them.
+            // Teardown is Dispose's job; VerifiedDisposable's finalizer reports a missed one.
             _root     = new GameObject(rootName)          { hideFlags = HideFlags.DontSave };
             _poolRoot = new GameObject("(container pool)") { hideFlags = HideFlags.DontSave };
             _poolRoot.transform.SetParent(_root.transform, worldPositionStays: false);
@@ -88,12 +61,10 @@ namespace MapRenderer.Unity.Rendering.Backend
                 maxSize: 512);
         }
 
-        /// <summary>The tree root's transform. THROWS <see cref="System.ObjectDisposedException"/> after
-        /// <see cref="VerifiedDisposable.Dispose"/> rather than returning null — reading the tree of a torn-down
-        /// backend is a caller bug, and a silent null only defers the NRE to whoever dereferences it. A caller
-        /// that legitimately outlives the tree nulls its own reference and guards with <c>?.</c> instead
-        /// (<see cref="GameObjects.TileRenderer.Root"/>, whose own "null after dispose" contract is preserved
-        /// that way).</summary>
+        /// <summary>The tree root's transform. Throws <see cref="System.ObjectDisposedException"/> after
+        /// <see cref="VerifiedDisposable.Dispose"/>, because reading a torn-down tree is a caller bug. A caller
+        /// that outlives the tree nulls its own reference and guards with <c>?.</c> instead
+        /// (<see cref="GameObjects.TileRenderer.Root"/>).</summary>
         public Transform Root
         {
             get

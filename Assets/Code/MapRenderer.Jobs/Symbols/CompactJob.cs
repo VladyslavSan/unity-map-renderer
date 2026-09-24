@@ -7,23 +7,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// The <c>GatherSymbolPoints</c> Compact pass, ported to Burst — consumes <see cref="CullJob"/>'s
-    /// per-record <see cref="GatherTrigger"/> verdict IN RECORD ORDER: a Dropped record is hard-skipped with no
-    /// fade/count; a triggered record whose fade is still alive KEEPS staging (its FadeIds recorded into
-    /// <see cref="ForceFadeOut"/> so the emit loop eases it to 0 — no pop); a triggered fade-dead record is
-    /// hard-skipped and tallied into its trigger's <see cref="Counts"/> slot; a kept (<c>None</c>) record is
-    /// appended. The running append length (<see cref="OutPoints"/><c>.Length</c>) is the destination offset, so
-    /// this pass is inherently serial — <see cref="IJob"/>, not <see cref="IJobParallelFor"/> (unlike
-    /// <see cref="CullJob"/>, whose per-index verdict has no cross-record dependency).
-    ///
-    /// <para><c>.Run()</c>, like <see cref="CullJob"/>/<see cref="SymbolProjectionJob"/>: no
-    /// Schedule/Complete round-trip, no worker hand-off — the caller blocks here regardless (<c>EmitSymbols</c>
-    /// reads <see cref="OutPoints"/>/<see cref="OutUps"/> immediately after).</para>
-    ///
-    /// <para>Integer branch + verbatim <c>double3</c>/<c>float3</c> copy + a single <c>float</c> compare
-    /// (<c>&gt; FadeEpsilon</c>) — no <c>dot</c>, no FMA-reorderable math — so Burst and managed are
-    /// bit-identical here; there is no near-threshold ULP hazard to fence a fixture around (contrast
-    /// <see cref="CullJob"/>'s Horizon/Distance double-precision <c>dot</c> math).</para>
+    /// The <c>GatherSymbolPoints</c> Compact pass, a serial Burst <see cref="IJob"/>. IN RECORD ORDER, a Dropped
+    /// record is skipped; a triggered record with a live fade KEEPS staging (its FadeIds go into
+    /// <see cref="ForceFadeOut"/>); a fade-dead one is skipped and tallied in <see cref="Counts"/>; a kept record
+    /// is appended at <see cref="OutPoints"/>' length. It has no FMA math, so Burst and managed are bit-identical.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct CompactJob : IJob
@@ -92,9 +79,8 @@ namespace MapRenderer.Jobs.Symbols
 
                 if (t != GatherTrigger.None && !MarkFadeOutIfAlive(r))
                 {
-                    // Enum-indexed, not a switch/default: behaviour-identical to the original switch because only
-                    // t ∈ {Departing,Coverage,Zoom,Horizon,Distance} (1-5) ever reach this branch (Dropped
-                    // short-circuits above; None is excluded by the `t != None` guard) — slots 0/6 stay unused.
+                    // Only t ∈ {Departing,Coverage,Zoom,Horizon,Distance} (1-5) reach this branch (Dropped exits
+                    // above; the guard excludes None), so slots 0/6 stay unused.
                     Counts[(int)t]++;
                     StageOffset[r] = -1;
                     continue;
@@ -110,19 +96,16 @@ namespace MapRenderer.Jobs.Symbols
             }
         }
 
-        // If record r's fade is still visible (any of its FadeIds has opacity > FadeEpsilon), record those
-        // FadeIds in ForceFadeOut so the emit loop eases them toward 0, and return true (the caller then keeps
-        // staging it for the fade-out). Returns false when the record has no live fade — never shown, or
-        // already faded — so the caller hard-skips it (no pop; nothing was on screen to pop).
+        // True if any of record r's FadeIds is above FadeEpsilon; those ids go into ForceFadeOut to ease to 0.
+        // False when nothing is on screen, so the caller hard-skips the record without a pop.
         private bool MarkFadeOutIfAlive(int r)
         {
             int detail = Detail[r];
             if (Kinds[r] == SymbolPlacementKind.Point)
                 return TryForceFadeOut(PointDetails[detail].FadeId);
 
-            // Curved: one candidate per anchor plus the centred-fallback slot. Force-fade EVERY anchor — not just
-            // the ones already visible — so a previously-invisible anchor can't fade IN on a tile we are culling;
-            // keep the record staged if ANY anchor is still visible.
+            // Curved: force-fade EVERY anchor plus the centred fallback, so an invisible anchor cannot fade IN on
+            // a culled tile; keep the record staged if ANY anchor is still visible.
             bool alive = false;
             int fadeStart = CurvedAnchorFadeStart[detail];
             int fadeCount = CurvedAnchorCount[detail] + 1; // + trailing centred-fallback fade id

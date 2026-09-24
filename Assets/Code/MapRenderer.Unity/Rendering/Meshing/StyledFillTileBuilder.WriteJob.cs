@@ -10,23 +10,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
     {
 
         /// <summary>
-        /// The write graph's stream-write node (job-scheduling-design.md): one
-        /// instance per layer, writing the graph's output lists into the mesh buffers as a Burst job.
-        /// Nested here (not a top-level type) so it can read this class's private
-        /// vertex-stream layout (<see cref="FillPositionNormal"/>, <see cref="PatternCoord"/>) directly —
-        /// <see cref="ScheduleStreamWrite"/> is its only caller (itself called from both a test-assembly
-        /// caller, reached via <c>InternalsVisibleTo</c>, and <see cref="ScheduleWrite"/>).
-        ///
-        /// <para>One job, both projections. The graph hands this job ONE column set regardless of arm, and
-        /// the tangent is <c>(VertexEast[i], 1)</c> on both: the flat arm's east is the constant
-        /// <c>(1,0,0)</c> (<c>AggregateJob</c>'s write — see its own doc); there is no curved twin
-        /// here.</para>
-        ///
-        /// <para><b>Holds the whole <see cref="Md"/>, not four separate stream <c>NativeArray</c> fields</b>
-        /// — see docs/lessons-learned.md for the MeshData-aliasing fault this shape avoids.</para>
-        ///
-        /// <para><b>The <c>.AsArray()</c> rule</b>: resolved inside <see cref="Execute"/>, never at schedule
-        /// time — the file convention every node in this graph follows.</para>
+        /// The stream-write node for one fill layer: writes the graph's output lists into the mesh buffers.
+        /// Nested so it reads the private vertex-stream layout. One job serves both projections: the tangent
+        /// is <c>(VertexEast[i], 1)</c>, and <c>AggregateJob</c> writes the flat arm's east as <c>(1,0,0)</c>.
+        /// It holds the whole <see cref="Md"/>, not per-stream arrays, to avoid the MeshData-aliasing fault in
+        /// docs/lessons-learned.md, and resolves <c>.AsArray()</c> inside <see cref="Execute"/>.
         /// </summary>
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         private struct FillStreamWriteJob : IJob
@@ -84,11 +72,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         Normal   = new Vector3(up.x, up.y, up.z),
                     };
 
-                    // (dirEast, dirNorth, side) straight from the graph's own column — zero on every interior
-                    // vertex and on the band's inner ring, an outward miter with side 1 on its outer ring.
-                    // Writing it unconditionally is what covers the interior: a Mesh.MeshData vertex buffer is
-                    // not guaranteed zero-initialised, so a skipped write leaves `side` reading whatever the
-                    // allocator handed back, and only on the runs where that memory happens to be dirty.
+                    // (dirEast, dirNorth, side), zero on interior and inner-ring vertices. Always written:
+                    // a MeshData vertex buffer is not zero-initialised, so a skipped write reads garbage.
                     float3 band = vertexBand[i];
                     stream1[i] = new FillPatternUvBand
                     {

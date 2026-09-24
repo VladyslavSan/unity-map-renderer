@@ -143,12 +143,9 @@ namespace MapRenderer.Unity.Rendering.Map
 
     /// <summary>
     /// The frustum tile-selection + LOD + far-plane knobs, grouped into a nested <c>[Serializable]</c> class so
-    /// they render as ONE collapsible foldout in the Inspector (the same mechanism <see cref="PreparedTileCacheConfig"/>
-    /// uses) — the flat <c>[Header]</c> version couldn't be minimized. All value types; read live by
-    /// <see cref="MapView"/> every Tick.
-    ///
-    /// <para>Not to be confused with the runtime per-frame <c>TileManager.TileSelectionConfig</c> (viewport +
-    /// projection + budgets the selector consumes each frame) — this is the static, Inspector-authored tuning.</para>
+    /// they render as one collapsible foldout in the Inspector. <see cref="MapView"/> reads them live every Tick.
+    /// This is the static, Inspector-authored tuning, not the per-frame <c>TileManager.TileSelectionConfig</c>
+    /// (viewport + projection + budgets) the selector consumes.
     /// </summary>
     [Serializable]
     public sealed class TileSelectionSettings

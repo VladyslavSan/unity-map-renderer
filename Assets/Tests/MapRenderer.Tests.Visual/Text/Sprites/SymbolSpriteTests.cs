@@ -26,23 +26,8 @@ using MapRenderer.Core.Text.Sprites;
 
 namespace MapRenderer.Tests.Text.Placement
 {
-    // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
-    // NOT registered in core-tests.csproj.
-    //
-    // A 2-page glyph atlas must render glyphs from BOTH pages correctly —
-    // the Texture2DArray sample must actually read the layer BillboardVertex.Page selects, not silently fall
-    // back to layer 0 (which would render page-0's leftover/garbage content, or nothing, at a page-1 UV).
-    //
-    // Approach (mirrors SymbolAtlasOrientationSnapshotTests' real-pipeline, off-screen-render, ink-pixel-
-    // count style): render the SAME real fixture glyph ('A') twice, at the SAME anchor/text-size —
-    //   (1) from a normal single-page atlas, where it packs onto Page 0 (the existing, already-proven path);
-    //   (2) from a FIXED atlas sized to exactly one glyph cell, pre-filled by a dummy filler glyph so the
-    //       real 'A' overflows onto Page 1.
-    // If the Texture2DArray upload/vertex Page/shader array-sample chain is wired correctly, both renders
-    // must produce near-identical ink coverage (same bitmap, different array layer). If the shader/vertex
-    // path silently samples layer 0 regardless of Page, the Page-1 render would show page 0's filler content
-    // (blank, since the filler has no bitmap) instead of 'A' — inkPage1 would collapse to ~0, failing the
-    // "meaningful ink" assertion below.
+    // Unity EditMode only. A 2-page glyph atlas must sample the Texture2DArray layer BillboardVertex.Page
+    // selects: the same 'A' from page 0 and from page 1 must match in ink; always reading layer 0 blanks page 1.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolAtlasMultiPageRenderSnapshotTests — Unity EditMode only
@@ -83,9 +68,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0, page0Entry.Page, "fixture precondition: a fresh grow-mode atlas never pages");
             Assert.AreEqual(1, page0Atlas.PageCount);
 
-            // (2) Forced multi-page: a FIXED atlas sized to exactly one 'A' cell. A filler glyph (no
-            // bitmap — its content is irrelevant, only its cell size matters) fills page 0 completely, so
-            // the real 'A' — appended second — overflows onto page 1.
+            // (2) Forced multi-page: an atlas one 'A' cell in size, filled by a bitmap-less filler, so the
+            // real 'A', appended second, overflows onto page 1.
             int2 cellA = a.CellSize;
             var page1Atlas = new GlyphAtlas(width: cellA.x, fixedHeight: cellA.y);
             var filler = new SdfGlyph { Codepoint = 0xFFFEu, Width = a.Width, Height = a.Height, Left = 0, Top = 0, Advance = 0, Bitmap = null };
@@ -102,10 +86,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "the page-1 glyph must render a meaningful number of ink pixels -- if this is ~0, the array sample is " +
                 "reading an empty/wrong Texture2DArray layer instead of layer 1 (BillboardVertex.Page not reaching the fragment).");
 
-            // Numeric ink-coverage bound: same glyph, same anchor/size, different array layer -> near-identical
-            // coverage. A generous tolerance (not a byte-exact snapshot) absorbs anti-aliasing / rasterization
-            // noise between the two independent draws while still catching "wrong layer" (which would either
-            // blank out or draw a completely different, unrelated bitmap).
+            // Same glyph on another layer → near-identical coverage. The 20% tolerance absorbs AA noise; a wrong
+            // layer blanks out or draws an unrelated bitmap.
             Assert.That((float)inkPage1, Is.EqualTo((float)inkPage0).Within(inkPage0 * 0.2f),
                 $"page-1 ink coverage ({inkPage1}px) must be comparable to page-0 ({inkPage0}px) -- same bitmap, " +
                 $"different Texture2DArray layer.");
@@ -174,38 +156,14 @@ namespace MapRenderer.Tests.Text.Placement
         }
     }
 
-    // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
-    // NOT registered in core-tests.csproj.
+    // Unity EditMode only — one REAL glyph ('A') through the REAL SymbolPlacementSystem, shader and uploaded
+    // GlyphAtlasTexture, which synthetic-UV tests never touch. It checks (1) horizontal centring and (2) that
+    // 'A' is wider at the bottom than at the apex; a flipped atlas UV inverts (2).
     //
-    // Synthetic-UV tests (BillboardMathTests/SymbolBillboardJobTests) cannot
-    // catch a vertical flip because they never touch the REAL uploaded atlas texture or the REAL shader. This
-    // test renders one REAL glyph ('A', from the committed NotoSansRegular fixture — the SAME glyph
-    // GlyphAtlasTextureTests/SdfDistanceFieldTests already prove is present) through the REAL
-    // SymbolPlacementSystem + Map/Symbol shader + GlyphAtlasTexture, reads the framebuffer back, and checks:
-    //   1. Horizontal placement: the anchor sits at the look-at's longitude → the glyph's ink must be roughly
-    //      horizontally centered. This is the position axis the readback CAN assert reliably (see below).
-    //   2. Orientation: 'A' has a narrow apex at its OWN top and a wide crossbar/legs at its OWN bottom -- the
-    //      rendered glyph's bottom third must be measurably WIDER than its top third. A flipped atlas UV
-    //      (texture row order vs. sample convention disagreeing) inverts this -- the guard this test exists for.
-    //
-    // READBACK IS VERTICALLY MIRRORED vs ON-SCREEN. This is a headless camera→RenderTexture readback; the
-    // shipping on-screen path renders through URP's intermediate RT and blits to the backbuffer (that blit
-    // flips Y), which a direct camera→RT readback lacks -- so the readback is the vertical mirror of what ships
-    // (Unity's well-known render-to-texture flip; _ProjectionParams.x is -1 in both paths so the shader cannot
-    // branch -- see Symbol_ForwardPass's header). On-screen is the ground truth (verified live: symbols upright
-    // and tracking their features under pan/zoom), so this test UN-MIRRORS the readback before the orientation
-    // check. Absolute VERTICAL position is therefore NOT asserted here -- it's a verified-live eyeball item;
-    // only the flip-invariant horizontal axis (1) and the un-mirrored orientation (2) are machine-checked.
-    //
-    // SUBMISSION PATH: system.Tick() renders through a
-    // REAL persistent scene MeshRenderer now -- SymbolPlacementSystem's demo-path fallback SymbolSlotPresenter
-    // creates a hidden GameObject with a MeshFilter/MeshRenderer bound to the built Mesh/Material as PART OF
-    // Tick() itself, so this test calls snap.Render(uCam) directly with no manual attach. Do NOT route it
-    // back through Graphics.RenderMesh: an immediate-mode submission renders 0 px in headless EditMode (a
-    // harness limitation, same bucket as the Entities-Graphics gotcha), while a persistent MeshRenderer is
-    // redrawn by Unity like any scene object.
-    // The Map/Symbol vertex shader ignores the object-to-world/VP transform entirely (screen-space px -> clip
-    // via _ScreenParamsLogical), so the hidden presenter's identity transform is inert.
+    // Non-obvious why: the headless camera→RT readback lacks the on-screen backbuffer blit, so it is the
+    // vertical MIRROR of what ships; the test un-mirrors it and never asserts absolute vertical position.
+    // Tick() binds a persistent scene MeshRenderer, so the test renders with no manual attach. Do NOT use
+    // Graphics.RenderMesh: an immediate-mode submission renders 0 px in headless EditMode.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolAtlasOrientationSnapshotTests — Unity EditMode only
@@ -257,9 +215,8 @@ namespace MapRenderer.Tests.Text.Placement
             //    RGB (NOT alpha -- blending over an opaque clear always yields alpha=1 in the readback).
             var camGo = Track(new GameObject("SymbolOrientation_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
-            // Deterministic pixelWidth/pixelHeight BEFORE any framing/placement math reads them (mirrors
-            // CameraTransformTests.CreatePair) -- SnapshotRenderer.Render swaps its own same-size
-            // RenderTexture in temporarily and restores this one afterward.
+            // Fixes pixelWidth/pixelHeight before the framing math reads them; SnapshotRenderer.Render swaps in
+            // its own same-size RenderTexture and restores this one.
             uCam.targetTexture = new RenderTexture(Size, Size, 0);
             uCam.clearFlags = CameraClearFlags.SolidColor;
             uCam.backgroundColor = Color.white;
@@ -272,13 +229,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Rebase = float3x3.identity,
             };
 
-            // Anchor slightly NORTH of the look-at (positive local Z). The longitude is unchanged, so the
-            // anchor stays at the look-at's X → the glyph renders horizontally centered (assertion 1). The
-            // small north offset keeps it comfortably inside the frame (its exact VERTICAL landing is not
-            // asserted — the off-screen RT readback mirrors it vertically; see the file header). The fraction
-            // is deliberately tiny: for a straight-down camera a ground point offset by frac*altitude subtends
-            // screen angle atan(frac), and a fraction picked without checking this (an earlier 0.3) can push
-            // the anchor off-frame regardless of RenderTexture Size — 0.02 keeps it safely inside with margin.
+            // Anchor slightly NORTH of the look-at at the same X, so the glyph renders horizontally centred. An
+            // offset of frac·altitude subtends atan(frac) on screen, so 0.02 keeps it well inside the frame.
             double altitude = uCam.transform.position.y;
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
 
@@ -288,9 +240,8 @@ namespace MapRenderer.Tests.Text.Placement
                 textSizePx: 220f, // large -- reliably legible at the readback resolution
                 sortKey: 0f,
                 featureIndex: 0,
-                // TileKey=0 (tile 0/0/0) is ~2e7m from this mid-latitude anchor —
-                // float32-unsafe for the world-anchored AnchorLocal bake (jitter/vanish on-screen). A
-                // realistic containing tile keeps the bake within one tile span (float32-safe).
+                // A realistic containing tile keeps the AnchorLocal bake float32-safe; TileKey=0 is ~2e7 m
+                // away.
                 tileKey: TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14));
 
             // point text now draws through the world path — pass the world base too.
@@ -306,22 +257,16 @@ namespace MapRenderer.Tests.Text.Placement
                     "1, matching the single glyph quad) -- if this is 0, the failure is a projection/culling " +
                     "bug, not a rendering bug.");
 
-                // Tick() already bound the built Mesh/Material to a real persistent scene MeshRenderer
-                // (the demo fallback SymbolSlotPresenter) — render straight away, no manual attach (see the
-                // file header's SUBMISSION PATH paragraph; a double-attach would double-blend the SDF ink).
+                // Tick() already bound the mesh to a persistent scene MeshRenderer, so render straight away;
+                // a manual attach would double-blend the SDF ink.
                 snap.Render(uCam);
 
                 Color32[] px = snap.Pixels.Pixels; // row-major, TOP-LEFT origin (SnapshotRenderer's doc'd convention)
 
-                // Un-mirror the off-screen readback to the ON-SCREEN orientation before analysis. This is a
-                // headless camera→RenderTexture readback, which carries Unity's well-known render-to-texture
-                // vertical flip: the SHIPPING on-screen path renders to URP's intermediate RT and blits to the
-                // backbuffer (that blit flips Y), whereas a direct camera→RT readback lacks that blit, so it is
-                // the vertical MIRROR of what ships on screen. On-screen is the ground truth (verified live in
-                // the demo: symbols render upright and track their features correctly under pan/zoom), and
-                // _ProjectionParams.x is -1 in BOTH paths so the shader cannot branch (see Symbol_ForwardPass's
-                // header). Un-mirror here so the orientation check below reads the on-screen truth; a regression
-                // that broke the on-screen flip would mirror this buffer and flip the result, so the guard bites.
+                // Non-obvious why: the on-screen path blits URP's intermediate RT to the backbuffer, which flips
+                // Y, and a direct camera→RT readback lacks that blit, so it is the vertical MIRROR of on-screen.
+                // _ProjectionParams.x is -1 in both, so the shader cannot branch. Un-mirroring here makes the
+                // check read the on-screen truth.
                 FlipRowsVertically(px, Size, Size);
 
                 AnalyzeInkRows(px, Size, Size, out int minRow, out int maxRow, out int minCol, out int maxCol,
@@ -330,10 +275,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.Greater(inkPixelCount, 50,
                     "the rendered label must cover a meaningful number of pixels (not blank / GPU-context-failed).");
 
-                // (1) Horizontal placement (flip-INVARIANT — the RT quirk is vertical-only, so this is the
-                // position axis the off-screen readback CAN assert reliably): the anchor sits at the look-at's
-                // longitude, which projects to screen-center X, so the glyph's ink must be roughly horizontally
-                // centered. A gross X projection error (wrong sign / offset) would push it to an edge.
+                // (1) Horizontal placement, the flip-invariant axis: the look-at's longitude projects to screen
+                // centre X, so a gross X projection error would push the ink to an edge.
                 float centerCol = (minCol + maxCol) * 0.5f;
                 Assert.That(centerCol, Is.EqualTo(Size * 0.5f).Within(Size * 0.15f),
                     $"a label anchored at the look-at's longitude must render horizontally centered " +
@@ -341,10 +284,8 @@ namespace MapRenderer.Tests.Text.Placement
                     $"the off-screen RT readback carries Unity's render-to-texture Y-flip and on-screen vertical " +
                     $"placement is a verified-live eyeball item — see the un-mirror comment above.)");
 
-                // (2) Orientation (un-mirrored to on-screen): 'A' is narrow at its own top (apex) and wide at
-                // its own bottom (crossbar/legs) -- the bottom third of the rendered glyph must be measurably
-                // wider. THIS is the guard this test exists for: a flipped atlas UV (texture row order vs. sample
-                // convention disagreeing) inverts this ratio without SnapshotRenderer's vertical mirror hiding it.
+                // (2) Orientation, the guard this test exists for: 'A' is wider at the bottom than at the apex. A
+                // flipped atlas UV inverts this ratio.
                 Assert.Greater(bottomThirdAvgWidth, topThirdAvgWidth * 1.3f,
                     $"'A' must render upright: its bottom third (crossbar/legs, avg width " +
                     $"{bottomThirdAvgWidth:F1}px) must be meaningfully WIDER than its top third (the apex, " +
@@ -444,20 +385,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
     }
 
-    // Unity EditMode only — off-screen GPU render of the REAL icon draw path to a PNG artifact. NOT registered
-    // in core-tests.csproj (needs Camera/RenderTexture/Material/Texture2D/SpriteSheet).
-    //
-    // This is the machine-checkable form of the "on-screen eyeball": it renders four DISTINCT, deliberately
-    // ASYMMETRIC demo sprites (a committed fixture — an up-triangle, an "F", a down-arrow, a ring) through the REAL
-    // SymbolPlacementSystem.Tick → Map/Symbol/IconWorld shader → row-flipped SpriteSheet texture, reads the framebuffer
-    // back, and writes Logs/snapshots/symbol-icons.png. Asymmetric shapes make any vertical flip / horizontal
-    // mirror visible (a symmetric square could not). The test asserts the frame is non-blank and that the four
-    // icons' saturated colors are all present (each distinct sprite actually sampled); the human-facing check is
-    // the saved PNG.
-    //
-    // READBACK IS VERTICALLY MIRRORED vs ON-SCREEN (Unity's render-to-texture Y-flip; the shipping path's
-    // backbuffer blit flips Y, a direct camera→RT readback lacks it — see SymbolAtlasOrientationSnapshotTests'
-    // header). So this un-mirrors the readback before writing the PNG, so the artifact matches on-screen truth.
+    // Unity EditMode only. Four ASYMMETRIC fixture sprites through the REAL icon path to
+    // Logs/snapshots/symbol-icons.png, so a flip or mirror is visible; it asserts all four colours render.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolIconRenderSnapshotTests — Unity EditMode only
@@ -566,9 +495,7 @@ namespace MapRenderer.Tests.Text.Placement
                     tileKey: tileKey);
             }
 
-            // Reference: a REAL text glyph 'A' (known upright on-screen — pinned by SymbolAtlasOrientation-
-            // SnapshotTests) rendered at CENTER, so the icons' orientation can be compared against a
-            // ground-truth glyph in the same frame (same camera, same un-mirror). If 'A' is upright and an
+            // Reference: a REAL text 'A', known upright, at CENTER in the same frame. If 'A' is upright and an
             // icon is not, the icon path has a real flip.
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadGlyphFixture("0-255.pbf.bytes")).Stacks[0];
             var glyphAtlas = new GlyphAtlas();
@@ -594,9 +521,8 @@ namespace MapRenderer.Tests.Text.Placement
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             using var snap = new SnapshotRenderer(Size, Size);
-            // Every symbol here is Point placement (icons carry Kind = Icon, not Placement = Line), so the
-            // production collect's curved-then-points split cannot reorder them — see
-            // SymbolGatherParityTests for the mixed-kind (curved + point) case where the split reorders.
+            // Every symbol here is Point placement, so the collect's curved-then-points split cannot reorder them
+            // (SymbolGatherParityTests covers the mixed case).
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
                 // Duplicate Tick — the collision verdict is harvested one Tick late.
@@ -612,10 +538,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                 Color32[] raw = snap.Pixels.Pixels; // row-major (the raw camera→RT readback).
 
-                // Write the human-facing artifact so it matches the ON-SCREEN orientation. The raw readback is
-                // the vertical MIRROR of on-screen (Unity's render-to-texture Y-flip); SetPixels32's
-                // bottom-left-origin upload re-flips it, so EncodeToPNG here lands on-screen-upright. (Feeding it
-                // an already-un-mirrored buffer would double-flip — the trap this comment guards against.)
+                // SetPixels32's bottom-left upload re-flips the mirrored RAW readback, so the PNG lands upright.
+                // Feeding it an already-un-mirrored buffer would double-flip.
                 string dir = SnapshotRenderer.GetSnapshotsDir();
                 Directory.CreateDirectory(dir);
                 string path = Path.Combine(dir, "symbol-icons.png");
@@ -638,10 +562,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.Greater(blue, 100, "the blue down-arrow sprite must be visible (sampled).");
                 Assert.Greater(orange, 60, "the orange ring sprite must be visible (sampled).");
 
-                // ORIENTATION GUARD (this is the tooth the on-screen eyeball was owed for): the 'tri-up' sprite
-                // is an apex-at-TOP triangle, so on screen (the un-mirrored buffer) its ink must be NARROWER at
-                // the top than the bottom. A vertically-flipped icon path (the exact bug the SpriteSheet row-flip
-                // caused) inverts this — the triangle would point down and this assertion goes RED.
+                // ORIENTATION GUARD: 'tri-up' is apex-at-TOP, so on screen its ink is NARROWER at the top. A
+                // vertically flipped icon path (a wrong SpriteSheet row flip) inverts this.
                 RedTriangleWidths(px, Size, Size, out float topWidth, out float bottomWidth);
                 Assert.Greater(bottomWidth, topWidth * 1.5f,
                     $"the 'tri-up' icon must render apex-UP (upright, matching text): its bottom third " +
@@ -652,14 +574,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // The ICON shader's along-line TANGENT branch, the one thing no CPU readback can prove:
-        // the rotation happens in the vertex shader, from the projected world Tangent. So render the SAME
-        // deliberately NON-SQUARE icon quad as an along-line icon on a HORIZONTAL road and on a VERTICAL
-        // one, and assert the ink's long axis follows the road. Against an icon pass that ignores
-        // tangentOS both renders are identical wide bars — RED on the vertical case.
-        //
-        // Not a golden: the assertion is a RELATION between two renders of the same content, so it needs no
-        // committed pixel signature and cannot enshrine a wrong rotation the way a minted golden could.
+        // The ICON shader's along-line TANGENT branch: the same NON-SQUARE quad on a HORIZONTAL and a VERTICAL
+        // road must follow the road; a pass that ignores tangentOS renders two wide bars.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         // Half-extents chosen 4:1 so the aspect flip dwarfs any AA-level jitter at either orientation.
@@ -675,10 +591,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.IsTrue(sheet.View.Index.TryGetSprite("arrow-down", out SpriteEntry entry),
                     "precondition: the demo fixture must define the asymmetric 'arrow-down' sprite");
 
-                // The sprite's real UV rect, taken FROM IconQuadLayout rather than restated here, on a
-                // deliberately WIDE cell — the cell footprint, not the sprite's aspect, is what makes the
-                // orientation legible. Restating the formula would mean this fixture silently disagrees with
-                // the production rect whenever that rect changes (it now spans the sprite's padded cell).
+                // The UV rect comes FROM IconQuadLayout, so it tracks the production rect, on a WIDE cell whose
+                // footprint makes the orientation legible.
                 SymbolQuad laidOut = IconQuadLayout.Layout(
                     entry, sheet.View.Size, 1f, MapRenderer.Core.Text.TextAnchor.Center, float2.zero);
                 var cell = new SymbolQuad
@@ -695,9 +609,8 @@ namespace MapRenderer.Tests.Text.Placement
                 SymbolInk vertical = MeasureAlongLineIconInk(
                     sheet, cell, "arrow-down", lineAngleDeg: 90f, iconRotateDeg: 0f);
 
-                // Precondition: the horizontal case IS the un-rotated shape, so it must read as a wide bar.
-                // (This arm alone cannot discriminate — it passes with or without the tangent branch — which
-                // is precisely why the vertical arm is the tooth.)
+                // Precondition: the horizontal case is the un-rotated wide bar. It passes with or without the
+                // tangent branch, so the vertical arm is the tooth.
                 Assert.Greater(horizontal.BoxWidth, horizontal.BoxHeight * 2,
                     $"precondition: on a horizontal road the icon must read WIDE " +
                     $"({horizontal.BoxWidth}x{horizontal.BoxHeight} px).");
@@ -711,56 +624,16 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // The SIGN of the two rotations, which the aspect tooth above cannot see. A bounding box
-        // is direction-blind: a quad turned +90° and one turned −90° are the same tall box, and 180° (what
-        // `road_one_way_arrow_opposite` asks for) is its own inverse. A sign error therefore survives both
-        // the tangent tooth and the icon-rotate teeth while misorienting every arrow on a DIAGONAL road —
-        // the common case in real OSM data. This tooth renders at 45°, where sign IS observable, and
-        // measures WHERE the ink mass sits rather than how big its box is.
-        //
-        // ── WHY A CENTROID, AND WHY 45° ──────────────────────────────────────────────────────────────
-        // Every rotation in this pipeline acts on the cell's corner offsets ABOUT THE LABEL ANCHOR, so the
-        // ink centroid taken about that anchor is an exactly rotation-equivariant observable: rotating the
-        // draw by φ rotates that vector by φ, no matter what the shape is. An ink bounding box is not — it
-        // only records extent. 45° is the smallest road bearing at which +φ and −φ are distinguishable.
-        //
-        // ── THE FRAME, CALIBRATED RATHER THAN ASSUMED ────────────────────────────────────────────────
-        // Which way "positive" turns in the analysed framebuffer depends on the readback's row order and on
-        // whether Unity flipped the projection for the render target — the exact convention this codebase
-        // has been burned by before, and NOT something to assume. So the tangent arm calibrates it, using a
-        // rotation whose physical sense is known independently of any frame:
-        //   · the test road turns from due-EAST to NORTH-EAST — i.e. +45° COUNTER-CLOCKWISE on the map
-        //     (east = +X, north = +Z, camera north-up at heading 0);
-        //   · a map-aligned line icon follows its road (that is the feature, and the shader derives the
-        //     angle in the very frame it applies it, so it holds whatever the frame is);
-        //   · therefore whatever signed rotation the ink centroid shows between those two renders IS the
-        //     buffer's representation of +45° counter-clockwise on the map.
-        // Every claim below is then read off that calibration, which is what makes them frame-independent.
-        //
-        // ── THE ARMS ─────────────────────────────────────────────────────────────────────────────────
+        // The SIGN of the two rotations. Non-obvious why: a bounding box is direction-blind (±90° give one tall
+        // box, and 180° is its own inverse), so a sign error would misorient every arrow on a DIAGONAL road.
+        // At 45° sign is observable, and the ink centroid about the anchor is rotation-equivariant.
+        // The frame's sense of "positive" is CALIBRATED, not assumed: the road turns +45° CCW on the map, and a
+        // map-aligned icon follows it, so arm B's measured turn IS the buffer's +45° CCW.
         //   A  road 0°,  icon-rotate 0°   — the un-rotated reference, p₀
-        //   B  road 45°, icon-rotate 0°   — must be p₀ turned +45° (the calibration, and the tangent tooth)
-        //   C  road 45°, icon-rotate 90°  — differs from B by icon-rotate ALONE, so B→C isolates it.
-        // MapLibre defines icon-rotate as "rotates the icon CLOCKWISE", so B→C must be −90° in the sense
-        // calibrated above. 90° is used deliberately: 180°, the value `road_one_way_arrow_opposite` asks
-        // for and the only value the existing icon-rotate teeth use, is its own inverse and so can never
-        // expose a sign error.
-        //
-        // ── p₀'s OWN DIRECTION (derived from the committed fixture, not from a run) ───────────────────
-        // The icon path renders a sprite upright and un-mirrored — pinned by the apex-UP 'tri-up' assertion
-        // in the test above, in this same buffer. 'f-glyph' is an "F", so its ink mass sits toward the TOP
-        // and the LEFT of its cell: on the committed sprite the ink centroid is at cell px (13.42, 13.33)
-        // against a 32-px cell centre of (15.5, 15.5). Scaled onto a square cell of half-extent H that is
-        // (−0.130·H, +0.136·H) — up-left, ≈134°, |p₀| ≈ 0.19·H.
-        //
-        // SPRITE: 'f-glyph', not the 'arrow-down' the aspect test uses. Measured on the committed fixture,
-        // arrow-down's ink centroid sits 0.25 px (of 32) from its cell centre — the shape is very nearly
-        // centroid-symmetric, so it carries no usable direction signal for a centroid measure however far
-        // it is rotated. The "F" is the fixture's genuinely two-dimensional asymmetry, and a DIAGONAL p₀ is
-        // what makes the arms land on clearly separated axes.
-        //
-        // Not a golden: every assertion is either a derived quadrant or a RELATION between two renders of
-        // the same content, so no committed pixel signature can enshrine a wrong rotation.
+        //   B  road 45°, icon-rotate 0°   — p₀ turned +45° (the calibration, and the tangent tooth)
+        //   C  road 45°, icon-rotate 90°  — B→C isolates icon-rotate, CLOCKWISE per the style spec, so −90°
+        // p₀ comes from the committed 'f-glyph': its ink centroid sits up-left of the cell centre (≈134°,
+        // |p₀| ≈ 0.19·H). 'arrow-down' is nearly centroid-symmetric, so it carries no direction signal.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         private const string SignToothSprite = "f-glyph";
@@ -780,9 +653,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                 AssertAnchorIsTheViewportCentre(baseline);
 
-                // The DERIVED baseline direction: an upright, un-mirrored "F" carries its ink mass up and to
-                // the left of its cell centre. Asserting it pins the absolute frame — a mirrored icon path
-                // would put the mass on the other side, and would also silently invert every sign below.
+                // An upright "F" carries its ink up-left of centre. This pins the absolute frame: a mirrored icon
+                // path would move the mass and invert every sign below.
                 float2 p0 = baseline.CentroidFromViewportCentrePx;
                 Assert.Less(p0.x, -6f,
                     $"the un-rotated 'F' must carry its ink mass LEFT of the anchor (offset {p0} px). " +
@@ -815,17 +687,14 @@ namespace MapRenderer.Tests.Text.Placement
 
                 AssertAnchorIsTheViewportCentre(baseline);
 
-                // CALIBRATION, not a duplicate of the tangent tooth: this is what fixes the SENSE of the
-                // measured angle below, by pinning the buffer's +45° against a rotation whose physical
-                // direction is known — the road swinging 45° counter-clockwise on the map, which the icon
-                // follows. Without it a "+90°" reading below could not be called clockwise or otherwise.
+                // CALIBRATION: the road swings 45° CCW on the map and the icon follows, which fixes the SENSE of
+                // the angle measured below.
                 AssertRotatedBy(baseline.CentroidFromViewportCentrePx, road45.CentroidFromViewportCentrePx, expectedDeg: 45f,
                     "calibration: the icon must follow its road, so this measures the buffer's rendering of " +
                     "+45° counter-clockwise on the map. Nothing below can be interpreted without it");
 
-                // The two 45° renders differ ONLY in icon-rotate, so this delta IS the icon-rotate term.
-                // MapLibre: "icon-rotate — Rotates the icon CLOCKWISE." Clockwise is negative in the sense
-                // just calibrated, so +90° of icon-rotate must show as −90°.
+                // The two 45° renders differ ONLY in icon-rotate, which the style spec defines as CLOCKWISE,
+                // so +90° must show as −90° in the calibrated sense.
                 AssertRotatedBy(road45.CentroidFromViewportCentrePx, road45Rotated90.CentroidFromViewportCentrePx,
                     expectedDeg: -90f,
                     "icon-rotate turns the icon the WRONG WAY: MapLibre defines icon-rotate as clockwise, " +
@@ -841,49 +710,15 @@ namespace MapRenderer.Tests.Text.Placement
         // ══════════════════════════════════════════════════════════════════════════════════════════════
         // The map-PITCHED along-line ICON arm, rendered.
         //
-        // WHY THIS EXISTS. `Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` carries a map-pitch branch, and
-        // that branch is LIVE IN PRODUCTION TODAY: `AlignmentResolution.ResolvePitch(Auto, Auto, LineCenter)`
-        // resolves to Map, `SymbolFeatureExtractor` stamps it onto the along-line ICON SymbolFeature, and
-        // `StageCurved` is shared across AtlasKind — so `road_one_way_arrow` / `road_one_way_arrow_opposite`
-        // ship with AlignFlags bit2 and METRE corner offsets. Every other map-pitch rendered tooth binds
-        // Map/Symbol/TextWorld and SymbolKind.Text, so without this pair the icon copy of the branch was
-        // compiled and shipped but never rendered by any test. `round-caps-never-rendered` is this repo's
-        // recorded cost of shipping exactly that shape.
-        //
-        // WHAT IS ICON-SPECIFIC ABOUT IT, i.e. why the text teeth do not cover it. Only the ICON arm carries a
-        // CPU-baked constant rotation: `CandidateEmit.ExtraRotationRadians` (icon-rotate) is applied to the
-        // corners by BillboardMath.BuildWorldQuad in its y-DOWN frame, and the shader THEN maps those already-
-        // rotated corners into the ground frame (x̂, ŷ). Curved text leaves that constant at 0, so no text tooth
-        // exercises the composition at all. The claim under test is that the two rotations compose the same way
-        // on both branches:
+        // Non-obvious why: the icon shader's map-pitch branch ships (along-line icons resolve to Map pitch and
+        // take METRE corners), but every other map-pitch render binds text. Only icons carry a CPU-baked
+        // icon-rotate (BillboardMath.BuildWorldQuad, y-DOWN) that the shader then maps into the ground frame:
         //     viewport:  off = Rot(cornerBaked, iconRotate)  then the shader rotates by the projected tangent
         //     map:       off = Rot(cornerBaked, iconRotate)  then the ground frame's x̂ IS the tangent
-        // — so at tilt 0 the total must be identical, and a swapped composition order or a flipped rotate sign
-        // must break it.
-        //
-        // WHY THESE PARAMETERS, none of them free choices:
-        //   · tilt 0 — the ONLY pose where a map-pitched quad and a viewport one must agree exactly: the ground
-        //     plane is ⊥ the view axis, so `cornerPx · metresPerLogicalPixel` metres projects to exactly
-        //     `cornerPx` logical px. (Same calibration MapPitchedGlyphSizeTiltZeroTests rests on.)
-        //   · road 45° — a sign or composition error is INVISIBLE on a screen-axis-aligned road; this file's own
-        //     sign teeth are at 45° for that reason: a sign measurement at 0° reads a false agreement.
-        //   · icon-rotate 90°, NOT 180° — 180° is its own inverse, so the only value production styles use
-        //     cannot expose a sign error.
-        //   · sprite 'f-glyph' — 'arrow-down' is very nearly centroid-symmetric (0.25 px of 32 from its cell
-        //     centre), so it carries no usable direction signal however far it is rotated.
-        //   · PathUpRender is set to world up by the harness, so the map arm takes SymbolWorldGroundFrame's
-        //     GROUND branch. Without it the arm would still pass at tilt 0 — via the camera-facing fallback,
-        //     which coincides there — while never exercising the branch this tooth exists for.
-        //
-        // THE REFERENCE IS THE VIEWPORT ARM, which shares no code with the map branch: SymbolWorldIsMapPitched
-        // sends the two down mutually exclusive paths. The twins differ in EXACTLY ONE FIELD,
-        // ShapedSymbol.PitchAlignment. A reference drawn from the arm under test cancels the defect it is
-        // meant to expose.
-        //
-        // Two [Test] methods, never one with two clauses — NUnit throws on the first failure, so a second
-        // clause would never run. The COUNT clause is the only one
-        // that can see a uniform scale error (it reads k as k²); the CENTROID clause is the only one that can
-        // see a mirror or a rotation error (a mirror is an isometry, so the count is structurally blind to it).
+        // At tilt 0 the two must render alike. Road 45° and icon-rotate 90° make a sign or order error
+        // visible, 'f-glyph' carries a direction signal, and PathUpRender = world up forces the GROUND branch.
+        // The viewport twin differs only in ShapedSymbol.PitchAlignment. The COUNT test sees a uniform scale
+        // error (as k²); the CENTROID test sees a mirror or rotation error.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>Ink-count agreement bound for the map-vs-viewport icon twins. Same reasoning as
@@ -963,47 +798,14 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // SymbolBearing.MapAlignedSign — the map-BEARING sign, the last of this file's three rotation signs.
-        // It was documented as "not headlessly testable … chosen, not derived … deferred to an eyeball
-        // pass", on the grounds that every headless test runs at bearing 0 where map- and viewport-alignment
-        // coincide. That premise is wrong: a headless camera takes a heading like any other, and the sibling
-        // constant IconRotationRadians — which carried the same "assumed correct" status until it was
-        // rendered at a discriminating angle — turned out to be inverted by exactly 180°. So this renders it.
-        //
-        // ── THE DERIVATION (written from the contract BEFORE the render, per the icon-sign method) ────
-        // SymbolBearing's stated contract: "+1 = a map heading of θ (CW from north) turns map-aligned symbols
-        // by +θ in the screen's (y-up) frame." What SHOULD happen is fixed independently by what
-        // rotation-alignment:map MEANS — the symbol is glued to the map plane, so it turns exactly as the map
-        // turns on screen, no more and no less. Following that through:
-        //   · CameraProperties.Heading is degrees CW from north, and CameraPoseMath derives the camera's
-        //     up-vector from the heading direction in the horizontal plane (at heading 0 the camera sits
-        //     south of the look-at, looking north). So at heading θ, screen-UP is map bearing θ and
-        //     screen-RIGHT is bearing θ+90.
-        //   · A map direction of bearing β therefore lands at screen angle 90° − β + θ, measured CCW from
-        //     screen-right in a y-up frame (check: β = θ+90 → 0°, β = θ → 90°). Map-EAST, β = 90°, lands at
-        //     θ — so raising the heading to θ turns everything drawn on the map by +θ COUNTER-CLOCKWISE on
-        //     screen, and a map-aligned symbol must turn +θ with it.
-        //   · The staging frame the sign feeds is positive-CCW-on-screen. That is MEASURED, not assumed —
-        //     it is what AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen above pins.
-        //   · BillboardRotationRadians hands the quad MapAlignedSign · θ. Matching +θ ⇒ MapAlignedSign = +1.
-        // DERIVED EXPECTATION: at heading 45° the map-aligned icon's ink turns +45° (counter-clockwise on
-        // screen) — the same way, and by the same amount, as the map underneath it.
-        //
-        // ── WHY 45°, AND WHY A CENTROID ──────────────────────────────────────────────────────────────
-        // Same reasons as the icon-rotate tooth above: 0° cannot separate map from viewport alignment at
-        // all, 180° is its own inverse, an axis-aligned bearing cannot separate +θ from −θ, and an ink
-        // BOUNDING BOX is direction-blind while the ink centroid taken about the anchor is exactly
-        // rotation-equivariant.
-        //
-        // ── THE MAP'S OWN TURN, MEASURED RATHER THAN ASSUMED ─────────────────────────────────────────
-        // "The symbol turns +45°" is only half the contract; the other half is "…the same way the map does",
-        // and asserting that against a NUMBER would smuggle the camera derivation in as an assumption. So
-        // two extra arms render a VIEWPORT-aligned probe icon at a deliberately off-centre anchor, placed
-        // due map-EAST of the look-at. Its quad never rotates, so its ink box centre tracks its anchor, and
-        // where that anchor lands on screen IS the camera's rendering of map-east — pure projection, with no
-        // symbol-rotation math in it at all. The tooth then asserts BOTH that the probe swings +45° (the
-        // camera derivation, so a camera-side sign error reports as itself rather than as a symbol bug) and
-        // that the symbol's turn MATCHES the probe's within a few degrees (the contract proper).
+        // SymbolBearing.MapAlignedSign — the map-BEARING sign, rendered at a heading. Non-obvious why: it is +1
+        // because a map-aligned symbol turns exactly as the map turns on screen. At heading θ a map bearing β
+        // lands at screen angle 90° − β + θ (CCW, y-up), so the map turns +θ CCW, and the staging frame is
+        // positive-CCW (AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen pins that).
+        // BillboardRotationRadians passes MapAlignedSign · θ, so at heading 45° the icon's ink must turn +45°.
+        // 45° and the centroid are used for the icon-rotate tooth's reasons. Two probe arms render a
+        // VIEWPORT-aligned icon due map-EAST, whose position is pure projection: the probe must swing +45°, so
+        // a camera-side sign error reports as itself, and the symbol's turn must match the probe's.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         private const float MapBearingToothHeadingDeg = 45f;
@@ -1043,9 +845,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.Greater(unrotated.y, 6f,
                     $"the un-rotated 'F' must carry its ink mass ABOVE the anchor (offset {unrotated} px).");
 
-                // The probe's anchor at heading 0: due map-east, so it must sit to the screen RIGHT. This
-                // also proves the offset actually reached the frame at a usable size, before it is used as
-                // a bearing reference.
+                // At heading 0 the due-east probe must sit to the screen RIGHT, at a usable offset, before it
+                // serves as a bearing reference.
                 float2 mapEastAtNorthUpPx = InkBoxCentreFromViewportCentrePx(mapEastNorthUp);
                 Assert.Greater(mapEastAtNorthUpPx.x, 60f,
                     $"precondition: at heading 0 (north up) an anchor due map-EAST of the look-at must land " +
@@ -1094,9 +895,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                 AssertAnchorIsTheViewportCentre(northUp);
 
-                // The control that makes the tooth above attributable: it shows the 45° turn measured there
-                // comes from the ALIGNMENT MODE and nothing else — not from the camera pose, not from the
-                // world-billboard construction, both of which are identical across these two renders.
+                // The control: with camera pose and billboard construction identical, it attributes the 45°
+                // turn above to the ALIGNMENT MODE alone.
                 AssertRotatedBy(northUp.CentroidFromViewportCentrePx, underBearing.CentroidFromViewportCentrePx,
                     expectedDeg: 0f,
                     "rotation-alignment:viewport must ignore the map bearing entirely — the billboard stays " +
@@ -1126,12 +926,9 @@ namespace MapRenderer.Tests.Text.Placement
             };
         }
 
-        /// <summary>Both sign teeth measure about the symbol's anchor, which this fixture puts at the viewport
-        /// centre: the camera looks straight down at <c>lookAt</c>, and the symbol's single cell sits at the
-        /// path's arc midpoint, which IS <c>lookAt</c> (the path is lookAt ± dir·halfLen and the anchor is
-        /// segment 0 at t = 0.5). Confirmed rather than assumed — the cell is symmetric about the anchor and
-        /// the "F"'s ink box is centred in its cell to within 0.5 px of 32, so on the UN-ROTATED arm the ink
-        /// box centre must land on the anchor.</summary>
+        /// <summary>Both sign teeth measure about the anchor, which sits at the viewport centre: the camera looks
+        /// straight down at <c>lookAt</c>, the path's arc midpoint. The "F"'s ink box is centred in its cell to
+        /// 0.5 px of 32, so on the UN-ROTATED arm the ink box centre must land on the anchor.</summary>
         private static void AssertAnchorIsTheViewportCentre(SymbolInk baseline)
         {
             float2 boxCentreFromAnchor = InkBoxCentreFromViewportCentrePx(baseline);
@@ -1149,11 +946,8 @@ namespace MapRenderer.Tests.Text.Placement
             => ink.CentroidFromViewportCentrePx - ink.CentroidFromInkBoxPx;
 
         /// <summary>Asserts <paramref name="rotated"/> is <paramref name="expectedDeg"/> around from
-        /// <paramref name="reference"/>, positive being counter-clockwise in the analysed buffer (which the
-        /// tangent arm calibrates against a known counter-clockwise turn on the map). The rotation is an
-        /// isometry about the anchor, so the length must survive it too. 15° of slack: the failure modes
-        /// this separates are 90° apart, while rasterizing a rotated shape moves a ~19 px centroid by well
-        /// under a pixel.</summary>
+        /// <paramref name="reference"/>, positive being counter-clockwise as the tangent arm calibrates, and
+        /// that the length survives. 15° of slack: the failure modes are 90° apart.</summary>
         private static void AssertRotatedBy(float2 reference, float2 rotated, float expectedDeg, string because)
         {
             float measuredDeg = SignedRotationDeg(reference, rotated);
@@ -1174,10 +968,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>One icon render — along-line or point — measured on the un-mirrored (on-screen)
         /// framebuffer. Both offsets are in a Y-UP screen frame (x right, y up); screen rows grow downward,
-        /// so the row term is negated on the way in.
-        /// <para>Plain <c>{ get; set; }</c>, not <c>init</c>: MapRenderer.Tests.EditMode has no
-        /// IsExternalInit polyfill of its own — the same call this assembly's other test-owned carriers make
-        /// (see <c>NonMvtDecoderFanOutTests.FixtureTileLayer</c>).</para></summary>
+        /// so the row term is negated on the way in. Plain <c>{ get; set; }</c>, not <c>init</c>: the test
+        /// assembly has no IsExternalInit polyfill.</summary>
         private struct SymbolInk
         {
             /// <summary>Ink bounding-box size in px — the direction-BLIND measure.</summary>
@@ -1202,9 +994,8 @@ namespace MapRenderer.Tests.Text.Placement
             public float2 CentroidFromInkBoxPx { get; set; }
         }
 
-        // Renders ONE along-line icon of sprite `iconImage`, carrying icon-rotate `iconRotateDeg`, on a road
-        // at `lineAngleDeg` (0 = east/screen-horizontal, 90 = north/screen-vertical at heading 0) through the
-        // real SymbolPlacementSystem → Map/Symbol/IconWorld, and measures its on-screen ink.
+        // Renders ONE along-line icon with icon-rotate `iconRotateDeg` on a road at `lineAngleDeg` (0 = east,
+        // 90 = north) through the real icon path, and measures its on-screen ink.
         private static SymbolInk MeasureAlongLineIconInk(SpriteSheet sheet, in SymbolQuad cell,
             string iconImage, float lineAngleDeg, float iconRotateDeg,
             AlignmentMode pitchAlignment = AlignmentMode.Viewport)
@@ -1233,11 +1024,8 @@ namespace MapRenderer.Tests.Text.Placement
             double3 dir = new double3(math.cos(rad), 0.0, math.sin(rad));
             double halfLen = altitude * 0.02;
 
-            // The per-vertex surface normal. Web-Mercator, so up IS (0,1,0). Set UNCONDITIONALLY — it is
-            // unread on the viewport path (so no existing arm moves), and it is what makes a map-pitched arm
-            // take SymbolWorldGroundFrame's GROUND branch rather than its camera-facing fallback. Without it
-            // the map arm would still pass at tilt 0 (the two frames coincide there) while never exercising
-            // the branch the tooth exists for.
+            // Web-Mercator up (0,1,0), set UNCONDITIONALLY: the viewport path ignores it, and it sends a map arm
+            // down the GROUND branch rather than the camera-facing fallback, which coincides at tilt 0.
             var worldUp = new double3(0.0, 1.0, 0.0);
 
             var buffer = new SymbolTileBuffer();
@@ -1294,10 +1082,8 @@ namespace MapRenderer.Tests.Text.Placement
                     out float centroidRow, out float centroidCol, out int ink);
                 Assert.Greater(ink, 200, $"({lineAngleDeg} deg) the icon must render meaningful ink, not a blank frame.");
 
-                // Row/col (top-left origin, rows growing DOWN) → a y-up screen frame about the viewport
-                // centre, which is where this fixture's camera puts the symbol anchor (see the sign tooth's
-                // reference-point precondition, which is what proves it rather than assuming it). Pixel
-                // centres are index+0.5, so the centre of a Size-wide viewport is index (Size−1)/2.
+                // Row/col (rows growing DOWN) → a y-up frame about the viewport centre, where the anchor sits
+                // (AssertAnchorIsTheViewportCentre). Pixel centres are index + 0.5, so the centre is (Size−1)/2.
                 float viewportCentre = (Size - 1) * 0.5f;
                 float2 inkBoxCentre = new float2((minCol + maxCol) * 0.5f, (minRow + maxRow) * 0.5f);
                 var measured = new SymbolInk
@@ -1317,13 +1103,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // Renders ONE POINT icon of sprite `SignToothSprite` in a square cell of `halfExtentPx`, with the
-        // given `rotationAlignment`, under a camera at `headingDeg`, anchored `anchorEastFractionOfAltitude`
-        // of the camera's altitude due map-EAST of the look-at (0 = at the look-at, i.e. the viewport
-        // centre) — through the real SymbolPlacementSystem → Map/Symbol/IconWorld — and measures its
-        // on-screen ink. The along-line sibling above shares everything but the symbol: this one carries a
-        // Layout + AnchorRender (the point path) instead of a PathRender + CurvedGlyphs, and a heading
-        // instead of a road bearing.
+        // Renders ONE POINT icon under a camera at `headingDeg`, anchored `anchorEastFractionOfAltitude` of the
+        // altitude due map-EAST of the look-at, and measures its ink; the point-path sibling of the one above.
         private static SymbolInk MeasurePointIconInk(SpriteSheet sheet, float halfExtentPx,
             float headingDeg, AlignmentMode rotationAlignment, double anchorEastFractionOfAltitude)
         {
@@ -1344,15 +1125,13 @@ namespace MapRenderer.Tests.Text.Placement
             };
             long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14);
 
-            // East = +X in render space (the same convention the along-line road above is built on). The
-            // camera orbits the look-at, so at tilt 0 its height above it is transform.position.y whatever
-            // the heading.
+            // East = +X in render space. The camera orbits the look-at, so at tilt 0 its height is
+            // transform.position.y whatever the heading.
             double altitude = uCam.transform.position.y;
             SymbolQuad cell = SignToothCell(sheet.View, halfExtentPx);
 
-            // The cell's footprint is a deliberately fixed square, not the sprite's own rect, so it carries no
-            // skirt to remove — skirtPx 0 reduces IconQuadLayout.ToLayoutResult's own bounds maths to the
-            // quad's raw min/max corner.
+            // The cell is a fixed square with no skirt, so its bounds are the quad's raw min/max corners
+            // (skirtPx 0 in IconQuadLayout.ToLayoutResult terms).
             var cellQuads = new List<SymbolQuad> { cell };
             float2 cellBoundsMin = math.min(cell.TopLeft, cell.BottomRight);
             float2 cellBoundsMax = math.max(cell.TopLeft, cell.BottomRight);
@@ -1512,25 +1291,14 @@ namespace MapRenderer.Tests.Text.Placement
         }
     }
 
-    // Unity EditMode only — off-screen GPU renders of the REAL icon draw path. NOT registered in
-    // core-tests.csproj (needs Camera/RenderTexture/Material/Texture2D/SpriteSheet).
+    // Unity EditMode only. Icon RESAMPLING teeth: a phase SWEEP, because a one-frame render cannot see "the
+    // render changes when it should not".
     //
-    // These are the teeth the icon path was owed for RESAMPLING — how the sprite sheet's texels are mapped onto
-    // device pixels. Every pre-existing icon test renders ONE static frame, so none of them can see a defect
-    // whose whole signature is "the render changes when it should not". That is why the bug below shipped.
-    //
-    // The reported symptom was "pixels inside the icon warp while zooming/panning". The geometry cannot produce
-    // that: BillboardMath.BuildWorldQuad gives all four corners the SAME bitwise anchorLocal plus static
-    // per-corner Offset, so a quad is RIGID in screen space — an anchor precision error TRANSLATES an icon and
-    // can never deform its interior. Interior deformation therefore has to be resampling, and it was:
-    // SpriteSheet bound the sheet with FilterMode.Point.
-    //
-    // Nearest-neighbour is exact only at INTEGER magnification. An icon's magnification is
-    // `iconSize * dpr / pixelRatio` — the sheet is always fetched @1x and dpr is Screen.dpi/160, so it is
-    // essentially never an integer. At a non-integer magnification each source texel covers either N or N+1
-    // device pixels, and WHICH depends on the quad's sub-pixel phase, so panning re-quantises the icon's
-    // interior every frame. Note the trap in that: at exactly 1x, Point sampling is a pixel-perfect blit, so the
-    // defect is INVISIBLE at the one setting anyone would eyeball first.
+    // Non-obvious why: all four corners share one bitwise anchorLocal, so a quad is RIGID on screen and an
+    // anchor error only translates it; interior warping is resampling. Nearest-neighbour is exact only at
+    // INTEGER magnification (iconSize · dpr / pixelRatio, almost never an integer), and otherwise each texel
+    // covers N or N+1 pixels by sub-pixel phase, so panning re-quantises the interior. At exactly 1× it is a
+    // pixel-perfect blit, so the defect is invisible where it is easiest to look.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolIconResamplingTests — Unity EditMode only
@@ -1543,16 +1311,10 @@ namespace MapRenderer.Tests.Text.Placement
         private const int SheetSize = 64;
 
         /// <summary>
-        /// The magnification (device px per source texel) the NON-sweeping teeth render at. Deliberately
-        /// NON-INTEGER — at an integer magnification nearest-neighbour is exact and the interior-resampling
-        /// defect does not exist. 2.5 is chosen over, say, 1.4 because it separates the two filters
-        /// furthest: see <see cref="MaxCentroidDeviationPx"/>.
-        ///
-        /// <para>The sweeping teeth take their magnification as a <c>[TestCase]</c> parameter instead: the
-        /// whole defect family is "which magnification you happen to be at", so a tooth pinned at a single
-        /// one is weak. Tooth 1 sweeps only non-integer values (its defect is absent at integer
-        /// magnification); <see cref="IconSilhouette_TracksSubPixelPhase_ForAFullBleedSprite"/> deliberately
-        /// INCLUDES 1.0, where tooth 1 is vacuous and the silhouette defect is at its sharpest.</para>
+        /// The magnification (device px per source texel) the NON-sweeping teeth render at: NON-INTEGER,
+        /// because an integer one hides the defect, and 2.5 separates the filters furthest (see
+        /// <see cref="MaxCentroidDeviationPx"/>). The sweeping teeth take it as a <c>[TestCase]</c>;
+        /// <see cref="IconSilhouette_TracksSubPixelPhase_ForAFullBleedSprite"/> includes 1.0.
         /// </summary>
         private const float Magnification = 2.5f;
 
@@ -1562,14 +1324,9 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>
         /// The PRIMARY tooth, in device px: the least the ink is allowed to advance for one
-        /// <see cref="PhaseStepPx"/> of quad shift. Set to half the ideal step, so it states "the icon moves
-        /// when the map moves" with a wide tolerance on HOW MUCH.
-        ///
-        /// <para>Chosen over a deviation-from-ramp bound (kept below as a secondary check) because it
-        /// separates the two filters by an order of magnitude rather than a factor of 1.4. Nearest-neighbour
-        /// does not move the ink AT ALL until the phase crosses a texel boundary, so its worst step is
-        /// exactly <c>0.000</c> px — measured, against the un-fixed tree: the centroid sat on 129.000 px for
-        /// three consecutive phases. Bilinear advances ~0.125 px every step.</para>
+        /// <see cref="PhaseStepPx"/> of quad shift: half the ideal step. Non-obvious why: it is primary because
+        /// nearest-neighbour holds the ink still until a texel boundary (a step of 0.000 px), while bilinear
+        /// advances ~0.125 px each step, an order of magnitude apart.
         /// </summary>
         private const float MinCentroidStepPx = 0.5f * PhaseStepPx;
 
@@ -1582,31 +1339,14 @@ namespace MapRenderer.Tests.Text.Placement
         private const float MaxCentroidDeviationPx = 0.15f;
 
         /// <summary>
-        /// The silhouette tooth's bounds, device px: every step of the sweep must fall between a QUARTER and
-        /// THREE TIMES the ideal <see cref="PhaseStepPx"/>. Two-sided, and deliberately NOT
-        /// <see cref="MinCentroidStepPx"/> — that bound is calibrated for tooth 1's probe, and cannot be
-        /// reused here for a structural reason:
+        /// The silhouette tooth's bounds, device px: every sweep step must fall between a QUARTER and THREE
+        /// TIMES the ideal <see cref="PhaseStepPx"/>. A STAIRCASE holds still (0.000 px) and then jumps a whole
+        /// pixel (8× the ideal), so it fails both sides.
         ///
-        /// <para>Tooth 1's ink IS its ramp (a one-texel stripe), so its centroid tracks the quad's phase
-        /// almost exactly — measured min step 0.092–0.117 px against an ideal 0.125. A full-bleed sprite's
-        /// ink is a SLAB whose only moving parts are the two one-texel ramps at its edges, and the readback
-        /// does NOT weight those ramps by their coverage. The project renders in Linear colour space into an
-        /// sRGB ARGB32 target, so the measured <c>ink = (255 - r)/255</c> is a NONLINEAR function of alpha:
-        /// a half-covered pixel (alpha 0.5) reads back ink ≈ 0.265, not 0.5 — the same transfer curve
-        /// <see cref="IconInk_RendersAtItsNominalSize_NotTheInsetMagnifiedSize"/>'s measurement is
-        /// deliberately built to be immune to (it uses symmetric centroids for exactly this reason). The
-        /// curve strongly de-weights every mid-ramp pixel, which sharpens the effective ink profile back
-        /// toward the hard edge the border exists to soften, so the centroid's per-step advance is uneven
-        /// even though its MEAN rate is exact. Measured after the fix: min 0.062–0.106, max 0.171–0.218
-        /// across magnifications 1.0/1.37/2.5/4.0. The residual scales with a ONE-texel ramp being only
-        /// <c>M</c> device px wide; a wider border would smooth it, and that is deliberately out of scope.</para>
-        ///
-        /// <para>What the tooth must discriminate is the STAIRCASE, and a staircase's signature is
-        /// two-sided: the centroid holds EXACTLY still and then jumps a WHOLE pixel. Measured against the
-        /// un-fixed tree, at every magnification: min step exactly <c>0.0000</c> px (fails the lower bound
-        /// outright) and max step exactly <c>1.0000</c> px, 8× the ideal (fails the upper bound by 2.7×).
-        /// Both bounds therefore separate fixed from un-fixed absolutely, with ~1.7–2.0× margin on the
-        /// passing side.</para>
+        /// <para>Non-obvious why: <see cref="MinCentroidStepPx"/> does not fit here. A full-bleed sprite's ink
+        /// is a slab whose only moving parts are its two one-texel edge ramps, and the sRGB readback reads
+        /// alpha 0.5 as ink ≈ 0.265. That de-weights mid-ramp pixels, so the steps are uneven (0.062–0.218 px)
+        /// even though their mean is exact. A wider border would smooth it.</para>
         /// </summary>
         private const float MinSilhouetteStepPx = 0.25f * PhaseStepPx;
 
@@ -1623,9 +1363,8 @@ namespace MapRenderer.Tests.Text.Placement
         [TestCase(3.25f)]
         public void IconInterior_TracksSubPixelPhaseSmoothly_DoesNotSnapToTheTexelGrid(float magnification)
         {
-            // A ONE-TEXEL-wide opaque column is the sharpest probe available: at a non-integer magnification
-            // nearest-neighbour renders it as either floor(M) or floor(M)+1 device px wide depending on
-            // phase, so its centroid can only sit on the destination pixel grid.
+            // A ONE-TEXEL opaque column is the sharpest probe: nearest-neighbour renders it floor(M) or
+            // floor(M)+1 px wide by phase, so its centroid can only sit on the pixel grid.
             var index = SpriteIndex.Parse(
                 $"{{\"stripe\":{{\"x\":0,\"y\":0,\"width\":{SheetSize},\"height\":{SheetSize},\"pixelRatio\":1}}}}");
             using var sheet = new SpriteSheet(BuildStripeSheetPng(), index);
@@ -1650,9 +1389,8 @@ namespace MapRenderer.Tests.Text.Placement
                     centroids[i] = RenderAndMeasureInkCentroidX(sheet, glyphAtlas, quad, "stripe");
                 }
 
-                // Ideal: the ink's centroid advances by exactly the phase shift. Fit is not needed — the
-                // slope is known to be 1 — so compare against the ramp anchored at the sweep's own mean,
-                // which removes the arbitrary absolute position of the anchor's projection.
+                // Ideal: the centroid advances by the phase shift (slope 1), compared against the ramp through
+                // the sweep's own mean, which removes the anchor's absolute position.
                 float meanCentroid = 0f, meanPhase = 0f;
                 for (int i = 0; i < phasesPx.Length; i++) { meanCentroid += centroids[i]; meanPhase += phasesPx[i]; }
                 meanCentroid /= phasesPx.Length;
@@ -1675,9 +1413,8 @@ namespace MapRenderer.Tests.Text.Placement
                     if (i > 0 && step < smallestStep) { smallestStep = step; smallestStepAt = i; }
                 }
 
-                // Record the sweep unconditionally, not only on failure: the PASSING margins are what tell
-                // the next person whether these bounds are comfortable or a flake waiting for a different
-                // GPU, and they cost nothing to keep in the results XML.
+                // Record the sweep always: the PASSING margins show whether the bounds are comfortable or a flake
+                // waiting for a different GPU.
                 TestContext.Out.WriteLine($"phase sweep (magnification {magnification}):{report}");
                 TestContext.Out.WriteLine(
                     $"  smallest step {smallestStep:F4}px (bound {MinCentroidStepPx}, ideal {PhaseStepPx}) | " +
@@ -1701,17 +1438,9 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // Tooth 2 — the atlas-bleed guard.
-        //
-        // This one is GREEN under nearest-neighbour and exists to fence the FIX: a bare switch to bilinear
-        // over an edge-to-edge UV rect in a PACKED sheet turns it RED, because a tap at the rect's boundary
-        // blends the sprite packed next door.
-        //
-        // What keeps it green is now the ONE-TEXEL TRANSPARENT BORDER SpriteSheet's repack lays around every
-        // sprite: the sprites are physically separated in the bound texture, so an edge tap reaches the
-        // border (this sprite's own colour at alpha 0) rather than the neighbour. That is a better reason
-        // than the half-texel inset it replaced — the inset merely kept the sampler away from the seam, at
-        // the cost of never drawing the sprite's outer half-texel.
+        // Tooth 2 — the atlas-bleed guard. Non-obvious why: bilinear over an edge-to-edge rect in a PACKED
+        // sheet blends the neighbouring sprite. SpriteSheet's repack lays a ONE-TEXEL TRANSPARENT BORDER round
+        // every sprite, so an edge tap reaches this sprite's own colour at alpha 0, not the neighbour.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         [Test]
@@ -1750,29 +1479,13 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // Tooth U1 — the SILHOUETTE, for a sprite with no transparent margin of its own.
+        // Tooth U1 — the SILHOUETTE of a sprite whose ink touches all four rect edges (most of the shipped sheet).
         //
-        // Nothing above covers the actual reported defect. Tooth 1 probes a one-texel stripe INSIDE a sprite
-        // that carries a transparent margin, so it can only see interior resampling. This one probes the
-        // OUTER boundary of a sprite whose ink touches all four rect edges — which is what 228 of the 264
-        // sprites in the shipped style's sheet look like.
-        //
-        // For such a sprite the silhouette IS the quad's polygon edge. MSAA is off project-wide
-        // (Assets/Settings/RPAsset.asset m_MSAA: 1, ProjectSettings/QualitySettings.asset antiAliasing: 0),
-        // so a pixel is covered iff its centre falls inside the quad — one binary sample. Every interior
-        // texel being uniformly opaque, the ink is exactly the covered rectangle, its centroid is that
-        // rectangle's centre, and it MOVES ONLY WHEN AN EDGE CROSSES A PIXEL CENTRE: several 0.000 steps,
-        // then a whole-pixel jump. No sampler setting can help, because bilinear can only soften an edge it
-        // has a transparent texel to ramp into.
-        //
-        // The fix is content: a one-texel transparent border in the sheet turns the silhouette into a
-        // texture ALPHA edge, and the quad grows by exactly that border so the ramp is actually rasterized.
-        // A "pad the atlas but leave the quad nominal" implementation stays RED here — nothing draws the
-        // skirt, so no ramp reaches the framebuffer.
-        //
-        // Run at magnification 1.0 as well, where tooth 1 is vacuous (nearest-neighbour is a pixel-perfect
-        // blit, no filter defect exists) and this one is at its sharpest — the polygon edge still snaps.
-        // That case alone proves the two defects are different.
+        // Non-obvious why: MSAA is off project-wide (RPAsset m_MSAA: 1, QualitySettings antiAliasing: 0), so the
+        // silhouette IS the quad's polygon edge and only moves when an edge crosses a pixel centre; no sampler
+        // can soften it. A one-texel transparent border makes it a texture ALPHA edge, and the quad grows by
+        // that border so the ramp rasterizes; a padded atlas with a nominal quad draws no ramp. At 1.0, where
+        // tooth 1 is vacuous, the polygon edge still snaps, so the two defects are distinct.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         [TestCase(1.0f)]
@@ -1844,29 +1557,14 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // Tooth U2 — the ink SIZE must be nominal.
-        //
-        // The half-texel UV inset made a sprite's content render W/(W-1) larger than its quad implies
-        // (+14.3% at an 8px rect). Retiring it is half the fix; the other half is that the quad grows by
-        // exactly the border, so the ink lands at its nominal size. This tooth fails in BOTH directions,
-        // because the border can be half-applied either way round — and note that neither shallow
-        // implementation is the "shrink" the naming might suggest:
-        //   * quad grown, UV left on the content → 8 content texels stretched over the 80px padded quad,
-        //     10 px/texel: 50.0 px. The icon GREW.
-        //   * atlas padded, quad left nominal    → 10 padded texels squeezed into the 64px nominal quad,
-        //     6.4 px/texel: 32.0 px. The icon SHRANK (and the skirt is never rasterized — U1 catches that
-        //     one too).
-        //   * the retired inset still applied    → 7 texels over 64px, 9.143 px/texel: 45.714 px.
-        //
-        // MEASUREMENT — NOT a coverage-threshold width. The readback is gamma-encoded (the
-        // project renders in Linear colour space into an sRGB ARGB32 target), so a "50% darkness" crossing
-        // does NOT sit at 50% coverage: it sits at alpha ≈ 0.79, which pulls BOTH edges inward by a
-        // magnification-proportional amount comparable to the whole signal. Instead the fixture carries two
-        // one-texel bars near its edges and the tooth measures the DISTANCE BETWEEN THEIR INK CENTROIDS.
-        // Each bar's rendered profile is symmetric about the bar's centre, and any monotone transfer curve
-        // applied to a symmetric profile leaves it symmetric — so each centroid is transfer-independent, and
-        // so is their separation. It is also a direct scale measurement: the separation is a fixed number of
-        // TEXELS, so it reads back exactly `texels × devicePxPerTexel`.
+        // Tooth U2 — the ink SIZE must be nominal, and it fails both ways a border can be half-applied:
+        //   * quad grown, UV left on the content → 8 texels over the 80 px quad: 50.0 px (GREW).
+        //   * atlas padded, quad left nominal    → 10 texels in the 64 px quad: 32.0 px (SHRANK).
+        //   * a half-texel UV inset              → 7 texels over 64 px: 45.714 px (W/(W-1) larger).
+        // Non-obvious why: the sRGB readback puts "50% darkness" at alpha ≈ 0.79, which moves both edges by about
+        // the whole signal, so this measures bar centroids, not a threshold width. Each one-texel bar's profile is
+        // symmetric, so its centroid survives any monotone transfer curve, and the separation reads back
+        // `texels × devicePxPerTexel`.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>Sheet-rect size of the U2 fixture sprite. 8 px is where the retired inset's W/(W-1)
@@ -1912,10 +1610,8 @@ namespace MapRenderer.Tests.Text.Placement
                 // Where the retired half-texel inset put it: the quad's 64 px spanned only W-1 == 7 texels,
                 // so a texel drew at 64/7 px and the bars sat 5 × 64/7 == 45.71 px apart.
                 const float insetMagnified = nominal * InsetProbeSpriteSize / (InsetProbeSpriteSize - 1f);
-                // Where "grow the quad but leave the UV on the content" would put it. Note the direction:
-                // that implementation makes the icon LARGER, not smaller. The quad still grows to the padded
-                // 10 texels' worth of px (80), but only the 8 CONTENT texels are sampled across it, so a
-                // texel draws at 80/8 == 10 px and the bars sit 5 × 10 == 50 px apart.
+                // "Grow the quad but leave the UV on the content" makes the icon LARGER: 8 texels over 80 px
+                // draw at 10 px each, so the bars sit 5 × 10 == 50 px apart.
                 const float uvNotWidened =
                     nominal * (InsetProbeSpriteSize + 2f) / InsetProbeSpriteSize;
                 // …and the other way round — "pad the atlas but leave the quad nominal": the 10 padded
@@ -2004,10 +1700,8 @@ namespace MapRenderer.Tests.Text.Placement
         /// <summary>
         /// The U2 fixture: an 8×8 sprite at (0,0) that is transparent except for two ONE-TEXEL opaque black
         /// bars at texel columns <see cref="InsetProbeLeftBarTexel"/> and
-        /// <see cref="InsetProbeRightBarTexel"/>, inset one row top and bottom so the sprite carries a
-        /// margin on every side. Two narrow bars rather than one solid block on purpose: their centroids are
-        /// symmetric (hence transfer-curve-independent) and their separation is a fixed count of TEXELS, so
-        /// the render reads back the drawn texel size directly.
+        /// <see cref="InsetProbeRightBarTexel"/>, inset one row top and bottom. Two bars, not a block: their
+        /// symmetric centroids ignore the transfer curve, and their TEXEL separation reads back the texel size.
         /// </summary>
         private static byte[] BuildTwoBarSheetPng()
         {
@@ -2121,11 +1815,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>
         /// Renders the two-bar fixture and returns the device-px distance between the two bars' ink
-        /// centroids. Each bar's rendered profile is symmetric about the bar's own centre, and a monotone
-        /// transfer curve on the readback maps a symmetric profile to a symmetric profile — so both centroids
-        /// (and therefore the separation) are independent of whether the framebuffer is gamma-encoded. The
-        /// split point is the midpoint of the ink's total extent, which sits in the wide transparent gutter
-        /// between the bars.
+        /// centroids, which a gamma-encoded framebuffer does not move. The bars are split at the midpoint of
+        /// the ink's extent, in the transparent gutter between them.
         /// </summary>
         private static float RenderAndMeasureBarSeparationPx(
             SpriteSheet sheet, GlyphAtlasTexture glyphAtlas, in SymbolQuad quad, string iconName)
@@ -2187,9 +1878,8 @@ namespace MapRenderer.Tests.Text.Placement
                 new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 },
                 zoom: 8.0, heading: 0.0, tilt: 0.0));
 
-            // The sweep converts a logical-px icon-offset into an exact DEVICE-px phase, which only holds at
-            // dpr 1. Assert it rather than assume it: a fixture default of 2 would halve every phase step and
-            // quietly weaken the tooth into a sweep of half a pixel.
+            // A logical-px icon-offset is an exact DEVICE-px phase only at dpr 1; at dpr 2 the sweep would
+            // quietly shrink to half a pixel.
             Assert.AreEqual(1.0, mapCamera.DevicePixelRatio, 1e-9,
                 "this fixture converts logical px to device px 1:1 — it requires dpr 1.");
 
@@ -2248,16 +1938,12 @@ namespace MapRenderer.Tests.Text.Placement
     // Unity EditMode only — an off-screen GPU render of the REAL text draw path. NOT registered in
     // core-tests.csproj (needs Camera/RenderTexture/Material/Texture2D).
     //
-    // The teeth the TEXT path was owed for sub-pixel stability, the sibling of SymbolIconResamplingTests.
-    // Every other text render fixture draws ONE static frame, so none of them can see a defect whose whole
-    // signature is "the render changes when it should not". That is why the regression below shipped.
+    // TEXT sub-pixel stability teeth, the sibling of SymbolIconResamplingTests: a phase sweep, which a
+    // one-frame render cannot replace.
     //
-    // MSAA is off project-wide (Assets/Settings/RPAsset.asset m_MSAA: 1, ProjectSettings/QualitySettings.asset
-    // antiAliasing: 0), so the SDF fragment's own coverage ramp is the ONLY antialiasing text has. A linear
-    // ramp of exactly ONE device pixel is the unique width whose sampled ink is invariant to sub-pixel phase:
-    // its integer shifts are a partition of unity, so the ink a stroke deposits is the same wherever the pixel
-    // grid falls. Narrow the ramp and the grid starts to matter — the ink freezes for several sub-pixel steps
-    // and then jumps, which on screen is a label whose glyphs morph as the map pans.
+    // Non-obvious why: MSAA is off project-wide, so the SDF coverage ramp is text's only AA. A linear ramp of
+    // exactly ONE device pixel is the unique width whose integer shifts partition unity, so a stroke's ink is
+    // phase-invariant. A narrower ramp freezes and then jumps, so glyphs morph as the map pans.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolTextResamplingTests — Unity EditMode only
@@ -2385,10 +2071,8 @@ namespace MapRenderer.Tests.Text.Placement
         /// <summary>
         /// A synthetic glyph whose field is an EXACT linear ramp in x: a vertical stem
         /// <see cref="ProbeStemPx"/> texels wide, centred in a <see cref="ProbeCellPx"/> cell, every row
-        /// identical. The shipped fragment recovers a signed device-px distance as
-        /// <c>(sample - iso) * screenPxRange</c>, so authoring the field with the matching slope makes the
-        /// rendered edge position analytic — and a stem is horizontally symmetric, which is what keeps the
-        /// ink centroid independent of the readback's transfer curve.
+        /// identical. The fragment reads distance as <c>(sample - iso) * screenPxRange</c>, so the matching
+        /// slope makes the edge analytic, and the symmetric stem keeps the centroid off the transfer curve.
         /// </summary>
         private static SdfGlyph BuildStemGlyph()
         {
@@ -2537,9 +2221,8 @@ namespace MapRenderer.Tests.Text.Placement
                 new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 },
                 zoom: 8.0, heading: 0.0, tilt: 0.0));
 
-            // The sweep converts a logical-px text-offset into an exact DEVICE-px phase, which only holds at
-            // dpr 1. Assert it rather than assume it: a fixture default of 2 would halve every phase step and
-            // quietly weaken the tooth into a sweep of half a pixel.
+            // A logical-px text-offset is an exact DEVICE-px phase only at dpr 1; at dpr 2 the sweep would
+            // quietly shrink to half a pixel.
             Assert.AreEqual(1.0, mapCamera.DevicePixelRatio, 1e-9,
                 "this fixture converts logical px to device px 1:1 — it requires dpr 1.");
 

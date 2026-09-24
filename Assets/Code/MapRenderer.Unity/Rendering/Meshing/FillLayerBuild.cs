@@ -78,9 +78,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 return false;
             }
 
-            // StyledFillTileBuilder.ScheduleWrite is NOT self-guarding — it allocates and returns
-            // IsCreated == true unconditionally, so this empty check must stay here (unlike
-            // FillExtrusionLayerBuild's own arm, self-guarding by design).
+            // StyledFillTileBuilder.ScheduleWrite is not self-guarding (it always allocates and returns
+            // IsCreated == true), so this empty check must stay here.
             if (_measure.TileVertices.Length == 0 || _measure.TriangleIndices.Length == 0)
                 return false;
 
@@ -100,9 +99,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (_disposed) return;
             _disposed = true;
 
-            // _write completes and frees FIRST: its job reads _measure's buffers (ScheduleWrite is called
-            // with _measure as an input), so disposing _measure first would free those buffers while the
-            // write job could still be in flight — ILayerMeshBuild.Dispose's own documented order.
+            // _write completes and frees FIRST, because its in-flight job reads _measure's buffers
+            // (ILayerMeshBuild.Dispose's order).
             _write.Dispose();
             _measure.Dispose();
             _input.RingVisitOrder.Dispose();

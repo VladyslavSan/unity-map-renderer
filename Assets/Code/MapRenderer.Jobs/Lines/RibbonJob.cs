@@ -7,20 +7,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// Burst-compiled 3D ribbon builder. It consumes an <b>already-projected</b> centerline
-    /// (origin-relative render-space <c>double3</c> points) plus a parallel per-point surface <c>up</c>, and
-    /// emits the extruded-ribbon topology directly in 3D. Because the projection is applied BEFORE the job,
-    /// this job carries no <c>TProj</c> generic and no <c>RegisterGenericJobType</c> — one code path serves
-    /// every projection (planar or curved, either handedness).
-    ///
-    /// <para>Join (miter / bevel / round), cap (butt / square / round) and index topology are all built from
-    /// first principles: the per-segment extrusion direction is
-    /// <c>across = normalize(cross(along, up))</c> — tied to the SAME <c>up</c> the centerline was projected with,
-    /// so ribbon winding is uniform across projections with no per-projection flip. OUTPUT WINDING: CCW —
-    /// the pipeline's single canonical winding, reversed once to Unity-front at the mesh-write boundary for
-    /// stock Cull Back, and pinned by <c>GlobeLineWindingTests</c>. Round arcs are swept in the local
-    /// tangent-plane basis
-    /// (<c>cos·e0 + sin·e1</c>) — an equal-angle sweep generalised to a curved surface.</para>
+    /// Burst-compiled 3D ribbon builder over an already-projected, origin-relative centerline plus per-point
+    /// surface <c>up</c>, so one code path serves every projection. Joins, caps and indices extrude along
+    /// <c>across = normalize(cross(along, up))</c>, which keeps winding uniform across projections. Output
+    /// winding is CCW (pinned by <c>GlobeLineWindingTests</c>). Round arcs sweep in the local tangent plane.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct RibbonJob : IJob
@@ -75,9 +65,8 @@ namespace MapRenderer.Jobs.Lines
             if (pointCount < 2) return 0;
             int rs = roundSegments < 1 ? 1 : roundSegments;
             int n = pointCount;
-            // Each round cap emits one extra co-located seed vertex (EmitStartCap/EmitEndCap):
-            // start = pivot + rs arc + seed + 2 butts; end = pivot + rs arc + seed.
-            // No extra TRIANGLES — MaxIndexCount is unchanged.
+            // A round cap adds one co-located seed vertex but no triangle: start = pivot + rs arc + seed +
+            // 2 butts; end = pivot + rs arc + seed.
             int startCap = rs + 4;
             int perJoin  = rs + 3;
             int joins    = n - 2 < 0 ? 0 : n - 2;
@@ -101,9 +90,7 @@ namespace MapRenderer.Jobs.Lines
         }
 
         // ── IJob ──────────────────────────────────────────────────────────────────────────────
-        // The working buffers (pts/ups/along/cumDist) are LOCALS, not job fields: the safety system validates
-        // every NativeContainer FIELD at schedule time, so a default field would throw. Allocator.Temp is
-        // off-main-thread safe on a worker.
+        // The working buffers are Temp LOCALS: the safety system rejects a default container FIELD at schedule.
         public void Execute()
         {
             OutVertexCount[0] = 0;
@@ -163,16 +150,12 @@ namespace MapRenderer.Jobs.Lines
                     double3 n1 = Across(along[seg],     upJ);  // incoming segment across, at the join point's up
                     double3 n2 = Across(along[seg + 1], upJ);  // outgoing segment across, same up
 
-                    // Left turn ⇔ the segment direction rotates left about the surface up. Mapping flat 2D
-                    // (x,y)→3D (x,0,y), the planar cross product's z equals −dot(cross(in,out), up), so the
-                    // left-turn test is the NEGATIVE dot. This predicate says only which way the path turns;
-                    // which side is convex is EmitBevelJoin/EmitRoundJoin's business.
+                    // Non-obvious why: the test is dot < 0, because with 2D (x,y) mapped to 3D (x,0,y) the planar
+                    // cross product's z equals −dot(cross(in,out), up). The emitters decide which side is convex.
                     bool leftTurn = math.dot(math.cross(along[seg], along[seg + 1]), upJ) < 0.0;
 
-                    // A Round join whose corner is shallow enough (f ≤ roundLimit) collapses to the miter
-                    // path instead of a fan, and that collapsed miter is STILL subject to miterLimit —
-                    // roundLimit/miterLimit are independently style-settable with no cross-clamp, so the
-                    // cascade must be round→miter→bevel, not round→(unbounded)miter.
+                    // A shallow Round join (f ≤ roundLimit) collapses to a miter that is still subject to
+                    // miterLimit, because the style sets the two limits independently: round→miter→bevel.
                     bool roundCollapsedToMiter = Join == JoinType.Round && NeedsMiter(n1, n2, roundLimit);
                     bool bevel = (Join == JoinType.Bevel) ||
                                  (Join == JoinType.Miter && NeedsBevel(n1, n2, miterLimit)) ||
@@ -368,9 +351,8 @@ namespace MapRenderer.Jobs.Lines
             double3 arcStart = leftTurn ? -n1 : n1;
             double3 arcEnd   = leftTurn ? -n2 : n2;
 
-            // Sweep the convex arc in the local tangent-plane basis (e0 = arcStart, e1 ⊥ e0 in-plane). The
-            // signed angle to arcEnd is measured in THIS basis, so the e1-sign is self-cancelling and the
-            // intermediate directions are basis-independent.
+            // Sweep the convex arc in the tangent-plane basis (e0 = arcStart, e1 ⊥ e0); the sweep angle is
+            // measured in the same basis, so the sign of e1 cancels out.
             double3 e0 = arcStart;
             double3 e1 = math.normalize(math.cross(up, e0));
             double  sweep = math.atan2(math.dot(arcEnd, e1), math.dot(arcEnd, e0));
@@ -456,10 +438,8 @@ namespace MapRenderer.Jobs.Lines
                         AddVertex(ref v, MakeVertex(p, dir, up, dist, +1f));
                     }
 
-                    // Fan seed: geometrically identical to rightButt but tagged +1. Seeding the fan from
-                    // rightButt itself would give the seam triangle a side +1 → −1 edge, passing through 0
-                    // at its midpoint, so anything keyed on |side| reads that arc segment as deep interior.
-                    // Emitted BEFORE the two butts, so Execute's verts[v-2]=left/verts[v-1]=right holds.
+                    // Non-obvious why: the fan seed sits at rightButt but is tagged +1, so the seam edge has no
+                    // |side| = 0 midpoint. It precedes the butts, so verts[v-2]/[v-1] stay left/right.
                     AddVertex(ref v, MakeVertex(p, -across, up, dist, +1f));  // capSeed
 
                     AddVertex(ref v, MakeVertex(p,  across, up, dist, +1f));  // leftButt  [v-2]
@@ -523,10 +503,8 @@ namespace MapRenderer.Jobs.Lines
                         AddIndex(ref idx, prevFanIdx);
                         prevFanIdx = fanIdx;
                     }
-                    // Closing-triangle seed: geometrically identical to rightPrev (this cap's `across` is the
-                    // same n1 the last segment extruded rightPrev with, at :202-206) but tagged +1, so the
-                    // closing triangle's outer edge runs +1 → +1 instead of +1 → −1. rightPrev itself stays
-                    // −1 for the ribbon quad. Same fix as EmitStartCap's capSeed.
+                    // Closing seed: at rightPrev's position but tagged +1, so the outer edge runs +1 → +1;
+                    // rightPrev stays −1 for the ribbon quad. Same reason as EmitStartCap's capSeed.
                     int capSeedIdx = v;
                     AddVertex(ref v, MakeVertex(p, -across, up, dist, +1f));
                     AddIndex(ref idx, centerIdx);

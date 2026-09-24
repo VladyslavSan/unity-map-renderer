@@ -17,9 +17,8 @@ namespace MapRenderer.Core.Expressions.Ops
         {
             _bindings = bindings;
             _body = body;
-            // A let's value depends on whatever its body needs; the body's Kind already folds in the
-            // bindings it references (VarExpression carries the bound expression's Kind). To be safe and
-            // simple we fold all binding kinds in too.
+            // The body's Kind already folds in the bindings it references (via VarExpression); folding in
+            // all binding kinds as well keeps the classification conservative.
             var k = body.Kind;
             foreach (var b in bindings) k = ExpressionKinds.Combine(k, b.Item2.Kind);
             _kind = k;
@@ -30,9 +29,8 @@ namespace MapRenderer.Core.Expressions.Ops
 
         public override Value Evaluate(in EvaluationContext context)
         {
-            // Bindings reference each other / the body via VarExpression, which holds the bound Expression
-            // directly (resolved at parse time), so there is no runtime environment to thread here — the
-            // body simply evaluates and each VarExpression evaluates its captured expression on demand.
+            // VarExpression holds its bound Expression, resolved at parse time, so no runtime environment is
+            // threaded here.
             return _body.Evaluate(context);
         }
     }

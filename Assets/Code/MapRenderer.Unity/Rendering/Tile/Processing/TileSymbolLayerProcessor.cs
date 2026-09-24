@@ -9,38 +9,27 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The <see cref="ITileWorkerThenMainLayerProcessor"/> adapter around one symbol STYLE LAYER's share of
-    /// a symbol tile build — one instance per symbol style layer per (source, tile) build (matching the
-    /// mesh side's per-layer granularity). Parity-safe because
-    /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/> and <see cref="StyledSymbolTileBuilder.Shape"/>
-    /// are already per-layer loops, so N single-layer processors invoked in SLOT order reproduce the
-    /// identical call sequence and symbol order as one N-layer call. Worker step =
-    /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/>; main tail =
-    /// <see cref="StyledSymbolTileBuilder.Shape"/>, appending into the build's SHARED
-    /// <see cref="SymbolTileBuffer"/>. Every processor of one build writes into the SAME instance (the
-    /// pairing-adjacency rule), so <c>SymbolTileStore.CompleteBuild</c> receives one buffer in symbol order,
-    /// with no concat step.
+    /// The <see cref="ITileWorkerThenMainLayerProcessor"/> for one symbol style layer of a (source, tile) build.
+    /// Worker step: <see cref="StyledSymbolTileBuilder.ExtractLayers"/>; main tail:
+    /// <see cref="StyledSymbolTileBuilder.Shape"/>. Both are per-layer loops, so N processors in SLOT order give
+    /// the same symbol order as one N-layer call. Every processor of a build appends to the same shared
+    /// <see cref="SymbolTileBuffer"/>, so <c>SymbolTileStore.CompleteBuild</c> receives one buffer, no concat.
     /// </summary>
     internal sealed class TileSymbolLayerProcessor : ITileWorkerThenMainLayerProcessor
     {
         private readonly StyledSymbolTileBuilder _builder;
-        // Single-element wrappers for ExtractLayers' list-shaped parameters, hoisted ONCE at construction
-        // (main thread, build start), so ProcessOnWorker allocates nothing beyond what ExtractLayers itself
-        // allocates.
+        // Single-element wrappers for ExtractLayers' list parameters, built once at construction, so
+        // ProcessOnWorker allocates nothing beyond what ExtractLayers allocates.
         private readonly SymbolStyle.StyleLayer[] _layerWrapper;
         private readonly int[]                    _materialIndexWrapper;
         private readonly SymbolTileBuffer       _sharedBuffer;
-        // Forwarded verbatim to ExtractLayers' spriteAtlas param (docs/road-shields-design.md): a build's
-        // worker step only ever runs once SymbolSubsystem.SpritesSettled is true — TryBeginBuild PARKS a
-        // build kicked before the sprite fetch settles instead of constructing this processor. Non-null here
-        // whenever the style resolved a sheet; null (and inert — every downstream icon path already guards
-        // on it) for a style with no 'sprite' URL, an absent sheet, or a fetch that never resolved before
-        // SpriteFetchDeadlineSeconds elapsed ("settled" then means "gave up waiting").
+        // Non-local invariant: TryBeginBuild parks a build until SymbolSubsystem.SpritesSettled, so this is
+        // non-null whenever the style resolved a sheet. Null (inert downstream) means no 'sprite' URL, no
+        // sheet, or a fetch past SpriteFetchDeadlineSeconds (docs/road-shields-design.md).
         private readonly SpriteAtlasView _spriteAtlas;
 
-        // Set by ProcessOnWorker; null if the worker step never ran (an earlier processor in the same
-        // dense pass faulted) — CompleteOnMain's no-op path relies on Shape returning early on a null
-        // extraction list.
+        // Null if the worker step never ran (an earlier processor faulted); CompleteOnMain's no-op path
+        // relies on Shape returning early on a null extraction list.
         private List<StyledSymbolTileBuilder.ExtractedLayer> _extracted;
 
         /// <param name="spriteAtlas">Forwarded verbatim to <see cref="StyledSymbolTileBuilder.ExtractLayers"/>;

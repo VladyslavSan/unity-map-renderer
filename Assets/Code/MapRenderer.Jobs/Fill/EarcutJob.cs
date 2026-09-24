@@ -7,39 +7,14 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// Burst job: ear-clipping polygon triangulator over NativeArrays, with the cure → split →
-    /// clean-drop failure cascade.
-    ///
-    /// Input: vertices for ONE polygon (outer + bridged holes packed contiguously), ring metadata
-    /// from <see cref="RingAssemblyJob"/> output.
-    ///
-    /// Output: flat index array written to <see cref="OutIndices"/> starting at
-    /// <see cref="OutIndexOffset"/> (pre-allocated by the pipeline coordinator).
-    ///
-    /// Does NOT reference MapRenderer.Core — keeps System.Math off the Burst path.
-    ///
-    /// Hole sort key: (leftmost-x, then min-y, then ring index) — a total order. Leftmost-x alone
-    /// would leave equal-leftmost-x holes to an unstable sort, breaking determinism.
-    ///
-    /// <b>No real recursion.</b> Burst does not reliably support recursion, so the natural recursive
-    /// formulation of ear-clipping-with-split — <see cref="ProcessRing"/> calling itself (via
-    /// <see cref="TrySplit"/>) on each half — becomes an EXPLICIT stack of pending (start, remaining)
-    /// ring-jobs (the <see cref="GlobeFillSubdivideJob{TProj}"/> pattern): <see cref="TrySplit"/>,
-    /// instead of recursing directly, pushes both halves onto the stack. To preserve the natural call
-    /// order (<c>a</c> fully processed, including any of its OWN nested splits, before <c>c</c>
-    /// starts) via a LIFO stack, the halves are pushed <c>c</c> then <c>a</c>, so <c>a</c> pops next.
-    ///
-    /// <b>Working-buffer capacity.</b> <see cref="Verts"/>/<see cref="Prev"/>/<see cref="Next"/>/
-    /// <see cref="Removed"/>/<see cref="IsBridgeCopy"/>/<see cref="IsEar"/> are fixed-size
-    /// <c>NativeArray</c>s pre-sized to the deterministic merged-ring size PLUS a bounded split
-    /// headroom, capped by <see cref="MaxSplits"/> — a tile-appropriate bound, not a worst-case one.
-    /// <see cref="TrySplit"/> checks remaining capacity before writing a split's two new vertices; if
-    /// the headroom is exhausted it refuses the split and the caller falls through to the clean-drop
-    /// path. <see cref="OutMergedVertexCount"/> reports the ACTUAL final vertex count used, which is
-    /// usually less than the pre-sized capacity, so the coordinator must read it rather than assume.
-    ///
-    /// This job operates on a single polygon's data (outer + holes); the coordinator schedules one
-    /// per polygon.
+    /// Burst ear-clipping triangulator for ONE polygon (outer + bridged holes, ring metadata from
+    /// <see cref="RingAssemblyJob"/>), with the cure → split → clean-drop failure cascade; indices go to
+    /// <see cref="OutIndices"/> at <see cref="OutIndexOffset"/>. It references no MapRenderer.Core type. Holes
+    /// sort by (leftmost-x, min-y, ring index), a total order, for determinism. Burst has no reliable
+    /// recursion, so a split pushes its halves on an explicit stack, <c>c</c> then <c>a</c>, so <c>a</c> ends
+    /// first as in the recursive form. Non-local invariant: the working arrays hold the merged ring plus split
+    /// headroom capped by <see cref="MaxSplits"/>; <see cref="TrySplit"/> refuses past it, and the coordinator
+    /// reads <see cref="OutMergedVertexCount"/> rather than the capacity.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct EarcutJob : IJob
@@ -199,13 +174,10 @@ namespace MapRenderer.Jobs.Fill
             }
 
             // ── Sort holes by (leftmost-x, min-y, original-index) for deterministic bridging.
-            // We sort the SortedHoleCounts array indices. Since caller already provides them sorted,
-            // we just use them in order. The coordinator sorts before scheduling this job.
+            // The coordinator sorts them before scheduling this job, so they are used in order.
 
-            // The deterministic merged-ring size on clean input is outer + Σ(hole + 2 bridge verts) — the
-            // coordinator pre-sizes the scratch NativeArrays to THAT plus a split headroom, and `total`
-            // only ever grows past the base via SplitPolygon, bounded by the array's real Length (the
-            // Verts.Length check in TrySplit — the single source of the capacity bound here).
+            // On clean input the merged ring is outer + Σ(hole + 2 bridge verts); `total` grows past that only
+            // through SplitPolygon, bounded by the Verts.Length check in TrySplit.
             int total = 0;
 
             // ── Insert outer ring, normalised to CCW-on-screen (area2 < 0 in Y-down). ────────
@@ -254,11 +226,8 @@ namespace MapRenderer.Jobs.Fill
                 int holeLM      = HoleLeftmostIndex(holeStart, holeCount);
                 int outerBridge = FindBridgeVertex(holeLM, mergedRingStart, mergedRingCount);
 
-                // The heuristic above picks a good bridge on the common case but is NOT guaranteed
-                // non-crossing for a concave outer. VALIDATE the chosen bridge against BOTH the merged
-                // ring AND this hole's own ring; if it crosses either, or is not locally inside, REPLACE
-                // it with the nearest vertex whose bridge is provably clear. A valid heuristic result is
-                // kept, so only genuinely-crossing bridges change.
+                // The heuristic bridge can cross a concave outer, so validate it against the merged ring and
+                // this hole's ring; a crossing or outside bridge becomes the nearest provably clear vertex.
                 if (!BridgeValid(holeLM, outerBridge, mergedRingStart, mergedRingCount, holeStart, holeCount))
                 {
                     int bestCand = -1;
@@ -300,9 +269,7 @@ namespace MapRenderer.Jobs.Fill
             }
 
             // ── Ear-clipping loop, with a cure → split → clean-drop failure cascade on stall. ──
-            // Bounding-box index over the merged ring, built once so ear tests scan only nearby
-            // vertices — answer-preserving per docs/mesh-triangulation-robustness-design.md.
-            // Allocator.Temp scratch, disposed before Execute returns.
+            // Answer-preserving ear-test grid (docs/mesh-triangulation-robustness-design.md), Temp, disposed here.
             var grid = BuildEarGrid(total);
 
             for (int i = 0; i < total; i++)
@@ -338,12 +305,9 @@ namespace MapRenderer.Jobs.Fill
         // ── Ear-clip one ring to completion ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Ear-clip exactly one ring (walked via Next/Prev from <paramref name="start"/>) to completion:
-        /// normal ear removal, the first-stall full ear-status refresh, then — on a second stall — the
-        /// cure → split → drop cascade. A split hands the two halves off through <paramref name="stack"/>
-        /// instead of recursing, because Burst has no real recursion; this ring's own
-        /// <paramref name="remaining"/> becomes 0 then, and each half emits its own final triangle when
-        /// it is processed.
+        /// Ear-clips one ring from <paramref name="start"/> to completion: ear removal, a full ear-status
+        /// refresh on the first stall, then the cure → split → drop cascade. A split pushes both halves onto
+        /// <paramref name="stack"/> (Burst has no real recursion) and sets <paramref name="remaining"/> to 0.
         /// </summary>
         private void ProcessRing(
             int start, int remaining,
@@ -443,9 +407,8 @@ namespace MapRenderer.Jobs.Fill
                                     break;
                                 }
 
-                                // Genuinely stuck: neither cure nor split could make progress (or the
-                                // Burst split headroom is exhausted). Drop this locus cleanly — no
-                                // triangle folds. ForceClips counts exactly these clean drops.
+                                // Stuck (or split headroom spent): drop this locus cleanly, with no folded
+                                // triangle. ForceClips counts these drops.
                                 forceClipCount++;
                                 remaining = 0;
                                 clippedAny = true;
@@ -571,9 +534,8 @@ namespace MapRenderer.Jobs.Fill
                     {
                         if (!Removed[b] && a != b && IsValidDiagonal(a, b, ringGuardBound))
                         {
-                            // Burst-only capacity guard: SplitPolygon needs 2 fresh scratch slots. Managed
-                            // grows its arrays unboundedly (up to MaxSplits); Burst's NativeArrays are
-                            // fixed-size, so refuse — never overflow — if the pre-sized headroom is spent.
+                            // SplitPolygon needs 2 fresh slots in fixed-size arrays, so refuse the split
+                            // rather than overflow when the headroom is spent.
                             if (total + 2 > Verts.Length) return false;
 
                             splitsUsed++;
@@ -588,9 +550,8 @@ namespace MapRenderer.Jobs.Fill
                             int remA = CountRing(a, remaining + 8);
                             int remC = CountRing(c, remaining + 8);
 
-                            // DFS order parity with managed's EarClipRing(a,remA); EarClipRing(c,remC):
-                            // push c then a, so a (and any of ITS OWN nested splits) pops and fully
-                            // completes before c starts — see class doc.
+                            // Push c then a, so a and its nested splits finish before c starts, as in the
+                            // recursive order.
                             stack.Add(new RingJob { Start = c, Remaining = remC });
                             stack.Add(new RingJob { Start = a, Remaining = remA });
                             return true;
@@ -1040,12 +1001,9 @@ namespace MapRenderer.Jobs.Fill
                    ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0));
         }
 
-        /// <summary>Does the candidate bridge segment (holeLM → cand) properly cross any edge of the ring
-        /// that starts at <paramref name="ringStart"/> and spans <paramref name="ringCount"/> vertices
-        /// via Next[]? Edges incident to holeLM or cand are skipped (shared endpoint, not a crossing).
-        /// Called for BOTH the already-merged ring AND the current hole's own ring (see
-        /// <see cref="BridgeValid"/>) so the accepted bridge is provably non-crossing against every
-        /// existing edge.</summary>
+        /// <summary>Does the bridge (holeLM → cand) properly cross an edge of the ring at
+        /// <paramref name="ringStart"/> (<paramref name="ringCount"/> vertices via Next[])? Edges touching holeLM
+        /// or cand are skipped. <see cref="BridgeValid"/> calls it for the merged ring and the hole's own ring.</summary>
         private bool BridgeCrossesRing(int holeLM, int cand, int ringStart, int ringCount)
         {
             double ax = Verts[holeLM].x, ay = Verts[holeLM].y, bx = Verts[cand].x, by = Verts[cand].y;

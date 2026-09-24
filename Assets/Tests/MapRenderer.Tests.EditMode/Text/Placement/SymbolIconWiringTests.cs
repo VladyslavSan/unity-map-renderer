@@ -1,16 +1,6 @@
-// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (SymbolSlotPresenter creates one,
-// SymbolRenderLayer clones materials). NOT registered in core-tests.csproj.
-//
-// The icon render-integration WIRING tooth (headless proves compile + byte-identical text + the
-// draw-side bind; the on-screen sprite pixels stay eyeball-owed). Three ticks:
-//   1. An icon-bearing batch through SymbolPlacementSystem.Tick with a fixture sprite Texture2D + a
-//      SymbolRenderLayer whose WorldIconMaterial is a real "Map/Symbol/IconWorld" clone — the icon slot mesh
-//      must build non-zero verts, LastQuadCount must include the icon quad, and the icon presenter's BOUND
-//      material's _MainTex must be the sprite texture (GetTexture — no framebuffer readback, no GPU
-//      snapshot needed for this tooth).
-//   2. A TEXT-ONLY batch (no icon symbols, no spriteTexture) must leave the icon presenter HIDDEN and the
-//      text mesh/material path unaffected — the #1-rule parity check.
-//   3. Shader.Find("Map/Symbol/IconWorld") must resolve (the shader actually compiled/imported).
+// Unity EditMode only (a real Camera/Mesh/GameObject/Texture2D); NOT registered in core-tests.csproj. Pins the
+// icon wiring: icon quads reach the icon world mesh with the sprite bound; a text-only batch leaves it hidden.
+// Limitation: no headless test reads the on-screen sprite pixels, so they stay an eyeball check.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -41,9 +31,8 @@ namespace MapRenderer.Tests.Text.Placement
             ]
         }";
 
-        // A throwaway MapMaterialSet built directly from the real committed shaders (Shader.Find) — never
-        // loads/mutates the committed production MapMaterialSet, mirrors how every other
-        // Symbol test builds its material(s) (`new Material(Shader.Find("Map/Symbol/TextWorld"))`).
+        // A throwaway MapMaterialSet built from the committed shaders (Shader.Find). It never loads or
+        // mutates the committed production MapMaterialSet.
         private static MapMaterialSet BuildSettings()
         {
             var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
@@ -194,9 +183,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, SymbolKind.Text),
                     "the text slot must stay hidden — this scene has no text label at all.");
 
-                // The tangent branch is what the shader reads: every emitted corner must carry a non-zero
-                // baked world Tangent and the along-line align flag (bit1). Without them the icon would draw
-                // unrotated on the GPU, which no CPU readback of position alone could detect.
+                // Every corner must carry a non-zero world Tangent and the along-line flag (bit1). Without them
+                // the shader draws the icon unrotated, which a position-only readback cannot detect.
                 WorldMeshReadback.Read(iconMesh, out WorldBillboardVertex[] verts, out _);
                 Assert.AreEqual(anchors.Length * 4, verts.Length);
                 for (int v = 0; v < verts.Length; v++)
@@ -215,9 +203,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── Icon-rotate on the ALONG-LINE path, observed headlessly by mesh readback. Two
-        //    identical layers over the SAME road, one with icon-rotate: 180 — the rotated layer's corner
-        //    offsets must be the exact negation of the unrotated one's, with identical UVs. ──
+        // ── Icon-rotate on the ALONG-LINE path, by mesh readback: icon-rotate 180 negates every corner offset
+        //    of an otherwise identical layer on the SAME road, and leaves the UVs unchanged. ──
         [Test]
         public void AlongLineIconRotate180_NegatesEveryCornerOffset_LeavingUvsUntouched()
         {
@@ -324,9 +311,7 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // ── 1. Icon-bearing batch ──────────────────────────────────────────────────────────────
-                // Icons draw through the WORLD path — the icon quad does not land on
-                // system.IconMesh/renderLayer.IconPresenterVisible (the screen slot/presenter), so this
-                // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
+                // Icons draw through the WORLD path, so this reads the world slot, not the screen slot/presenter.
                 var iconBuffer = MakeIcon(frame.SceneOriginRender);
                 // Duplicate — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,

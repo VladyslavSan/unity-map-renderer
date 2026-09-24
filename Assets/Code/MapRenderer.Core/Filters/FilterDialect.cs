@@ -3,23 +3,11 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Filters
 {
     /// <summary>
-    /// Determines whether a filter <see cref="JsonValue"/> should be treated as a MapLibre expression
-    /// (routed directly to <see cref="Expressions.ExpressionParser"/>) or as a legacy filter (translated
-    /// first by <see cref="LegacyFilterTranslator"/>).
-    ///
-    /// Dialect detection rules (from the public MapLibre Style Spec "Other filter" section):
-    /// <list type="bullet">
-    ///   <item>Non-array → legacy (bare true/false or null); handled before this predicate in CompiledFilter.</item>
-    ///   <item>Empty array or first element non-string → expression (parse error surfaced by ExpressionParser).</item>
-    ///   <item>Operators only valid in legacy syntax (<c>!has</c>, <c>!in</c>, <c>none</c>) → always legacy.</item>
-    ///   <item>Operators only valid in expression syntax (<c>get</c>, <c>!</c>, <c>match</c>, <c>case</c>,
-    ///     math ops, <c>zoom</c>, etc.) → always expression.</item>
-    ///   <item>Overlapping operators (<c>==</c>, <c>!=</c>, <c>&lt;</c>, <c>&lt;=</c>, <c>&gt;</c>,
-    ///     <c>&gt;=</c>, <c>in</c>, <c>has</c>, <c>all</c>, <c>any</c>): disambiguate by operand form —
-    ///     if any child operand is itself an array, it's an expression; otherwise legacy.</item>
-    /// </list>
-    ///
-    /// Clean-room: rule table derived from the public MapLibre Style Spec, not MapLibre source.
+    /// Decides whether a filter <see cref="JsonValue"/> is a MapLibre expression (for
+    /// <see cref="Expressions.ExpressionParser"/>) or a legacy filter (for <see cref="LegacyFilterTranslator"/>),
+    /// per the Style Spec "Other filter" section. An empty array or a non-string head is an expression;
+    /// <c>!has</c>/<c>!in</c>/<c>none</c> are legacy; expression-only operators are expressions. An overlapping
+    /// operator (<c>==</c>, <c>in</c>, <c>has</c>, <c>all</c>, …) is decided by its operand form.
     /// </summary>
     public static class FilterDialect
     {
@@ -48,18 +36,14 @@ namespace MapRenderer.Core.Filters
             if (IsExpressionOnlyOp(op))
                 return true;
 
-            // Overlapping operators: ==, !=, <, <=, >, >=, in, has, all, any
-            // Disambiguate by operand form: if any non-first-element argument is itself an array,
-            // treat it as expression (a bare key string cannot be an array; an expression can be).
-            // For all/any: expression form if every child is itself an array (expression sub-filter).
+            // Overlapping operators (==, !=, <, <=, >, >=, in, has, all, any) disambiguate by operand form:
+            // a bare key string cannot be an array, and an expression operand can.
             if (op == "all" || op == "any")
             {
                 // all/any with no children: ambiguous, treat as expression (no-op AllExpression returns true)
                 if (items.Count == 1) return true;
-                // Legacy: each child is itself a legacy filter array (e.g. ["==","key","val"], ["has","key"]).
-                // Expression: at least one child is an expression (e.g. ["==",["get","k"],val]).
-                // Rule: recursively call IsExpressionFilter on each child. If any child routes as expression,
-                //       the parent all/any is also expression.
+                // Each child is a sub-filter (legacy ["==","key","val"] or expression ["==",["get","k"],val]);
+                // if any child routes as an expression, the parent all/any is an expression too.
                 for (int i = 1; i < items.Count; i++)
                 {
                     if (IsExpressionFilter(items[i])) return true;
@@ -67,9 +51,8 @@ namespace MapRenderer.Core.Filters
                 return false;
             }
 
-            // For ==, !=, <, <=, >, >=: legacy form is ["op", "key", value] (exactly 3 elements,
-            // with arg[0] a bare string key and arg[1] a scalar). Expression form if arg[0] is an array
-            // or arg[1] is an array, or element count != 3.
+            // Comparisons: legacy is ["op", "key", scalar], exactly 3 elements with a bare string key. An array
+            // operand or another element count is an expression.
             if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=")
             {
                 // Must have exactly 2 args (3 elements total) for legacy form.
@@ -79,9 +62,8 @@ namespace MapRenderer.Core.Filters
                 return false; // legacy: ["op","key",value]
             }
 
-            // For "in": legacy form is ["in", key, v1, v2, ...] (3+ elements; key is bare string;
-            // values are scalars). Expression form is ["in", needle, haystackArrayExpr] (exactly 3 elements,
-            // but haystack is an array expression, not a string).
+            // "in": legacy is ["in", key, v1, v2, ...] with a bare string key and scalar values; expression is
+            // ["in", needle, haystack], exactly 3 elements with an array-expression haystack.
             if (op == "in")
             {
                 if (items.Count < 3) return true; // expression parser handles error

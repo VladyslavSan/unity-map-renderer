@@ -1,16 +1,6 @@
-// EditMode only. Reaches the internal FillMeshPipeline.HoleRingComparer via Jobs'
-// InternalsVisibleTo("MapRenderer.Tests.EditMode"). Uses the Recorder-based Is.Not.AllocatingGCMemory() — the
-// only live GC meter in this Mono runner (GC.GetAllocatedBytesForCurrentThread() returns 0 here; see
-// FillMeshBuildBuffersPoolTests). NOT registered in core-tests.csproj (FillMeshPipeline lives in Jobs, which
-// core-tests does not compile).
-//
-// SCOPE OF THIS TOOTH: FillMeshGraph.Schedule cannot be measured at zero either — it
-// still allocates schedule-time managed work per call (the boxed IProjection dispatch switch,
-// JobHandle.CombineDependencies, a ScheduleDispose call per graph node/buffer). So this pins the
-// per-POLYGON win directly at the mechanism: the hole-ring sort now runs in a REUSED NativeArray (off the GC
-// heap) through a struct comparer taken by generic constraint (no boxing) — where the retired code allocated
-// a managed `new int[holeCount]` every polygon (the inline lambda it also dropped was already compiler-cached
-// to one delegate per call, so it never was the per-polygon cost).
+// EditMode only: FillMeshPipeline.HoleRingComparer is internal to Jobs, and Is.Not.AllocatingGCMemory() is
+// this runner's only live GC meter. Limitation: FillMeshGraph.Schedule allocates per call, so this pins the
+// per-polygon hole-ring sort alone — a reused NativeArray sorted through a struct comparer, with no boxing.
 
 using System;
 using System.Collections.Generic;
@@ -68,10 +58,8 @@ namespace MapRenderer.Tests.Meshing
                 Assert.AreEqual(new[] { 1, 2, 0 }, holeRIs.ToArray(),
                     "comparer must order hole rings by ascending leftmost-x");
 
-                // Zero MANAGED allocation: refilling the reused native buffer and sorting a view through the
-                // struct comparer allocates nothing on the GC heap. RED against the retired `new int[holeCount]`
-                // managed array + managed Array.Sort. Warm the exact measured delegate first (one-shot-lambda
-                // JIT false-positive mitigation).
+                // Refilling the reused native buffer and sorting it through the struct comparer allocates nothing.
+                // Warm the exact measured delegate first, so one-time JIT stays out of the window.
                 TestDelegate act = () =>
                 {
                     for (int i = 0; i < 3; i++) holeRIs[i] = src[i];

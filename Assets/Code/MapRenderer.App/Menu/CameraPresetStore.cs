@@ -25,11 +25,8 @@ namespace MapRenderer.App.Menu
     /// <summary>
     /// PlayerPrefs-backed camera-preset slots for the debug menu — the app-local persistence behind the
     /// <see cref="CameraPresetsPage"/>. One string entry per slot, so presets survive a Play-session restart.
-    ///
-    /// <para>Poses are serialized field-by-field with the round-trip-exact <c>G17</c> format under the invariant
-    /// culture — NOT <c>JsonUtility</c>, whose double formatting is lossy and would silently degrade lat/lon
-    /// precision. The serialize/deserialize pair is <c>internal static</c> so an EditMode test pins the exact
-    /// round-trip directly.</para>
+    /// Poses are serialized field-by-field in round-trip-exact <c>G17</c> under the invariant culture, not with
+    /// <c>JsonUtility</c>, whose lossy double formatting would degrade lat/lon precision.
     /// </summary>
     internal sealed class CameraPresetStore
     {

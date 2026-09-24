@@ -6,19 +6,11 @@ using MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The ONE resolver that turns a proposed <see cref="SymbolPairRole"/> stamping into
-    /// a resolved pair. The extractor's roles are a PROPOSAL, not a fact (a rider can go missing to per-symbol
-    /// shaping isolation, list truncation, or a downstream filter); this class decides the truth from a list,
-    /// so the baker and the reconciler cannot disagree on which pairs actually hold.
-    ///
-    /// Rule (both carriers): <c>symbols[i]</c> is a paired owner iff it is
-    /// <see cref="SymbolPairRole.Owner"/>, <c>i + 1 &lt; Count</c>, <c>symbols[i + 1]</c> is
-    /// <see cref="SymbolPairRole.Rider"/>, and the two <c>PairId</c>s are equal. The <see cref="SymbolFeature"/>
-    /// overload additionally skips a null entry (its list can hold nulls; a <see cref="ShapedSymbol"/> list is
-    /// dense), and for the <see cref="ShapedSymbol"/> overload <c>TileKey</c> and <c>MaterialIndex</c> must also
-    /// match, since <c>FeatureIndex</c>/<c>PairId</c> is only unique within one <c>Extract</c> call (per layer, per tile).
-    /// A half-built pair dissolves into two ordinary symbols — never an owner bound to a stranger. Tolerant of
-    /// an absent slot throughout (the baker's null-slot invariant). No allocation, O(1).
+    /// The ONE resolver of proposed <see cref="SymbolPairRole"/>s, so the baker and the reconciler agree on
+    /// which pairs hold. <c>symbols[i]</c> owns a pair iff it is <see cref="SymbolPairRole.Owner"/>,
+    /// <c>symbols[i + 1]</c> exists, is <see cref="SymbolPairRole.Rider"/>, and has the same <c>PairId</c>; the
+    /// <see cref="ShapedSymbol"/> overload also matches <c>TileKey</c> and <c>MaterialIndex</c>, because PairId
+    /// is unique only per layer and tile. A half-built pair dissolves into two symbols. No allocation, O(1).
     /// </summary>
     public static class SymbolPairing
     {

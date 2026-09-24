@@ -1,6 +1,5 @@
-// Style/StyleShieldTests.cs — the icon+text pairing predicate and the road-shields extraction acceptance
-// teeth. Both exercise SymbolFeatureExtractor.Extract, which depends on Unity.Collections; not registered
-// in core-tests.csproj.
+// Style/StyleShieldTests.cs — both fixtures exercise SymbolFeatureExtractor.Extract, which depends on
+// Unity.Collections; not registered in core-tests.csproj.
 //
 // Contents:
 //   SymbolPairPredicateTests    — the icon+text pairing predicate: both halves resolved, not merely coincident.
@@ -31,12 +30,9 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P-A — the icon+text PAIRING predicate is "this feature resolved both halves", not "the two halves
-    /// coincide". These are the teeth that DISCRIMINATE that change: each one sets a value at which the five
-    /// retired conjuncts (text/icon anchor, text/icon offset, text-radial-offset) were the thing saying "no
-    /// pair". The pre-existing centred teeth (<c>SymbolShieldExtractionTests</c>,
-    /// <c>SymbolFeatureExtractorIconTests</c>) leave every anchor/offset at its default, so the retired code
-    /// was inert at their values and they cannot tell the two predicates apart.
+    /// The icon+text PAIRING predicate is "this feature resolved both halves", not "the two halves coincide".
+    /// Each tooth sets a non-default anchor or offset (text/icon anchor, text/icon offset, text-radial-offset);
+    /// the centred teeth in <c>SymbolShieldExtractionTests</c> cannot tell the two predicates apart.
     /// </summary>
     [TestFixture]
     public class SymbolPairPredicateTests
@@ -52,9 +48,8 @@ namespace MapRenderer.Tests.Style
         private static readonly TileId PlaceTileId = new TileId { Z = 6, X = 32, Y = 20 };
         private static readonly TileId BerlinTileId = new TileId { Z = 9, X = 274, Y = 168 };
 
-        // ── Synthetic sprite sheet: the committed fixtures carry NO sprite sheet for liberty's own names,
-        //    so `circle_11_black` / `airport_11` / `road_3` have to be synthesised. 16x16 at the origin —
-        //    only the sprite's EXISTENCE and its size matter to these teeth. ──
+        // ── Synthetic 16x16 sprites for liberty's names (no committed sheet has them); only EXISTENCE and
+        //    size matter to these teeth. ──
         private static SpriteAtlasView SyntheticAtlas(params string[] names)
         {
             var sb = new StringBuilder("{");
@@ -109,9 +104,8 @@ namespace MapRenderer.Tests.Style
             return null;
         }
 
-        // ══ T2 — predicate symmetry: EACH retired conjunct, alone, on an otherwise centred layer ══════════
-        // One case per conjunct, so a partial relaxation (the tempting "just drop the text-side checks")
-        // cannot pass: the two icon-side cases would still read None.
+        // ══ Predicate symmetry: EACH retired conjunct, alone, on an otherwise centred layer ══════════
+        // One case per conjunct, so dropping only the text-side checks leaves the icon-side cases None.
         [TestCase("\"text-anchor\":\"bottom\"", TestName = "RetiredConjunct_TextAnchor_StillPairs")]
         [TestCase("\"text-offset\":[0,0.6]", TestName = "RetiredConjunct_TextOffset_StillPairs")]
         [TestCase("\"text-radial-offset\":0.5", TestName = "RetiredConjunct_TextRadialOffset_StillPairs")]
@@ -134,20 +128,14 @@ namespace MapRenderer.Tests.Style
                 "owner-immediately-then-rider — SymbolPairing's adjacency contract");
         }
 
-        // ══ T3 — a non-centred pair's two boxes land where each half's OWN baked bounds say ════════════════
-        // The predicate rests on a premise: `text-anchor`/`text-offset`/`text-radial-offset` (and their icon twins) are
-        // already folded into each half's anchor-RELATIVE bounds upstream, so StagePointPair appending both
-        // halves at the OWNER's ScreenPx displaces them correctly with no per-half placement plumbing. If
-        // that premise were false the two boxes would coincide and a non-centred pair would be nonsense.
-        // This runs the REAL chain — TextQuadLayout.Layout for the text, IconQuadLayout.Layout (via the
-        // extractor) for the icon, StagePointPair for the staging — and pins each box against the box built
-        // from that half's OWN bounds at its OWN size.
+        // ══ A non-centred pair's two boxes land where each half's OWN baked bounds say ════════════════
+        // Non-local invariant: anchor/offset are folded into each half's anchor-RELATIVE bounds upstream, so
+        // StagePointPair places both halves at the OWNER's ScreenPx. Runs the REAL layout + staging chain.
         [Test]
         public void NonCentredPair_EachHalfsBox_IsBuiltFromItsOwnBakedBounds_AndTheyAreDisjoint()
         {
-            // text-anchor bottom puts the text above its anchor; text-offset [0,-2] (y-DOWN as authored, so
-            // 2 em UPWARD) pushes it clear of a 16 px icon. The magnitude is the discriminating value: at a
-            // zero offset the boxes coincide whatever the staging does, and the tooth would prove nothing.
+            // text-anchor bottom plus text-offset [0,-2] (y-DOWN, so 2 em UP) clears a 16 px icon; at a zero
+            // offset the boxes coincide whatever the staging does.
             const string layoutJson =
                 "{\"text-field\":\"{ref}\",\"icon-image\":\"road_3\",\"text-anchor\":\"bottom\",\"text-offset\":[0,-2]}";
             List<SymbolStyle.SymbolFeature> symbols = ExtractPoint(layoutJson, SyntheticAtlas("road_3"));
@@ -222,12 +210,8 @@ namespace MapRenderer.Tests.Style
                 "are y-UP, as TextQuadLayout bakes them)");
         }
 
-        // ══ T4 — the maintainer's artefact: liberty's city dot does not outlive its own name ════════════════
-        // "dots are still visible without text." liberty sets icon-allow-overlap: true on the dot and leaves
-        // the text at the default false. Un-paired, the two are independent candidates and the dot's
-        // allow-overlap buys it an unconditional place while the name is culled. Paired, the candidate's
-        // AllowOverlap is the AND of the halves, so the whole instance drops together. The ASYMMETRY is what
-        // makes this discriminating — a layer with both flags false would drop either way.
+        // ══ Liberty's city dot does not outlive its own name ════════════════
+        // The dot allows overlap and the text does not; paired, AllowOverlap is the AND, so both drop together.
         [Test]
         public void LibertyLabelCity_TextBlocked_DropsTheDotToo_NoOrphanIcon()
         {
@@ -248,18 +232,16 @@ namespace MapRenderer.Tests.Style
                 "precondition: liberty sets icon-allow-overlap on the dot — the asymmetry this tooth turns on");
             Assert.IsFalse(text.AllowOverlap, "precondition: the name keeps text-allow-overlap's false default");
 
-            // Stage the instance the way the placement system does: ONE pair candidate when the extractor
-            // proposed a pair, two independent candidates when it did not. Reverting the predicate therefore
-            // reads RED as the ARTEFACT (an orphan dot survives), not as a broken precondition.
+            // Stage as the placement system does: ONE pair candidate for a pair, two otherwise. So a broken
+            // predicate reads RED as the artefact itself (an orphan dot survives).
             var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[8];
             int boxCount = 0, quadCount = 0, emitCount = 0;
 
-            // Synthetic half-bounds + a viewport translate on the rider: label_city's real text-offset is
-            // -0.1 em, far too small to separate the boxes, and a blocker that overlaps BOTH halves would not
-            // isolate "the text half was blocked". T3 is where the real baked bounds are pinned.
+            // Synthetic half-bounds + a rider translate: label_city's real -0.1 em offset cannot separate the
+            // boxes, so a blocker could not hit the text half alone. The real bounds are pinned above.
             PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, SymbolKind.Icon,
                 new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
             PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, SymbolKind.Text,
@@ -295,7 +277,7 @@ namespace MapRenderer.Tests.Style
                 "the blocked name is culled too (this half was never in doubt)");
         }
 
-        // ══ T5 — D-PA-3: text-optional does NOT un-pair; it stays a per-BOX verdict inside the pair ═══════
+        // ══ D-PA-3: text-optional does NOT un-pair; it stays a per-BOX verdict inside the pair ═══════
         [Test]
         public void LibertyAirport_TextOptional_StillPairs_AndMarksOnlyTheRiderDroppable()
         {
@@ -305,10 +287,8 @@ namespace MapRenderer.Tests.Style
                 "precondition: this tooth turns on liberty's REAL `text-optional: true` — if the style ever " +
                 "drops it, the tooth is inert and must be re-pointed, not re-baked");
 
-            // The REAL liberty layer over a hand-built aerodrome_label tile. The committed Berlin fixture DOES
-            // carry the airport feature, but at tile x=4929 — outside [0, extent), so the single-world clip
-            // drops it and the extractor emits nothing. Only the FEATURE is synthetic here; the style
-            // (text-optional + text-anchor top + text-offset [0,0.6]) is liberty's own.
+            // The REAL liberty layer over a hand-built feature: the Berlin fixture's airport sits at x=4929,
+            // outside [0, extent), so the clip drops it.
             var feature = new DictionaryFeature(
                 properties: new Dictionary<string, Value>
                 {
@@ -358,7 +338,7 @@ namespace MapRenderer.Tests.Style
                 "optionality is a per-BOX verdict: bit 1 (the rider) droppable, bit 0 (the owner) required");
         }
 
-        // ══ T6 — the negatives: the predicate needs BOTH halves, never either ═════════════════════════════
+        // ══ The negatives: the predicate needs BOTH halves, never either ═════════════════════════════
         [Test]
         public void OneSidedFeatures_NeverPair()
         {
@@ -384,11 +364,8 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(SymbolPairRole.None, nullAtlasSymbols[0].PairRole, "no icon resolved ⇒ no pair");
         }
 
-        // ══ T8 — D-PA-4: the line branch re-gates on BOTH suppressions, not just the icon's ═══════════════
-        // The mirror of ViewportTextWithAlongLineIcon_StampsNoPairRole: there the ICON left for the
-        // along-line shape; here the TEXT leaves for the curved shape, so the at-anchors emit has a lone
-        // icon and no rider will ever follow it. Without the `&& textAtAnchors` conjunct the extractor
-        // stamps that icon Owner and the "PairedInstance implies both halves" contract is a false claim.
+        // ══ The line branch re-gates on BOTH suppressions, not just the icon's ═══════════════
+        // The TEXT leaves for the curved shape; without `&& textAtAnchors` a lone icon is stamped Owner.
         [Test]
         public void MapAlignedTextWithViewportIcon_StampsNoPairRole()
         {
@@ -451,8 +428,8 @@ namespace MapRenderer.Tests.Style
             _berlinTile?.Dispose(); _berlinTile = null;
         }
 
-        // A synthetic quad standing in for a shaped text run — the teeth that need REAL text geometry (T3)
-        // lay it out for real; these only need quads.Length > 0 so the half actually stages.
+        // A synthetic quad standing in for a shaped text run; these teeth only need quads.Length > 0 so the half
+        // stages (NonCentredPair_EachHalfsBox_IsBuiltFromItsOwnBakedBounds_AndTheyAreDisjoint lays out real text).
         private static SymbolQuad SyntheticTextQuad() => new SymbolQuad
         {
             TopLeft = new float2(-6f, 6f), BottomRight = new float2(6f, -6f),
@@ -610,7 +587,8 @@ namespace MapRenderer.Tests.Style
         private static readonly TileId SyntheticTileId = new TileId { Z = 1, X = 0, Y = 0 };
 
         /// <summary>A synthetic <c>transportation_name</c> tile carrying one us-interstate feature and one
-        /// us-highway feature — the two networks Berlin's real fixture carries none of (T13).</summary>
+        /// us-highway feature — the two networks Berlin's real fixture carries none of
+        /// (<c>UsShieldLayers_SelectNothingFromBerlinFixture</c>).</summary>
         private static IDecodedTile SyntheticUsShieldTile()
         {
             var interstate = ShieldFeature("us-interstate", 2, "80", LineStringGeometry(
@@ -635,7 +613,7 @@ namespace MapRenderer.Tests.Style
             return n;
         }
 
-        // ── T2 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void PointPlacement_OnLineString_EmitsSymbols()
         {
@@ -663,7 +641,7 @@ namespace MapRenderer.Tests.Style
         private static int FeatureSelectorCount(StyleLayer layer)
             => MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 10.0).Count;
 
-        // ── T3 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void ShieldIconImages_ResolveFromAtlas_AllThreeLayers()
         {
@@ -682,7 +660,8 @@ namespace MapRenderer.Tests.Style
                     StringAssert.StartsWith("road_", l.IconImage, "non-us icon name must be road_<ref_length>");
                 }
 
-            // interstate + road_shield_us — synthetic tile (Berlin carries no US-network features — T13).
+            // interstate + road_shield_us — synthetic tile: Berlin carries no US-network features
+            // (UsShieldLayers_SelectNothingFromBerlinFixture).
             IDecodedTile synthTile = SyntheticUsShieldTile();
 
             SymbolStyle.StyleLayer interstate = FindShieldLayer("highway-shield-us-interstate");
@@ -705,7 +684,7 @@ namespace MapRenderer.Tests.Style
                         $"road_shield_us icon name must be us-highway_<n>|us-state_<n>, was '{l.IconImage}'");
         }
 
-        // ── T4 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void LinePlacement_ViewportAligned_EmitsUprightAnchorSymbols()
         {
@@ -729,7 +708,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(texts, icons, "icon count must equal text count at z13");
         }
 
-        // ── T5 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void CentredPair_EmitsAdjacentIconThenText()
         {
@@ -751,9 +730,8 @@ namespace MapRenderer.Tests.Style
                 Assert.AreEqual(SymbolKind.Text, text.Kind, $"symbols[{i + 1}] must be the text");
                 Assert.AreEqual(icon.FeatureIndex + 1, text.FeatureIndex, "text's ordinal must immediately follow its icon's");
                 Assert.AreEqual(icon.AnchorRender, text.AnchorRender, "icon and text of a pair share the same anchor");
-                // The icon+text pair is ONE placement instance downstream (SymbolPairing / StagePointPair), so
-                // both halves carry their AUTHORED text-allow-overlap/text-ignore-placement (liberty's shield
-                // layers declare neither — default false), not a forced-true passenger flag.
+                // The pair is ONE placement instance, so both halves carry their AUTHORED overlap flags
+                // (liberty's shields declare neither — default false), not a forced-true passenger flag.
                 Assert.IsFalse(text.AllowOverlap, "the rider text carries its AUTHORED AllowOverlap (unset -> false)");
                 Assert.IsFalse(text.IgnorePlacement, "the rider text carries its AUTHORED IgnorePlacement (unset -> false)");
                 Assert.IsFalse(icon.AllowOverlap, "the icon (pair owner) must NOT set AllowOverlap");
@@ -767,9 +745,8 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── A NON-centred icon+text feature (text-offset != 0) PAIRS like any other — the predicate is
-        //    "both halves resolved", not "both halves coincide". Unpaired, a city dot could place while
-        //    its own name was culled. ──
+        // ── A NON-centred icon+text feature (text-offset != 0) PAIRS like any other: the predicate is
+        //    "both halves resolved", not "both halves coincide". ──
         [Test]
         public void NonCentredPair_NowEmitsIconThenText_OwnerRider()
         {
@@ -802,7 +779,7 @@ namespace MapRenderer.Tests.Style
                 "the rider's ordinal must immediately follow its owner's (SymbolPairing's adjacency contract)");
         }
 
-        // ── T7 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void MapAlignedLineLayer_StillCurves_FieldForField()
         {
@@ -885,10 +862,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── A map-resolved line icon emits ─────────────────────────────────────────────────────────────
-        // A map-resolved line icon is emitted as a ONE-GLYPH CURVED symbol (the road_one_way_arrow*
-        // shape), rather than never emitting. The assertion below is the inverse of that older rule, not
-        // a re-bake: the old zero-icon
-        // expectation described a deliberate gap, and this stage closes it.
+        // A map-resolved line icon is emitted as a ONE-GLYPH CURVED symbol (the road_one_way_arrow* shape).
         private static SymbolStyle.StyleLayer MapAlignedIconProbeLayer(string extraLayoutJson = "")
             => new SymbolStyle.StyleLayer
             {
@@ -932,9 +906,8 @@ namespace MapRenderer.Tests.Style
                 MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(mapAligned, BerlinFixtureTile(), 13.0);
             Assert.Greater(selected.Count, 0, "precondition: > 0 features selected");
 
-            // Precondition that the fixture is genuinely ICON-BEARING: the SAME layer with an explicit
-            // viewport alignment takes the at-anchors path and emits POINT-shaped icons. Without
-            // this, a zero-icon map arm could pass for the wrong reason (an unresolvable sprite).
+            // Precondition: the SAME layer with viewport alignment emits POINT icons, so a zero-icon map arm
+            // cannot pass because of an unresolvable sprite.
             var viewportSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
@@ -1001,11 +974,8 @@ namespace MapRenderer.Tests.Style
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "line + viewport -> point-shaped icon at each anchor");
                 Assert.IsNull(l.PathRender, "an at-anchors icon carries no path");
             }
-            // The two shapes are genuinely different, not the same emit relabelled: the viewport arm produces
-            // one symbol PER ANCHOR, the map arm one per PATH. The map arm's count is pinned EXACTLY — that is
-            // the claim, and it needs no premise. The strict inequality does need one the exact count does
-            // not: that at least one decoded path is longer than a symbol-spacing (250 px default) and so
-            // carries >= 2 anchors. True of this committed fixture, and asserted rather than assumed.
+            // Viewport emits one symbol PER ANCHOR, map one per PATH (pinned EXACTLY). The strict inequality
+            // needs a path longer than one symbol-spacing (>= 2 anchors), which is asserted, not assumed.
             int eligiblePaths = EligiblePathCount(MapAlignedIconProbeLayer());
             Assert.AreEqual(eligiblePaths, CountIcons(mapSymbols),
                 "the along-line arm emits exactly one curved icon per eligible decoded path");
@@ -1023,18 +993,13 @@ namespace MapRenderer.Tests.Style
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "point placement -> point icon");
         }
 
-        // ── P-B review NIT 2: the centred-pair predicate is computed from the UN-suppressed `hasIcon`, so on
-        //    the line branch it must be re-gated on the fence that decides whether an icon reaches the
-        //    at-anchors emit at all. P-B widened that gap: before it, `hasIcon` on a line layer implied
-        //    `iconAtAnchors`; now the icon can leave for the along-line shape instead, and a centred text
-        //    would be stamped Rider against a PairId no emitted symbol owns. SymbolPairing dissolves such an
-        //    orphan, so this is about the pairing site telling the truth, not about a visible defect. ──
+        // ── The centred-pair predicate uses the UN-suppressed `hasIcon`, so on the line branch it re-gates on
+        //    `iconAtAnchors`: an icon that leaves for the along-line shape must not leave a Rider orphaned. ──
         [Test]
         public void ViewportTextWithAlongLineIcon_StampsNoPairRole()
         {
-            // Text resolves VIEWPORT (explicit) -> at-anchors; the icon's alignment is unset -> auto -> MAP
-            // under line placement -> the along-line shape. Anchors/offsets are left at their defaults, which
-            // is exactly what makes the centred-pair predicate fire.
+            // Text: explicit VIEWPORT -> at-anchors. Icon: unset -> MAP under line placement -> along-line.
+            // Default anchors/offsets make the centred-pair predicate fire.
             var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(
@@ -1123,8 +1088,7 @@ namespace MapRenderer.Tests.Style
             Assert.Greater(icons, 0, "precondition: the layer must emit along-line icons");
         }
 
-        // ── Shared centred-pair synthetic fixture: literal "point" placement, default centred anchors —
-        //    unaffected by the step-expression/anchor-emit machinery. <paramref name="extraLayout"/>
+        // ── Shared centred-pair fixture: literal "point" placement, default anchors. `extraLayout`
         //    appends further layout members (the optional flags). ──
         private static List<SymbolStyle.SymbolFeature> ExtractCentredPairSymbols(string extraLayout = null)
         {
@@ -1330,9 +1294,8 @@ namespace MapRenderer.Tests.Style
                 SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
                 Assert.IsNotNull(icon, what); Assert.IsNotNull(text, what);
 
-                // Optionality must NOT un-pair the halves. A "pair only when both flags are false" rule would
-                // leave these None — and, because a centred pair's boxes overlap, make the two halves mutually
-                // exclusive (the bare-number defect).
+                // Optionality must NOT un-pair the halves: unpaired, a centred pair's overlapping boxes would
+                // make the halves mutually exclusive (the bare-number defect).
                 Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole, $"{what}: the icon must STILL be the pair Owner");
                 Assert.AreEqual(SymbolPairRole.Rider, text.PairRole, $"{what}: the text must STILL be the pair Rider");
                 Assert.AreEqual(icon.PairId, text.PairId, $"{what}: both halves must still share one PairId");
@@ -1348,13 +1311,8 @@ namespace MapRenderer.Tests.Style
             AssertPair("\"icon-optional\":true,\"text-optional\":true", true, true, "both");
         }
 
-        // ── Shared harness (C3/C4/C5) ─────────────────────────────────────────────────────────────────────
-        // The REAL extractor → REAL StagePointPair → REAL CollisionJob, with the rider translated clear of
-        // the owner so a blocker can address exactly ONE half's box (a centred pair's boxes overlap —
-        // the reason the mask is consulted inside test-all-then-insert rather than by
-        // un-pairing). Two low-priority PROBES, one over each half and both disjoint from the blocker, then
-        // report which boxes the pair actually RESERVED: a probe that places proves its half's box was never
-        // inserted.
+        // Shared harness: REAL extractor → StagePointPair → CollisionJob, the rider translated clear so a blocker
+        // hits ONE half. A low-priority probe over each half that places proves that half's box was never inserted.
         private struct OptionalPairOutcome
         {
             public bool PairPlaced;
@@ -1504,7 +1462,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(o.ProbeOverTextPlaced);
         }
 
-        // ── T13 ────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void UsShieldLayers_SelectNothingFromBerlinFixture()
         {
@@ -1519,7 +1477,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0, usShieldCount, "road_shield_us must select 0 features from the Berlin fixture");
         }
 
-        // ── T14 ────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void PointAnchor_ClipSemantics()
         {
@@ -1588,9 +1546,8 @@ namespace MapRenderer.Tests.Style
                 int outOfTile = 0;
                 foreach (LineAnchor a in allAnchors)
                 {
-                    // Single-segment path (Segment is always 0) — manual lerp, mirroring
-                    // SymbolFeatureExtractorTests' anchor-resolve pattern (math.lerp(double2,double2,double)
-                    // DOES exist in the shim — VectorMath.cs:51 — this is just the established local idiom).
+                    // Single-segment path (Segment is always 0): a manual lerp, the local idiom of
+                    // SymbolFeatureExtractorTests' anchor resolve.
                     double2 pos = p0 + (p1 - p0) * (double)a.T;
                     if (pos.x < 0.0 || pos.x >= Extent) outOfTile++;
                 }
@@ -1599,7 +1556,7 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── T15 ────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void SymbolPlacement_IsEvaluatedAtBuildZoom()
         {
@@ -1627,7 +1584,7 @@ namespace MapRenderer.Tests.Style
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "z11.0 must yield Line placement");
         }
 
-        // ── T1 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void SymbolPlacement_StepExpressions_EvaluatePerBuildZoom()
         {
@@ -1652,7 +1609,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(SymbolPlacement.Line, literalLine.Layout.SymbolPlacement.Evaluate(11.0), "highway-name-major z11 -> Line (literal)");
         }
 
-        // ── T6 ─────────────────────────────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void AlignmentAuto_ResolvesToMapOnLine()
         {
@@ -1670,18 +1627,10 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── The along-line anchor clip ─────────────────────────────────────────────────────────────────
-        // One horizontal road crossing a VERTICAL seam, with the IDENTICAL local geometry in both tiles —
-        // which is what a tiler emits for a road spanning a seam, each tile clipping it to its own box plus a
-        // 128-unit buffer. Both tiles therefore compute the same local anchor phase, and the two halves of the
-        // road claim the same world stretch twice.
-        //
-        // The vertices at local x == 0 and x == 4096 are load-bearing, not decoration. LineAnchor.T is a
-        // FLOAT, so an anchor resolved in the middle of a long segment lands ~1e-4 tile units off its ideal
-        // position — which on a boundary anchor is enough to decide the `< extent` comparison the WRONG way
-        // and make the tooth measure float rounding instead of the clip. With a vertex AT each boundary the
-        // containing arc ends exactly on that vertex, so LineAnchorPlacement resolves t == 1.0f exactly (and
-        // dyadic k/16 in between); every anchor then sits bit-exactly on local x == 256k, and `>= extent` vs
-        // `> extent` / `>= 0` vs `> 0` are genuinely discriminated.
+        // A horizontal road across a VERTICAL seam, with IDENTICAL local geometry in both tiles (clip plus a
+        // 128-unit buffer), so both tiles claim the same world stretch.
+        // Non-obvious why: LineAnchor.T is a FLOAT, so vertices AT x == 0 and x == 4096 put every anchor
+        // bit-exactly on x == 256k; mid-segment rounding would decide the `< extent` comparison instead.
         private static readonly double2[] SeamRoadVertices =
         {
             new double2(-128, 2048), new double2(0, 2048), new double2(4096, 2048), new double2(4224, 2048),
@@ -1704,9 +1653,8 @@ namespace MapRenderer.Tests.Style
         /// and only running every tooth in both arms proves it.</summary>
         public enum SeamArm { AlongLineIcon, CurvedText }
 
-        // No rotation-alignment on the icon arm: unset -> auto -> MAP under line placement, the
-        // road_one_way_arrow* shape. The text arm declares map explicitly so it stays curved rather than
-        // resolving to the upright at-anchors shape.
+        // Icon arm: unset alignment -> MAP under line placement (road_one_way_arrow*). The text arm declares
+        // map explicitly, so it stays curved rather than upright.
         private static SymbolStyle.StyleLayer SeamLayer(SeamArm arm) => new SymbolStyle.StyleLayer
         {
             Id          = "seam-clip-probe",
@@ -1818,9 +1766,8 @@ namespace MapRenderer.Tests.Style
                 "without this the tooth below could pass over a geometry that never doubled anything");
         }
 
-        // T1 — CENTRAL, two-tile: the defect itself. A world position claimed by two tiles is emitted by
-        // exactly one of them. Single-tile output cannot discriminate this — the duplicate exists only in the
-        // union.
+        // Two-tile: a world position claimed by two tiles is emitted by exactly one of them. The duplicate
+        // exists only in the union, so single-tile output cannot show it.
         [Test]
         public void SeamAnchorClip_TwoTiles_EmitEachWorldPositionExactlyOnce(
             [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
@@ -1833,7 +1780,7 @@ namespace MapRenderer.Tests.Style
                 $"emitted {world.Count} anchors over {DistinctCount(world)} distinct world positions");
         }
 
-        // T2 — anti-over-clip: GREEN before AND after. The surviving set is exactly the positions the geometry
+        // Anti-over-clip: GREEN before AND after. The surviving set is exactly the positions the geometry
         // implies, so "the fix drops symbols that should exist" fails here rather than passing quietly.
         [Test]
         public void SeamAnchorClip_KeepsEveryWorldPositionTheGeometryImplies(
@@ -1854,9 +1801,8 @@ namespace MapRenderer.Tests.Style
                 "no position orphaned by a too-tight bound, none invented");
         }
 
-        // T3 — the boundary SENSE. The seam position is emitted exactly once and by the tile whose LOCAL
-        // coordinate for it is 0, never by the one whose local coordinate is `extent`. This is the only tooth
-        // that separates `< extent` from `<= extent` and `>= 0` from `> 0`.
+        // The boundary SENSE: the seam position is emitted by the tile whose LOCAL coordinate is 0, never
+        // `extent`. Only this separates `< extent` from `<= extent` and `>= 0` from `> 0`.
         [Test]
         public void SeamAnchorClip_SeamPositionIsOwnedByTheTileHoldingItAtLocalZero(
             [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
@@ -1882,11 +1828,8 @@ namespace MapRenderer.Tests.Style
                 $"{arm}: tile A must still emit its own left edge at local x == 0 (`> 0` would drop it)");
         }
 
-        // T7 — the SAME property on the Y axis. Every tooth above runs a horizontal road across a vertical
-        // seam, so all four comparisons are exercised only through `p.x`: a predicate that tested `p.x` twice,
-        // or that used `p.y <= extent`, passes every one of them. This is the transposed fixture — a vertical
-        // road across a HORIZONTAL seam between z1 (0,0) and (0,1) — so the y comparisons carry the assertion.
-        // Only the one discriminating claim; the x teeth already cover the shared machinery.
+        // The SAME property on the Y axis: a vertical road across the HORIZONTAL seam between z1 (0,0) and (0,1),
+        // so a predicate that tests `p.x` twice or uses `p.y <= extent` fails here.
         [Test]
         public void SeamAnchorClip_TwoTilesStackedVertically_EmitEachWorldPositionExactlyOnce(
             [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
@@ -1930,7 +1873,7 @@ namespace MapRenderer.Tests.Style
                 "means the Y lower bound orphans the seam (`p.y > 0`)");
         }
 
-        // T4 — the path is NOT clipped: only anchors are filtered. A shallow implementation that clipped the
+        // The path is NOT clipped: only anchors are filtered. A shallow implementation that clipped the
         // polyline instead would shorten PathRender and turn a join into a cap.
         [Test]
         public void SeamAnchorClip_DoesNotClipThePath(
@@ -1959,7 +1902,7 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // T5 — a path whose every anchor belongs to a neighbour emits NOTHING here, rather than an anchor-less
+        // A path whose every anchor belongs to a neighbour emits NOTHING here, rather than an anchor-less
         // symbol that can never place.
         [Test]
         public void SeamAnchorClip_PathWithNoSurvivingAnchor_EmitsNoSymbol(
@@ -1980,9 +1923,8 @@ namespace MapRenderer.Tests.Style
                 $"{arm}: a buffer-only path must emit ZERO symbols here — not one carrying an empty LineAnchors");
         }
 
-        // T6 — the at-anchors arm (the shipped shield shape) did not move: it already applied the same
-        // predicate at EmitAtAnchor, so hoisting the test upstream is the same comparison on the same inputs.
-        // Drift between the two copies of the rule shows up here as a shield regression rather than as nothing.
+        // The at-anchors arm (the shield shape) applies the same predicate; drift between the two copies of
+        // the rule shows up here as a shield regression.
         [Test]
         public void SeamAnchorClip_AtAnchorsArmIsUnchanged()
         {

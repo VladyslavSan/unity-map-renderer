@@ -26,15 +26,11 @@ using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Unity.Text
 {
-    /// <summary>The decoupled production symbol subsystem: owns the shared <see cref="GlyphManager"/>, the
-    /// fixed-size <see cref="GlyphAtlasTexture"/>, and the <see cref="StyledSymbolTileBuilder"/>. Symbol DATA
-    /// arrives via <see cref="Tile.TileManager"/>'s per-tile kick (this implements
-    /// <see cref="ISymbolTileWorkerFactory"/>); the tile LIFECYCLE is pulled — <c>ReconcileLoadedTiles</c> takes
-    /// the loaded set each frame. Symbols are placed every frame, feeding <see cref="SymbolPlacementSystem"/>.
-    ///
-    /// <para>The glyph atlas is allocated big and FIXED (<c>AtlasDimension</c>) so its <c>Size</c> never changes
-    /// as tiles append glyphs — a growing atlas would invalidate earlier tiles' baked UVs
-    /// against the old size.</para></summary>
+    /// <summary>The production symbol subsystem: owns the shared <see cref="GlyphManager"/>, the fixed-size
+    /// <see cref="GlyphAtlasTexture"/>, and the <see cref="StyledSymbolTileBuilder"/>. Symbol data arrives via
+    /// <see cref="Tile.TileManager"/>'s per-tile kick; <c>ReconcileLoadedTiles</c> pulls the tile lifecycle each
+    /// frame. Non-obvious why: the atlas size is fixed (<c>AtlasDimension</c>), because a growing atlas would
+    /// invalidate earlier tiles' baked UVs.</summary>
     internal sealed class SymbolSubsystem : VerifiedDisposable, ISymbolTileWorkerFactory
     {
 
@@ -173,38 +169,27 @@ namespace MapRenderer.Unity.Text
         // loop drains this FIFO at most MaxBuildsPerFrame per frame.
         internal readonly List<ReadySymbolTail> _readyTails = new();
 
-        // A SymbolTileBuffer free-list — main-thread only. Builds interleave, so each in-flight build RENTS its
-        // own instance. A never-returned buffer (dropped on cancel/restyle) just degrades to a fresh alloc next
-        // time — not chased down every drop path, since a still-referenced buffer must never be recycled.
+        // A main-thread SymbolTileBuffer free-list; each in-flight build rents its own. A buffer dropped on
+        // cancel/restyle is not returned, since a still-referenced buffer must never be recycled.
         private readonly Stack<SymbolTileBuffer> _bufferPool = new();
 
-        // A per-build glyph-range-request list free-list — main-thread only, same idiom as _bufferPool. A
-        // build's range list must survive its own await (RunTailAsync's EnsureGlyphRangesAsync suspension), so
-        // it can't be a shared field like _rangeSeen below — but a per-tile `new List` would be a data-plane
-        // allocation, so it is pooled instead.
+        // A main-thread free-list of per-build glyph-range lists. A range list must survive its build's await in
+        // RunTailAsync, so it cannot be a shared field like _rangeSeen; pooling avoids a per-tile allocation.
         private readonly Stack<List<(string FontName, int RangeStart)>> _rangeListPool = new();
 
-        // The build-wide glyph-range dedup set for RunTailAsync's collect step. SAFE to share as a single field
-        // (unlike _rangeListPool's per-build lists): the whole collect runs synchronously on main with no
-        // suspension inside it, so two builds' collects can never interleave — one build's Clear()+fill+read
-        // always completes before the next tail's collect starts.
+        // The glyph-range dedup set for RunTailAsync's collect step. One shared field is safe: the collect runs
+        // synchronously on main with no suspension, so two builds' collects cannot interleave.
         private readonly HashSet<(string FontName, int RangeStart)> _rangeSeen = new();
 
         // Cancels in-flight builds on restyle/teardown so a resumed build never touches disposed glyph/atlas
         // state. Recreated per SetStyle so each style has its own cancellation scope.
         private CancellationTokenSource _buildCts = new();
 
-        /// <summary>The execution policy both off-main dispatch sites in this class go through — the parked-
-        /// build drain (<c>PumpBuilds</c>) and the cross-tile reconcile (<c>ScheduleReconcileIfDirty</c>):
-        /// ThreadPool on desktop/editor, Inline on a WebGL player, where no worker ever picks a dispatch up
-        /// (docs/web-target.md). Settable so a test can force Inline and exercise the web-correct path
-        /// on desktop. Mirrors <see cref="MapRenderer.Unity.Rendering.Tile.TileManager.WorkScheduler"/>.
-        /// <para>Rejects a <see cref="IWorkScheduler.RunsInline"/> policy while
-        /// <see cref="SymbolReconciler.GateForTest"/> is armed — under Inline,
-        /// <c>ScheduleReconcileIfDirty</c>'s dispatch would park on that gate on the CALLING thread (the body
-        /// runs inline), and only the test's OWN later statement could release it — a statement that cannot
-        /// run until this call returns. The symmetric order (arming the gate while already Inline) is not
-        /// guarded here — see <see cref="SymbolReconciler.GateForTest"/>'s own doc.</para></summary>
+        /// <summary>The execution policy for both off-main dispatch sites here (<c>PumpBuilds</c>' parked drain and
+        /// <c>ScheduleReconcileIfDirty</c>): ThreadPool on desktop/editor, Inline on a WebGL player
+        /// (docs/web-target.md). A test can set Inline to run the web path on desktop. Rejects a
+        /// <see cref="IWorkScheduler.RunsInline"/> policy while <see cref="SymbolReconciler.GateForTest"/> is
+        /// armed, because the inline dispatch would park the calling thread on that gate.</summary>
         internal IWorkScheduler WorkScheduler
         {
             get => _workScheduler;
@@ -225,16 +210,13 @@ namespace MapRenderer.Unity.Text
         // The per-frame winner plan — the placement source of truth, rebuilt (alloc-free) every frame.
         private readonly SymbolGatherPlan      _gatherPlan   = new SymbolGatherPlan();
 
-        // The reconcile state machine: ONE worker in flight, its cross-tile dedup dispatched through
-        // WorkScheduler — off the render thread on desktop/editor, inline-on-main on WebGL. Front/back
-        // double-buffer — the FRONT is consumed every frame, the worker fills the BACK, a successful pickup
-        // swaps by ref. The paired snapshots PIN each result's blocks so the store can't free a live one.
+        // The reconcile state machine: one worker in flight; the frame reads the front, the worker fills the
+        // back, and a successful pickup swaps them. The paired snapshots pin each result's blocks.
         internal readonly SymbolReconciler _reconciler = new SymbolReconciler();
         private SymbolReconcileResult _frontResult   = new SymbolReconcileResult();
         private SymbolReconcileResult _backResult    = new SymbolReconcileResult();
-        // Monotonic front-set version, bumped on every change to _frontResult's CONTENT and stamped onto the
-        // gather plan so it holds its pools across unchanged frames. NOT _store.CollectGeneration, which moves
-        // 1-4 frames before the front swaps (apply-stale).
+        // Bumped on every change to _frontResult's content; the gather plan keys its memo on it. Not
+        // _store.CollectGeneration, which moves 1-4 frames before the front swaps.
         private int _frontSetVersion;
         private SymbolSnapshot        _frontSnapshot = new SymbolSnapshot();
         private SymbolSnapshot        _backSnapshot  = new SymbolSnapshot();
@@ -333,9 +315,8 @@ namespace MapRenderer.Unity.Text
         public int DepartingTileCount => _store.DepartingTileCount;
 
         // ── Constructor ───────────────────────────────────────────────
-        /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap — bounds how many
-        /// out-of-cover tiles' symbols are kept warm (clamped to a finite hard cap inside the store even when
-        /// this is 0/unbounded).</param>
+        /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap; it bounds the kept-warm
+        /// tiles. The store clamps it to a finite hard cap, even when it is 0 (unbounded).</param>
         /// <param name="cacheEnabled">The prepared mesh cache's master toggle — see <c>_cacheEnabled</c>.</param>
         public SymbolSubsystem(MapCamera camera, int preparedCacheMaxCount = 0, bool cacheEnabled = true)
         {
@@ -386,10 +367,8 @@ namespace MapRenderer.Unity.Text
         /// <paramref name="symbolLayers"/> arrives in declared order (a 1:1 ordinal mapping downstream).</summary>
         public void SetStyle(StyleDocument style, IReadOnlyList<SymbolStyle.StyleLayer> symbolLayers)
         {
-            // A restyle inline-drains the reconcile pipeline BEFORE clearing the store, so a stale worker can
-            // never write the back buffer afterward: cancel, block the in-flight worker to terminal, release both
-            // snapshot pins, Clear, reset buffers. Ordering between the ReleasePins pair and store.Clear() is no
-            // longer load-bearing (SharedDisposable): either order reaches the same single 0-transition.
+            // Drain the reconcile before clearing the store, so a stale worker cannot write the back buffer after.
+            // ReleasePins and Clear may run in either order: SharedDisposable reaches one 0-transition.
             _buildCts.Cancel();
             DrainInFlightReconcile();
             _store.ReleasePins(_frontSnapshot);
@@ -432,9 +411,8 @@ namespace MapRenderer.Unity.Text
                     indices.Add(index);
                 }
             }
-            // Kick off the sprite-sheet fetch (fire-and-forget, this style's _buildCts scope). BEFORE the
-            // no-symbol-layers early return: fill-pattern layers resolve against the same sheet. .Preserve()'d so
-            // SpritesSettled can poll its status. Stamp the deadline clock HERE, when the fetch actually starts.
+            // Start the sprite fetch before the no-symbol-layers return: fill-pattern layers use the same sheet.
+            // Preserve() lets SpritesSettled poll its status; the deadline clock starts here.
             _spriteFetchStartedAtSeconds = NowSeconds;
             _spriteFetchTask = FetchSpriteSheetAsync(style, _buildCts.Token).Preserve();
 
@@ -670,9 +648,8 @@ namespace MapRenderer.Unity.Text
                 _readyTails.Add(ready);
             }
 
-            // Drain the parked queue once the sprite fetch settled — build each entry's processors with the live
-            // _spriteAtlas and dispatch through WorkScheduler as the kick would. Ungated: main-thread-only and
-            // never cancels, so it has no acquire window to guard.
+            // Once sprites settle, build each parked entry's processors and dispatch them as the kick would. No
+            // _parkGate: this main-thread drain never cancels, so it has no acquire window to guard.
             if (SpritesSettled)
             {
                 while (_pendingSpriteQueue.TryDequeue(out PendingSymbolBuild pending))
@@ -685,10 +662,8 @@ namespace MapRenderer.Unity.Text
                         continue;
                     }
                     PendingSymbolBuild captured = pending;
-                    // OWNERSHIP GUARD over the dequeue→worker-start window: a throw before Schedule accepts the
-                    // body would strand the last reference. `handedToWorker` makes the two release mouths below
-                    // mutually exclusive (SharedDisposable has no per-acquire token, so releasing both is a
-                    // double-release).
+                    // A throw before Schedule accepts the body would strand the reference. `handedToWorker` makes
+                    // the two release sites below exclusive, because releasing both is a double-release.
                     bool handedToWorker = false;
                     try
                     {
@@ -701,20 +676,15 @@ namespace MapRenderer.Unity.Text
                             processors[k] = new TileSymbolLayerProcessor(_builder, _allSymbolLayers[globalIndex], globalIndex,
                                 captured.Buffer, _spriteAtlas);
                         }
-                        // The in-lambda ct check below is the guard, not the `captured.Ct` argument passed to
-                        // Schedule: unlike UniTask.RunOnThreadPool's cancellationToken:, IWorkScheduler.Schedule
-                        // never skips the body based on its token (poll, not push — IWorkScheduler.cs) — a
-                        // skipped body is exactly what would leak this reference, since the body is the only
-                        // release. The check stays inside the try so `finally` always runs either way.
+                        // IWorkScheduler.Schedule never skips the body for its token, so the in-lambda ct check is
+                        // the guard. It stays inside the try, so the releasing `finally` always runs.
                         WorkScheduler.Schedule(_ =>
                             {
                                 try
                                 {
                                     if (captured.Ct.IsCancellationRequested) return true;
-                                    // This reference held the decode alive since park time, so this reads the SAME
-                                    // IDecodedTile the mesh pass read — no second decode.
-                                    // in-param needs an addressable local: a { get; init; } getter returns a value,
-                                    // so captured.Context can't be passed by ref directly (unlike a field).
+                                    // Reads the same IDecodedTile the mesh pass read. An `in` argument needs a
+                                    // local, because the Context property getter returns a value.
                                     var capturedContext = captured.Context;
                                     RunSymbolWorkerAndHandoff(captured.Decode, in capturedContext, processors,
                                         captured.Key, captured.Generation, captured.Buffer, captured.Ct, captured.SourceId, captured.Tile);
@@ -962,16 +932,11 @@ namespace MapRenderer.Unity.Text
             _reconcileInFlight = false;
         }
 
-        /// <summary>Schedules ONE reconcile when the store moved and no worker is in flight — captures (pins
-        /// the back snapshot) on the main thread, then dispatches the dedup through <see cref="WorkScheduler"/>
-        /// (the pool on desktop/editor, inline-on-main on WebGL), polled across frames.
-        /// <para><c>SymbolReconciler.Run</c> takes no <see cref="CancellationToken"/> and cannot skip early —
-        /// unlike the <c>UniTask.RunOnThreadPool(cancellationToken:)</c> this replaces, <see cref="IWorkScheduler.Schedule{T}"/>
-        /// never skips the body based on its token (poll, not push — <see cref="IWorkScheduler"/>'s own
-        /// contract), so a reconcile whose token is already cancelled by dispatch time still runs to
-        /// completion instead of going Canceled. Benign: the result only ever feeds a swap through
-        /// <see cref="PickupCompletedReconcile"/>, and a restyle/teardown that cancelled this token also
-        /// drains and discards via <see cref="DrainInFlightReconcile"/> before that pickup could run.</para></summary>
+        /// <summary>Schedules one reconcile when the store moved and no worker is in flight: pins the back
+        /// snapshot on the main thread, then dispatches the dedup through <see cref="WorkScheduler"/>. A reconcile
+        /// whose token is cancelled still runs to completion, because <see cref="IWorkScheduler.Schedule{T}"/>
+        /// never skips the body. Non-local invariant: this is benign, because the cancelling restyle/teardown
+        /// discards it via <see cref="DrainInFlightReconcile"/> before any pickup.</summary>
         private void ScheduleReconcileIfDirty()
         {
             if (_reconcileInFlight || _store.CollectGeneration == _reconcileScheduledGen) return;
@@ -992,11 +957,8 @@ namespace MapRenderer.Unity.Text
         private void DrainInFlightReconcile()
         {
             if (!_reconcileInFlight) return;
-            // WaitOffPlayerLoop, NOT GetResult() — the latter THROWS on a pending WorkHandle instead of waiting,
-            // so the caller would free the snapshot's native columns under a still-running Run (UAF). Bridged
-            // via ToUniTask(): under Inline the handle is already terminal, so this is a no-op short-circuit;
-            // under ThreadPool it parks exactly as it did on the UniTask this replaces. Timeout ⇒ signal lost;
-            // log, never hang. The guarded GetResult below then observes any fault.
+            // Not GetResult(): it throws on a pending WorkHandle, so the caller would free native columns under a
+            // running Run. Under Inline the handle is already terminal. A timeout means a lost signal: log, not hang.
             UniTask<bool> reconcileTask = _reconcileHandle.ToUniTask();
             if (!reconcileTask.WaitOffPlayerLoop(ReconcileDrainTimeoutMs))
                 Debug.LogError("[SymbolSubsystem] reconcile drain timed out — the in-flight worker never completed; " +
@@ -1053,10 +1015,8 @@ namespace MapRenderer.Unity.Text
 
         protected override void DoDispose()
         {
-            // Teardown runs the SAME inline-drain protocol as a restyle — cancel, drain to terminal, release both
-            // snapshots' pins, THEN Clear (ordering between the two is not load-bearing — SharedDisposable
-            // makes both idempotent). A test tearing down while GateForTest is held MUST open the gate first, or
-            // DrainInFlightReconcile hangs.
+            // The same drain protocol as a restyle. A test tearing down while GateForTest is held must open the
+            // gate first, or DrainInFlightReconcile hangs.
             _buildCts.Cancel();   // stop any in-flight build + the reconcile token before glyph/atlas state is disposed
             DrainInFlightReconcile();
             _store.ReleasePins(_frontSnapshot);

@@ -16,43 +16,16 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Rendering.Backend.Entities
 {
     /// <summary>
-    /// The ECS render backend (internal, IDisposable) — the engine for <c>RenderBackend.Entities</c>.
-    ///
-    /// Each tile-layer draw item is an <see cref="Entity"/> rendered by Entities Graphics (which runs on
-    /// <see cref="UnityEngine.Rendering.BatchRendererGroup"/> under the hood). Unlike the raw-BRG backend
-    /// (<see cref="Backend.BRG.TileRenderer"/>, which hand-packs a struct-of-arrays GraphicsBuffer), Entities
-    /// Graphics owns the instance data: we create one entity per (tile, layer) carrying the layer's
-    /// shared <see cref="Material"/> + the tile's <see cref="Mesh"/> + a <see cref="LocalToWorld"/>.
-    /// The per-entity advantage is debuggability — each draw item is inspectable/disable-able in the
-    /// Entities Hierarchy — the reason the project goes past raw BRG.
-    ///
-    /// Hierarchy: a tile's layer entities are <see cref="Parent"/>ed under one named root entity
-    /// (<c>"Tile z/x/y"</c>) per tile, so the Entities Hierarchy shows a per-tile tree instead of a flat
-    /// list. The root carries the <see cref="LocalTransform"/>; layer entities carry
-    /// <see cref="LocalTransform.Identity"/>, so <c>LocalToWorldSystem</c> derives each layer's world
-    /// matrix from its root — <see cref="Rebuild"/> writes one transform per tile, not per layer. The
-    /// root is non-rendered and is destroyed once its last layer is removed.
-    ///
-    /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c>) plus
-    /// per-feature (vertex colours baked into the mesh), so no per-instance material-property override
-    /// components are needed — Entities Graphics reads the live material. <paramref name="layerMaterials"/>
-    /// is the FULL-WIDTH, global-draw-slot-aligned material list, so <c>materialIndex</c> matches
-    /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>.
-    ///
-    /// World lifecycle: this owns a <see cref="World"/> created on construction (automatic bootstrap is
-    /// disabled project-wide via <c>UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP</c>, so this is the only
-    /// world and we own its disposal). <see cref="Rebuild"/> must be called once per frame to refresh
-    /// the floating-origin matrices and tick the Entities-Graphics systems; the GPU submission itself
-    /// happens during the camera's render (SRP culling drives EG's BRG culling callback).
-    ///
-    /// Clean-room: design follows the Entities Graphics runtime-entity-creation documentation and the
-    /// existing BRG backend's tile-origin math (<see cref="FloatingOrigin.TileLocalToScene"/>).
+    /// ECS render backend for <c>RenderBackend.Entities</c>: one Entities Graphics <see cref="Entity"/> per
+    /// (tile, layer), parented under a non-rendered <c>"Tile z/x/y"</c> root that carries the tile transform,
+    /// so <see cref="Rebuild"/> writes one transform per tile. Entities Graphics reads the live shared material.
+    /// Non-local invariant: automatic bootstrap is off project-wide, so this owns the only <see cref="World"/>,
+    /// and <see cref="Rebuild"/> must tick its systems once per frame.
     /// </summary>
     internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
-        // One draw item = one layer entity (a child of its tile's root entity).
-        // internal, not private: the test assembly's observability extensions read it (see
-        // EntitiesTileRendererTestExtensions) — the sanctioned footprint for test-only accessors.
+        // One draw item = one layer entity under its tile's root entity. Internal so the test assembly's
+        // EntitiesTileRendererTestExtensions can read it.
         internal struct ItemRec
         {
             public Entity      Entity;
@@ -62,9 +35,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                                                // SetLayerMaterials find every item a retired slot must retire
         }
 
-        // One per live tile: the named parent entity its layer entities are grouped under, so the
-        // Entities Hierarchy shows a per-tile tree instead of a flat list. Carries the tile's projected
-        // SW-corner render origin so Rebuild can reposition the whole subtree by writing only the root's transform.
+        // One per live tile: the named parent of its layer entities. Rebuild moves the whole subtree by writing
+        // only the root's transform from TileOriginRender.
         internal struct RootRec
         {
             public Entity  Root;
@@ -73,36 +45,29 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         private readonly List<Material>             _layerMaterials = new List<Material>();
-        // Per-layer style id (e.g. "water", "road-primary"), parallel to _layerMaterials. Editor-only debug
-        // aid: it names each layer entity after its style layer in the Entities Hierarchy (matching the old
-        // GameObject backend) instead of the shared material name ("MapView_Fill"). Empty ⇒ fall back to name.
+        // Per-layer style id (e.g. "water"), parallel to _layerMaterials. It names each layer entity in the
+        // Entities Hierarchy; empty ⇒ the shared material name.
         private readonly List<string>               _layerNames     = new List<string>();
         // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
         // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
         private readonly List<ShadowCastingMode>    _layerShadowModes = new List<ShadowCastingMode>();
-        // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
-        // slot's entities draw (false ⇒ they carry DisableRendering). Absent or short ⇒ visible, identically
-        // in all three backends.
+        // Per-layer draw gate (SetLayerVisible), parallel to _layerMaterials; false ⇒ the slot's entities carry
+        // DisableRendering. Absent or short ⇒ visible, identically in all three backends.
         private readonly List<bool>                _layerVisible     = new List<bool>();
         // internal (not private) for the same reason as ItemRec/RootRec — test-assembly observability.
         internal readonly Dictionary<int, ItemRec>    _items          = new Dictionary<int, ItemRec>();
         internal readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
 
-        // Reused scratch for one RemoveItems() batch — the record's layer entities plus any tile
-        // root the batch empties, destroyed in ONE EntityManager.DestroyEntity(NativeArray) structural change
-        // instead of one per layer. Persistent (reused every release); disposed in DoDispose.
+        // Persistent list for one RemoveItems() batch: its layer entities plus the tile roots it empties,
+        // destroyed in ONE DestroyEntity structural change. Disposed in DoDispose.
         private NativeList<Entity> _destroyList;
 
-        // ── ID-based layer creation (avoid the per-entity RenderMeshArray) ────────────────────────────
-        // EG's ID route: register each layer material ONCE + each mesh on add, and point the entity at them
-        // via MaterialMeshInfo.FromMeshIDAndMaterialID — no fresh one-element RenderMeshArray shared component
-        // (and its batch registration) per consumed mesh. Layer entities are Instantiated from a single
-        // prototype so they all share ONE archetype (no per-entity structural migration for the render set).
+        // ── ID-based layer creation: materials register once, meshes on add, no RenderMeshArray per entity ──
+        // An ID-based MaterialMeshInfo points each entity at them; shared prototypes avoid per-entity migration.
         private EntitiesGraphicsSystem                 _eg;             // from `using Unity.Rendering` — NOT qualified (Unity.Rendering collides with MapRenderer.Unity.Rendering)
         private BatchMaterialID[]                      _materialIds;   // one per layer material, registered once
-        // Two Prefab-tagged prototypes, one per shadow-cast mode: RenderFilterSettings is shared-component
-        // data, so choosing at Instantiate time keeps AddTileLayer free of a per-entity SetSharedComponent
-        // (a structural change — the exact cost the ID route exists to avoid).
+        // One Prefab-tagged prototype per shadow-cast mode: RenderFilterSettings is a shared component, so
+        // choosing at Instantiate time avoids a per-entity SetSharedComponent structural change.
         private Entity                                 _layerPrototypeNoCast; // Instantiated for ShadowCastingMode.Off slots
         private Entity                                 _layerPrototypeCast;   // Instantiated for ShadowCastingMode.On slots
         private Mesh                                   _prototypeMesh;  // inert placeholder mesh for the prototypes' RenderMeshArray
@@ -130,22 +95,15 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <c>InternalsVisibleTo</c>). Keep the existing hierarchical names so the Profiler flat search groups.</summary>
         internal static class ProfilerMarkerNames
         {
-            // ── the per-frame EG drive, split so a per-frame spike is attributable ──
-            // RootTransforms: the per-tile LocalTransform/LocalToWorld writes (scales with tile count).
-            // Init/Sim/PresGroup: the three system-group ticks. PresGroup runs EntitiesGraphicsSystem
-            // (instance-data upload + BRG batch (re)registration) and is the usual culprit when tiles churn.
+            // Per-frame drive: RootTransforms = per-tile transform writes; Init/Sim/PresGroup = the system-group
+            // ticks. PresGroup runs EntitiesGraphicsSystem (instance upload + BRG batch registration).
             internal const string RootTransforms = "MapRenderer.ECS.RootTransforms";
             internal const string InitGroup      = "MapRenderer.ECS.InitGroup";
             internal const string SimGroup       = "MapRenderer.ECS.SimGroup";
             internal const string PresGroup      = "MapRenderer.ECS.PresGroup";
 
-            // ── AddTileLayer sub-phases (nested under MapRenderer.Tile.AddLayer) ──
-            // The per-tile-load spike on the render thread is hypothesised to be EG batch registration. Split
-            // AddTileLayer so the live profiler attributes the cost to its real source:
-            //   Root     — GetOrCreateRoot (creates the tile-root entity on first layer of a tile).
-            //   Register — new RenderMeshArray + RenderMeshUtility.AddComponents — the EG mesh/material batch
-            //              registration. PRIME SUSPECT for the zoom stall (per-tile RenderMeshArray).
-            //   Parent   — the Parent+LocalTransform structural change + the LocalToWorld/bounds sets.
+            // AddTileLayer sub-phases under MapRenderer.Tile.AddLayer: Root = GetOrCreateRoot, Register = prototype
+            // Instantiate + EG mesh registration, Parent = Parent/LocalTransform + LocalToWorld/bounds writes.
             internal const string AddLayerRoot     = "MapRenderer.Tile.AddLayer.Root";
             internal const string AddLayerRegister = "MapRenderer.Tile.AddLayer.Register";
             internal const string AddLayerParent   = "MapRenderer.Tile.AddLayer.Parent";
@@ -167,10 +125,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private static readonly ProfilerMarker PmAddParent =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.AddLayerParent);
 
-        // Last scene frame seen by Rebuild. AddTileLayer may be called AFTER Rebuild within the same frame,
-        // so without caching the frame we'd create the entity at LocalToWorld.identity (world origin) and it
-        // would render there for one frame until the NEXT Rebuild repositioned it — the zoom "blink in the
-        // corner". Caching the frame lets AddTileLayer place the entity correctly the instant it is created.
+        // Last frame seen by Rebuild. An entity added after Rebuild in the same frame is placed from it at
+        // once, instead of blinking at the world origin until the next Rebuild.
         private SceneFrame _lastFrame;
         private bool       _hasSceneOrigin;
 
@@ -179,11 +135,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// Optional per-layer style ids parallel to <paramref name="layerMaterials"/>, used only to name the
         /// layer entities in the Editor's Entities Hierarchy. When null/short, the material name is used.
         /// </param>
-        /// <param name="layerShadowModes">
-        /// Optional per-layer <c>Style.IRenderLayer.CastShadows</c> declarations parallel to
-        /// <paramref name="layerMaterials"/>. When null/short, a slot falls back to
-        /// <see cref="ShadowCastingMode.Off"/> — see <see cref="ShadowModeFor"/>.
-        /// </param>
+        /// <param name="layerShadowModes">Optional per-layer <c>Style.IRenderLayer.CastShadows</c> parallel to
+        /// <paramref name="layerMaterials"/>; null/short ⇒ <see cref="ShadowCastingMode.Off"/>.</param>
         public TileRenderer(
             IReadOnlyList<Material> layerMaterials,
             IReadOnlyList<string> layerNames = null,
@@ -261,24 +214,11 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         /// <summary>
-        /// Builds the layer-entity PROTOTYPES — one per shadow-cast mode.
-        /// <see cref="RenderMeshUtility.AddComponents"/>
-        /// stamps EG's full render component set (LocalToWorld, RenderBounds, MaterialMeshInfo, and the
-        /// RenderMeshArray shared component); we add Parent/LocalTransform (the transform hierarchy) and Prefab
-        /// (so the prototypes themselves never render and are skipped by EG's queries). Every AddTileLayer
-        /// Instantiates one of them — instances share that prototype's archetype AND the single (inert,
-        /// ID-overridden) RenderMeshArray VALUE both prototypes were built from, so no per-entity array or
-        /// structural migration is created. The placeholder mesh is
-        /// empty and never drawn (Prefab); it exists only because AddComponents requires a RenderMeshArray.
-        ///
-        /// <para>Two prototypes rather than a per-entity <c>SetSharedComponent</c>: shadow casting lives in
-        /// <see cref="RenderFilterSettings"/>, which is <see cref="ISharedComponentData"/>, so writing it per
-        /// entity would be a structural change per layer — the measured <c>MapRenderer.Tile.AddLayer</c> spike
-        /// this whole path exists to avoid.</para>
-        /// Seeds the RenderMeshArray with the first NON-null material — slot 0 may be a
-        /// background layer (null Material, when unconfigured) or a symbol layer (non-null
-        /// <c>WorldTextMaterial</c>) that AddTileLayer is never called for either way; this is an
-        /// inert, ID-overridden prototype seed, harmless regardless of which kind supplies it.
+        /// Builds the two Prefab layer-entity prototypes, one per shadow-cast mode: EG's render components plus
+        /// Parent/LocalTransform. Every AddTileLayer instantiates one, sharing its archetype and its single
+        /// inert RenderMeshArray value, which exists only because <see cref="RenderMeshUtility.AddComponents"/>
+        /// requires one. That array is seeded with the first non-null material, because slot 0 may be a null
+        /// background slot.
         /// </summary>
         private void BuildLayerPrototype()
         {
@@ -356,11 +296,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         // ── Instrumentation counters ────────────────────────────────────────────────────────────
-        // Read only by tests, but WRITTEN by the code below, so they stay on the class: they are state this
-        // renderer produces, not a query over it. The read-only queries with zero production callers
-        // (DrawItemCount, TileRootCount, TileRootExists, RootChildBufferCount, IsParentedToTileRoot,
-        // EntityExists, GetInstanceTranslation, GetRenderBoundsLocal, GetLayerEntityName) live in the test
-        // assembly — see EntitiesTileRendererTestExtensions.
+        // Tests read them, but this class writes them. Test-only queries live in EntitiesTileRendererTestExtensions.
 
         /// <summary>Number of batched DestroyEntity structural changes performed by the LAST
         /// <see cref="RemoveItems"/> call (0 or 1 — the whole batch is one structural change). A shallow
@@ -472,49 +408,35 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             BatchMeshID meshId;
             using (PmAddRegister.Auto())
             {
-                // ID route: Instantiate the shared-archetype prototype (ONE structural op, no fresh
-                // RenderMeshArray shared component / batch registration per layer), register the mesh with EG,
+                // ID route: one Instantiate of the shared-archetype prototype, then register the mesh with EG
                 // and point the entity at (meshId, materialId).
                 e      = _em.Instantiate(ShadowModeFor(materialIndex) == ShadowCastingMode.Off
                     ? _layerPrototypeNoCast
                     : _layerPrototypeCast);
                 meshId = _eg.RegisterMesh(mesh);
                 RegisteredMeshCount++;
-                // ID-based MaterialMeshInfo (ctor (materialID, meshID) in this EG version — no
-                // FromMeshIDAndMaterialID factory) → EG batches by the registered ids, ignoring the inert
-                // RenderMeshArray the instance carries from the prototype.
+                // This EG version has the (materialID, meshID) ctor, not a factory. EG batches by these ids and
+                // ignores the inert RenderMeshArray copied from the prototype.
                 _em.SetComponentData(e, new MaterialMeshInfo(_materialIds[materialIndex], meshId));
             }
 
             using (PmAddParent.Auto())
             {
-            // Parent + LocalTransform already exist on the instance (copied from the prototype's archetype by
-            // Instantiate), so these are pure SetComponentData — no per-entity archetype migration (the old
-            // ComponentTypeSet add was the measured MapRenderer.Tile.AddLayer spike). LocalToWorldSystem then
-            // computes this entity's LocalToWorld = root.LocalToWorld each Rebuild tick.
+            // Parent + LocalTransform come from the prototype's archetype, so these sets cause no migration.
+            // LocalToWorldSystem then derives this entity's LocalToWorld from the root on each Rebuild tick.
             _em.SetComponentData(e, new Parent { Value = root });
             _em.SetComponentData(e, LocalTransform.Identity);
 
-            // Set LocalToWorld directly for the frame BEFORE the first transform tick (the consume happens
-            // after this frame's Rebuild), so the tile renders at the right place immediately — no origin
-            // blink. The next Rebuild's LocalToWorldSystem re-derives the identical value from the root.
-            // (LocalToWorld is already present from RenderMeshUtility.AddComponents, so this is a set, not a
-            // migration.) Identity rebase (Mercator) ⇒ TRS == Translate.
+            // Set LocalToWorld directly: this entity renders before its first transform tick, so this avoids an
+            // origin blink. The next Rebuild's LocalToWorldSystem re-derives the same value from the root.
             _em.SetComponentData(e, new LocalToWorld
             {
                 Value = float4x4.TRS(InitialScenePos(tileOriginRender), InitialSceneRot(), new float3(1f))
             });
 
-            // RenderBounds drives EG frustum culling (WorldRenderBounds = this × LocalToWorld). It MUST
-            // enclose the mesh: the builders compute a tight, correctly-centred AABB in the same
-            // origin-relative frame as the vertices (StyledFillTileBuilder / StyledLineTileBuilder), so we
-            // mirror mesh.bounds. The old fixed { Center=0, Extents=1e6 } box was both undersized and
-            // off-centre once render units are ECEF metres: at low zoom a tile spans several 1e6 m
-            // (Mercator z3≈5e6, globe z0–1 out to R≈6.4e6), so the box hugged one corner and EG culled the
-            // whole tile whenever that corner left the frustum — tiles vanished in the Game view (but not
-            // Scene view, a wider frustum) at exactly those zooms. A rotation in LocalToWorld only inflates
-            // the world AABB (conservative). Fallback: a mesh that arrives with degenerate (zero-size)
-            // bounds keeps the generous never-cull box rather than being culled-always.
+            // RenderBounds drives EG frustum culling, so it mirrors mesh.bounds, which the builders compute in the
+            // vertices' frame. Non-obvious why: a fixed box is too small at low zoom, where a tile spans several
+            // million metres, so EG culls the whole tile. A zero-size mesh bound falls back to a never-cull box.
             if (_em.HasComponent<RenderBounds>(e))
             {
                 Bounds mb = mesh.bounds;
@@ -592,13 +514,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             EntitiesDestroyedLastRemove    = 0;
             if (IsDisposed) return;
 
-            // Play-mode Stop disposes EVERY Entities World — this backend's MapEntitiesWorld included — before
-            // our MapViewComponent.OnDestroy runs, so at teardown the EntityManager may already be deallocated
-            // while this backend is NOT yet disposed (IsDisposed == false). The layer entities are already gone
-            // with the World, so there is nothing to remove; touching _em below (_em.Exists) would instead throw
-            // ObjectDisposedException, aborting the caller TileManager.RenderTeardownRecord → DoDispose mid-loop
-            // and stranding every subsystem disposed after it (the "finalized without Dispose()" leak flood).
-            // Mirror DoDispose's own _world.IsCreated guard; inert during normal runtime (World alive).
+            // Non-local invariant: Play-mode Stop disposes every World before MapViewComponent.OnDestroy, so the
+            // entities are gone while this backend is not. Touching _em would throw and abort TileManager's
+            // teardown mid-loop, leaking every subsystem disposed after it.
             if (_world is not { IsCreated: true }) return;
 
             _destroyList.Clear();
@@ -636,20 +554,11 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // ── Per-frame rebuild ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Refreshes each tile ROOT's transform from <paramref name="sceneOrigin"/> (origin ≡ look-at;
-        /// camera-relative rendering) and ticks the Entities-Graphics systems so the instance data is
-        /// uploaded before the camera renders. Must be called once per frame on the Entities backend.
-        ///
-        /// Only the per-tile root transforms are written here (one write per tile, not per layer); the
-        /// ticked <c>TransformSystemGroup</c> (<see cref="ParentSystem"/> → <see cref="LocalToWorldSystem"/>,
-        /// both under <see cref="SimulationSystemGroup"/>) then derives every child layer entity's
-        /// <see cref="LocalToWorld"/> from its root. Both root <see cref="LocalTransform"/> and
-        /// <see cref="LocalToWorld"/> are set so reads (bounds / translation probes) are correct even
-        /// before the tick.
-        ///
-        /// Steady-state allocation-free at the managed level: the refresh is a struct-enumerator loop over
-        /// the root map with in-place <c>SetComponentData</c> (no structural change). Entities Graphics'
-        /// own system update uses native/temp allocations, not managed GC.
+        /// Once per frame: writes each tile root's <see cref="LocalTransform"/> and <see cref="LocalToWorld"/>
+        /// from <paramref name="frame"/> (origin = look-at), then ticks the system groups, so
+        /// <see cref="LocalToWorldSystem"/> derives each layer entity's transform from its root and EG uploads
+        /// the instance data before the camera renders. Setting the root's <see cref="LocalToWorld"/> too keeps
+        /// reads correct before the tick. The root loop does no managed allocation or structural change.
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {
@@ -673,11 +582,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 }
             }
 
-            // Drive the Entities-Graphics systems (no automatic player-loop tick — bootstrap disabled).
-            // SimulationSystemGroup contains TransformSystemGroup (parents → child LocalToWorld);
-            // PresentationSystemGroup contains EntitiesGraphicsSystem (uploads instance data + registers
-            // the BRG batch); the actual draw is emitted during the camera's render via SRP culling.
-            // Markered separately so the profiler shows which group owns a per-frame spike.
+            // Bootstrap is disabled, so tick the groups here: Simulation runs TransformSystemGroup, Presentation
+            // runs EntitiesGraphicsSystem. The draw itself is emitted during the camera's render via SRP culling.
             using (PmInitGroup.Auto())
                 _initGroup?.Update();
             using (PmSimGroup.Auto())
@@ -701,9 +607,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             }
             _world = null;
 
-            // The world disposal tears down EG's registries wholesale, so no explicit Unregister* is
-            // needed for correctness. But the prototype's placeholder Mesh is a UnityEngine.Object we created —
-            // destroy it explicitly (a Mesh is not freed just because nothing references it).
+            // World disposal tears down EG's registries, so no Unregister* is needed. The placeholder Mesh is
+            // a UnityEngine.Object this class created, and nothing frees it unless it is destroyed here.
             if (_prototypeMesh != null)
             {
                 _prototypeMesh.DestroySafely(allowDestroyingAssets: true);

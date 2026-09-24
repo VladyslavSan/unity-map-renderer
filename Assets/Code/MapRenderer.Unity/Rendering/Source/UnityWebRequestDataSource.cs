@@ -10,25 +10,10 @@ using MapRenderer.Core.Data;
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// Production HTTP tile data source using <see cref="UnityWebRequest"/> and UniTask.
-    /// Zero <c>Task</c> / <c>Task.Run</c> — fetches are fully async via <c>.ToUniTask()</c>.
-    ///
-    /// <para>
-    /// URL template tokens: <c>{z}</c>, <c>{x}</c>, <c>{y}</c>.
-    /// Example: <c>https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf</c>
-    /// </para>
-    ///
-    /// <para>
-    /// Y convention: XYZ (slippy-map / MapLibre default). TMS Y-flip is NOT applied.
-    /// </para>
-    ///
-    /// <para>
-    /// HTTP 404/204 → <see cref="TileResponse.Absent"/>; HTTP 5xx → throws
-    /// <see cref="UnityWebRequestException"/>. <see cref="CancellationToken"/> is threaded through
-    /// via <c>destroyCancellationToken</c> support in ToUniTask.
-    /// </para>
-    ///
-    /// Clean-room: standard UnityWebRequest HTTP pattern; no MapLibre source read.
+    /// Production HTTP tile data source over <see cref="UnityWebRequest"/> and UniTask (no <c>Task.Run</c>).
+    /// The URL template takes <c>{z}</c>, <c>{x}</c>, <c>{y}</c> in the XYZ convention; no TMS Y-flip.
+    /// HTTP 404/204 → <see cref="TileResponse.Absent"/>; 5xx and connection errors throw
+    /// <see cref="UnityWebRequestException"/>. The <see cref="CancellationToken"/> aborts the fetch.
     /// </summary>
     public sealed class UnityWebRequestDataSource : IDataSource
     {
@@ -36,9 +21,8 @@ namespace MapRenderer.Unity.Rendering.Source
 
         public TileEncoding Encoding => TileEncoding.Mvt;
 
-        // Test observability: how many of these (the network source) have been constructed process-wide.
-        // The offline tooth asserts this stays unchanged across a file:// SetStyle + settle — a "zero network"
-        // proof (mirrors the DebugLiveAllocCount counter pattern). Interlocked: ctor may run off-main.
+        // Process-wide construction count; the offline test asserts a file:// style constructs none.
+        // Interlocked, because the ctor can run off the main thread.
         private static int _debugConstructedCount;
         internal static int DebugConstructedCount => System.Threading.Volatile.Read(ref _debugConstructedCount);
 
@@ -55,15 +39,8 @@ namespace MapRenderer.Unity.Rendering.Source
             using var req = UnityWebRequest.Get(url);
             req.downloadHandler = new DownloadHandlerBuffer();
 
-            // .ToUniTask() hooks into the Unity PlayerLoop to poll the web request each frame.
-            // CancellationToken is threaded through so destroyCancellationToken can abort the fetch.
-            //
-            // 404 / 204 — tile explicitly absent: ToUniTask() calls IsError() which returns true for
-            // ProtocolError (any non-2xx response), so a 404 throws UnityWebRequestException BEFORE we
-            // can inspect responseCode. Catch the exception early and map known absent codes to
-            // TileResponse.Absent. All other errors (5xx, connection errors) re-throw so TileScheduler
-            // can handle them (negative-cache prevention). OperationCanceledException is NOT a
-            // UnityWebRequestException, so it propagates through and the scheduler's per-tile CTS works.
+            // ToUniTask() throws on any non-2xx before responseCode is readable, so 404/204 map to Absent in
+            // the catch. Other errors re-throw to TileScheduler; OperationCanceledException passes through.
             try
             {
                 await req.SendWebRequest().ToUniTask(cancellationToken: ct);
@@ -76,10 +53,8 @@ namespace MapRenderer.Unity.Rendering.Source
             }
             catch (UnityWebRequestException) when (ct.IsCancellationRequested)
             {
-                // A fetch cancelled mid-flight (tile released by cover churn) aborts the
-                // UnityWebRequest, which can surface as a generic "Unknown Error" UnityWebRequestException
-                // rather than OperationCanceledException. Re-map it to a cancellation so the scheduler /
-                // TileManager treat it as benign (swallowed) instead of a logged error / unobserved fault.
+                // A mid-flight cancel can surface as a generic "Unknown Error" UnityWebRequestException.
+                // Re-map it, so the scheduler and TileManager swallow it instead of logging a fault.
                 throw new OperationCanceledException(ct);
             }
 

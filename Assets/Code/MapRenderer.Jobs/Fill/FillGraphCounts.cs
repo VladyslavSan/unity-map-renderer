@@ -1,17 +1,11 @@
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// Blittable per-layer counts the fill graph's nodes report through — the scalars a surviving output
-    /// list's length cannot give. The layer's TOTAL vertex and index counts come off
-    /// <see cref="FillGraphOutput.TileVertices"/>/<see cref="FillGraphOutput.TriangleIndices"/> once
-    /// <see cref="FillGraphOutput.Handle"/> completes, so they need no field here. The boundary band's
-    /// SHARE of those totals does, because nothing else separates the interior prefix from the band that
-    /// <see cref="FillBandJob"/> appends to the same columns.
-    ///
-    /// <para>The error flag is NOT a member here — it is <see cref="FillGraphOutput.Error"/>, a standalone
-    /// <see cref="Unity.Collections.NativeReference{T}"/>. A job can set an <c>Error*</c> code below with no
-    /// other reason to touch these scalars, so folding it in would make every error-only writer a writer of
-    /// counts it never reports.</para>
+    /// Blittable per-layer counts the fill graph's nodes report, the scalars no list length gives. Totals come
+    /// off <see cref="FillGraphOutput.TileVertices"/>/<see cref="FillGraphOutput.TriangleIndices"/> after
+    /// <see cref="FillGraphOutput.Handle"/> completes; the band's share is here, because nothing else separates
+    /// the interior prefix from what <see cref="FillBandJob"/> appends. The error flag is the separate
+    /// <see cref="FillGraphOutput.Error"/>, so an error-only writer does not write counts.
     /// </summary>
     public struct FillGraphCounts
     {
@@ -47,14 +41,11 @@ namespace MapRenderer.Jobs.Fill
         /// <summary>Total clean-drop ("force clip") loci across every polygon's earcut.</summary>
         public int ForceClipCount;
 
-        /// <summary>Vertices <see cref="FillBandJob"/> appended for the boundary band — two per ring vertex,
-        /// zero when that node did not run or found no ring to follow. The interior's own vertices are
-        /// therefore <c>TileVertices.Length - BandVertexCount</c>, and they are the array's PREFIX: the band
-        /// only ever appends.
-        /// <para><b>ZERO on the curved arm, and that is not "no band".</b>
-        /// <see cref="GlobeFillScatterJob"/> clears both band scalars because subdivision re-emits every
-        /// vertex in traversal order — band and interior interleave and no prefix split survives. Band-ness
-        /// there is the per-vertex <see cref="FillGraphOutput.VertexBand"/> attribute.</para></summary>
+        /// <summary>Vertices <see cref="FillBandJob"/> appended: two per ring vertex, zero if it did not run
+        /// or found no ring. On the flat arm the interior is the <c>TileVertices.Length - BandVertexCount</c>
+        /// prefix. Zero on the curved arm is not "no band": <see cref="GlobeFillScatterJob"/> clears it, since
+        /// subdivision interleaves band and interior; <see cref="FillGraphOutput.VertexBand"/> marks it
+        /// there.</summary>
         public int BandVertexCount;
 
         /// <summary>Indices <see cref="FillBandJob"/> appended — six per ring edge. Unlike the vertices these

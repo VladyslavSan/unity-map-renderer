@@ -6,14 +6,8 @@ namespace MapRenderer.Core.Expressions.Ops
     /// <c>boolean</c> / <c>number</c> / <c>string</c> / <c>object</c> type-assertion expressions (spec
     /// "Types / Assertion" section).  Distinct from the <c>to-*</c> coercions: these return the input
     /// unchanged when the type matches and throw <see cref="ExpressionEvaluationException"/> when it does
-    /// not.  Multi-arg first-match form: try each argument in order and return the first one whose type
-    /// matches.
-    ///
-    /// <b>Alloc-free per-frame design</b> — accepting the restriction that produced the plan's no-GC
-    /// guarantee: instead of sharing <see cref="FunctionExpression"/> (which allocates a <c>Value[]</c>
-    /// on every call), each assertion op is a dedicated node that evaluates its sub-expression(s)
-    /// directly via stack-local Values.  With Constant-folded color outputs the whole path from
-    /// <c>["interpolate",…,["number",["zoom"]],…]</c> is allocation-free.
+    /// not. The multi-arg form returns the first argument whose type matches. A dedicated node evaluates
+    /// its sub-expressions into stack locals, so the assertion allocates no <c>Value[]</c> per call.
     /// </summary>
     public sealed class AssertExpression : Expression
     {
@@ -39,9 +33,8 @@ namespace MapRenderer.Core.Expressions.Ops
 
         public override Value Evaluate(in EvaluationContext context)
         {
-            // Single-arg form: assert and return. Multi-arg: first match.
-            // We track the last evaluated value so we can report its type in the single-arg error path
-            // without re-evaluating the sub-expression.
+            // Single-arg form: assert and return. Multi-arg: first match. `last` reports the type in the
+            // error path without re-evaluating the sub-expression.
             Value last = default;
             for (int i = 0; i < _args.Length; i++)
             {
@@ -59,15 +52,10 @@ namespace MapRenderer.Core.Expressions.Ops
     }
 
     /// <summary>
-    /// <c>array</c> type-assertion expression (spec "Types / Assertion" section).  Three forms:
-    /// <list type="bullet">
-    ///   <item><c>["array", v]</c> — assert v is an array of any element type / any length.</item>
-    ///   <item><c>["array", type, v]</c> — assert every element is of the given primitive type
-    ///         ("boolean" | "number" | "string").</item>
-    ///   <item><c>["array", type, N, v]</c> — as above, and assert the array has exactly N elements.</item>
-    /// </list>
-    /// <c>type</c> and <c>N</c> are parse-time literals; the value <c>v</c> is evaluated at runtime.
-    /// No <c>Value[]</c> allocation per call — evaluates <c>v</c> into a stack local directly.
+    /// <c>array</c> type-assertion expression (spec "Types / Assertion" section): <c>["array", v]</c> asserts
+    /// any array; <c>["array", type, v]</c> also asserts every element is "boolean" | "number" | "string";
+    /// <c>["array", type, N, v]</c> also asserts exactly N elements. <c>type</c> and <c>N</c> are parse-time
+    /// literals; <c>v</c> is evaluated at runtime into a stack local, with no per-call allocation.
     /// </summary>
     public sealed class ArrayAssertExpression : Expression
     {

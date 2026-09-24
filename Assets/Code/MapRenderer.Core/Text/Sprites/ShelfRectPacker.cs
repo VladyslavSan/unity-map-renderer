@@ -6,18 +6,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
-    /// Deterministic next-fit-decreasing-height <b>shelf</b> rectangle packing. Knows nothing about sprites —
-    /// it packs axis-aligned cells into the smallest power-of-two-widened sheet it can.
-    ///
-    /// <para>Shelf packing is chosen over MaxRects/skyline: a few hundred cells that each grow a
-    /// couple of texels do not need the extra 3–5 % occupancy, and a shelf layout's disjointness follows
-    /// directly from the rule (cells within a shelf advance along x and never overlap; shelves stack along y
-    /// and never overlap). That guarantee is worth more here than density.</para>
-    ///
-    /// <para><b>Determinism.</b> Cells are ordered by height desc, then width desc, then <i>input index</i>
-    /// asc. The input-index tiebreak makes the order TOTAL, so the caller's own ordering (for sprites: the
-    /// group's lexicographically-smallest name by <c>string.CompareOrdinal</c>) decides ties and two runs
-    /// cannot differ. Nothing here consults a hash table or a culture-sensitive comparison.</para>
+    /// Deterministic next-fit-decreasing-height <b>shelf</b> rectangle packing of axis-aligned cells into the
+    /// smallest power-of-two-widened sheet it can. A shelf layout is disjoint by its rule, which matters more
+    /// here than the few percent MaxRects/skyline would gain. Cells sort by height desc, width desc, then input
+    /// index asc; that total order lets the caller's own ordering decide ties, so two runs cannot differ.
     /// </summary>
     public static class ShelfRectPacker
     {

@@ -5,20 +5,10 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// Decodes a MapLibre glyph-PBF range response (<c>{fontstack}/{range}.pbf</c>) into
-    /// <see cref="GlyphPbfRange"/>. Clean-room, built from the public glyph-PBF wire schema; reuses
-    /// the project's hand-rolled <see cref="ProtobufReader"/> (see <c>MvtDecoder</c> for the same
-    /// field-const + reader style).
-    ///
-    /// Wire schema:
-    ///   glyphs    { repeated fontstack stacks = 1 }
-    ///   fontstack { string name = 1; string range = 2; repeated glyph glyphs = 3 }
-    ///   glyph     { uint32 id = 1; bytes bitmap = 2; uint32 width = 3; uint32 height = 4;
-    ///               sint32 left = 5; sint32 top = 6; uint32 advance = 7 }
-    ///
-    /// <c>left</c>/<c>top</c> are zigzag <c>sint32</c> — decoded via <see cref="ProtobufReader.ReadSInt64"/>,
-    /// not a plain varint (plain-varint decode of a negative zigzag value yields the wrong number).
-    /// <c>bitmap</c> is optional (whitespace/zero-advance glyphs carry none) — decodes to a null
-    /// <see cref="SdfGlyph.Bitmap"/>, never throws.
+    /// <see cref="GlyphPbfRange"/> with <see cref="ProtobufReader"/>, per the public wire schema: glyphs
+    /// { stacks = 1 }; fontstack { name = 1; range = 2; glyphs = 3 }; glyph { id = 1; bitmap = 2; width = 3;
+    /// height = 4; sint32 left = 5; sint32 top = 6; advance = 7 }. The zigzag <c>left</c>/<c>top</c> decode
+    /// via <see cref="ProtobufReader.ReadSInt64"/>; a missing <c>bitmap</c> decodes to null.
     /// </summary>
     public static class GlyphPbfDecoder
     {

@@ -1,18 +1,15 @@
-// Engine-free, BLITTABLE — this struct crosses into the Jobs boundary as a NativeArray<SymbolQuad> element (the
-// same Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/GlyphAtlasEntry/
-// PositionedGlyph use) — keep it to blittable fields only.
+// BLITTABLE: this struct crosses into the Jobs boundary as a NativeArray<SymbolQuad> element, so keep it to
+// blittable fields only.
 
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// One symbol-local glyph or sprite-icon quad: an axis-aligned, anchor-relative rectangle
-    /// in baked-pixel space (<see cref="TextQuadLayout.OneEm"/> = 24px) plus its normalized atlas UV
-    /// rect. Glyph/sprite-AGNOSTIC — nothing text-specific (no codepoint/cluster field) — so icon layout
-    /// reuses this struct with sprite UVs instead of glyph UVs. Placement scales these by
-    /// <c>text-size/24</c>, places the anchor on screen, and turns them into camera-facing billboard
-    /// vertices; layout itself builds no <c>Mesh</c>.
+    /// One symbol-local glyph or sprite-icon quad: an axis-aligned, anchor-relative rectangle in baked-pixel
+    /// space (<see cref="TextQuadLayout.OneEm"/> = 24px) plus its normalized atlas UV rect. It has no
+    /// text-specific field, so icon layout reuses it with sprite UVs. Placement scales it by
+    /// <c>text-size/24</c> and turns it into camera-facing billboard vertices.
     /// </summary>
     public readonly struct SymbolQuad
     {

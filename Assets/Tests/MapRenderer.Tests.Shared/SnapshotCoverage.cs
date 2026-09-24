@@ -6,22 +6,18 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Result of analysing a decoded RGBA32 pixel buffer for "map-like" coverage.
-    ///
-    /// Fields:
-    ///   FilledFraction      — fraction of pixels that differ from background beyond tolerance.
-    ///   BackgroundFraction  — fraction of pixels that match background within tolerance.
-    ///   DistinctRegionBucketsHit — number of NxN grid cells containing >= MinFillPixelsPerBucket fill pixels.
-    ///   IsBlank             — buffer is ~100% background or ~100% black (GPU context failure or empty render).
-    ///   IsUniform           — buffer is ~100% a single coarse colour per a 4096-bucket full-RGB histogram
-    ///                         (catches all-filled / garbage flat frames; full-RGB avoids false positives
-    ///                         when fill shares the background's R high-nibble but differs in G or B).
     /// </summary>
     public readonly struct SnapshotVerdict
     {
+        /// <summary>Fraction of pixels that differ from the background beyond tolerance.</summary>
         public readonly float FilledFraction;
+        /// <summary>Fraction of pixels that match the background within tolerance.</summary>
         public readonly float BackgroundFraction;
+        /// <summary>Number of grid cells with at least <c>MinFillPixelsPerBucket</c> fill pixels.</summary>
         public readonly int   DistinctRegionBucketsHit;
+        /// <summary>~100% background or ~100% black: a GPU context failure or an empty render.</summary>
         public readonly bool  IsBlank;
+        /// <summary>~100% one coarse colour in the full-RGB histogram: an all-filled or garbage flat frame.</summary>
         public readonly bool  IsUniform;
 
         public SnapshotVerdict(
@@ -39,12 +35,9 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// Returns true when the buffer looks like a real (non-blank, non-garbage) render:
-        ///   - not blank (not all-background, not all-black)
-        ///   - not uniform (not a single flat colour)
-        ///   - fill fraction in the expected band [minFill, maxFill]
-        ///   - spatial spread: at least minBuckets grid cells contain fill pixels.
-        /// Thresholds are wide (10–85%, 8 of 64 buckets) to stay GPU/driver/Unity-tolerant.
+        /// Returns true when the buffer looks like a real render: not blank, not uniform, a fill fraction in
+        /// [minFill, maxFill], and fill pixels in at least minBuckets grid cells. The default thresholds are
+        /// wide so that they tolerate GPU, driver and Unity differences.
         /// </summary>
         public bool Passes(
             float minFill    = 0.10f,
@@ -59,12 +52,9 @@ namespace MapRenderer.Tests
     }
 
     /// <summary>
-    /// Analyses a decoded RGBA32 <see cref="Frame"/> and returns a <see cref="SnapshotVerdict"/>.
-    ///
-    /// Design: zero dependency on <c>Texture2D</c> or any render-target type — only the
-    /// <see cref="UnityEngine.Color32"/>-typed <see cref="Frame"/>, which itself compiles under both
-    /// runners via a matching shim (<c>Tools/core-tests/Shim/Types/Color32.cs</c>). This keeps Core
-    /// GPU-free and unit-testable with a dotnet runner.
+    /// Analyses a decoded RGBA32 <see cref="Frame"/> and returns a <see cref="SnapshotVerdict"/>. It depends
+    /// on no render-target type, only on <see cref="UnityEngine.Color32"/>, which a shim
+    /// (<c>Tools/core-tests/Shim/Types/Color32.cs</c>) supplies, so it also runs under dotnet.
     /// </summary>
     public static class SnapshotCoverage
     {
@@ -89,15 +79,10 @@ namespace MapRenderer.Tests
         private const float BlankThreshold = 0.97f;
 
         /// <summary>
-        /// Fraction of pixels that must share a single coarse colour to declare the buffer "uniform".
-        /// Uses a coarse 4096-bucket full-RGB histogram (4 bits per channel: R>>4, G>>4, B>>4).
-        /// The histogram is tolerant: up to 5% outlier pixels (GPU noise, sub-pixel AA) are allowed.
-        ///
-        /// Design choice: full-RGB rather than R-only avoids false positives when the fill colour shares
-        /// the background's R high-nibble (e.g. bg.R=26 → nibble 1; fill.R=20 → nibble 1 also, but
-        /// G/B differ significantly). A purely R-channel histogram would erroneously declare such a
-        /// two-colour buffer "uniform". IsBlank covers the nearly-all-background case separately, so
-        /// the 95% threshold here is applied against the dominant RGB bucket only.
+        /// Fraction of pixels that must share one bucket of a 4096-bucket full-RGB histogram (4 bits per
+        /// channel) to declare the buffer "uniform"; up to 5% outliers (GPU noise, AA) are allowed.
+        /// Non-obvious why: an R-only histogram would call a two-colour frame uniform when fill and background
+        /// share an R high-nibble but differ in G or B.
         /// </summary>
         private const float UniformThreshold = 0.95f;
 
@@ -127,11 +112,8 @@ namespace MapRenderer.Tests
             // Bucket grid for spatial spread: GridN × GridN cells.
             var bucketFill = new int[GridN * GridN];
 
-            // Coarse full-RGB histogram for uniformity detection (4096 buckets: 4 bits per channel).
+            // Coarse full-RGB histogram for uniformity detection (see UniformThreshold).
             // Index = ((r>>4) << 8) | ((g>>4) << 4) | (b>>4).  Range: 0–4095.
-            // Full-RGB avoids the false-positive of an R-only histogram: two colours that share an
-            // R high-nibble (e.g. bg.R=26 and fill.R=20 both → nibble 1) are kept distinct if they
-            // differ in G or B, so a legitimate map frame is not wrongly declared "uniform".
             var rgbHist = new int[4096];
 
             for (int y = 0; y < height; y++)
@@ -174,11 +156,8 @@ namespace MapRenderer.Tests
             bool isBlank = bgFrac >= BlankThreshold ||
                            (float)blackCount / totalPixels >= BlackThreshold;
 
-            // IsUniform: a single coarse colour dominates (catches all-fill or all-garbage flat colour).
-            // IsBlank already covers the nearly-all-background case; IsUniform fires when a non-bg
-            // flat colour occupies ≥95% of pixels — e.g. an all-red garbage frame or renderer hang.
-            // The full-RGB histogram (4096 buckets) keeps bg and fill in separate buckets whenever
-            // they differ in any channel's high nibble, preventing the R-only false positive.
+            // IsUniform: one coarse colour dominates, e.g. an all-red garbage frame or a renderer hang.
+            // IsBlank covers the nearly-all-background case.
             int maxBucket = 0;
             for (int i = 0; i < rgbHist.Length; i++)
                 if (rgbHist[i] > maxBucket) maxBucket = rgbHist[i];
@@ -193,16 +172,9 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// Compute the mean luminance (relative [0,1]) of pixels that are NOT the background colour
-        /// (Manhattan distance > <see cref="Tolerance"/>).
-        ///
-        /// Luminance uses the standard Rec.709 coefficients: Y = 0.2126·R + 0.7152·G + 0.0722·B.
-        ///
-        /// Returns 0.0 when there are no non-background pixels (e.g. blank render or GPU failure).
-        ///
-        /// Used by <c>LitFillSnapshotTests</c> to prove lighting is active: under a directional
-        /// light with intensity I1 vs I2, the mean luminance of non-background pixels differs.
-        /// A constant unlit color would give equal luminance regardless of light intensity.
+        /// Compute the mean Rec.709 luminance (relative [0,1]) of pixels farther than
+        /// <see cref="Tolerance"/> from the background colour; 0.0 when there are none. A lighting test
+        /// compares it under two light intensities: an unlit colour gives the same value for both.
         /// </summary>
         public static double MeanLuminanceOfNonBackground(Frame frame, Color32 background)
         {
@@ -235,13 +207,8 @@ namespace MapRenderer.Tests
         }
 
         // ─────────────────────────────────────────────────────────────────────────────
-        // Region samplers for the multi-layer draw-order snapshot test.
-        //
-        // The painter's-algorithm reorder test samples a fixed screen rectangle where two
-        // layers overlap, then asserts (a) the top layer's colour dominates the region mean
-        // and (b) the region has near-zero colour variance (a clean composite, no coplanar
-        // z-fighting speckle). Engine-free (plain ints plus the Color32 shim), so they
-        // unit-test under dotnet.
+        // Region samplers for the draw-order snapshot: over a rectangle where two layers overlap, the top
+        // layer's colour dominates the mean and the variance is near zero (no z-fight speckle).
         // ─────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -288,13 +255,9 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// Total colour variance inside the rectangle: the sum of the per-channel variances of R, G, B
-        /// (each normalised to [0,1] before squaring). A flat, single-colour region → ~0; a speckled /
-        /// z-fighting region → noticeably positive. Empty region returns 0.
-        ///
-        /// Used by the reorder snapshot to assert a CLEAN composite (no coplanar z-fight): a coplanar
-        /// ZWrite-On stack would alternate between two layers' colours per pixel and inflate this value;
-        /// the ZWrite-Off painter's stack composites flat → near-zero.
+        /// Total colour variance inside the rectangle: the sum of the R, G, B variances, each normalised to
+        /// [0,1]; 0 for an empty region. A flat region gives ~0. A coplanar ZWrite-On stack alternates two
+        /// layers' colours per pixel and inflates it; the ZWrite-Off painter's stack stays near zero.
         /// </summary>
         public static double RegionColorVariance(Frame frame, int x0, int y0, int x1, int y1)
         {

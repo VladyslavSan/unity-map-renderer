@@ -110,24 +110,19 @@ namespace MapRenderer.Core.Style.Symbol
         /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
         public AlignmentMode RotationAlignment { get; init; }
 
-        /// <summary>W1 — the RESOLVED <c>text-pitch-alignment</c> / <c>icon-pitch-alignment</c>
-        /// (<see cref="AlignmentResolution.ResolvePitch"/>), NOT the raw layout value: unlike
-        /// <see cref="RotationAlignment"/> above (recorded as authored) this one is consumed downstream, so
-        /// the <c>auto</c> chain is collapsed once, in <c>SymbolFeatureExtractor</c>, where the
-        /// layer's <c>symbol-placement</c> is in hand. Carried onto <c>ShapedSymbol.PitchAlignment</c> and
-        /// from there into the curved staging input, whose <c>Map</c> branch lays the symbol out in world
-        /// metres.</summary>
+        /// <summary>The RESOLVED <c>text-pitch-alignment</c> / <c>icon-pitch-alignment</c>
+        /// (<see cref="AlignmentResolution.ResolvePitch"/>), not the raw layout value: <c>SymbolFeatureExtractor</c>
+        /// collapses the <c>auto</c> chain once, where <c>symbol-placement</c> is in hand. It flows through
+        /// <c>ShapedSymbol.PitchAlignment</c> to the curved staging input, whose <c>Map</c> branch lays out in
+        /// world metres.</summary>
         public AlignmentMode PitchAlignment { get; init; }
 
         /// <summary>
-        /// Distinguishes a text symbol from an icon symbol. Default <see cref="SymbolKind.Text"/>. An icon symbol
-        /// reuses the text-named fields for its icon-* counterparts, a non-local invariant:
-        /// <see cref="AnchorRender"/> (icon-anchor), <see cref="Placement"/> (always
-        /// <see cref="SymbolPlacement.Point"/>), <see cref="SortKey"/> (<c>symbol-sort-key</c>, shared),
-        /// <see cref="PaddingPx"/> (<c>icon-padding</c>), <see cref="AllowOverlap"/>/<see cref="IgnorePlacement"/>
-        /// (<c>icon-allow-overlap</c>/<c>icon-ignore-placement</c>), <see cref="RotationAlignment"/>
-        /// (<c>icon-rotation-alignment</c>), <see cref="Paint"/>.Opacity (<c>icon-opacity</c>).
-        /// <see cref="Text"/> stays null on an icon symbol.
+        /// Distinguishes a text symbol from an icon symbol; default <see cref="SymbolKind.Text"/>.
+        /// Non-local invariant: an icon reuses the text-named fields for its icon-* counterparts
+        /// (<see cref="AnchorRender"/>, <see cref="PaddingPx"/>, <see cref="AllowOverlap"/>,
+        /// <see cref="IgnorePlacement"/>, <see cref="RotationAlignment"/>, <see cref="Paint"/>.Opacity;
+        /// <see cref="Placement"/> is always Point, <see cref="SortKey"/> is shared) and leaves <see cref="Text"/> null.
         /// </summary>
         public SymbolKind Kind { get; init; }
 
@@ -145,13 +140,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// </summary>
         public float IconSkirtPx { get; init; }
 
-        /// <summary><c>icon-rotate</c> in RADIANS, positive = clockwise on screen (MapLibre's sense, kept
-        /// verbatim on every carrier — the staging frame's opposite sense is entered once, far downstream, at
-        /// <c>SymbolBearing.IconRotationRadians</c>) — the degrees→radians
-        /// conversion happens ONCE here, at extract (the <see cref="MapRenderer.Core.Geo.Angle"/> rule). A
-        /// constant angular offset composed ON TOP of whatever the icon's alignment produced; 0 (the default)
-        /// on every text symbol and every un-rotated icon. Meaningful only when <see cref="Kind"/> is
-        /// <see cref="SymbolKind.Icon"/> — <c>icon-rotate</c> never rotates text.</summary>
+        /// <summary><c>icon-rotate</c> in radians, converted once here at extract; positive = clockwise on screen,
+        /// kept on every carrier until <c>SymbolBearing.IconRotationRadians</c> enters the staging sense. A
+        /// constant offset composed on top of the icon's alignment; 0 on every text symbol and un-rotated icon.
+        /// Meaningful only when <see cref="Kind"/> is <see cref="SymbolKind.Icon"/>.</summary>
         public float IconRotateRadians { get; init; }
 
         /// <summary>The resolved sprite name — the icon's cross-tile identity; null for text. Threaded

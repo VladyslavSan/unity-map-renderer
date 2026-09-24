@@ -1,7 +1,5 @@
-// PlayMode — shared scaffold for the MapView.SetStyle commit-atomicity tests
-// (MapViewBackgroundRestyleTests + MapViewMaterialValidationOrderingTests). A restyle must keep the
-// PREVIOUS style live until the single synchronous post-await commit; both files drive that seam through a
-// main-thread gated loader and assert the old style survives resolution/cancel/validation-failure.
+// Shared scaffold for the MapView.SetStyle commit-atomicity tests: a restyle keeps the PREVIOUS style live
+// until the single synchronous post-await commit, through resolution, cancel and validation failure.
 
 using System.Collections;
 using System.Threading;

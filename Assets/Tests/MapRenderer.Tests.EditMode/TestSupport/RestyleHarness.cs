@@ -1,7 +1,5 @@
-// The real-SetStyle drive scaffold: a fixture drives a settled cover through MapView.SetStyle
-// without pasting it. EditMode-only: Object.Destroy is immediate here, so
-// CountMeshObjects and every fake-null read below are honest; PlayMode defers destruction to
-// end-of-frame and breaks both. The same holds for every fixture that drives through this scaffold.
+// Non-local invariant: every fixture that drives through this scaffold is EditMode-only. Object.Destroy
+// is immediate here, so CountMeshObjects and fake-null reads are honest; PlayMode defers it and breaks both.
 
 using Cysharp.Threading.Tasks;
 using UnityEngine;

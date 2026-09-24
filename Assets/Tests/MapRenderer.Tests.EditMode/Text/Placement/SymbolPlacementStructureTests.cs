@@ -45,11 +45,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>The ONLY legitimate <c>AddTileLayer(</c> call sites in the assembly: the backend
         /// interface's declaration, its three backend implementations, and the static per-tile pipeline's
-        /// one caller. Scanning ONLY <c>Text/Placement</c> (the prior scope) misses a violation routed
-        /// through an indirection defined elsewhere in the assembly — a wrapper method the symbol-placement
-        /// code calls that itself calls <c>AddTileLayer(</c> never contains the literal string inside
-        /// <c>Text/Placement</c> at all. Scanning the whole assembly against this allowlist catches that
-        /// wrapper wherever it lands, while the five known-legitimate files stay silent.</summary>
+        /// one caller. The scan covers the whole assembly, not only <c>Text/Placement</c>, so it also
+        /// catches a wrapper defined elsewhere that the symbol-placement code calls.</summary>
         private static readonly string[] AllowedAddTileLayerCallers =
         {
             Path.Combine("Rendering", "Backend", "ITileRenderBackend.cs"),
@@ -65,9 +62,8 @@ namespace MapRenderer.Tests.Text.Placement
             string dir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
             DirectoryAssert.Exists(dir);
 
-            // Match the CALL form "AddTileLayer(" (no space before the paren) so a doc comment discussing
-            // the constraint in prose ("must never call AddTileLayer (the static ... path)") is not itself
-            // flagged as an offender -- only an actual invocation is.
+            // Match the CALL form "AddTileLayer(" (no space before the paren) so prose that names the
+            // method ("must never call AddTileLayer (the static ... path)") is not flagged -- only a call is.
             var offenders = new List<string>();
             foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
             {
@@ -136,10 +132,8 @@ namespace MapRenderer.Tests.Text.Placement
             return texture;
         }
 
-        // AnchorRender is render-space PRE-RTC (the same space projection.Project(geo) emits) -- NOT a
-        // small local offset. It must be built relative to the frame's SceneOriginRender (a large absolute
-        // Mercator coordinate), or TryProjectAnchor's rebase lands it far outside the viewport and every
-        // symbol is silently culled (the bug this comment fixes: LastQuadCount was 0, not 2/1).
+        // AnchorRender is render-space PRE-RTC (the space projection.Project(geo) emits), so it is built from
+        // SceneOriginRender; a small local offset lands outside the viewport and every symbol is culled.
         private static void AddSymbol(SymbolTileBuffer buffer, int featureIndex, double3 sceneOriginRender,
             float2 translatePx = default, AlignmentMode rotationAlignment = AlignmentMode.Auto)
         {
@@ -158,10 +152,8 @@ namespace MapRenderer.Tests.Text.Placement
                 sceneOriginRender + new double3(featureIndex * 5.0, 0.0, featureIndex * 2.0),
                 quads, float2.zero, new float2(18f, 18f),
                 paint: SymbolPaint.Default, textSizePx: 24f, sortKey: 0f, featureIndex: featureIndex, tileKey: 0L,
-                // AllowOverlap: this test asserts the buffer is REBUILT-not-accumulated every Tick (2/1/2
-                // quads), which is orthogonal to Slice-2 collision. Without it, whether the two nearby
-                // anchors' boxes overlap (and one gets culled) is projection-dependent and would make the
-                // quad-count assertion flaky. Collision itself is covered by SymbolCollisionTests (T1).
+                // AllowOverlap: without it, whether the two nearby anchors collide depends on the projection,
+                // which makes the rebuild quad counts flaky. SymbolCollisionTests covers collision.
                 allowOverlap: true,
                 translatePx: translatePx, rotationAlignment: rotationAlignment);
         }
@@ -191,14 +183,8 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Assert.AreEqual(0, system.TickCount, "TickCount starts at 0 before any Tick.");
 
-                // Deferred collision: the collision verdict a Tick's emit reads is the one
-                // HARVESTED at that Tick's top — i.e. the collision scheduled at the end of the PREVIOUS Tick,
-                // over the PREVIOUS Tick's candidates. A candidate-set change (twoSymbols → oneSymbol →
-                // twoSymbols) therefore needs TWO Ticks before its placement can be asserted, so each step below
-                // duplicates its Tick call (same args) — TickCount advances TWICE per assertion step (2, 4, 6),
-                // NOT because of a fudged expectation, but because it counts Ticks and this fixture now ticks
-                // twice per step. The quad-count expectations (2 / 1 / 2) — the actual subject of this test — do
-                // NOT move.
+                // A Tick's emit reads the collision verdict scheduled over the PREVIOUS Tick's candidates, so each
+                // step ticks twice before it asserts; TickCount therefore reads 2, 4, 6.
                 system.TickSymbols(in frame, twoSymbols, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, twoSymbols, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(2, system.TickCount);
@@ -220,9 +206,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── Slice C: text-translate shifts the placed billboard vertices in screen space (guards that
-        //    SymbolPlacementSystem.Tick actually applies SymbolTranslate — the fast SymbolTranslateTests only
-        //    cover the pure delta math; this proves Tick calls it). ──
+        // ── text-translate shifts the placed billboard vertices: SymbolTranslateTests covers the delta math,
+        //    this proves Tick applies it. ──
         [Test]
         public void Tick_TextTranslate_ShiftsEveryPlacedVertex_ByScreenDelta()
         {
@@ -245,11 +230,8 @@ namespace MapRenderer.Tests.Text.Placement
             var moved = new SymbolTileBuffer();
             AddSymbol(moved, 0, frame.SceneOriginRender, translate);
 
-            // This symbol is a POINT (default Placement) — it draws through the world path.
-            // The screen-space translate does not show up as a delta on system.Mesh's Position (screen px);
-            // it is carried as an ADDITIVE, UNROTATED Offset delta instead (BillboardMath.BuildWorldQuad),
-            // with the SAME Y-negation as the glyph corner — so the sign convention differs from the
-            // OLD path's raw screen-vertex delta (see BuildWorldQuad's doc for the derivation).
+            // A POINT draws through the world path: the translate is an additive, unrotated Offset delta
+            // (BillboardMath.BuildWorldQuad) with the same Y-negation as the glyph corner.
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
@@ -277,9 +259,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── #4: text-rotation-alignment:map rotates the billboard with the map bearing (guards that Tick
-        //    threads symbol.RotationAlignment + the bearing into BillboardMath — the axis-aligned viewport
-        //    billboard becomes a rotated quad under a non-zero heading). ──
+        // ── text-rotation-alignment:map rotates the billboard with the map bearing: Tick threads the
+        //    alignment and the bearing into BillboardMath, so a non-zero heading rotates the quad. ──
         [Test]
         public void Tick_RotationAlignmentMap_RotatesBillboard_UnderBearing_ViewportStaysAxisAligned()
         {
@@ -302,11 +283,8 @@ namespace MapRenderer.Tests.Text.Placement
             var mapSymbols = new SymbolTileBuffer();
             AddSymbol(mapSymbols, 0, frame.SceneOriginRender, default, AlignmentMode.Map);
 
-            // This symbol is a POINT — it draws through the world path. The rotation is baked
-            // into Offset (every frame, byte-equivalent to the old path while the emit runs every
-            // Tick) rather than a raw screen-vertex position, so this reads Offset off the world mesh
-            // instead of system.Mesh.vertices. Winding is IDENTICAL to the old path (BuildWorldQuad mirrors
-            // BuildQuad's TL/TR/BR/BL corner order).
+            // A POINT draws through the world path, which bakes the rotation into Offset, so this reads Offset
+            // off the world mesh. BuildWorldQuad emits the corners in TL/TR/BR/BL order.
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
@@ -333,9 +311,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── A curved (symbol-placement:line-center) symbol emits one quad per glyph, distributed along
-        //    the projected line (guards that Tick projects the path, walks it, and places per-glyph quads —
-        //    line symbols have a null Layout so the point path emits nothing for them). ──
+        // ── A curved (line-center) symbol emits one quad per glyph along the projected line; its Layout is
+        //    null, so only the curved path can emit it. ──
         private static CurvedGlyph MakeCurvedGlyph(float arcCenter) => new CurvedGlyph
         {
             ArcCenter = arcCenter,
@@ -349,10 +326,8 @@ namespace MapRenderer.Tests.Text.Placement
             },
         };
 
-        // A curved symbol carries pre-computed LineAnchors (stable (segment,t) topology). These helpers
-        // build them from the RENDER-space test path by arc length — the same topology the extractor derives in
-        // tile space (for these straight/L test lines the segment structure is identical). AnchorAt gives the
-        // anchor at a fraction of total arc length; BandAnchors gives `n` anchors evenly within [lo,hi].
+        // Build a curved symbol's (segment,t) LineAnchors from the render-space path by arc length. AnchorAt
+        // gives the anchor at a fraction of the arc; BandAnchors gives `n` anchors evenly within [lo,hi].
         private static LineAnchor AnchorAt(double3[] path, double frac)
         {
             int n = path.Length;
@@ -391,9 +366,8 @@ namespace MapRenderer.Tests.Text.Placement
             };
             using var atlasTexture = BuildTinyAtlasTexture();
 
-            // A straight line along a latitude, projected from real geo endpoints so it spans a WIDE on-screen
-            // segment (render-space units are huge, so a small render offset would project shorter than the
-            // symbol and be correctly skipped). Midpoint (lon 20) projects to ~screen center.
+            // Real geo endpoints give a WIDE on-screen segment; a small render offset would project shorter than
+            // the symbol and be skipped. The midpoint (lon 20) projects near the screen centre.
             double3 a = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 10.0 });
             double3 b = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 30.0 });
             var path = new double3[] { a, b };
@@ -405,9 +379,8 @@ namespace MapRenderer.Tests.Text.Placement
                 placement: SymbolPlacement.LineCenter, paint: SymbolPaint.Default, textSizePx: 24f,
                 maxAngleDeg: 45f, keepUpright: true, featureIndex: 0, tileKey: 0L);
 
-            // Curved routes to the world sink like point/icon — it needs its own
-            // world base material for the world text slot to actually build+present (mirrors the point
-            // migration, e.g. WorldPointEmitRenderTests).
+            // Curved routes to the world sink like point/icon, so the world text slot needs a world base
+            // material to build and present.
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             system.SymbolMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place symbols beyond the far plane without them being culled
@@ -422,10 +395,8 @@ namespace MapRenderer.Tests.Text.Placement
                 WorldMeshReadback.Read(worldMesh, out WorldBillboardVertex[] v, out _);
                 Assert.AreEqual(12, v.Length, "3 glyphs x 4 verts");
 
-                // The glyphs are DISTRIBUTED along the line, not stacked at one point: each glyph's world
-                // AnchorLocal (the Level-1 RTC bake) differs from its neighbours', so the 3D
-                // spread of all corners' AnchorLocal exceeds a small threshold (robust to the projected
-                // line's world orientation; the world path has no single screen-px anchor to spread).
+                // DISTRIBUTED, not stacked: the 3D spread of the corners' AnchorLocal exceeds a small threshold,
+                // whatever the line's world orientation.
                 float3 minA = new float3(float.MaxValue), maxA = new float3(float.MinValue);
                 foreach (WorldBillboardVertex vv in v)
                 {
@@ -437,10 +408,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── symbol-placement:line REPEATS the symbol along the line at symbol-spacing px, whereas
-        //    line-center places exactly one. Over the SAME wide projected line, `line` emits several symbols
-        //    (a multiple of the 3 glyphs) while `line-center` emits one — proving the repetition is driven by
-        //    the placement mode + spacing, not the geometry. allow-overlap isolates repetition from collision. ──
+        // ── Over the SAME wide line, symbol-placement:line repeats the symbol while line-center places one, so
+        //    the placement mode drives the repetition. allow-overlap isolates it from collision. ──
         [Test]
         public void Tick_LinePlacement_RepeatsSymbolAlongLine_WhereLineCenterPlacesOne()
         {
@@ -501,10 +470,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── Defence-in-depth: build-time anchor placement is already capped (see LineAnchorPlacementTests),
-        //    but the per-frame walk ALSO clamps the anchor iteration to MaxAnchorsPerLine (256) so a caller that
-        //    somehow hands a huge anchor array can never spin an unbounded loop. Feed 300 anchors, all inside the
-        //    fit band (allow-overlap, so none are dropped by collision) → exactly 256 place, not 300. ──
+        // ── The per-frame walk clamps its anchors to MaxAnchorsPerLine (256), on top of the build-time cap
+        //    (LineAnchorPlacementTests): 300 fitting anchors with allow-overlap place 256, not 300. ──
         [Test]
         public void Tick_LinePlacement_AnchorCount_IsHardCapped()
         {
@@ -544,8 +511,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── #6: text-max-angle drops a curved symbol whose glyphs would bend around a sharp corner more than the
-        //    allowed adjacent-glyph angle — the SAME corner geometry places with a permissive angle, drops with
+        // ── text-max-angle: the SAME sharp corner places a curved symbol at a permissive angle and drops it at
         //    a strict one. ──
         [Test]
         public void Tick_TextMaxAngle_DropsSymbolBendingRoundASharpCorner()
@@ -662,10 +628,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── END-TO-END: two OVERLAPPING curved symbols (same line, allow-overlap OFF) collide through the
-        //    real rotated-glyph box → candidate → CollisionJob → emit chain — only the lower-sort-key one
-        //    places. This is the decisive proof that curved symbols actually collide (every other curved Tick
-        //    test is single-symbol or allow-overlap); it also exercises SymbolBox.BuildRotatedGlyph for real. ──
+        // ── Two OVERLAPPING curved symbols collide end-to-end (rotated-glyph box → CollisionJob → emit) and
+        //    only the lower sort key places. The other curved Tick tests are single-symbol or allow-overlap. ──
         [Test]
         public void Tick_TwoOverlappingCurvedSymbols_OnlyLowerSortKeyPlaces()
         {
@@ -750,11 +714,8 @@ namespace MapRenderer.Tests.Text.Placement
             var cands = new SymbolCandidate[anchors.Length + 1]; var emit = new CandidateEmit[anchors.Length + 1];
             int bc = 0, qc = 0, ec = 0;
             int staged = SymbolStagingMath.StageCurved(in s, screen, depth, valid, world, worldUps, glyphs, anchors, fadeIds, wasPlaced,
-                // `view` reaches BOTH arms identically (Native assigns the same value to
-                // StageJob.View), so the differential compares the same transform on each side. The
-                // bend cases below pass `default`, which keeps them byte-identical to their screen-box form;
-                // BurstStage_MatchesManaged_MapPitchedCurved passes a real one and is what covers the
-                // projected-corner arithmetic.
+                // `view` reaches both arms (Native assigns it to StageJob.View). The bend cases pass `default`;
+                // BurstStage_MatchesManaged_MapPitchedCurved passes a real one to cover the projected corners.
                 new float2[screen.Length], new float[screen.Length], bearing, view, 0,
                 boxes, ref bc, quads, ref qc, cands, emit, ref ec);
             return new Result { Staged = staged, BoxCount = bc, QuadCount = qc, Boxes = boxes, Quads = quads, Candidates = cands };
@@ -781,17 +742,13 @@ namespace MapRenderer.Tests.Text.Placement
             var pointOffset = One(0); var nScreen = From(screen); var nDepth = From(depth); var nValid = From(valid);
             var nWorld = From(world); // The gathered world polyline, index-aligned with Screen
             var nWorldUps = From(worldUps); // index-parallel unit surface normals
-            // AnchorWasPlaced is JOB-OWNED scratch — StageJob.Execute fills it from AnchorFadeIds +
-            // Placed. Allocated ZERO-FILLED (NativeArrayOptions.ClearMemory is the default), which is the property
-            // doing the work here: a MISSING fill loop reads as not-placed and fails the differential rather than
-            // matching by luck. Placed is the native incumbency set the job resolves against, built from the
-            // harness's (fadeIds, wasPlaced) ground truth — mirrors SymbolPlacementSystem._placedLastFrame.
+            // StageJob fills AnchorWasPlaced from Placed (built from the harness's wasPlaced). It is zero-filled,
+            // so a missing fill loop reads as not-placed and fails the differential instead of matching by luck.
             var awp = new NativeArray<byte>(fadeIds.Length, alloc);
             var placed = new NativeHashSet<long>(math.max(1, fadeIds.Length), alloc);
             for (int i = 0; i < fadeIds.Length; i++) if (wasPlaced[i] != 0) placed.Add(fadeIds[i]);
-            // The job's per-half drop carry. This harness stages a CURVED symbol, which never reads it —
-            // but every NativeContainer field on a job must be constructed at schedule time, so it is allocated
-            // empty rather than left default.
+            // The per-half drop carry. A curved symbol never reads it, but every NativeContainer job field must
+            // be constructed at schedule time, so it is allocated empty.
             var droppedHalves = new NativeHashMap<long, byte>(1, alloc);
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<SymbolBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
@@ -809,12 +766,8 @@ namespace MapRenderer.Tests.Text.Placement
                 WorldUpsRender = nWorldUps,
                 AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), DroppedHalves = droppedHalves.AsReadOnly(),
                 Bearing = bearing, Viewport = new double2(1920, 1080), View = view,
-                // ASYMMETRY the two arms must bridge explicitly: StageJob.Execute PATCHES
-                // s.MetresPerLogicalPixel from this per-frame field (StageJob.cs:178), so the value
-                // stored on the CurvedStageInput is IGNORED here while the managed arm reads it straight off
-                // `s`. Setting it only on `s` gives the managed arm a live ruler and the Burst arm a zero
-                // one, so they silently take different branches and the differential fails on geometry
-                // rather than on the real cause. Default 0 keeps the bend cases byte-identical.
+                // StageJob overwrites s.MetresPerLogicalPixel from this field, while the managed arm reads it off
+                // `s`; set only on `s`, the arms take different branches. Default 0 serves the bend cases.
                 MetresPerLogicalPixel = metresPerLogicalPixel,
                 PathPoints = path, CumulativeLengths = cum,
                 Boxes = oBoxes, StagedQuads = oQuads, Candidates = oCands, Emit = oEmit, OutCounts = counts,
@@ -838,10 +791,8 @@ namespace MapRenderer.Tests.Text.Placement
         public void BurstStage_MatchesManaged_CurvedBends(
             [Values(0f, 10f, 29f, 31f, 44f, 46f, 90f)] float bendDeg,
             [Values(30f, 45f)] float maxAngleDeg,
-            // anchorIncumbent exercises WasPlacedLastFrame != false, which NO prior case here did. This
-            // proves index-resolution PLUMBING (the job's relocated fill loop resolves the right fade id to the
-            // right boolean) — StageCurved itself never branches on wasPlaced, it only stores it onto the
-            // candidate (SymbolStagingMath.cs:305), so this is not a staging-math sensitivity tooth.
+            // anchorIncumbent pins the job's fade-id → incumbency plumbing, not staging math: StageCurved
+            // never branches on wasPlaced, it only stores it onto the candidate.
             [Values(false, true)] bool anchorIncumbent)
         {
             // A 3-vertex line: straight run, then a bend of bendDeg. Glyphs span the joint so the per-glyph tangent
@@ -858,20 +809,16 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var anchors = new[] { new LineAnchor(0, 1f) }; // anchor at the joint (arc 60)
             var fadeIds = new[] { 111L, 222L };            // anchor + centred fallback
-            // Derive wasPlaced from a NativeHashSet<long> of incumbent fade ids — the SAME lookup shape
-            // StageJob resolves incumbency through in production (both arms resolve off one set). A
-            // hand-typed byte[] literal could hand duplicate fade ids inconsistent bytes, an input production can
-            // never produce; deriving both arms' input from one set keeps this oracle testing the staging math
-            // (well, the plumbing — see the anchorIncumbent comment above), not an impossible input.
+            // Derive wasPlaced from one NativeHashSet<long>, the lookup StageJob uses. A hand-typed byte[] could
+            // give duplicate fade ids inconsistent bytes, an input production never produces.
             var incumbentFadeIds = anchorIncumbent ? new[] { fadeIds[0] } : System.Array.Empty<long>(); // build-time anchor incumbent, centred fallback not
             var placed = new NativeHashSet<long>(math.max(1, incumbentFadeIds.Length), Allocator.Temp);
             foreach (long id in incumbentFadeIds) placed.Add(id);
             var wasPlaced = new byte[fadeIds.Length];
             for (int i = 0; i < fadeIds.Length; i++) wasPlaced[i] = (byte)(placed.Contains(fadeIds[i]) ? 1 : 0);
             placed.Dispose();
-            // The gathered WORLD polyline the screen path was projected from — same
-            // bend, embedded in the render-space XZ plane (east=X, north=Z), at a nontrivial (nonzero, large)
-            // tile origin so the T-ULP bake below exercises a real double-narrow, not a degenerate zero.
+            // The WORLD polyline: the same bend in the render-space XZ plane, with a large nonzero tile origin so
+            // the baked AnchorLocal below exercises a real double-narrow.
             var world = new double3[screen.Length];
             for (int i = 0; i < screen.Length; i++) world[i] = new double3(screen[i].x, 0.0, screen[i].y);
             // A genuinely varying, non-uniform up per vertex — exercises SampleUp's lerp/normalize on both
@@ -917,12 +864,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(m.Quads[i].AnchorScreenPx.y, n.Quads[i].AnchorScreenPx.y, GeomTol);
                 Assert.AreEqual(m.Quads[i].RotationRadians, n.Quads[i].RotationRadians, 1e-4f);
 
-                // T-ULP: the baked float3 fields come from a double3 subtract + normalize
-                // (rsqrt) computed in BOTH the managed and the Burst path — a REAL cross-backend numeric
-                // tolerance (Burst's rsqrt/atan2 diverge from Mono by ULPs), not a snapshot re-bake. Must be
-                // compared (never left untested), within a STATED bound: AnchorLocal at GeomTol (same as the
-                // screen anchor above — it's the same class of narrowed-double bake); Tangent (a unit vector)
-                // at a small absolute tolerance.
+                // The baked float3 fields come from a double3 subtract and an rsqrt normalize, where Burst and Mono
+                // differ by ULPs: AnchorLocal compares at GeomTol, the unit Tangent at a small absolute bound.
                 Assert.AreEqual(m.Quads[i].AnchorLocal.x, n.Quads[i].AnchorLocal.x, GeomTol, "AnchorLocal.x");
                 Assert.AreEqual(m.Quads[i].AnchorLocal.y, n.Quads[i].AnchorLocal.y, GeomTol, "AnchorLocal.y");
                 Assert.AreEqual(m.Quads[i].AnchorLocal.z, n.Quads[i].AnchorLocal.z, GeomTol, "AnchorLocal.z");
@@ -939,26 +882,16 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>
-        /// <b>Burst-vs-managed BIT parity for the projected-corner box.</b> The bend cases above
-        /// leave <c>PitchAlignment</c> at <c>Auto</c> with a zero ruler, so that branch is unreachable on
-        /// BOTH arms and they agree by not running it. This case makes it reachable: map pitch, a live
-        /// ruler, and a usable view transform handed identically to each side.
-        ///
-        /// <para><b>What is actually at stake.</b> The Burst path itself is already exercised — the rendered
-        /// rendered teeth read boxes produced by <c>StageJob</c>, which is
-        /// <c>[BurstCompile(CompileSynchronously = true)]</c> and invoked through <c>.Run()</c>, checked
-        /// against an independent oracle. What was missing is managed-vs-Burst EQUALITY over the new
-        /// arithmetic: a <c>double3</c> corner accumulation, a Gram-Schmidt <c>normalize</c>, a
-        /// <c>float4x4</c> multiply and the perspective divide. Burst's rsqrt and fused multiply-add diverge
-        /// from Mono by ULPs, which is exactly the class this differential exists to catch.</para>
-        ///
-        /// <para><b>The view transform is built by hand, not from a camera.</b> <c>float4x4.LookAt</c> is a
-        /// camera-to-world transform with +Z forward while <c>PerspectiveFov</c> expects the camera looking
-        /// down -Z; composing them the obvious way yields <c>clip.w &lt;= 0</c> on every corner, both arms
-        /// fall back to the screen box, and the tooth passes while testing nothing. A literal matrix with a
-        /// stated non-unit w row avoids that entirely — the w row is what makes the divide real rather than
-        /// a division by one.</para>
+        /// <b>Burst-vs-managed parity for the projected-corner box.</b> The bend cases leave
+        /// <c>PitchAlignment</c> at <c>Auto</c> with a zero ruler, so neither arm runs that branch. This case
+        /// uses map pitch, a live ruler and a usable view transform, and compares the <c>double3</c> corner sum,
+        /// the Gram-Schmidt <c>normalize</c>, the <c>float4x4</c> multiply and the divide, where Burst differs by ULPs.
         /// </summary>
+        /// <remarks>
+        /// Non-obvious why: the view matrix is a literal because <c>float4x4.LookAt</c> looks down +Z and
+        /// <c>PerspectiveFov</c> expects -Z, so composing them gives <c>clip.w &lt;= 0</c> on every corner and
+        /// both arms fall back to the screen box. The literal's non-unit w row makes the divide real.
+        /// </remarks>
         [Test]
         public void BurstStage_MatchesManaged_MapPitchedCurved()
         {
@@ -976,10 +909,8 @@ namespace MapRenderer.Tests.Text.Placement
             var wasPlaced = new byte[fadeIds.Length];
 
             var tileOriginRender = new double3(1_250_000.0, 0.0, -430_000.0);
-            // The WORLD path must be in METRES, and long enough to hold the symbol: under map pitch the walk
-            // is world arc length, so a glyph's ArcCenter is scaled by MetresPerLogicalPixel (40..70 baked
-            // becomes 2000..3500 m at this ruler). A path built 1:1 from the screen path is ~132 m and the
-            // symbol simply does not fit, which reads as "did not stage" rather than as a failure.
+            // Under map pitch the walk is world arc length in METRES, with ArcCenter scaled by the ruler, so the
+            // world path is scaled too; at 1:1 the symbol does not fit and silently fails to stage.
             const float Mpp = 50f;        // the ruler, used for BOTH the world path scale and both arms
             var world = new double3[screen.Length];
             for (int i = 0; i < screen.Length; i++)
@@ -1020,10 +951,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(m.Staged, n.Staged, "staged count");
             Assert.AreEqual(m.BoxCount, n.BoxCount, "box count");
 
-            // NON-VACUITY: the projected branch must actually have been taken, or this whole tooth is the
-            // bend cases again under a different name. The screen box for this cell is
-            // TextSizePx/OneEm * 6 baked px + 2 px padding = 8 px half-height; a metre-sized cell at this
-            // ruler and matrix is far larger, so a box that still measures ~8 px means the fallback ran.
+            // NON-VACUITY: the projected branch must run. The screen box here has an 8 px half-height; a
+            // projected metre-sized cell is far larger, so a box of the screen-box height means the fallback ran.
             Result screenArm = Managed(in s, screen, depth, valid, world, worldUps, glyphs, anchors, fadeIds, wasPlaced, 0f);
             float projectedH = m.Boxes[0].Max.y - m.Boxes[0].Min.y;
             float screenH    = screenArm.Boxes[0].Max.y - screenArm.Boxes[0].Min.y;
@@ -1068,10 +997,8 @@ namespace MapRenderer.Tests.Text.Placement
             new float2(-20f, -10f), // bottom-left
         };
 
-        // A few look-at locations, including one far from Mercator's absolute (0,0) origin (near the
-        // antimeridian) — the RTC cancellation must hold regardless of the ABSOLUTE Mercator magnitude,
-        // per FloatingOrigin's doc (precision is governed by camera-to-sceneOrigin distance, not by how
-        // far sceneOrigin sits from Mercator's own origin).
+        // Includes one look-at near the antimeridian: the RTC cancellation must hold at any absolute Mercator
+        // magnitude, because precision depends on the camera-to-sceneOrigin distance only.
         private static readonly GeoCoordinate[] LookAts =
         {
             new GeoCoordinate { Latitude = 30.0,  Longitude = 30.0 },
@@ -1082,10 +1009,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static readonly int[] TileZooms = { 2, 8, 14, 20 };
 
-        // A z0/z1 tile spans a quarter-to-whole
-        // Earth, so its AnchorLocal magnitude approaches the "wrong tile" regime — a RELAXED bound (not the
-        // 0.5px used for z2-20 above) pins that the on-screen error stays BOUNDED (sub-pixel) rather than
-        // diverging, the accepted low-zoom known-limit.
+        // Limitation: a z0/z1 tile spans a quarter to all of the Earth, so AnchorLocal is huge. A relaxed
+        // bound (not the 0.5 px of z2-20) pins only that the error stays bounded rather than diverging.
         private static readonly int[] LowZoomTileZooms = { 0, 1 };
         private const float LowZoomBoundPx = 2.0f;
 
@@ -1119,9 +1044,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                     foreach (int tileZoom in TileZooms)
                     {
-                        // Two tile origins per zoom: the tile actually containing the anchor (the realistic
-                        // case) and a neighbor tile that does NOT contain it (proves the cancellation doesn't
-                        // depend on containment).
+                        // Two tile origins per zoom: the tile that contains the anchor and a neighbour that does
+                        // not, which proves the cancellation does not depend on containment.
                         TileId containing = TileContaining(lookAt, tileZoom);
                         TileId neighbor = new TileId { X = containing.X + 1, Y = containing.Y, Z = tileZoom };
 

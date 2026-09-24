@@ -1,12 +1,5 @@
-// Engine-free: no UnityEngine dependency.
-//
-// Clean-room from PUBLIC Unicode data files, not MapLibre source:
-//   - Joining_Type values (R/L/D/C/T/U below) — Unicode Character Database "ArabicShaping.txt".
-//   - Presentation-form codepoints (U+FE70-FEFF "Arabic Presentation Forms-B", plus the U+FEF5-FEFC
-//     lam-alef ligatures) — Unicode Character Database "UnicodeData.txt" (each presentation-form
-//     codepoint's <isolated>/<initial>/<medial>/<final> compatibility-decomposition tag maps it back
-//     to exactly one base codepoint + form; this table is the forward direction of that mapping).
-// Both are permissive (Unicode, Inc. data files under the Unicode License), not MapLibre/Mapbox source.
+// Built from PUBLIC Unicode data files (Unicode License): Joining_Type from "ArabicShaping.txt";
+// presentation forms (U+FE70-FEFF, lam-alef U+FEF5-FEFC) forward-mapped from "UnicodeData.txt".
 
 using System.Collections.Generic;
 
@@ -49,21 +42,17 @@ namespace MapRenderer.Core.Text
     }
 
     /// <summary>
-    /// The standard Arabic cursive-joining algorithm (Unicode Standard, "Arabic Cursive Joining"; the
-    /// same table-driven transform every Arabic-aware shaper implements from the same public data) —
-    /// implemented here as a bounded, codepoint-level pass: map each
-    /// Arabic base letter (U+0600-06FF) to its contextual presentation-form codepoint, entirely from a
-    /// hand-rolled joining-type table. No font, no glyph indices — output stays codepoint-keyed so it
-    /// can look up the codepoint-keyed glyph-PBF atlas directly.
+    /// The standard Arabic cursive-joining algorithm (Unicode Standard, "Arabic Cursive Joining") as a
+    /// bounded, codepoint-level pass: each Arabic base letter (U+0600-06FF) maps to its contextual
+    /// presentation-form codepoint from a joining-type table. It uses no font or glyph index, so the
+    /// output stays codepoint-keyed for the glyph-PBF atlas.
     /// </summary>
     public static class ArabicJoining
     {
         public const uint Lam = 0x0644;
 
-        // ── Joining_Type table (ArabicShaping.txt) — standard Arabic block U+0621-064A + combining
-        //    marks + tatweel + alef wasla. Codepoints outside this table default to NonJoining (a safe
-        //    fallback: NonJoining never joins, so an unlisted codepoint just renders isolated/unchanged
-        //    rather than corrupting a neighbor's shape).
+        // ── Joining_Type table (ArabicShaping.txt): U+0621-064A, combining marks, tatweel,
+        //    alef wasla. An unlisted codepoint is NonJoining, so it cannot corrupt a neighbour.
         private static readonly Dictionary<uint, ArabicJoiningType> JoiningTypes = new Dictionary<uint, ArabicJoiningType>
         {
             [0x0621] = ArabicJoiningType.NonJoining,   // HAMZA (isolated only — no connecting forms)
@@ -116,8 +105,7 @@ namespace MapRenderer.Core.Text
         };
 
         // ── base codepoint -> (isolated, final, initial, medial) presentation-form codepoints.
-        //    Right-joining-only letters (see JoiningTypes above) only ever have isolated/final forms —
-        //    their initial/medial slots are 0 (unused; ToPresentationForm falls back to isolated).
+        //    Right-joining letters leave initial/medial 0; ToPresentationForm falls back to isolated.
         private static readonly Dictionary<uint, (uint isolated, uint final, uint initial, uint medial)> PresentationForms =
             new Dictionary<uint, (uint, uint, uint, uint)>
         {
@@ -159,9 +147,8 @@ namespace MapRenderer.Core.Text
             [0x064A] = (0xFEF1, 0xFEF2, 0xFEF3, 0xFEF4), // YEH
         };
 
-        // ── Mandatory lam-alef ligature: LAM immediately followed by one of the 4 alef-family letters
-        //    collapses to a SINGLE glyph (isolated/final only — the ligature behaves like alef itself
-        //    with respect to a following character, since alef never joins forward).
+        // ── Mandatory lam-alef ligature: LAM + one of the 4 alef-family letters is ONE glyph,
+        //    isolated/final only, because like alef it never joins forward.
         private static readonly Dictionary<uint, (uint isolated, uint final)> LamAlefLigatures =
             new Dictionary<uint, (uint, uint)>
         {

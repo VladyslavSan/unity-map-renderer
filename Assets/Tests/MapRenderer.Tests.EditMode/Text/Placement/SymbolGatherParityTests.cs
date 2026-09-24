@@ -203,13 +203,9 @@ namespace MapRenderer.Tests.Text.Placement
                 "the survivor set must not depend on candidate insertion order (mixed point + curved)");
         }
 
-        // ── STRICT TOTAL ORDER for a curved feature's repeated anchors: two overlapping candidates sharing
-        //    (SortKey, FeatureIndex, TileKey) — a road's adjacent repeat anchors — must resolve DETERMINISTICALLY
-        //    by FadeId, independent of input order. Without the FadeId final tiebreak they compare EQUAL; the
-        //    unstable heapsort's tie-resolution then flips with input order, and the incumbency feedback drives
-        //    a frame-to-frame limit cycle → a collision loser that never finishes fading ("line symbols, one won't
-        //    fade" — stuck even with a still camera). RED against the pre-fix comparator (reversed input flips the
-        //    survivor); GREEN once FadeId makes the order total. ──
+        // ── Two overlapping candidates sharing (SortKey, FeatureIndex, TileKey) — a road's repeat anchors — resolve
+        //    by FadeId, whatever the input order. Non-obvious why: a tie flips the unstable heapsort with input order,
+        //    and incumbency then drives a frame-to-frame cycle in which the loser never finishes fading. ──
         [Test]
         public void Collision_SameFeatureAnchors_ResolveDeterministicallyByFadeId()
         {
@@ -261,10 +257,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "an ignore-placement curved label is placed but none of its glyph boxes block a later label");
         }
 
-        // ── A 1-box candidate is exactly a point symbol: the unified path changed nothing for single-box
-        //    symbols. The legacy box-only path and its differential are both gone, so this is a direct
-        //    property — the same overlapping-cluster-plus-disjoint-label shape
-        //    that pins the box-only comparator tooth, rebuilt as 1-box candidates through the same job. ──────
+        // ── A 1-box candidate collides like a point symbol: an overlapping cluster plus a disjoint label,
+        //    built as 1-box candidates through the same job. ──────
         [Test]
         public void Collision_AllSingleBoxCandidates_MatchLegacyPointPath()
         {
@@ -280,9 +274,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Sticky-placement hysteresis (anti-flicker). Incumbency (WasPlacedLastFrame) breaks EQUAL-sort-key────
-        //    ties in favour of last frame's survivor, sitting below SortKey so it never blocks a higher-priority
-        //    newcomer. Teeth verify: the fixed-point (no oscillation), the killed tiebreak flip,
-        //    correct yielding, and within-frame determinism given a fixed kept-set. ──────────────────────────────
+        //    ties for last frame's survivor, below SortKey, so it never blocks a higher-priority newcomer. ──────
 
         // Helper: a Scene builder for a fixed geometry reused across kept-sets (each test rebuilds it fresh — the
         // Scene mutates its candidate array in Survivors()).
@@ -304,9 +296,8 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEquivalent(cold, ClusterAB().Survivors(withHistory), "stable across a further step");
         }
 
-        // ── KILLS THE TIEBREAK FLIP (the actual flicker): equal sort keys, decided cold by the arbitrary feature
-        //    tiebreak — but whichever was placed last frame stays placed. This is the tile-churn/reprojection flip
-        //    that incumbency exists to stop. ──
+        // ── KILLS THE TIEBREAK FLIP (the flicker): equal sort keys, decided cold by the arbitrary feature
+        //    tiebreak — but whichever was placed last frame stays placed. ──
         [Test]
         public void Collision_Hysteresis_OverridesFeatureTiebreak_KeepingTheIncumbent()
         {
@@ -363,15 +354,11 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The real teeth for <c>SymbolStagingMath.SanitizeSortKey</c>:
-    /// a NON-FINITE baked <c>symbol-sort-key</c> makes
-    /// <see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate, in SymbolCandidate)"/> intransitive (NaN
-    /// compares false both ways, so the sort-key branch never ties and the fall-through feature/tile order can form a
-    /// 3-cycle that contradicts the sort-key order). The unstable heapsort's survivor set then depends on input
-    /// order. Staging the SAME symbols through <see cref="SymbolStagingMath.StagePoint"/> in two MIRROR-ORDER
-    /// permutations must yield the IDENTICAL survivor set — which only holds once the NaN is normalized to
-    /// <c>float.MaxValue</c> at candidate build. RED-verified: feeding raw <c>s.SortKey</c> (fix reverted) makes the
-    /// two orders diverge; the sanitizer restores determinism.
+    /// Pins <c>SymbolStagingMath.SanitizeSortKey</c>. A NaN <c>symbol-sort-key</c> compares false both ways, so
+    /// <see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate, in SymbolCandidate)"/> can form a 3-cycle
+    /// and the unstable heapsort's survivors depend on input order. Two mirror-order stagings through
+    /// <see cref="SymbolStagingMath.StagePoint"/> must yield the same survivors, which holds only when the NaN
+    /// becomes <c>float.MaxValue</c> at candidate build.
     /// </summary>
     [TestFixture]
     public class SymbolCollisionOrderTests
@@ -385,10 +372,8 @@ namespace MapRenderer.Tests.Text.Placement
             public SymbolSpec(float sortKey, int featureIndex) { SortKey = sortKey; FeatureIndex = featureIndex; }
         }
 
-        // The intransitive core: two finite candidates whose SortKey order (L_lowKey < L_highKey) CONTRADICTS their
-        // FeatureIndex order (feat_highKey < feat_nan < feat_lowKey), with the NaN candidate's FeatureIndex sitting
-        // BETWEEN them. With a NaN key the comparator forms a 3-cycle over {lowKey, nan, highKey}. Plus two extra
-        // finite candidates so the heapsort has enough elements to reorder differently per input permutation.
+        // Two finite candidates whose SortKey order contradicts their FeatureIndex order, with the NaN between them:
+        // a 3-cycle over {lowKey, nan, highKey}. Two fillers give the heapsort room to reorder per permutation.
         private static readonly SymbolSpec[] Specs =
         {
             new SymbolSpec(sortKey: 1f, featureIndex: 10),          // low key  → highest priority; high feature
@@ -398,10 +383,8 @@ namespace MapRenderer.Tests.Text.Placement
             new SymbolSpec(sortKey: 3f, featureIndex: 0),           // filler
         };
 
-        // Stage `specs` (in the given array order) as fully-overlapping point symbols through StagePoint, then run the
-        // production candidate collision pass. Returns the survivor set keyed by the stable FeatureIndex. All symbols
-        // share one screen position + bounds ⇒ they all overlap ⇒ exactly the sorted-first survives; so a change in
-        // the sorted order (the intransitive-NaN symptom) changes WHICH feature survives.
+        // Stages `specs` in order as fully-overlapping points and runs collision; returns survivors by FeatureIndex.
+        // Only the sorted-first survives, so a change in sort order changes WHICH feature survives.
         private static HashSet<int> SurvivorsByFeature(SymbolSpec[] specs)
         {
             int n = specs.Length;
@@ -453,9 +436,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "float.MaxValue at StagePoint, so ComparePlacementOrder stays a strict total order (without the fix " +
                 "the intransitive NaN comparator makes the unstable heapsort's winner mirror-order dependent)");
 
-            // Positive pin: all symbols overlap ⇒ exactly one survives, and it is the finite highest-priority symbol
-            // (lowest SortKey = 1f, FeatureIndex 10). The poison NaN candidate is normalized to sort LAST, never
-            // preempting a good symbol.
+            // All overlap ⇒ one survivor: the lowest finite SortKey (FeatureIndex 10). The NaN candidate sorts
+            // LAST and never preempts a good symbol.
             Assert.AreEqual(1, forwardSurvivors.Count, "all overlap ⇒ a single survivor");
             CollectionAssert.AreEquivalent(new[] { 10 }, forwardSurvivors,
                 "the lowest finite SortKey (highest priority) wins; the NaN candidate sorts last and loses");
@@ -496,9 +478,8 @@ namespace MapRenderer.Tests.Text.Placement
         private const int KeptNoneB           = 10;
         private const int SymbolCount         = 11;
 
-        // Detail == record index everywhere (Detail[r] = r) — a deliberate simplification: it still exercises
-        // every read path (PointDetails / CurvedAnchorFadeStart / CurvedAnchorCount are all indexed by Detail,
-        // not by r directly), while keeping the fixture legible.
+        // Detail[r] = r keeps the fixture legible and still exercises every read path: PointDetails,
+        // CurvedAnchorFadeStart and CurvedAnchorCount are all indexed by Detail, not by r.
         private static readonly GatherTrigger[] Trigger =
         {
             GatherTrigger.None, GatherTrigger.Dropped, GatherTrigger.Departing, GatherTrigger.Coverage,
@@ -577,10 +558,8 @@ namespace MapRenderer.Tests.Text.Placement
             // every other FadeId referenced by the fixture is ABSENT ⇒ reads as dead (TryGetValue false).
         };
 
-        // World-point pool: irregular WorldStart per kept record (NOT the cumulative kept-vertex count, and
-        // not derivable from r) + a point/up pattern that differs per component (point=(r,v,0), up=(r,v,1)) so
-        // a swapped-source or wrong-array read is visible. Only kept records (0,7,8,10) are ever read; the
-        // skipped records' spans are never touched, so they are left at the zeroed default.
+        // WorldStart is irregular (not the cumulative count, not derived from r); point/up differ per component, so a
+        // swapped-source or wrong-array read is visible. Only kept records (0,7,8,10) are read; the rest stay zeroed.
         private static int[] WorldStart()
         {
             var a = new int[SymbolCount];
@@ -895,9 +874,8 @@ namespace MapRenderer.Tests.Text.Placement
             return a;
         }
 
-        // RepAnchor: only Horizon/Distance/Kept actually gate on geometry (every other record short-circuits
-        // earlier in the chain, so its anchor is never read) — those three are placed CLEARLY on their side of
-        // the Horizon/Distance thresholds; everyone else gets the safe (0,0,0) anchor for tidiness.
+        // Only Horizon/Distance/Kept records read their anchor; the others short-circuit earlier. Those three sit
+        // clearly on their side of the thresholds; the rest get (0,0,0).
         private static double3[] RepAnchor()
         {
             var a = new double3[SymbolCount];
@@ -1121,10 +1099,8 @@ namespace MapRenderer.Tests.Text.Placement
                 $"{because} — sampled ({actual.x:F3},{actual.y:F3},{actual.z:F3}) vs expected ({expected.x:F3},{expected.y:F3},{expected.z:F3}).");
         }
 
-        // ── The primary deferred-collision tooth: the collision verdict a Tick's emit reads is the one HARVESTED at the top
-        //    of THAT Tick — i.e. the collision SCHEDULED at the end of the PREVIOUS Tick, over the PREVIOUS
-        //    Tick's candidates. A brand-new candidate set therefore takes one extra Tick to be reflected: an
-        //    incumbent holds its slot for one more Tick after a newcomer that would beat it appears. ──
+        // ── A Tick's emit reads the collision scheduled at the end of the PREVIOUS Tick, over that Tick's candidates.
+        //    So an incumbent holds its slot for one more Tick after a newcomer that beats it appears. ──
         [Test]
         public void Collision_VerdictAppliesOneFrameLate_IncumbentHoldsUntilTheNextTick()
         {
@@ -1176,10 +1152,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, h.System.LastQuadCount, "the second Tick harvests the first Tick's scheduled collision.");
         }
 
-        // ── DoDispose must Complete() a still-pending collision before disposing the buffers it holds
-        //    (_stageCandidates/_stageBoxes/_nSurvivors/_survivorCountOut/the grid lists), or the job safety system
-        //    throws (a use-after-free). Tick once (schedules a collision, leaving it pending — HarvestCollision
-        //    only runs at the START of the NEXT Tick, which never comes here) then Dispose. ──
+        // ── DoDispose must Complete() a pending collision before it disposes the buffers the job holds, or the job
+        //    safety system throws. One Tick leaves the collision pending, because only the next Tick harvests it. ──
         [Test]
         public void Dispose_WithPendingCollision_CompletesCleanly()
         {
@@ -1204,10 +1178,8 @@ namespace MapRenderer.Tests.Text.Placement
             return SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(styleJson).Layers[0], settings, initialZoom, drawIndex: 0);
         }
 
-        // ── The display-time zoom gate (`!cand.Suppressed` in the emit `show` expression) is a SAME-frame
-        //    override on top of the deferred verdict: a candidate that WON a previous collision must stop
-        //    showing the instant its layer leaves the live zoom range, not linger a Tick until the next
-        //    harvest catches up. ──
+        // ── The zoom gate (`!cand.Suppressed` in the emit `show` expression) overrides the deferred verdict in the
+        //    SAME frame: a past collision winner hides as soon as its layer leaves the live zoom range. ──
         [Test]
         public void SuppressedCandidate_HidesInTheSameFrame_NotOneFrameLate()
         {
@@ -1230,9 +1202,8 @@ namespace MapRenderer.Tests.Text.Placement
                 h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity, symbolLayers: visibleLayers);
                 Assert.AreEqual(1, h.System.LastQuadCount, "tick 2: the label has won its harvested verdict and shows.");
 
-                // tick 3: the SAME symbol, now under a layer whose minzoom excludes the live zoom. Even though
-                // the harvested verdict (from tick 2's scheduled collision) still says "won", Suppressed must
-                // hide it THIS Tick — not one Tick later.
+                // tick 3: the SAME symbol under a layer whose minzoom excludes the live zoom. The harvested verdict
+                // still says "won", but Suppressed must hide it THIS Tick.
                 h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity, symbolLayers: suppressedLayers);
                 Assert.AreEqual(0, h.System.LastQuadCount, "tick 3: suppression is a same-frame override, not one-Tick-late.");
             }
@@ -1249,12 +1220,10 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The placement layer is a fade state machine. A symbol eases in/out (its opacity, carried on
-    /// <c>PlacedQuad.Color.w</c> → the billboard vertex alpha) instead of popping. Teeth: the default (infinite)
-    /// deltaTime snaps to full opacity (byte-parity with the previous behaviour); a real small deltaTime fades IN over frames;
-    /// a collision-suppressed symbol fades OUT while still drawn (both visible mid-transition); a stable symbol
-    /// keeps its opacity across frames (no per-frame re-fade — the anti-blink property); and the point fade id
-    /// is a FIXED-grid identity (independent of camera zoom, unlike the display-zoom dedup key it replaced).
+    /// The placement layer is a fade state machine: a symbol eases its opacity in and out instead of popping.
+    /// Pins: infinite deltaTime snaps to full opacity; a small deltaTime fades in over frames; a suppressed
+    /// symbol fades out while still drawn; a stable symbol does not re-fade; the point fade id is a fixed-grid
+    /// identity, independent of camera zoom.
     /// </summary>
     [TestFixture]
     public class SymbolFadeTests
@@ -1279,9 +1248,8 @@ namespace MapRenderer.Tests.Text.Placement
             },
         };
 
-        // n copies of OneQuad()'s single glyph, sharing its bounds — identical bounds ⇒ identical SymbolBox ⇒
-        // two symbols built from NQuads always overlap, so only the quad COUNT distinguishes them (used to tell
-        // which of two co-located symbols won via LastQuadCount).
+        // n copies of OneQuad()'s glyph with the same bounds, so two NQuads symbols always overlap and only the quad
+        // COUNT tells which of them won (via LastQuadCount).
         private static List<SymbolQuad> NQuads(int n)
         {
             var quads = new List<SymbolQuad>(n);
@@ -1299,10 +1267,8 @@ namespace MapRenderer.Tests.Text.Placement
                 paint: SymbolPaint.Default, textSizePx: 24f, paddingPx: 2f, sortKey: sortKey, text: text,
                 featureIndex: feature, tileKey: 0L);
 
-        // Point symbols draw through the WORLD path — the fade opacity (stream 1) does not
-        // ride system.Mesh's vertex-colour alpha (BillboardVertex.Color.a); it lives on the world slot's
-        // Opacity stream (WorldMeshReadback.MaxOpacity). tileKey defaults to 0L — every symbol in this file
-        // uses it (fade/opacity assertions are position-independent).
+        // Point symbols draw through the WORLD path: the fade opacity lives on the world slot's Opacity stream, not
+        // on system.Mesh's vertex-colour alpha. tileKey 0L is the key every symbol in this file uses.
         private static float MaxAlpha(SymbolPlacementSystem system, long tileKey = 0L)
             => system.TryGetWorldSlotMesh(tileKey, 0, SymbolKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
 
@@ -1339,8 +1305,6 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── The default (infinite) deltaTime SNAPS to full opacity — a single-Tick test renders symbols exactly
-        //    as before the fade (byte-parity). ──
         // ── Telemetry provider (docs/telemetry-design.md): the placement system OWNS its results as a struct
         //    field, refreshes it at the end of Tick, and hands it out BY REFERENCE. ──
         [Test]
@@ -1354,9 +1318,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0, h.System.Telemetry.PlacedQuadCount,
                 "before any Tick the provider's struct is still default — it reports levels, it does not invent them.");
 
-            // Bind ONCE, by reference, then Tick. This is the tooth for the ref-return itself: `live` aliases the
-            // provider's own field, so a later refresh is visible through it. Were the accessor to return BY VALUE,
-            // `live` would be a snapshot copy taken before the Tick and every assertion below would read 0.
+            // `live` aliases the provider's own field, so a later refresh is visible through it. A BY-VALUE accessor
+            // would give a copy taken before the Tick, and every assertion below would read 0.
             ref readonly SymbolPlacementTelemetrySnapshot live = ref h.System.Telemetry;
 
             // TWO ticks before asserting a placed quad: the collision verdict is deferred by one Tick, so the
@@ -1380,6 +1343,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "MirrorRebuildCount is CUMULATIVE; it must never go backwards.");
         }
 
+        // ── The default (infinite) deltaTime SNAPS to full opacity, so a test that passes no deltaTime sees no fade. ──
         [Test]
         public void Tick_DefaultDeltaTime_SnapsToFullOpacity()
         {
@@ -1427,8 +1391,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── A collision-suppressed symbol fades OUT while still drawn: mid-transition BOTH the fading-out loser
-        //    and the fading-in winner are emitted (2 quads), then it settles to just the winner (1). Before the fade, the
-        //    loser popped instantly (1 quad throughout). ──
+        //    and the fading-in winner are emitted (2 quads), then it settles to just the winner (1). ──
         [Test]
         public void Tick_CollisionSuppression_FadesOutWhileStillDrawn()
         {
@@ -1455,10 +1418,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, h.System.LastQuadCount, "settled: only the winner B remains, A has faded to 0");
         }
 
-        // ── A stable collision loser eases fully to 0 and STAYS hidden (no re-pump, no partial-opacity hover). The
-        //    total-order collision tiebreak makes the survivor set a fixed point, so a deterministic loser fades out
-        //    cleanly with a plain ease — no sticky/cooldown machinery. (The earlier "stuck bright" oscillation is
-        //    fixed at the root in SymbolCandidateCollisionTests.Collision_SameFeatureAnchors_*.) ──
+        // ── A stable collision loser eases fully to 0 and STAYS hidden. The total-order tiebreak makes the survivor set
+        //    a fixed point (SymbolCandidateCollisionTests.Collision_SameFeatureAnchors_*), so a plain ease works. ──
         [Test]
         public void Tick_StableCollisionLoser_FadesFullyOutAndStaysHidden()
         {
@@ -1485,15 +1446,9 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…and the winner is at full opacity, not stuck partial");
         }
 
-        // ── The fade map does not accumulate invisible identities. A candidate staged every frame and placed by
-        //    none (the stable collision loser above) never parks a record AT ALL — its opacity never leaves 0, so
-        //    EaseFade suppresses the store rather than writing a 0 that nothing would collect (the decay sweep
-        //    skips ids seen this frame, and a staged candidate is always seen). This is a per-frame COST, not
-        //    just memory: DecayUnseenFadeSymbols walks every held record each Tick, so a dense view — where
-        //    candidates outrun placed symbols by an order of magnitude — would otherwise pay that sweep over
-        //    symbols nobody can see. Retention is invisible on screen, hence a state assertion rather than a
-        //    rendered one. (The live-record-then-DROPPED transition is a different path, covered behaviourally
-        //    by Tick_DepartingRecord_/Tick_CoverageFadingRecord_FadesOut_InsteadOfPopping.) ──
+        // ── A candidate staged every frame and placed by none never parks a fade record: its opacity never leaves 0,
+        //    so EaseFade does not store it. Non-obvious why: the decay sweep skips ids seen this frame, so a stored 0
+        //    is never collected, and DecayUnseenFadeSymbols walks every held record each Tick. ──
         [Test]
         public void Tick_StableCollisionLoser_LeavesNoFadeRecordBehind()
         {
@@ -1506,9 +1461,8 @@ namespace MapRenderer.Tests.Text.Placement
 
             for (int i = 0; i < 12; i++) h.System.TickSymbols(in h.Frame, aBeatsB, h.Atlas, h.Projection, deltaTime: 0.1f);
 
-            // PRECONDITION — without these the count assertion is vacuous. B must still be STAGED (so it still
-            // eases, and could still park a record); it must simply never place. If a cull ever removed B from
-            // staging instead, the assertion below would pass while proving nothing about retention.
+            // PRECONDITION: B is still STAGED but never places. If a cull removed B from staging, the count assertion
+            // below would pass while proving nothing about retention.
             Assert.AreEqual(2, h.System.LastCandidateCount, "both labels are still staged — B was not culled away");
             Assert.AreEqual(1, h.System.LastQuadCount, "…but only the winner A draws; B lost every collision");
 
@@ -1528,9 +1482,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── A symbol far past the far-plane cull distance is skipped BEFORE projection/collision; the near symbol
-        //    (at the look-at, distance 0) still places. (The Core distance math is pinned in SymbolFarPlaneCullTests;
-        //    this proves the wiring; the far anchor at 1e8 m dwarfs any plausible far×fraction, so it is robust to
-        //    the harness's exact far value.) ──
+        //    still places. SymbolFarPlaneCullTests pins the distance math; this pins the wiring. ──
         [Test]
         public void Tick_FarSymbol_IsDistanceCulled_WhileNearSymbolPlaces()
         {
@@ -1544,11 +1496,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, h.System.LastQuadCount, "only the near label places");
         }
 
-        // ── Retain-as-departing: when a tile leaves cover its symbols are flagged DEPARTING (SymbolDeparting, set
-        //    from CollectInto's active/departing split) so they FADE OUT in place instead of popping (the B-3
-        //    distance / horizon culls' companion fade-out trigger — the tile-coverage pre-cull now runs
-        //    upstream of the batch and pops instead, see SymbolTileCoverageFilter). Simulated here by building
-        //    the batch with activeCount: the same symbol is active first, then departing (activeCount excludes it). ──
+        // ── When a tile leaves cover its symbols are flagged DEPARTING (SymbolDeparting, set from CollectInto's
+        //    active/departing split), so they FADE OUT in place instead of popping. ──
         [Test]
         public void Tick_DepartingRecord_FadesOut_InsteadOfPopping()
         {
@@ -1556,10 +1505,8 @@ namespace MapRenderer.Tests.Text.Placement
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, h.Origin, sortKey: 0f, text: "A", feature: 0);
 
-            // The DEPARTING flag is the subject, so these ticks go through the plan directly: production
-            // carries it as SymbolGatherPlan.Departing (filled from the store's per-record IsDeparting),
-            // which is what TestSymbolPlan's departingTiles stamps — the plan-path equivalent of the
-            // retired batch builder's activeCount knob.
+            // The DEPARTING flag is the subject, so these ticks go through the plan: TestSymbolPlan's departingTiles
+            // stamps SymbolGatherPlan.Departing, which production fills from the store's per-record IsDeparting.
             using var plan = new TestSymbolPlan(h.Projection);
             var departingTiles = new HashSet<long> { 0L }; // the symbol above carries TileKey = 0L
 
@@ -1588,10 +1535,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Greater(h.System.LastDepartingCulledCount, 0, "…and its skip is attributed to departing telemetry");
         }
 
-        // ── REVISION 2: coverage-fading (a tile's on-screen coverage crossed below threshold, flagged
-        //    SymbolCoverageFading by SymbolTileCoverageFilter/Build — a SEPARATE flag from SymbolDeparting, since
-        //    the tile is still ACTIVE, just small on screen) FADES OUT in place instead of popping — mirrors
-        //    Tick_DepartingRecord_FadesOut_InsteadOfPopping above, one flag over. ──
+        // ── A coverage-fading record (SymbolCoverageFading: a separate flag from SymbolDeparting, because the tile is
+        //    still ACTIVE, just small on screen) FADES OUT in place, like the departing test above. ──
         [Test]
         public void Tick_CoverageFadingRecord_FadesOut_InsteadOfPopping()
         {
@@ -1599,9 +1544,8 @@ namespace MapRenderer.Tests.Text.Placement
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, h.Origin, sortKey: 0f, text: "A", feature: 0); // TileKey = 0L
 
-            // The coverage-fading FLAG is the subject here, so these ticks go through the plan directly
-            // rather than the TickSymbols convenience — the production path carries the flag as a per-record
-            // SymbolTileCoverageFilter.Fade decision, which is what TestSymbolPlan's coverageFadingTiles sets.
+            // The coverage-fading FLAG is the subject, so these ticks go through the plan: TestSymbolPlan's
+            // coverageFadingTiles sets the per-record SymbolTileCoverageFilter.Fade decision production carries.
             using var plan = new TestSymbolPlan(h.Projection);
 
             // 1) Not coverage-fading (no coverageFadingTiles) → places and snaps to full opacity.
@@ -1630,9 +1574,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Greater(h.System.LastCoverageFadingCulledCount, 0, "…and its skip is attributed to coverage-fading telemetry");
         }
 
-        // ── The point fade id is a FIXED-grid identity: it collapses anchors within a few metres (a cross-tile
-        //    no-op) and separates distinct ones — and it takes NO zoom parameter, so it cannot drift as the
-        //    camera zooms (the bug a per-frame display-zoom grid would cause). ──
+        // ── The point fade id is a FIXED-grid identity: it collapses anchors within a few metres and separates
+        //    distinct ones. It takes NO zoom parameter, so it cannot drift as the camera zooms. ──
         [Test]
         public void PointFadeId_FixedGrid_CollapsesNearby_SeparatesFar()
         {
@@ -1651,10 +1594,8 @@ namespace MapRenderer.Tests.Text.Placement
                                "different text is a different label even at the same anchor");
         }
 
-        // ── The icon analogue — two co-located icon symbols (text=null, distinct icon-image) must get
-        //    DISTINCT fade ids (pre-fix they'd collide: text==null for both). Same icon-image at the same
-        //    anchor shares an id (the seamless no-op icons now get too). A text symbol's id is unchanged when
-        //    iconImage is omitted/explicitly-null (the #1 invariant: guard-skip, not `?? 0`). ──
+        // ── Co-located icon symbols (text=null) with distinct icon-image get DISTINCT fade ids; the same icon shares
+        //    one. A text symbol's id is the same with iconImage omitted or 0 (guard-skip, not `?? 0`). ──
         [Test]
         public void PointFadeId_IconIdentity_DistinctIconsSeparate_SameIconShares_TextUnaffected()
         {
@@ -1677,12 +1618,8 @@ namespace MapRenderer.Tests.Text.Placement
                              "a text label's fade id is unchanged whether iconImageId is omitted or explicitly 0");
         }
 
-        // ── ONE canonical identity: the point fade id partitions symbols IDENTICALLY to the store's
-        //    dedup cell — both quantize to CrossTileSymbolKey.CanonicalGridMeters. A pair co-located within the
-        //    canonical grid shares BOTH a PointFadeId and a dedup cell (CrossTileSymbolKey.For equality); a pair
-        //    further apart than the grid shares NEITHER. This binds the fade identity to the SAME constant the
-        //    dedup uses, not merely to "some fixed grid": diverge the fade grid from CanonicalGridMeters and the
-        //    beyond-grid pair would agree in fade but split in dedup — which this asserts cannot happen. ──
+        // ── The point fade id and the store's dedup cell both quantize to CrossTileSymbolKey.CanonicalGridMeters, so
+        //    they partition symbols the same way: a near pair shares both, a beyond-grid pair shares neither. ──
         [Test]
         public void PointFadeId_AgreesWithDedupCell()
         {
@@ -1713,17 +1650,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(SameDedupCell(a, far), SameFadeId(a, far), "fade grouping == dedup grouping (far)");
         }
 
-        // ── incumbency plumbing ──────────────────────────────────────────────────────────────────────────────
-        // End-to-end coverage for the _placedLastFrame → WasPlacedLastFrame plumbing — untested anywhere else
-        // (SymbolCandidateCollisionTests sets WasPlacedLastFrame by hand, never through
-        // SymbolPlacementSystem; SymbolStageJobTests feeds it as a raw input; SymbolProjectionJobTests
-        // arranges distinct sort keys "so incumbency is a no-op"). X and Y sit at the SAME anchor with an
-        // EQUAL SortKey, so SymbolCollision.ComparePlacementOrder falls to its incumbency term (SymbolCollision.cs:144)
-        // strictly BEFORE the FeatureIndex term (:145) — if a future change reorders those two lines this test
-        // breaks loudly, which is correct. Distinct Text ⇒ distinct PointFadeId even at a shared anchor
-        // (SymbolPlacementSystem.cs's PointFadeId folds the interned TextId into the FNV hash). NQuads(n) discriminates
-        // the winner via LastQuadCount — a faded-to-0 loser is `continue`d before it can emit (SymbolPlacementSystem.cs:608)
-        // and contributes 0 quads to the total (WorldSymbolRenderer.Emit's returned QuadCount, accumulated at :615/626).
+        // ── incumbency plumbing: _placedLastFrame → WasPlacedLastFrame, end to end. X and Y share an anchor and an
+        //    EQUAL SortKey, so incumbency decides before FeatureIndex; distinct text gives distinct fade ids. ──
         [Test]
         public void Tick_IncumbentKeepsSlot_OverEqualSortKeyNewcomer()
         {
@@ -1734,28 +1662,20 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(xAndY, h.Origin, sortKey: 0f, text: "A", feature: 0, quads: NQuads(1)); // newcomer
             AddPoint(xAndY, h.Origin, sortKey: 0f, text: "B", feature: 1, quads: NQuads(2)); // incumbent
 
-            // Tick 1: Y alone places (default deltaTime snaps it to full opacity) — _placedLastFrame == { fadeId(Y) }.
-            // The verdict a Tick's stage/emit reads is one Tick behind — duplicate (same args) so the
-            // scheduled collision has been harvested before the assertion. This ALSO matters structurally here:
-            // Y must be the harvested incumbent BEFORE the {X,Y} Tick below stages, or StageJob never sees
-            // WasPlacedLastFrame=true for Y and the tiebreak this test pins never engages.
+            // Tick 1: Y alone places. Duplicated because the verdict is one Tick late, and Y must be the harvested
+            // incumbent before the {X,Y} Tick stages, or StageJob never sees WasPlacedLastFrame=true for Y.
             h.System.TickSymbols(in h.Frame, yOnly, h.Atlas, h.Projection);
             h.System.TickSymbols(in h.Frame, yOnly, h.Atlas, h.Projection);
             Assert.AreEqual(2, h.System.LastQuadCount, "Y places alone");
 
-            // Tick 2: X and Y tie on SortKey. Y is the incumbent ⇒ it wins the tiebreak over the newcomer X ⇒
-            // X (a brand-new fade id, never above FadeEpsilon) fades to 0 in the same tick and is skipped.
-            // The FIRST {X,Y} Tick here only re-emits Y off the PRIOR (Y-alone) harvested verdict — it is the
-            // SECOND {X,Y} Tick (duplicated) whose harvest reflects the actual {X,Y} collision staged with Y's
-            // incumbency bias, which is the real tiebreak this test proves.
+            // Tick 2: X and Y tie on SortKey; incumbent Y wins and X fades to 0 in the same tick. The SECOND {X,Y}
+            // Tick is the one whose harvest reflects the {X,Y} collision staged with Y's incumbency.
             h.System.TickSymbols(in h.Frame, xAndY, h.Atlas, h.Projection, deltaTime: 0.1f);
             h.System.TickSymbols(in h.Frame, xAndY, h.Atlas, h.Projection, deltaTime: 0.1f);
             Assert.AreEqual(2, h.System.LastQuadCount, "the incumbent Y keeps its slot over the equal-sort-key newcomer X");
 
-            // Control (falsifies the above): a FRESH harness/system has no incumbents at all, so with the SAME
-            // { X, Y } the collision resolves purely on FeatureIndex — X (0 < 1) wins instead of Y. Two ticks:
-            // the first only schedules (nothing harvested yet on a virgin system); the second harvests
-            // that FeatureIndex-only-tiebreak collision's verdict.
+            // Control: a FRESH system has no incumbents, so FeatureIndex decides and X (0 < 1) wins instead of Y.
+            // The first tick only schedules; the second harvests.
             using var fresh = new Harness();
             var controlBuffer = new SymbolTileBuffer();
             AddPoint(controlBuffer, fresh.Origin, sortKey: 0f, text: "A", feature: 0, quads: NQuads(1));
@@ -1800,9 +1720,8 @@ namespace MapRenderer.Tests.Text.Placement
                 textSizePx: 24f, paddingPx: 2f, sortKey: 0f, text: text, featureIndex: feature, tileKey: 0L,
                 materialIndex: 0);
 
-        // A far-plane policy that returns a FIXED distance regardless of altitude/tilt/FOV — so a test can pin the
-        // exact far the cull compares against (MapCamera.CurrentFarMetres reads this) instead of deriving it from
-        // the geometry.
+        // A far-plane policy that returns a FIXED distance, so a test pins the far the cull compares against
+        // (MapCamera.CurrentFarMetres reads this) instead of deriving it from the geometry.
         private sealed class FixedFarPlane : IFarPlanePolicy
         {
             private readonly double _far;
@@ -1901,38 +1820,22 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="SymbolPlacementSystem.GatherIntoMirror"/> memoizes its heavy compaction on
-    /// <see cref="SymbolGatherPlan.WinnerSetVersion"/> — a same-source, same-version frame runs only
-    /// the three per-frame masks (Departing/CoverageFading/Dropped), not the full
-    /// pool rebuild. These are the CONTENT teeth: byte-identity across held frames, invalidation on a real
-    /// version change with the winner SET changing, per-frame mask tracking on a held mirror, and the memo-hit
-    /// path's own zero-GC guarantee. <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating
-    /// signal throughout — without it every test here would pass trivially against an unmemoized implementation.
-    ///
-    /// <para>A REAL front swap through the production <see cref="MapRenderer.Unity.Text.SymbolSubsystem"/>
-    /// (<c>Memo_RealFrontSwap_Invalidates</c>) and a restyle through the subsystem
-    /// (<c>Memo_RestyleBetweenTicks_Invalidates</c>) live in <c>SymbolReconcileAsyncTests</c> — that fixture
-    /// already owns the async pump harness (UseImmediateGlyphs / DriveTileBytesReady / PumpToQuiescence) both
-    /// need, so a second copy of it here would duplicate non-trivial async machinery for no benefit.</para>
-    ///
-    /// Fixture style follows <c>SymbolGatherParityTests</c> / <c>SymbolGatherPlanDropMaskTests</c>: a real
-    /// <see cref="SymbolTileStore"/> seeded via <see cref="SymbolTileBlockBaker"/>, a real
-    /// <see cref="SymbolPlacementSystem"/> behind a throwaway camera/material (<see cref="LpsHarness"/> — a plain
-    /// camera, no real look-at, since <see cref="SymbolPlacementSystem.GatherIntoMirror"/>/<c>CopyMirrorInto</c>
-    /// never touch the camera; <see cref="TickHarness"/> adds a real look-at only for the tests below that drive
-    /// a full <c>Tick</c>). The gather/mirror comparison is camera-independent. The content-diff oracle is the
-    /// shared <see cref="SymbolBatchDiff.FirstDifference"/>. The REFERENCE gather alternates between TWO
-    /// persistent <see cref="SymbolGatherPlan"/> objects fed to ONE reference <see cref="SymbolPlacementSystem"/>
-    /// — a different instance identity than the previous call always mismatches <c>_mirrorSource</c>, so the
-    /// reference NEVER memo-hits (a trustworthy ground truth) with zero per-tick native allocation (a
-    /// fresh-plan-per-tick oracle would leak <c>Allocator.Persistent</c> lists).
+    /// <see cref="SymbolPlacementSystem.GatherIntoMirror"/> memoizes its compaction on
+    /// <see cref="SymbolGatherPlan.WinnerSetVersion"/>: a same-source, same-version frame runs only the three
+    /// per-frame masks. <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating signal; without
+    /// it these tests pass against an unmemoized gather. The front-swap and restyle invalidation tests live in
+    /// <c>SymbolReconcileAsyncTests</c>, which owns the async pump harness they need.
     /// </summary>
+    /// <remarks>
+    /// Non-local invariant: the REFERENCE gather alternates two persistent plans on one reference system, so the
+    /// plan identity always mismatches <c>_mirrorSource</c> and the reference never memo-hits. A fresh plan per
+    /// tick would leak <c>Allocator.Persistent</c> lists.
+    /// </remarks>
     [TestFixture]
     public class SymbolGatherMemoTests
     {
-        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
-        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
-        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        // A leaked SymbolTileBlock keeps DebugLiveAllocCount raised: only Dispose decrements it, never a finalizer,
+        // so this delta is deterministic and catches a test that bakes a block and never disposes it.
         private long _liveBlocks;
         [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
         [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
@@ -1969,10 +1872,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsTrue(store.CompleteBuild(Key(tile), gen, block), "sanity: block committed");
         }
 
-        // Fills `plan` from `store`'s current winner set at `version`, with optional per-tile Fade/Drop/Departing
-        // overrides (all default Keep/not-departing). Mirrors SymbolGatherPlanDropMaskTests.BuildMaskedPlan/
-        // BuildReferencePlan but generalized over which per-frame override applies to which tile, since these tests
-        // need to vary EITHER the winner set (a different store) OR just the masks (same store, same records).
+        // Fills `plan` from `store`'s winner set at `version`, with optional per-tile Fade/Drop/Departing overrides
+        // (default Keep/not-departing), so a test can vary EITHER the winner set OR just the masks.
         private static void BuildPlan(SymbolTileStore store, SymbolGatherPlan plan, int version,
             long dropTileKey = -1, long fadeTileKey = -1, long departingTileKey = -1)
         {
@@ -2104,10 +2005,8 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); store.Clear(); }
         }
 
-        // ═══ Rebuilding the SAME plan object with DIFFERENT content at a FIXED WinnerCount and a bumped
-        //          version must invalidate the memo — the coupled constraint: vary the winner SET (a
-        //          different tile), never the record count, or the release-build count backstop rescues a broken
-        //          version key and this row's RED-verify goes vacuously green. ═══
+        // ═══ The SAME plan rebuilt with DIFFERENT content, a FIXED WinnerCount and a bumped version must invalidate
+        //     the memo. Vary the winner SET, never the count, or the release-build backstop hides a broken key. ═══
 
         [Test]
         public void Memo_VersionChange_Invalidates()
@@ -2154,18 +2053,11 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); storeA.Clear(); storeB.Clear(); }
         }
 
-        // ═══ Masks (Departing/CoverageFading) are per-frame inputs, legitimately varying at a FIXED version
-        //     — must be tracked on a HELD (memo-hit) mirror, not frozen from the first rebuild. Fixed
-        //     WinnerCount throughout (else AssertMemoPlanMatchesMirror fires for the wrong reason). Two
-        //     single-mask tests, so a cross-wire between the two masks can't hide behind a "both flipped
-        //     together" test. ═══
+        // ═══ Masks (Departing/CoverageFading) vary per frame at a FIXED version and must be tracked on a HELD
+        //     mirror. WinnerCount stays fixed, else AssertMemoPlanMatchesMirror fires for the wrong reason. ═══
 
-        // Two independent single-mask flips: a single test that flipped Departing and CoverageFading
-        // TOGETHER would let an implementation that copied either source mask into BOTH destinations
-        // (e.g. WritePerFrameMasks writing plan.Departing into both _mirrorSymbolDeparting AND
-        // _mirrorSymbolCoverageFading) pass — both masks would read true either way.
-        // Each test below flips exactly ONE mask and asserts the OTHER stayed at its unflipped value, so a
-        // mask-to-mask cross-wire fails on the "unchanged" assertion even though the "changed" one still passes.
+        // Each test flips ONE mask and asserts the OTHER is unchanged, so a cross-wire that copies one source mask
+        // into both destinations fails. A test that flipped both masks together would pass it.
 
         [Test]
         public void Memo_DepartingFlip_TrackedWhilePoolsHeld_CoverageFadingUnchanged()
@@ -2241,11 +2133,8 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
         }
 
-        // ═══ Dropped is invisible through CopyMirrorInto (it hard-skips in GatherSymbolPoints, not the
-        //          mirror-comparison surface) — assert it BEHAVIOURALLY, on a memo-HIT frame, via a real Tick +
-        //          WorldMeshReadback comparison against a reference that never collected the dropped tile at all
-        //          (mirrors SymbolGatherPlanDropMaskTests' pattern), with the masked side's Drop flip held at the
-        //          SAME version (a memo hit) instead of a bumped one. ═══
+        // ═══ Dropped is invisible through CopyMirrorInto (GatherSymbolPoints hard-skips it), so assert it through a
+        //     real Tick on a memo-HIT frame, against a reference that never collected the dropped tile. ═══
 
         // Full vertex + opacity byte comparison of two world-slot meshes — mirrors
         // SymbolGatherPlanDropMaskTests.FirstMeshDifference. Returns the first difference, or null if byte-identical.
@@ -2286,13 +2175,8 @@ namespace MapRenderer.Tests.Text.Placement
                 var planRef = new SymbolGatherPlan();
                 try
                 {
-                    // Frame 1: both tiles Keep on both sides — establishes a live fade for the drop tile too.
-                    // The collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick —
-                    // duplicate (same plan+version, so the second Tick is a memo HIT, not a second rebuild) so
-                    // this frame's ticks actually SHOW both tiles before frame 2 masks one of them off. Without
-                    // this, frame 1 is a virgin system's first Tick and shows NOTHING — the drop tile's slot
-                    // would never be built, so :510's "masked: the Dropped slot must be HIDDEN" would pass
-                    // vacuously (never shown ⇒ trivially not visible), proving nothing about the Drop mask.
+                    // Frame 1: both tiles Keep on both sides. Ticked twice (the second a memo HIT) because the verdict
+                    // is one Tick late; else the drop slot never shows and the HIDDEN assertion below passes vacuously.
                     BuildPlan(storeMasked, planMasked, version: 0);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
@@ -2302,9 +2186,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
                         "sanity: frame 1 is a heavy rebuild — the duplicate Tick is a memo HIT (same plan+version), not a second rebuild");
 
-                    // Frame 2: MASKED flags the drop tile Dropped at the SAME version (a memo-HIT frame — the point
-                    // of this test); REFERENCE excludes the drop tile physically (a different plan/store shape,
-                    // separate rebuild — its own memoization is irrelevant here).
+                    // Frame 2: MASKED flags the drop tile Dropped at the SAME version (a memo HIT); REFERENCE leaves
+                    // the drop tile out of its plan.
                     BuildPlan(storeMasked, planMasked, version: 0, dropTileKey: dropKey);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
@@ -2345,9 +2228,8 @@ namespace MapRenderer.Tests.Text.Placement
             finally { storeMasked.Clear(); storeRef.Clear(); }
         }
 
-        // ═══ The memo-HIT path (three mask memcpys + a subtraction) allocates ZERO managed garbage — pairs
-        //     with SymbolGatherParityTests.GatherIntoMirror_Warm_AllocatesNoGCMemory (the HEAVY-path guard,
-        //     which forces a version bump before its measured call). ═══
+        // ═══ The memo-HIT path allocates ZERO managed garbage; the heavy path's guard is
+        //     SymbolGatherParityTests.GatherIntoMirror_Warm_AllocatesNoGCMemory. ═══
 
         [Test]
         public void GatherIntoMirror_MemoHit_AllocatesNoGCMemory()
@@ -2379,45 +2261,29 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// THE ORDER-PARITY TOOTH. The production per-frame
-    /// path replaced a managed SoA build with a NATIVE GATHER (<see cref="SymbolPlacementSystem.GatherIntoMirror"/>)
-    /// that compacts each winner's pre-baked <see cref="SymbolTileBlock"/> slice into the placement job's
-    /// native mirror. This test proves the gather is BYTE-IDENTICAL to an INDEPENDENT restatement over the SAME
-    /// winner plan — the exact invariant the GPU snapshot suite depends on, localized to a field-by-field
-    /// comparison so a spine bug (winner order, the <c>(blockId, localIndex)</c> mapping, or a source-offset
-    /// remap) surfaces HERE, not as a vague snapshot flip.
-    ///
-    /// <para><b>The oracle (<see cref="BuildExpectedBatch"/>) is independent of the gather, not of the bake.</b>
-    /// It walks the SAME winner plan the gather reads (<c>blockId</c>/<c>localIndex</c>/<c>isDeparting</c>/
-    /// <c>decisions</c>) and, for each winner, reads its fields straight off the committed
-    /// <see cref="SymbolTileBlock"/>'s own columns (<c>block.Points[block.Detail[localIndex]]</c>, quad/
-    /// glyph/anchor/path spans, <c>block.RepAnchor</c>) — a hand-written managed loop, never calling
-    /// <see cref="SymbolPlacementSystem.GatherIntoMirror"/> or the Burst <c>SymbolGatherJob</c> it drives. Both
-    /// the oracle and the production gather consume the SAME immutable bake output (itself pinned separately by
-    /// <c>SymbolTileBlockBakerTests</c>), so a match here proves the gather's SELECTION/ASSEMBLY logic
-    /// (which block, which raw slot, which pool offset) is correct — exactly what this tooth exists to pin —
-    /// without re-deriving the per-symbol field math the baker already owns (reusing <c>block.Points</c>/
-    /// <c>block.Curveds</c> verbatim is the same "shared math, checked assembly" split
-    /// <c>SymbolTileBlockBaker</c>'s own doc describes).</para>
-    ///
-    /// <para>Fixture: a MULTI-TILE set with BOTH curved and point symbols, a tile the coverage filter FADES, a tile
-    /// it DROPS (so the active-range compaction genuinely moves elements), and a DEPARTING tile (so the
-    /// departing-tail shift runs).</para>
+    /// THE ORDER-PARITY TOOTH. <see cref="SymbolPlacementSystem.GatherIntoMirror"/> compacts each winner's pre-baked
+    /// <see cref="SymbolTileBlock"/> slice into the placement job's native mirror, and must be BYTE-IDENTICAL to an
+    /// independent restatement over the same winner plan. A spine bug (winner order, the
+    /// <c>(blockId, localIndex)</c> mapping, a source-offset remap) then fails HERE, not as a vague snapshot flip.
     /// </summary>
+    /// <remarks>
+    /// Non-obvious why: the oracle (<see cref="BuildExpectedBatch"/>) is independent of the gather, not of the bake.
+    /// It reads each winner's fields off the block's own columns, so a match proves the gather's selection and
+    /// assembly, while <c>SymbolTileBlockBakerTests</c> pins the bake. The fixture has curved and point symbols, a
+    /// FADED tile, a DROPPED tile (so compaction moves elements) and a DEPARTING tile (so the tail shift runs).
+    /// </remarks>
     [TestFixture]
     public class SymbolGatherParityTests
     {
-        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
-        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
-        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        // A leaked SymbolTileBlock keeps DebugLiveAllocCount raised: only Dispose decrements it, never a finalizer,
+        // so this delta is deterministic and catches a test that bakes a block and never disposes it.
         private long _liveBlocks;
         [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
         [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
             "this test baked a block it never disposed — release the snapshot and Clear() the store");
 
-        // Identity projection matrices: every corner projects (clip.w == 1 > 0) so a HUGE minCoverage forces every
-        // tile below threshold deterministically — Keep/Fade/Drop is then driven purely by coverageAbovePrev, no
-        // camera framing needed (the filter's classification, not its exact coverage number, is what we exercise).
+        // Identity projection: every corner projects (clip.w == 1 > 0), so with HugeMinCoverage the filter's
+        // Keep/Fade/Drop is driven only by coverageAbovePrev, with no camera framing needed.
         private static readonly float4x4 IdViewProj = float4x4.identity;
         private static readonly float3x3 IdRebase = float3x3.identity;
         private static readonly double2 Viewport = new double2(100, 100);
@@ -2458,9 +2324,8 @@ namespace MapRenderer.Tests.Text.Placement
         // exercising SymbolGatherJob's `quadCount > 0` guard (a zero-length source array can yield a null Ptr).
         private static List<SymbolQuad> ZeroQuadList() => new List<SymbolQuad>();
 
-        // A parameterized curved-symbol append so a test can hand it an EMPTY
-        // glyph list or an EMPTY anchor array — exercising the `glyphCount > 0` / `anchorCount > 0` guards and,
-        // for the empty-anchor case, the UNGUARDED fade copy (fadeCount = anchorCount + 1 = 1, no guard).
+        // A curved-symbol append that takes an EMPTY glyph list or anchor array, to exercise the `glyphCount > 0` /
+        // `anchorCount > 0` guards and the UNGUARDED fade copy (fadeCount = anchorCount + 1 = 1).
         private static void AddCurvedSymbolCustom(SymbolTileBuffer buffer, double3 anchor, string text, int feature,
             long tileKey, List<CurvedGlyph> glyphs, LineAnchor[] anchors)
             => TestSymbolTileBuffer.AddCurved(buffer, glyphs, anchors,
@@ -2483,9 +2348,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static long Tk(TileId t) => SymbolTileKey.Pack(t);
 
-        // Locates the winner entry for tileKey's raw record at wantLocalIndex — used by the RED-verify (a) test
-        // to perturb a KNOWN-real winner without assuming CollectInto's scan order (block/collection order is an
-        // implementation detail this test must not bake in).
+        // Locates the winner entry for tileKey's raw record at wantLocalIndex, so a test can perturb a known winner
+        // without assuming CollectInto's scan order.
         private static int FindWinner(List<int> blockId, List<int> localIndex,
             IReadOnlyList<SymbolTileBlock> orderedBlocks, long tileKey, int wantLocalIndex)
         {
@@ -2494,11 +2358,8 @@ namespace MapRenderer.Tests.Text.Placement
             return -1;
         }
 
-        // Classify + compact the RAW CollectInto winner-plan arrays: removes every Drop-classified record,
-        // mirroring the RETIRED SymbolTileCoverageFilter.FilterActive's physical-compaction behaviour (this test
-        // targets winner-ORDER parity — "compaction genuinely moves elements" — not the resident-Drop masking,
-        // which SymbolGatherPlan's own doc describes as a separate, later concern). Driven by the BLOCK-based
-        // SymbolTileCoverageFilter.ClassifyActive so no per-symbol managed carrier list is ever materialized.
+        // Classifies the raw CollectInto winner plan with the block-based SymbolTileCoverageFilter.ClassifyActive and
+        // removes every Drop record, so compaction moves elements. This targets winner ORDER, not resident-Drop masking.
         private static void ClassifyAndCompact(IReadOnlyList<SymbolTileBlock> orderedBlocks,
             List<int> blockId, List<int> localIndex, List<byte> isDeparting, HashSet<long> coverageAbovePrev,
             out List<byte> rawDecisions,
@@ -2525,10 +2386,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // THE INDEPENDENT ORACLE — see the type doc for why this does not call GatherIntoMirror. A line-for-line
-        // MANAGED restatement of the same "select this winner's slice from its block, flatten into one SoA" job
-        // SymbolGatherJob performs in Burst — written independently here rather than shared, so the two can
-        // disagree if either one has a selection/offset bug.
+        // THE INDEPENDENT ORACLE: a managed restatement of SymbolGatherJob's "select each winner's slice, flatten into
+        // one SoA", written apart from it so the two disagree if either has a selection/offset bug.
         private static void BuildExpectedBatch(SymbolBatch expected,
             List<int> blockId, List<int> localIndex, List<byte> isDeparting, List<byte> decisions,
             IReadOnlyList<SymbolTileBlock> orderedBlocks)
@@ -2591,9 +2450,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // Build the whole production winner-plan pipeline into `plan`, and the reference oracle via
-        // BuildExpectedBatch over the SAME (compacted) winner plan. Returns the gathered mirror (materialized as
-        // a batch) via `gathered`.
+        // Builds the production winner-plan pipeline into `plan` and the oracle over the SAME compacted winner plan;
+        // `gathered` returns the gathered mirror as a batch.
         private void RunPipeline(SymbolTileStore store, SymbolPlacementSystem lps, SymbolGatherPlan plan,
             HashSet<long> coverageAbovePrev, bool skipPermute, int perturbWinner, int perturbLocalIndex,
             out SymbolBatch oracle, out SymbolBatch gathered, out int culled)
@@ -2615,9 +2473,8 @@ namespace MapRenderer.Tests.Text.Placement
             var oracleIsDeparting = new List<byte>(compactIsDeparting);
             var oracleDecisions = new List<byte>(compactDecisions);
 
-            // RED-verify (b): skip compaction entirely for the plan feed — the RAW, uncompacted arrays (which
-            // still carry the Dropped winner) desync from the oracle's compacted winner set — the class of
-            // bug the permute step exists to prevent.
+            // RED-verify (b): feed the plan the RAW, uncompacted arrays, which still carry the Dropped winner and so
+            // desync from the oracle's compacted winner set.
             List<int> feedBlockId = skipPermute ? planBlockId : compactBlockId;
             List<int> feedLocalIndex = skipPermute ? planLocalIndex : compactLocalIndex;
             List<byte> feedIsDeparting = skipPermute ? planIsDeparting : compactIsDeparting;
@@ -2767,13 +2624,8 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
         }
 
-        // Gather path: once warm, a second HEAVY GatherIntoMirror allocates ZERO managed garbage — the
-        // mirror native lists + plan are reused (the point of the build-time SoA bake). Mirrors
-        // the SymbolSubsystemPumpTests.CurrentBatch_Warm_… idiom, one level down on the gather itself.
-        // A same-version GatherIntoMirror is a memo HIT, not the heavy path this test's message
-        // claims — bump WinnerSetVersion immediately before the measured call to force a real rebuild (the honest
-        // "force a rebuild" knob: the field is internal, so the test can assign it). The memo-HIT alloc guard is
-        // SymbolGatherMemoTests.GatherIntoMirror_MemoHit_AllocatesNoGCMemory, kept separate.
+        // Once warm, a HEAVY GatherIntoMirror allocates ZERO managed garbage: the mirror native lists and plan are
+        // reused. A same-version call is a memo HIT, so the test bumps WinnerSetVersion to force a real rebuild.
         [Test]
         public void GatherIntoMirror_Warm_AllocatesNoGCMemory()
         {
@@ -2789,9 +2641,8 @@ namespace MapRenderer.Tests.Text.Placement
                 harness.Lps.GatherIntoMirror(plan); // extra warm-up (first-touch native growth already done above)
 
                 plan.WinnerSetVersion++; // force the measured call to take the heavy (rebuild) path, not a memo hit
-                // The version bump above is a PRECONDITION this test's own claim ("measures the
-                // heavy rebuild path") rests on, and only the MirrorRebuildCount delta below actually proves it
-                // engaged, so this test can never silently degrade into measuring a memo hit.
+                // The MirrorRebuildCount delta below proves the version bump engaged, so this test never silently
+                // measures a memo hit.
                 int rebuildsBefore = harness.Lps.MirrorRebuildCount;
                 Assert.That(() => { harness.Lps.GatherIntoMirror(plan); }, Is.Not.AllocatingGCMemory(),
                     "a warm GatherIntoMirror must allocate ZERO managed garbage — native lists + plan are reused");
@@ -2801,17 +2652,11 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
         }
 
-        // Widen the parity fixture: a Burst-only running-offset bug only manifests when MULTIPLE winners
-        // share a block, or a ZERO-SIZED slice sits between two non-empty ones — the original 4-tile fixture (one
-        // winner per block) cannot catch either. Hand-built (no store/coverage filter — full control over winner
-        // order and which raw slot is null), this fixture exercises all four gaps in one shot:
-        //  - block A: >= 3 winners, with a NULL slot BETWEEN the first two real ones (the null-slot invariant —
-        //    localIndex 1 is never itself a winner, but it must not perturb localIndex 2's block-pool slot);
-        //  - a point symbol with ZERO quads (empty quad list) — the `quadCount > 0` guard;
-        //  - a curved symbol with ZERO glyphs, and one with ZERO anchors — the `glyphCount > 0` /
-        //    `anchorCount > 0` guards AND the unguarded fade copy (fadeCount = anchorCount + 1 = 1, no guard);
-        //  - >= 2 blocks interleaved in winner order (A, B, A, B, A) so the per-block switch and the running
-        //    mirror cursors are exercised together, not block-at-a-time.
+        // Non-obvious why: a Burst running-offset bug shows only when MULTIPLE winners share a block or a ZERO-SIZED
+        // slice sits between two non-empty ones. Hand-built, so winner order is under full control:
+        //  - a point with ZERO quads, a curved with ZERO glyphs and one with ZERO anchors — the `quadCount > 0` /
+        //    `glyphCount > 0` / `anchorCount > 0` guards and the unguarded fade copy (fadeCount = anchorCount + 1);
+        //  - two blocks interleaved in winner order, so the per-block switch and the running cursors run together.
         [Test]
         public void Gather_MatchesBuildOracle_FieldByField_MultiWinnerInterleavedBlocks()
         {
@@ -2821,16 +2666,9 @@ namespace MapRenderer.Tests.Text.Placement
             double3 originB = TileRenderOrigin.Project(b, P);
             long tkA = Tk(a), tkB = Tk(b);
 
-            // Block A raw slots: [0] point ZERO quads — [1] point normal #1, 1 quad — [2] point normal #2,
-            // 1 DIFFERENT quad — [3] curved normal #1, 2 glyphs + 1 anchor — [4] curved ZERO glyphs —
-            // [5] curved normal #2, 2 DIFFERENT glyphs + 1 DIFFERENT anchor. Two quad-bearing points AND two
-            // glyph/anchor-bearing curveds in the SAME block is
-            // what makes the SECOND of each pair's source offset within the block's OWN pool genuinely non-zero
-            // (each #1 occupies the pool's slot 0; the zero-content records before/between contribute nothing to
-            // the running offset) — review found the original point-only widening left the curved arm's three
-            // source-offset remaps (glyph/anchor/fade start) untestable, since every fixture in the repo has at
-            // most one curved symbol per block. #1 and #2 carry DIFFERENT glyph/anchor content so a swapped
-            // source offset reads detectably wrong data, not coincidentally-correct data.
+            // Block A raw slots: [0] point ZERO quads, [1] point #1, [2] point #2, [3] curved #1, [4] curved ZERO
+            // glyphs, [5] curved #2. Non-obvious why: two points and two curveds in one block give each #2 a non-zero
+            // source offset in the block's own pool; #1 and #2 differ in content, so a swapped offset reads wrong data.
             var bufferA = new SymbolTileBuffer();
             TestSymbolTileBuffer.AddPoint(bufferA, new double3(10, 0, 10), ZeroQuadList(), float2.zero, float2.zero,
                 text: "a0", textSizePx: 20f, paddingPx: 2f, sortKey: 0f, featureIndex: 10, tileKey: tkA, paint: SymbolPaint.Default);
@@ -2913,9 +2751,8 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); harness.Dispose(); blockA.Dispose(); blockB.Dispose(); }
         }
 
-        // ── Bake/gather parity holds on a pair-bearing fixture — the baker resolves PairRole
-        //    over the TILE list (SymbolTileBlockBaker.Fill); this test pins that the gather's block/detail
-        //    SELECTION carries that resolved role through untouched. ──
+        // ── Bake/gather parity on a pair-bearing fixture: the baker resolves PairRole over the TILE list, and the
+        //    gather's block/detail SELECTION must carry that role through untouched. ──
         [Test]
         public void Gather_MatchesBuildOracle_FieldByField_CentredPair()
         {
@@ -2975,45 +2812,22 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The symbol-label native bake: the tile-coverage cull's Drop decision is now a per-record
-    /// MASK (<see cref="SymbolGatherPlan.Dropped"/>, stamped onto the native mirror as <c>_mirrorSymbolDropped</c>)
-    /// instead of a physical compaction — a Dropped winner stays RESIDENT in the plan/mirror and is hard-skipped
-    /// by <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s FIRST, unconditional check. This is the falsifiable
-    /// proof that masking a Dropped record is bit-for-bit equivalent to it never having been collected — proven
-    /// three ways, each independently RED-verifiable so a single defect can't hide behind another:
-    ///
-    /// <list type="bullet">
-    ///   <item><see cref="MaskedDrop_PointOnly_MatchesReference_SurvivorContentIdentical"/> — a POINT-only
-    ///     fixture (no curved symbol anywhere), so a point-path regression can't hide behind curved candidates.</item>
-    ///   <item><see cref="MaskedDrop_CurvedOnly_MatchesReference_SurvivorContentIdentical"/> — a CURVED-only
-    ///     fixture, with an explicit pre-Drop assertion that the curved record actually SURVIVED with positive
-    ///     opacity (a genuinely live fade, not just "no assertion it ever placed") — this is what makes the
-    ///     <c>MarkFadeOutIfAlive</c> "still alive ⇒ keep staging" path a real divergence risk if the hard-skip is
-    ///     ever folded into that OR-chain instead of preceding it.</item>
-    ///   <item><see cref="AllDropped_FadeStaysFrozen_ReappearOpacityMatchesReference"/> — the all-dropped regression:
-    ///     a frame where EVERY resident record is Dropped must behave EXACTLY like the empty-after-
-    ///     compaction mirror (placement/fade-decay block skipped entirely), so a live fade FREEZES instead of
-    ///     decaying — <see cref="SymbolPlacementSystem"/>'s <c>_mirrorNonDroppedCount</c> gate, not raw <c>_mirrorCount</c>.</item>
-    /// </list>
-    ///
-    /// Each test compares the RESIDENT-MASKED production path (a plan carrying every winner, some flagged
-    /// Dropped) against a REFERENCE plan that never includes the would-be-Dropped winners in the first place —
-    /// not just candidate/quad COUNTS, but the surviving record's full world-mesh vertex + opacity byte content
-    /// (<see cref="WorldMeshReadback"/>), so a wrong-candidate-survived defect (same count, different content)
-    /// is caught too.
-    ///
-    /// <para><b>SF8 (vacuous-pass guard).</b> <c>SymbolStagingMath.StagePoint</c> returns 0 candidates on a
-    /// projection/viewport-margin failure — the KEEP anchor is the dead-centre point the test camera looks
-    /// straight at (mirrors <c>SymbolFadeTests</c>' pattern) and the DROP anchor is offset by <c>DropOffset</c>
-    /// but stays well inside the 256px viewport, both guaranteed projectable and inside margin, so a removed
-    /// hard-skip is never saved from detection by an unrelated off-viewport reject.</para>
+    /// The tile-coverage cull's Drop decision is a per-record MASK (<see cref="SymbolGatherPlan.Dropped"/>, mirrored
+    /// as <c>_mirrorSymbolDropped</c>): a Dropped winner stays RESIDENT and is hard-skipped by
+    /// <c>SymbolPlacementSystem.GatherSymbolPoints</c>. Each test compares that path against a reference plan that
+    /// never holds the Dropped winners, down to the survivor's world-mesh vertex and opacity bytes.
     /// </summary>
+    /// <remarks>
+    /// Non-local invariant: the hard-skip precedes <c>MarkFadeOutIfAlive</c>'s "still alive ⇒ keep staging" check, and
+    /// an all-Dropped frame gates on <c>_mirrorNonDroppedCount</c>, not <c>_mirrorCount</c>, so a live fade freezes.
+    /// Both anchors stay projectable and inside the 256px viewport, so an off-viewport reject in
+    /// <c>SymbolStagingMath.StagePoint</c> never hides a removed hard-skip.
+    /// </remarks>
     [TestFixture]
     public class SymbolGatherPlanDropMaskTests
     {
-        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
-        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
-        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        // A leaked SymbolTileBlock keeps DebugLiveAllocCount raised: only Dispose decrements it, never a finalizer,
+        // so this delta is deterministic and catches a test that bakes a block and never disposes it.
         private long _liveBlocks;
         [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
         [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
@@ -3021,9 +2835,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
 
-        // Render-space offset separating the DROP symbol from the centre-anchored KEEP symbol so the two do NOT
-        // collide (a same-point pair suppresses one to opacity 0). ~1600 render metres — large enough to clear the
-        // 18px glyph box across the plausible metres-per-pixel range, small enough to stay inside the 256px viewport.
+        // Keeps the DROP symbol clear of the centre-anchored KEEP symbol (a same-point pair suppresses one to 0), yet
+        // inside the 256px viewport.
         private static readonly double3 DropOffset = new double3(0, 0, 1600);
 
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
@@ -3059,9 +2872,8 @@ namespace MapRenderer.Tests.Text.Placement
             TestSymbolTileBuffer.Curved(
                 glyphs: new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = OneQuad(0.3f).Quads[0] } },
                 anchors: new[] { new LineAnchor(0, 0.5f) },
-                // A fixed ~8m path is sub-pixel at z12 and never stages — mirror WorldCurvedAbRenderSnapshotTests'
-                // altitude-relative sizing: a ~1600 render-metre span (anchor at path mid via LineAnchor 0.5, glyph
-                // at ArcCenter 0 ⇒ at the anchor) places comfortably on-screen at this zoom.
+                // A ~8m path is sub-pixel at z12 and never stages; this span, with the anchor and glyph at its middle,
+                // places on-screen at this zoom.
                 path: new[] { anchor - new double3(800, 0, 0), anchor + new double3(800, 0, 0) },
                 anchorRender: anchor, placement: SymbolPlacement.LineCenter,
                 text: text, textSizePx: 20f, paddingPx: 2f, sortKey: 1f,
@@ -3117,12 +2929,8 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // Fills `plan` from the store's real winner arrays (blockId/localIndex/isDeparting), stamping every winner
-        // whose TileKey == dropTileKey Drop and everything else Keep — the RESIDENT-MASKED path (every winner
-        // present in the plan, regardless of decision). dropTileKey == -1 (no tile ever packs to -1) ⇒ all Keep.
-        // `version` is threaded through to SymbolGatherPlan.Build — every test below rebuilds the SAME plan
-        // object across frames, so each call passes a freshly incremented per-test counter (audited by READING
-        // this call site, not by which tests happen to go RED).
+        // The RESIDENT-MASKED path: every winner is in the plan, dropTileKey's winners stamped Drop, the rest Keep
+        // (-1 packs to no tile ⇒ all Keep). Each rebuild of the SAME plan object must pass a fresh `version`.
         private static void BuildMaskedPlan(SymbolTileStore store, SymbolGatherPlan plan, long dropTileKey, int version)
         {
             var blockId = new List<int>();
@@ -3137,9 +2945,8 @@ namespace MapRenderer.Tests.Text.Placement
             plan.Build(blockId, localIndex, isDeparting, decisions, store.OrderedBlocks, version);
         }
 
-        // Fills `plan` with ONLY the winners whose TileKey != excludedTileKey — the REFERENCE path (physical
-        // absence, as if the excluded tile's build never happened / was never collected). excludedTileKey == -1
-        // (no tile ever packs to -1) ⇒ everything included (a plain "Build the whole store" call).
+        // The REFERENCE path: fills `plan` with ONLY the winners outside excludedTileKey, as if that tile was never
+        // collected (-1 packs to no tile ⇒ everything included).
         private static void BuildReferencePlan(SymbolTileStore store, SymbolGatherPlan plan, long excludedTileKey, int version)
         {
             var blockId = new List<int>();
@@ -3204,10 +3011,8 @@ namespace MapRenderer.Tests.Text.Placement
                 int maskedVersion = 0, refVersion = 0; // Each rebuild of the SAME plan object gets a fresh version
                 try
                 {
-                    // Frame 1: both tiles Keep on both harnesses — establishes a live (full-opacity) fade for the
-                    // drop tile's point too (default +∞ deltaTime snaps to full). The collision verdict a
-                    // Tick's emit reads is harvested from the PREVIOUS Tick — duplicate each harness's
-                    // Tick call (SAME plan+args) before an assertion reads placement output.
+                    // Frame 1: both tiles Keep on both harnesses, so the drop tile's point has a live full-opacity fade.
+                    // Each Tick is duplicated because the verdict is one Tick late.
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
@@ -3216,11 +3021,8 @@ namespace MapRenderer.Tests.Text.Placement
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f, "sanity: the drop tile's point is genuinely live before the Drop");
 
-                    // Frame 2: MASKED flags the drop tile's winner Dropped (resident); REFERENCE excludes it.
-                    // Duplicate again — LastSurvivorCount/LastQuadCount otherwise still read frame 1's
-                    // harvested (pre-Drop) verdict rather than the collision frame 2 itself just scheduled with
-                    // the Drop applied, which would make the comparison below pass without exercising the Drop
-                    // mask at all.
+                    // Frame 2: MASKED flags the drop tile's winner Dropped; REFERENCE excludes it. Duplicated, or
+                    // the counts still read frame 1's pre-Drop verdict and the comparison passes without the mask.
                     BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
@@ -3242,11 +3044,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
                         "the surviving KEEP point's full vertex+opacity content must be byte-identical whether the Drop tile is masked or absent");
 
-                    // The Dropped point is hard-skipped BEFORE emit (masked) / absent (reference); either way its slot
-                    // is not emitted this frame, so WorldSymbolRenderer disables the Renderer but RETAINS the stale
-                    // frame-1 mesh until idle-reclaim. Equivalence is therefore masked-drop-slot == reference-drop-slot
-                    // (both hidden, both stale-identical), NOT "absolutely invisible" (the retained mesh reads its old
-                    // opacity on both sides). This differential still fails loudly if residency changed the slot at all.
+                    // Non-obvious why: an unemitted slot keeps its stale frame-1 mesh (Renderer disabled) until
+                    // idle-reclaim, so the check is masked slot == reference slot, not "absolutely invisible".
                     bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshMasked);
                     bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshRef);
                     Assert.AreEqual(refHasDrop, maskedHasDrop, "the Dropped point's world slot must be present/absent identically masked vs reference");
@@ -3254,9 +3053,8 @@ namespace MapRenderer.Tests.Text.Placement
                         Assert.IsNull(FirstMeshDifference(dropMeshRef, dropMeshMasked),
                             "the Dropped point's world slot content must be byte-identical whether resident-masked or physically absent");
 
-                    // Content equality alone can't catch a KEEP↔DROP swap (both slots hold identical stale/rebuilt
-                    // meshes); visibility is carried separately by the presenter's MeshRenderer.enabled. Assert the
-                    // RENDERED set — KEEP visible, DROP hidden, on BOTH paths — a swap flips these and fails here.
+                    // Content equality cannot catch a KEEP↔DROP swap, and MeshRenderer.enabled carries visibility, so
+                    // assert the RENDERED set on BOTH paths: KEEP visible, DROP hidden.
                     Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "masked: the surviving KEEP slot must be VISIBLE");
                     Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "reference: the surviving KEEP slot must be VISIBLE");
                     Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "masked: the Dropped slot must be HIDDEN (Renderer disabled), not merely stale-mesh-identical");
@@ -3292,12 +3090,8 @@ namespace MapRenderer.Tests.Text.Placement
                 int maskedVersion = 0, refVersion = 0; // Each rebuild of the SAME plan object gets a fresh version
                 try
                 {
-                    // Frame 1: both tiles Keep — establishes a LIVE fade for the drop tile's CURVED record.
-                    // Explicitly assert it actually survived + placed with positive opacity (the
-                    // prior version never proved this) — this is what makes MarkFadeOutIfAlive's "still alive ⇒
-                    // keep staging" branch a genuine divergence risk if Drop is ever folded into that OR-chain.
-                    // The collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick —
-                    // duplicate each harness's Tick call (SAME plan+args) before an assertion reads placement output.
+                    // Frame 1: both tiles Keep; the drop tile's CURVED record must place with a LIVE fade, or a Drop
+                    // folded into MarkFadeOutIfAlive's OR-chain cannot diverge. Each Tick is duplicated (verdict lag).
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
@@ -3308,10 +3102,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f,
                         "the drop tile's curved record must be a genuinely LIVE (placed, positive-opacity) fade before the Drop");
 
-                    // Frame 2: MASKED flags the drop tile's curved winner Dropped (resident); REFERENCE excludes it.
-                    // Duplicate again — see the point-only test's identical comment for why (otherwise the
-                    // comparison below reads frame 1's stale harvested verdict, not frame 2's own Drop-masked
-                    // collision).
+                    // Frame 2: MASKED flags the curved winner Dropped (resident); REFERENCE excludes it. Duplicated,
+                    // or the comparison reads frame 1's stale verdict, not frame 2's Drop-masked collision.
                     BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
@@ -3332,9 +3124,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
                         "the surviving KEEP curved label's full vertex+opacity content must be byte-identical whether the Drop tile is masked or absent");
 
-                    // Same equivalence as the point test, but the drop record had a genuinely LIVE curved fade before
-                    // the Drop — so this proves masking a live curved record is bit-identical to its absence (it is NOT
-                    // soft-faded via MarkFadeOutIfAlive, because the hard-skip precedes that chain).
+                    // The drop record had a LIVE curved fade, so this proves masking it equals its absence: the
+                    // hard-skip precedes MarkFadeOutIfAlive, so the record is not soft-faded.
                     bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshMasked);
                     bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshRef);
                     Assert.AreEqual(refHasDrop, maskedHasDrop, "the Dropped curved record's world slot must be present/absent identically masked vs reference");
@@ -3375,10 +3166,8 @@ namespace MapRenderer.Tests.Text.Placement
                 int maskedVersion = 0, refVersion = 0; // Each rebuild of the SAME plan object gets a fresh version
                 try
                 {
-                    // Frame 1 (default +∞ deltaTime): visible, opacity snaps to 1.0 on both sides. The
-                    // collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick —
-                    // duplicate each harness's Tick call (SAME plan+args) before an assertion reads placement
-                    // output.
+                    // Frame 1 (default +∞ deltaTime): opacity snaps to 1.0 on both sides. Each Tick is duplicated
+                    // because the verdict is one Tick late.
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
@@ -3387,28 +3176,18 @@ namespace MapRenderer.Tests.Text.Placement
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(MaxAlpha(hMasked.System, soloKey), 0.99f, "sanity: frame 1 is fully visible");
 
-                    // Frame 2: EVERY resident record is Dropped (the only tile in the universe) — masked side keeps
-                    // the winner resident+flagged Dropped; reference excludes it entirely (physically absent, the
-                    // ground truth: 0 winners ⇒ _mirrorCount == 0 regardless of any gate, so the reference is
-                    // fix-independent). A LARGE deltaTime here makes a wrongly-firing decay unambiguous (a step
-                    // large enough to fully zero-and-remove the fade entry).
+                    // Frame 2: the only tile is Dropped; the reference excludes it (0 winners, independent of any gate).
+                    // A LARGE deltaTime makes a wrongly-firing decay zero and remove the fade entry.
                     const float bigDeltaTime = 1.0f;
                     BuildMaskedPlan(storeMasked, planMasked, soloKey, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, bigDeltaTime);
                     BuildReferencePlan(storeRef, planRef, soloKey, refVersion++);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, bigDeltaTime);
 
-                    // Frame 3: reappear (Keep again on both sides) with a SMALL deltaTime, so a frozen fade (current
-                    // == 1.0) and a decayed-then-removed fade (current == 0, fading in fresh) land at visibly
-                    // different opacities — not coincidentally re-converged by a single symmetric ease step.
-                    // F2 (all-Dropped / zero-winner) never reaches ScheduleCollision — the whole placement
-                    // block, collision included, is gated on _mirrorNonDroppedCount > 0 — so nothing
-                    // is pending when F3 harvests, and F3's OWN emit reads an EMPTY _placedLastFrame (harvest's
-                    // "no pending" branch), easing solo DOWN one smallDeltaTime step before its own newly-scheduled
-                    // collision (solo alone, trivial winner) can be harvested. Duplicate F3 so that harvest lands
-                    // (SAME args — still fade-neutral: solo is a live candidate throughout, never decays via
-                    // DecayUnseenFadeSymbols) — both sides dip identically then recover, so the comparison and the
-                    // "reference never decayed" sanity both still hold once the second F3 Tick's harvest lands.
+                    // Frame 3: reappear with a SMALL deltaTime, so a frozen fade (1.0) and a decayed one (fading in from
+                    // 0) land at different opacities. Non-obvious why: the Tick is duplicated; frame 2 schedules no
+                    // collision (the gate is _mirrorNonDroppedCount > 0), so frame 3's first emit reads an empty
+                    // _placedLastFrame and dips solo one step on both sides; the second Tick's harvest recovers it.
                     const float smallDeltaTime = 0.05f;
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
@@ -3486,10 +3265,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var projection = new WebMercatorProjection();
             var camGo = new GameObject("SymbolHaloEmit_TestCamera");
-            // Owned so the finally can release them. A camera left ENABLED with a live target keeps
-            // rendering on every Editor update after this fixture returns, and the visual fixtures that run
-            // later sample real pixels — leaking GPU state out of here shows up as THEIR failure, which is a
-            // miserable thing to debug.
+            // Owned so the finally can release them. An ENABLED camera with a live target keeps rendering after
+            // this fixture returns, and the later visual fixtures would then fail on the leaked GPU state.
             RenderTexture target = null;
             Material textMaterial = null;
             try
@@ -3577,9 +3354,8 @@ namespace MapRenderer.Tests.Text.Placement
                 $"{glyphs} glyphs x (4 text corners + 4 halo corners) — a halo that did not emit reads as {glyphs * 4}.");
             Assert.AreEqual(glyphs * 12, indices.Length, "two triangles per run per glyph");
 
-            // Vertices [0, 4g) are the text run and [4g, 8g) the halo run (Emit keeps the text quad at the
-            // base of the block it has always been at). The FIRST half of the index buffer must reference
-            // only the halo half, and the second half only the text half.
+            // Vertices [0, 4g) are the text run and [4g, 8g) the halo run. The FIRST half of the index buffer must
+            // reference only the halo half, and the second half only the text half.
             int textVertEnd = glyphs * 4;
             for (int i = 0; i < glyphs * 6; i++)
                 Assert.GreaterOrEqual(indices[i], textVertEnd,

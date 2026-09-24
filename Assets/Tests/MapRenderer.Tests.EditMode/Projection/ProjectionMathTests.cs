@@ -1,11 +1,5 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine, NativeArray, or MonoBehaviour references.
-//
-// Projection math tests:
-//   Ecef is genuinely 3D (pole, antipodal, chord, tangent-frame varies with position).
-//   Batch Forward equals scalar Forward element-wise (exact), for both modules.
-//   WebMercator.Forward(geo).xz == FromLonLat(lon,lat) within 1e-6 m.
-//   TangentBasis orthonormality for both modules.
 
 using System;
 using NUnit.Framework;
@@ -93,18 +87,16 @@ namespace MapRenderer.Tests.Projection
         [Test]
         public void TangentBasis_EcefVariesWebMercatorConstant()
         {
-            // --- Ecef at (lon=0, lat=0): Up should be ~(1,0,0) in render space ---
-            // ECEF up at origin: (cosφ·cosλ, cosφ·sinλ, sinφ) = (1,0,0)
-            // axis-swap (X,Y,Z)→(X,Z,Y): render-up = (1, 0, 0)
+            // --- Ecef at (lon=0, lat=0): ECEF up (cosφ·cosλ, cosφ·sinλ, sinφ) = (1,0,0);
+            // the axis swap (X,Y,Z)→(X,Z,Y) keeps render-up = (1,0,0) ---
             float3x3 b00 = Ecef.TangentBasis(new GeoCoordinate { Longitude = 0.0, Latitude = 0.0 });
             float3 up00 = b00.c1; // c1 = Up column
             Assert.That(up00.x, Is.EqualTo(1f).Within(1e-5f), "Ecef(0,0) Up.x≈1");
             Assert.That(up00.y, Is.EqualTo(0f).Within(1e-5f), "Ecef(0,0) Up.y≈0");
             Assert.That(up00.z, Is.EqualTo(0f).Within(1e-5f), "Ecef(0,0) Up.z≈0");
 
-            // --- Ecef at (lon=0, lat=90): Up should be ~(0,1,0) in render space ---
-            // ECEF up at north pole: (cosφ·cosλ, cosφ·sinλ, sinφ) = (0,0,1) (φ=90° → sinφ=1)
-            // axis-swap: render-up = (X_ecef=0, Z_ecef=1, Y_ecef=0) = (0,1,0)
+            // --- Ecef at (lon=0, lat=90): ECEF up = (0,0,1) (φ=90° → sinφ=1);
+            // the axis swap gives render-up = (X_ecef, Z_ecef, Y_ecef) = (0,1,0) ---
             float3x3 b090 = Ecef.TangentBasis(new GeoCoordinate { Longitude = 0.0, Latitude = 90.0 });
             float3 up090 = b090.c1; // c1 = Up column
             Assert.That(up090.x, Is.EqualTo(0f).Within(1e-5f), "Ecef(0,90) Up.x≈0");
@@ -163,13 +155,10 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// <see cref="WebMercator.Forward"/>'s planar output pinned against hard-coded oracle values,
-        /// computed independently (not by re-invoking <c>Forward</c> or <c>FromLonLat</c>) —
-        /// <see cref="WebMercator_ForwardXZ_MatchesFromLonLat"/> only proves the two callers agree with EACH
-        /// OTHER, never that either is numerically correct (both reduce to the same pure function called
-        /// twice). Mirrors the <c>Ecef_*</c> numeric-pin teeth above. RED-verify: flip
-        /// <c>WebMercator.cs</c>'s <c>x = R * longitude</c> to <c>x = -R * longitude</c> and this reds; the
-        /// tautological sibling above does not.
+        /// <see cref="WebMercator.Forward"/>'s planar output pinned against independently computed values.
+        /// <see cref="WebMercator_ForwardXZ_MatchesFromLonLat"/> proves only that two callers of the same
+        /// pure function agree; this tooth also reds when <c>x = R * longitude</c> is flipped to
+        /// <c>x = -R * longitude</c>.
         /// </summary>
         [Test]
         public void WebMercator_Forward_MatchesHardcodedOracle()

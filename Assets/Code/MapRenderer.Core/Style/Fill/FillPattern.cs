@@ -69,9 +69,7 @@ namespace MapRenderer.Core.Style.Fill
         /// the tile's span there is a phase step at tile edges (docs/fill-parity-design.md).</para>
         /// </summary>
         /// <param name="worldPeriodMetres">
-        /// WorldAbsolute only. The tiling period: the world distance one full repetition spans, along the
-        /// sprite's width axis. At 1, the pattern coordinate advances by exactly one repetition per world
-        /// unit. World units are Web-Mercator metres — the units the mesh, tile origins and camera all use.
+        /// WorldAbsolute only: the Web-Mercator metres one repetition spans along the sprite's width axis.
         /// A non-positive value falls back to ScreenRelative rather than dividing by zero.
         /// </param>
         public static double2 RepeatsPerWorldUnit(

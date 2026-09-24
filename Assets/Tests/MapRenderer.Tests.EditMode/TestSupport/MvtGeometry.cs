@@ -8,16 +8,10 @@ namespace MapRenderer.Tests.TestSupport
     /// polylines for lines) in tile-local coordinates. Per the MVT spec: command = id &amp; 0x7,
     /// repeat-count = id &gt;&gt; 3; MoveTo=1, LineTo=2, ClosePath=7; parameters are zigzag-encoded
     /// deltas applied to a running cursor.
-    ///
-    /// <para><b>Zero production callers</b>, kept for what follows. Fill,
-    /// line and symbol obtain geometry from the shared <c>TileGeometryBuffers</c> that the Burst
-    /// <c>MvtDecodeJob</c> fills. What keeps this type in Core is that it is the <b>measurement instrument</b>
-    /// for that job: (a) the managed reference decoder <c>MvtDecodeJob</c> is checked against
-    /// (<c>JobifiedPipelineTests</c>' decode parity — the only thing keeping the Burst decoder honest against
-    /// this spec transcription), (b) the arm-A oracle of the line and symbol differential teeth
-    /// (<c>StyledLineBufferParityTests</c>, <c>SymbolBufferParityTests</c>), and (c) <c>Tools/core-tests</c>'
-    /// decode ground truth. It is also this repo's only in-source transcription of the MVT command encoding.
-    /// Deleting it would delete the oracle rather than retire a decoder.</para>
+    /// Non-obvious why: it has zero production callers but is the managed oracle that the Burst
+    /// <c>MvtDecodeJob</c> is checked against (<c>JobifiedPipelineTests</c>,
+    /// <c>StyledLineBufferParityTests</c>, <c>SymbolBufferParityTests</c>, <c>Tools/core-tests</c>), so
+    /// deleting it deletes the oracle.
     /// </summary>
     public static class MvtGeometry
     {

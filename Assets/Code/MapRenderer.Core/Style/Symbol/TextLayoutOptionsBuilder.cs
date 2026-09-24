@@ -18,13 +18,8 @@ namespace MapRenderer.Core.Style.Symbol
         /// Assemble the per-feature layout options. The zoom-capable ems (<see cref="LayoutProperties.TextMaxWidth"/>,
         /// <see cref="LayoutProperties.TextLineHeight"/>, <see cref="LayoutProperties.TextLetterSpacing"/>,
         /// <see cref="LayoutProperties.TextRadialOffset"/>) are evaluated at <paramref name="zoom"/> for
-        /// <paramref name="feature"/>; anchor/justify are the already-parsed enums.
-        ///
-        /// <para><b>Offset y-flip:</b> MapLibre <c>text-offset</c> is y-DOWN (positive y = down), while
-        /// <see cref="TextLayoutOptions.Offset"/> / <c>TextQuadLayout</c> are y-UP (line 0's baseline at y=0,
-        /// lower lines at negative y). So the y component is negated here, consistent with the sign in
-        /// <c>TextQuadLayout.ComputeRadialOffset</c> (a Top anchor pushes toward −y). <c>RadialOffset</c> is a
-        /// magnitude (direction is derived from the anchor downstream), so it is passed through unflipped.</para>
+        /// <paramref name="feature"/>. <c>text-offset</c>'s y is negated, because MapLibre is y-down and
+        /// <see cref="TextLayoutOptions.Offset"/> is y-up; <c>RadialOffset</c> is a magnitude and passes unflipped.
         /// </summary>
         public static TextLayoutOptions Build(LayoutProperties layout, double zoom, IFeature feature)
         {

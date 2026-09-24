@@ -8,23 +8,11 @@ using UnityEngine;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Alpha-weighted coverage recovery from a rendered <see cref="Frame"/> — the measurement
-    /// <see cref="LineAaSnapshotTests"/> established, in the test assembly so a second fixture can measure
-    /// the same way rather than hand-rolling a band finder that the AA ramp would dominate.
-    ///
-    /// <para>Coverage at a pixel is the composite's position on the background→plateau colour axis, in
-    /// LINEAR space. The project renders in linear colour, so the 8-bit snapshot bytes are sRGB-ENCODED
-    /// composites: skipping the decode bends the alpha ramp and corrupts every integral. Σ coverage across a
-    /// perpendicular cut is the band's APPARENT WIDTH in pixels — never a thresholded "non-background pixel"
-    /// count, which is what made earlier AA work flake.</para>
-    ///
-    /// <para>Rows are bottom-up (<see cref="SnapshotRenderer.Pixels"/>'s native convention). Every
-    /// quantity here is a magnitude or a count, so it is flip-invariant — a caller asserting a vertical
-    /// DIRECTION must un-mirror first.</para>
-    ///
-    /// <para><see cref="LineAaSnapshotTests"/> still carries its own private copies; de-duplicating that
-    /// fixture onto this helper is a deliberate follow-up, kept out of the DPR stage so no AA tooth is
-    /// touched by a change that cannot affect it.</para>
+    /// Alpha-weighted coverage recovery from a rendered <see cref="Frame"/>, shared so fixtures do not
+    /// hand-roll a band finder that the AA ramp would dominate. Non-obvious why: coverage is the position on
+    /// the background→plateau axis in LINEAR space, because the snapshot bytes are sRGB-encoded and skipping
+    /// the decode bends the ramp. Σ coverage across a cut is the band's apparent width, never a thresholded
+    /// pixel count. Rows are bottom-up; a caller asserting a vertical DIRECTION must un-mirror first.
     /// </summary>
     internal static class PixelCoverage
     {
@@ -130,16 +118,12 @@ namespace MapRenderer.Tests
 
         // ── General-direction extensions ─────────────────────────────────────────────────────────────────
         //
-        // Everything above this line is a column cut (axis-aligned), and DevicePixelRatioSnapshotTests and
-        // LineProbeSymmetrySnapshotTests depend on its exact behaviour. Below is a general-direction cut for
-        // fixtures under tilt, where the silhouette a tooth measures is not vertical on screen.
+        // Cuts for tilted fixtures, where a silhouette is not vertical. The column cuts above stay unchanged.
 
-        /// <summary>Bilinear sample in SCREEN coordinates (not a pixel index). Pixel index j's centre is at
-        /// screen coordinate j + 0.5 (<see cref="GroundRowSolver"/> is the authority on this half-pixel, and
-        /// on there being no flip — rows are bottom-up and Unity screen-y grows up too), so the fractional
-        /// pixel index is <paramref name="screenPoint"/> − 0.5. Border behaviour matches <see cref="SampleLinear"/>
-        /// exactly, because each of the 4 taps IS a <see cref="SampleLinear"/> call. Existing integer-index
-        /// callers are unaffected — this is a new entry point for cuts that are not axis-aligned.</summary>
+        /// <summary>Bilinear sample in SCREEN coordinates, not a pixel index. Pixel j's centre is at screen
+        /// j + 0.5 with no flip (<see cref="GroundRowSolver"/> is the authority), so the fractional index is
+        /// <paramref name="screenPoint"/> − 0.5. Each of the 4 taps is a <see cref="SampleLinear"/> call, so
+        /// border behaviour matches it.</summary>
         public static float3 SampleLinearBilinear(Frame frame, double2 screenPoint)
         {
             double2 idx = screenPoint - 0.5;
@@ -197,17 +181,9 @@ namespace MapRenderer.Tests
         /// <summary>Distance from the ray origin (<c>i = 0</c>) to the first <c>≥0.5 → &lt;0.5</c> crossing in
         /// <paramref name="profile"/>, linearly interpolated between the bracketing samples and scaled by
         /// <paramref name="stepPx"/>. Generalises <c>LineAaSnapshotTests.BisectorReachPx</c> to an arbitrary
-        /// screen direction.
-        ///
-        /// <para>ACCURACY, stated honestly: this is a SILHOUETTE-REACH estimator, good to a small fraction of a
-        /// pixel at a hard-ish edge — it is NOT the sub-0.1 px estimator
-        /// (<c>LineProbeSymmetrySnapshotTests</c>'s half-sum rejects the 0.5-crossing for that régime, and that
-        /// rejection stands). Use the coverage INTEGRAL where apparent WIDTH is wanted; use this where
-        /// silhouette REACH is wanted.</para>
-        ///
-        /// <para>Fails loudly when no crossing occurs within <paramref name="profile"/>'s length — a silent 0
-        /// would read as "the feature vanished" and could pass a <c>&lt;</c> assertion for the wrong
-        /// reason.</para></summary>
+        /// screen direction. Limitation: it estimates silhouette REACH to a fraction of a pixel, not sub-0.1 px;
+        /// use the coverage integral for apparent WIDTH. It fails when no crossing occurs, because a silent 0
+        /// could pass a <c>&lt;</c> assertion for the wrong reason.</summary>
         public static double HalfCrossingDistancePx(float[] profile, double stepPx)
         {
             for (int i = 1; i < profile.Length; i++)

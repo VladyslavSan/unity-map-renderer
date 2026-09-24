@@ -8,15 +8,9 @@ namespace MapRenderer.Jobs.Projection
 {
     /// <summary>
     /// Converts tile-space <c>double2</c> coordinates to geodetic SURFACE points (<see cref="GeoCoordinate"/>,
-    /// lat/lon degrees, no elevation). Projection-INDEPENDENT — pure tile math, the same for every
-    /// projection. It feeds the projection job (<c>ProjectPointsJob&lt;TProj&gt;</c>), which does ONLY the projection.
-    ///
-    /// <para>Splitting tile→geo out of the projection keeps the projection job reusable for any geodetic input
-    /// (symbols, markers). A future terrain step would elevate these surface points into
-    /// <see cref="GeoCoordinate3D"/> (a more-complex path than the surface case) before projection.</para>
-    ///
-    /// Formula:
-    ///   u = (tileX + px / extent) / 2^z ;  v = (tileY + py / extent) / 2^z
+    /// lat/lon degrees, no elevation). Projection-INDEPENDENT — pure tile math, the same for every projection.
+    /// It feeds <c>ProjectPointsJob&lt;TProj&gt;</c>, which then stays reusable for any geodetic input.
+    /// Formula: u = (tileX + px / extent) / 2^z ;  v = (tileY + py / extent) / 2^z
     ///   lon = u·360 − 180 ;  lat = atan(sinh(π·(1 − 2v)))·180/π
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]

@@ -1,9 +1,5 @@
-// Unity EditMode only — Mesh.AcquireReadOnlyMeshData needs the engine. NOT registered in core-tests.csproj.
-//
-// Point/icon draws land on a WorldSymbolRenderer-built mesh (WorldBillboardVertex stream 0 plus a separate
-// stream-1 Opacity float), which mesh.vertices/mesh.colors cannot read. This is the single shared readback
-// the point/icon test files use, so none of them re-derive the MeshData round-trip. Internal, not public:
-// a test helper's footprint stays inside the test assembly.
+// The shared MeshData readback for point/icon tests: a WorldSymbolRenderer mesh (WorldBillboardVertex stream 0,
+// stream-1 Opacity float) is unreadable through mesh.vertices/mesh.colors.
 
 using Unity.Collections;
 using Unity.Mathematics;

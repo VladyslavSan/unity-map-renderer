@@ -66,10 +66,8 @@ namespace MapRenderer.Unity.Rendering.Style
             _layout    = layout;
             _applier   = applier;
             DrawIndex  = drawIndex;
-            // Seed the zoom the pattern scale is computed against. TryCreate drives the applier directly
-            // rather than through this class's ApplyZoom, so without this _lastZoom would sit at 0 until the
-            // first Tick — harmless for ScreenRelative (2^frac(0) == 1) but a whole-world tile span, and so a
-            // nonsense repeat count, for WorldAbsolute on any frame that resolves a sprite before that Tick.
+            // Seed the pattern-scale zoom: TryCreate bypasses ApplyZoom, and a zoom of 0 gives WorldAbsolute a
+            // whole-world repeat count for a sprite that resolves before the first Tick.
             _lastZoom  = initialZoom;
         }
 
@@ -141,27 +139,16 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// Pushes <c>_PatternScale</c> — repetitions per WORLD UNIT — for the current zoom. The arithmetic
-        /// and both sizing modes live in <see cref="Fill.FillPattern.RepeatsPerWorldUnit"/> so they are
-        /// engine-free and unit-testable; this is only the per-frame delivery.
-        ///
-        /// <para>Per-frame like <c>MaterialFactory.ApplyLineDashArray</c>, and for the same reason: under
-        /// <see cref="Fill.FillPatternSizing.ScreenRelative"/> the value is a function of the live zoom, not
-        /// of the style, so it cannot be bound once. (Under <c>WorldAbsolute</c> it is zoom-independent and
-        /// the repeated push is a harmless no-op.)</para>
-        ///
-        /// <para>No tile enters this calculation. The mesh's stream 1 carries world units rather than a 0..1
-        /// tile fraction (<c>StyledFillTileBuilder.PatternCoord</c>), so a tile's own zoom — which differs
-        /// from the display zoom under overzoom and under mixed-zoom cover, and which a per-layer uniform
-        /// cannot see — does not enter the pattern's size at all.</para>
+        /// Pushes <c>_PatternScale</c> — repetitions per WORLD UNIT — for the current zoom; the arithmetic lives
+        /// in <c>Fill.FillPattern.RepeatsPerWorldUnit</c>. It runs per frame because under
+        /// <see cref="Fill.FillPatternSizing.ScreenRelative"/> the value follows the live zoom. No tile zoom
+        /// enters it: stream 1 carries world units (<c>StyledFillTileBuilder.PatternCoord</c>), not a tile fraction.
         /// </summary>
         private void PushPatternScale()
         {
             if (!_patternResolved) return;
 
-            // Sizing comes from the parsed style (Fill.PaintProperties), not from a settable knob here —
-            // the style is the single source of truth, and a set-only-by-tests property would be production
-            // code with no production caller.
+            // Sizing comes from the parsed style (Fill.PaintProperties), the single source of truth.
             double2 repeats = Fill.FillPattern.RepeatsPerWorldUnit(
                 _pattern, _paint.PatternSizing, _lastZoom, _paint.PatternWorldPeriodMetres);
 
@@ -172,13 +159,9 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>
         /// Resolves this layer's <c>fill-pattern</c> against the style's sprite sheet. A layer with no
-        /// <c>fill-pattern</c> ignores the call entirely — its uniforms are already the solid-fill identity.
-        ///
-        /// <para>A pattern layer that cannot resolve (no sheet yet, or a name absent from the sheet) binds a
-        /// ZERO-AREA <c>_PatternRect</c>, which the shader reads as "clip". Per the Style Spec such a layer is
-        /// not painted, and in particular does NOT fall back to <c>fill-color</c>, whose spec default is opaque
-        /// black — a <c>fill-pattern</c> layer characteristically declares no <c>fill-color</c> of its own, so a
-        /// fallback would paint it black.</para>
+        /// <c>fill-pattern</c> ignores the call. An unresolved pattern (no sheet yet, or an absent name) binds
+        /// a ZERO-AREA <c>_PatternRect</c>, which the shader clips. Per the Style Spec the layer is then not
+        /// painted; a fallback to <c>fill-color</c> would paint it the spec default, opaque black.
         /// </summary>
         public void SetSprites(SpriteAtlasView atlas, Texture2D texture)
         {
@@ -199,10 +182,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 new Vector4((float)pattern.Rect.x, (float)pattern.Rect.y,
                             (float)pattern.Rect.z, (float)pattern.Rect.w));
 
-            // The scale is NOT written straight through: it is the base repeat count at the tile's own zoom,
-            // and PushPatternScale applies the live fractional-zoom factor on top. Pushed here as well as in
-            // ApplyZoom because the sheet lands mid-frame AFTER MapView has already called ApplyZoom, so
-            // waiting would leave one frame at the unscaled repeat count.
+            // Pushed here as well as in ApplyZoom: the sheet lands AFTER MapView's ApplyZoom for this frame,
+            // so waiting would leave one frame at the unscaled repeat count.
             _pattern         = pattern;
             _patternResolved = true;
             PushPatternScale();

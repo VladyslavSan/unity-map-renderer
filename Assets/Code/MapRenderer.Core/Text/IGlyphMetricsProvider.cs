@@ -3,13 +3,10 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Minimal glyph lookup a <see cref="CodepointTextShaper"/> consults while shaping. Keyed by ATLAS codepoint
-    /// (a presentation-form codepoint for shaped Arabic, per <see cref="PositionedGlyph.AtlasCodepoint"/>),
-    /// not the source character's own codepoint. A real implementation is typically backed by one or
-    /// more decoded <see cref="FontStackGlyphs"/> ranges (<see cref="SdfGlyph.Advance"/>).
-    ///
-    /// <para>It returns the resolved FONT alongside the advance because both come from the same walk down
-    /// the stack, and the shaper must record which face answered — the atlas is keyed by it.</para>
+    /// Minimal glyph lookup a <see cref="CodepointTextShaper"/> consults while shaping, keyed by ATLAS codepoint
+    /// (a presentation form for shaped Arabic, per <see cref="PositionedGlyph.AtlasCodepoint"/>). It is usually
+    /// backed by decoded <see cref="FontStackGlyphs"/> ranges. It returns the resolved font with the advance,
+    /// because both come from one walk down the stack and the atlas is keyed by the font.
     /// </summary>
     public interface IGlyphMetricsProvider
     {

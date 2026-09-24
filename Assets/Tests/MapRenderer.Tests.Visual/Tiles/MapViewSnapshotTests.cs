@@ -1,8 +1,5 @@
-// MapView-loop tile-pipeline GPU/visual acceptance test.
-//
-// Standalone, not merged with TileSeamSnapshotTests: the two collide on `CameraProperties`
-// (MapRenderer.Core.Geo vs UnityEngine.Rendering, CS0104) — this file uses the bare
-// Core.Geo constructor, TileSeamSnapshotTests imports UnityEngine.Rendering.
+// MapView-loop tile-pipeline GPU/visual acceptance test. Not merged with TileSeamSnapshotTests: bare
+// `CameraProperties` here is Core.Geo's, and that file imports UnityEngine.Rendering (CS0104).
 //
 // Contents:
 //   MapViewSnapshotTests  — visual proof: the LIVE multi-tile loop (MapView) renders a non-blank fill cover.
@@ -24,13 +21,9 @@ namespace MapRenderer.Tests.Visual
 
     /// <summary>
     /// Visual proof: the LIVE multi-tile loop (<see cref="MapView"/>) renders a non-blank fill cover.
-    /// The geometry is the committed fixture replayed across the cover (synthetic, same shape per tile) —
-    /// this proves the go-live loop produces visible meshes through the jobified pipeline; it is NOT a real
-    /// multi-zoom basemap. Pan/tilt jitter is proven separately by the Core
-    /// <c>FloatingOrigin_ExtremeMercator_RenderCoordsBounded_SubMillimetre</c> assertion, not by eyeballs.
-    ///
-    /// The camera is framed on the REBASED render-space bounds of the loaded tiles (near the local origin
-    /// after floating-origin rebasing), not the raw ~world-scale Mercator extent.
+    /// The geometry is the committed fixture replayed on every tile, not a real multi-zoom basemap.
+    /// <c>FloatingOrigin_ExtremeMercator_RenderCoordsBounded_SubMillimetre</c> covers pan/tilt jitter. The
+    /// camera frames the REBASED render-space bounds of the loaded tiles, not the raw Mercator extent.
     /// </summary>
     [TestFixture]
     public class MapViewSnapshotTests : BaseTestFixture
@@ -92,15 +85,10 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), style: MinimalStyle());
-                // Pump to settle all tiles. AwaitInFlightMeshBuilds (not DrainMeshBuilds) KEPT here: on the
-                // default Entities backend, a settle reached in essentially one forced-drain tick renders
-                // BLANK — Entities Graphics needs a few more Rebuild/EG-system ticks after the last tile is
-                // consumed before its BRG batch is cullable (see VisualScene.WarmupFrames, which exists for
-                // exactly this). AwaitInFlightMeshBuilds keeps ONE real LateUpdate tick per loop iteration (it
-                // only supplies the ThreadPool wall-clock, no consume/kick of its own), so the warm-up
-                // survives — unlike DrainMeshBuilds, which collapsed the tick count to ~1 and made this test
-                // go blank (RED-verified: MapViewLiveLoop_RendersMultiTileFill_NonBlank failed with
-                // filled=0.0% after the DrainMeshBuilds conversion).
+                // Non-obvious why: AwaitInFlightMeshBuilds, not DrainMeshBuilds. Entities Graphics needs
+                // more Rebuild ticks after the last consume before its BRG batch is cullable (see
+                // VisualScene.WarmupFrames). This loop keeps one real LateUpdate per iteration; a forced
+                // drain settles in ~1 tick and renders BLANK.
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.LateUpdate();

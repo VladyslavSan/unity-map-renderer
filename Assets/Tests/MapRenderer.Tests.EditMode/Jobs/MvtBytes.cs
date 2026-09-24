@@ -12,13 +12,8 @@ namespace MapRenderer.Tests
     /// only way to obtain decoded layers whose shapes no committed fixture holds: a ring-less feature
     /// (<see cref="OrdinalDomainTests"/> clause A) and a layer with no usable <c>name</c>
     /// (<see cref="GeoJsonTileDecoderTests.AStyleLayerWithNoSourceLayer_StillSelectsNothingFromAnMvtTile"/>).
-    ///
-    /// <para>Deliberately its own transcription rather than a call into anything production owns: an encoder
-    /// that shared the decoder's field numbers would agree with it about a wrong one.</para>
-    ///
-    /// <para><b>Top-level, not nested in a fixture.</b> It was private to <c>OrdinalDomainTests</c> until a
-    /// second fixture needed it; reaching into one fixture from another, or transcribing the spec a second
-    /// time, are the two shapes this file exists instead of.</para>
+    /// Non-obvious why: it shares nothing with production, because an encoder that reused the decoder's field
+    /// numbers would agree with it about a wrong one.
     /// </summary>
     internal static class MvtBytes
     {
@@ -83,12 +78,10 @@ namespace MapRenderer.Tests
             return feature.ToArray();
         }
 
-        /// <summary>A POINT feature with the <c>geometry</c> field <b>absent</b>. NOT spec-conformant —
-        /// MVT 2.1 §4.2 requires a feature to carry the field — but input this decoder accepts:
-        /// <c>DecodeFeature</c> leaves the stream <c>null</c> rather than rejecting the feature. It
-        /// reaches the materializer as <c>null</c>, i.e. by the <c>?.</c> arm rather than the
-        /// <c>Length</c> arm, which is why it and <see cref="EmptyGeometryPointFeature"/> are not
-        /// interchangeable.</summary>
+        /// <summary>A POINT feature with the <c>geometry</c> field <b>absent</b>. MVT 2.1 §4.2 requires the
+        /// field, but <c>DecodeFeature</c> accepts the feature and leaves the stream <c>null</c>. It reaches the
+        /// materializer by the <c>?.</c> arm, not the <c>Length</c> arm, so it and
+        /// <see cref="EmptyGeometryPointFeature"/> are not interchangeable.</summary>
         public static byte[] AttributeOnlyPointFeature()
         {
             var feature = new List<byte>();
@@ -97,12 +90,10 @@ namespace MapRenderer.Tests
             return feature.ToArray();
         }
 
-        /// <summary>A layer whose <c>name</c> field is <b>ABSENT</b>. NOT spec-conformant — MVT 2.1 §4.1
-        /// lists <c>name</c> as required — but input this decoder accepts: <c>DecodeLayer</c> assigns
-        /// <c>Name</c> only when the field is present, so the layer decodes with a <b>null</b> name. That is
-        /// the only input under which "a style layer with no <c>source-layer</c> selects nothing from an MVT
-        /// tile" is a discriminating claim: <c>l.Name == null</c> is TRUE for such a layer, so without the
-        /// guard a background or raster style layer would acquire its features.</summary>
+        /// <summary>A layer whose <c>name</c> field is <b>ABSENT</b>. MVT 2.1 §4.1 requires it, but
+        /// <c>DecodeLayer</c> accepts the layer with a <b>null</b> name. Only this input makes "a style layer
+        /// with no <c>source-layer</c> selects nothing" discriminating: <c>l.Name == null</c> is TRUE here, so
+        /// without the guard a background or raster layer would acquire its features.</summary>
         public static byte[] NamelessLayer(params byte[][] features)
         {
             var layer = new List<byte>();
@@ -128,9 +119,8 @@ namespace MapRenderer.Tests
             into.Add((byte)value);
         }
 
-        // The (uint) hop is load-bearing: casting a negative int straight to ulong SIGN-EXTENDS, emitting
-        // a 10-byte varint instead of the intended small one. Inert at the coordinates used here, and a
-        // trap for the next author who reaches for this writer.
+        // The (uint) hop is load-bearing: a negative int cast straight to ulong SIGN-EXTENDS and emits a
+        // 10-byte varint instead of the intended small one.
         private static ulong ZigZag(int value) => (ulong)(uint)((value << 1) ^ (value >> 31));
     }
 }

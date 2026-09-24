@@ -6,14 +6,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// One raw symbol slot inside a
-    /// <see cref="SymbolTileBuffer"/> build buffer, minus the managed quad/glyph/anchor/path lists (which
-    /// live in the scratch's own pools; see the <c>*Start</c>/<c>*Count</c> span fields below). A
-    /// <c>readonly struct</c> (not a class), taken by <see langword="in"/> at every call site, so a scratch build accumulates zero
-    /// per-symbol managed allocation (the 3b win) — <see cref="SymbolTileBuffer.Symbols"/> is a
-    /// <c>List&lt;ShapedSymbol&gt;</c>, so appending one is an in-place struct copy, not a heap allocation.
-    /// A build appends one record per successfully-shaped symbol: a per-symbol build failure is SKIPPED outright
-    /// (<c>StyledSymbolTileBuilder.Shape</c>), so the list is dense — no gap/placeholder element.
+    /// One raw symbol slot inside a <see cref="SymbolTileBuffer"/>; its quads, glyphs, anchors and path live in
+    /// the buffer's pools, addressed by the <c>*Start</c>/<c>*Count</c> spans. A <c>readonly struct</c> taken
+    /// by <see langword="in"/>, so appending to <see cref="SymbolTileBuffer.Symbols"/> allocates nothing per
+    /// symbol. A symbol that fails to shape is skipped (<c>StyledSymbolTileBuilder.Shape</c>), so the list is dense.
     /// </summary>
     public readonly struct ShapedSymbol
     {

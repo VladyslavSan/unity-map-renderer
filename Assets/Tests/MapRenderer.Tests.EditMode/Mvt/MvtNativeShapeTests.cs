@@ -1,8 +1,5 @@
-// Mvt/MvtNativeShapeTests.cs — the two MVT fixtures that alias Is = UnityEngine.TestTools.Constraints.Is (EditMode).
-//
-// Split from the other four Mvt files by the using-collision rule, not by size: both here alias
-// Is to reach Is.Not.AllocatingGCMemory(); Mvt/MvtDecodeTests.cs's four files use bare NUnit Is
-// and must never share a file with this alias.
+// Mvt/MvtNativeShapeTests.cs — the two MVT fixtures that alias Is = UnityEngine.TestTools.Constraints.Is (EditMode),
+// split from Mvt/MvtDecodeTests.cs by the using-collision rule: that file's fixtures use bare NUnit Is.
 //
 // Contents:
 //   DensePropertyStoreTests  — DensePropertyStore's zero-allocation teeth via the Recorder-based Is.Not.AllocatingGCMemory().
@@ -30,19 +27,10 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Dense MVT property storage (<see cref="DensePropertyStore"/>), the GC-eliminating alternative
-    /// to an eager per-feature dictionary and the sole production property store. Two things this stage
-    /// must prove:
-    /// <list type="bullet">
-    ///   <item><b>Equivalence</b> — <see cref="DensePropertyStore.TryGet"/> (the backward tag-pair scan
-    ///     <see cref="IFeature.TryGetProperty"/> hits) agrees with
-    ///     <see cref="MvtLayerPropertyResolver.ResolveToDictionary"/> (the forward walk
-    ///     <see cref="IFeature.Properties"/> resolves through), for every layer, every feature, every
-    ///     declared key, plus one key guaranteed absent. Two independent implementations of the same
-    ///     resolve — not a comparison against a second store.</item>
-    ///   <item><b>Zero allocation</b> — the hot single-key <c>TryGetProperty</c> path allocates nothing,
-    ///     for both a present and an absent key.</item>
-    /// </list>
+    /// Dense MVT property storage (<see cref="DensePropertyStore"/>), the sole production property store.
+    /// Pins two things: <b>equivalence</b> — the backward tag-pair scan agrees with the forward walk of
+    /// <see cref="MvtLayerPropertyResolver.ResolveToDictionary"/> for every layer, feature and key; and
+    /// <b>zero allocation</b> — the single-key <c>TryGetProperty</c> path allocates nothing, present or absent.
     /// </summary>
     [TestFixture]
     public class DensePropertyStoreTests
@@ -73,17 +61,10 @@ namespace MapRenderer.Tests.Mvt
         // ── Equivalence ─────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// The discriminating oracle: for every layer, every feature, every key the layer declares (plus
-        /// one key guaranteed absent from every feature), <see cref="IFeature.TryGetProperty"/> (backward
-        /// tag-pair scan, <see cref="DensePropertyStore.TryGetByKeyIndex"/>) must agree with
-        /// <see cref="IFeature.Properties"/> (forward walk, <see cref="MvtLayerPropertyResolver.ResolveToDictionary"/>)
-        /// on both the presence bool and the resolved <see cref="Value"/> — two independent
-        /// implementations of the same resolve. An index-math bug in either (wrong keyIdx/valIdx, wrong
-        /// pair picked on a duplicate-key feature, off-by-one) fails this test; a store that always returns
-        /// <c>false</c> is caught by the per-key presence assertion, not just a value comparison.
-        /// RED-verified by swapping the keyIdx/valIdx read order inside
-        /// <see cref="DensePropertyStore.TryGetByKeyIndex"/>: every presence assertion for every real
-        /// property failed (all reads land on the wrong slot) — restored before committing.
+        /// For every layer, feature and declared key (plus one absent key), <see cref="IFeature.TryGetProperty"/>
+        /// (backward tag-pair scan) must agree with <see cref="IFeature.Properties"/> (forward walk) on both
+        /// presence and the resolved <see cref="Value"/>. Two independent resolves catch an index-math bug in
+        /// either; the per-key presence assertion catches a store that always returns <c>false</c>.
         /// </summary>
         [Test]
         public void TryGetProperty_AgreesWithResolveToDictionary_ForEveryKeyAndEveryFeature_AcrossAllLayers()
@@ -134,10 +115,8 @@ namespace MapRenderer.Tests.Mvt
                 MvtDecoder.Decode(FixtureTileId, LoadFixture())).GetLayer("countries");
             IFeature feature = layer.Features[0]; // every countries feature has NAME (has NAME == 239)
 
-            // Warm the EXACT delegate the constraint invokes (not just the method), so its compiled body is
-            // JIT'd before measurement — the mitigation for Is.Not.AllocatingGCMemory's one-shot-lambda
-            // false-positive. A real per-call allocation would still be caught (the Recorder sees every
-            // GC.Alloc); this only removes the one-time JIT of the measured wrapper from the window.
+            // Warm the EXACT delegate the constraint invokes, so its one-time JIT is outside the measured window
+            // (Is.Not.AllocatingGCMemory's one-shot-lambda false positive); a per-call allocation still fails.
             TestDelegate act = () => feature.TryGetProperty("NAME", out Value _);
             for (int w = 0; w < 50; w++) act();
             Assert.That(act, Is.Not.AllocatingGCMemory(),
@@ -168,7 +147,7 @@ namespace MapRenderer.Tests.Mvt
     [TestFixture]
     public class MvtValueCompactionTests
     {
-        // ── T1 — blittability (structural) ─────────────────────────────────────────────────────
+        // ── blittability (structural) ──────────────────────────────────────────────────────────
 
         /// <summary>
         /// <see cref="MvtValueNative"/> must carry NO managed field (the whole point of the native table:
@@ -199,7 +178,7 @@ namespace MapRenderer.Tests.Mvt
                 "MvtLayer.Values must be a NativeArray<MvtValueNative> — the field this stage nativizes.");
         }
 
-        // ── T2 — size (magnitude) ───────────────────────────────────────────────────────────────
+        // ── size (magnitude) ────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// <see cref="MvtValueNative"/> must hold its designed 16 B packing (double 8 + <c>ValueType</c> 4 +
@@ -224,21 +203,16 @@ namespace MapRenderer.Tests.Mvt
                 "any added field regresses it to 24 B (see the field-order comment in MvtValueNative).");
         }
 
-        // ── T3 — DensePropertyStore.TryGet stays zero-alloc through ToValue(string[]) ─────────────
+        // ── DensePropertyStore.TryGet stays zero-alloc through ToValue(string[]) ──────────────────
 
         /// <summary>
-        /// Guards the exact code this stage adds: <see cref="DensePropertyStore.TryGet"/> now calls
-        /// <see cref="MvtValueNative.ToValue"/> on every hit, and that reconstitution must stay alloc-free
-        /// for every variant the wire produces (string, number, bool). Builds the resolver/store directly
-        /// (internal types, visible to this assembly) rather than through the decoder, so all three variants
-        /// are covered in one feature without a protobuf-encoding round-trip.
+        /// <see cref="DensePropertyStore.TryGet"/> calls <see cref="MvtValueNative.ToValue"/> on every hit, and
+        /// that must stay alloc-free for string, number and bool. Builds the resolver/store directly, so all
+        /// three variants fit in one feature without a protobuf-encoding round-trip.
         /// </summary>
-        /// <remarks>RED-verify: inject a boxing conversion into DensePropertyStore.TryGet before the
-        /// <c>ToValue(...)</c> call — but it must ESCAPE, or the JIT dead-store-eliminates it and the box
-        /// never happens (an unused <c>object _ = values[valIdx];</c> silently no-ops and the tooth stays
-        /// GREEN — a false pass). Force it live: <c>object _box = values[valIdx]; GC.KeepAlive(_box);</c>.
-        /// Only then does the constraint fail — and it fails T3 alone, confirming isolation. Restored before
-        /// commit.</remarks>
+        /// <remarks>Non-obvious why: to RED-verify, an injected box in <c>TryGet</c> must escape
+        /// (<c>object _box = values[valIdx]; GC.KeepAlive(_box);</c>); an unused box is dead-store-eliminated
+        /// by the JIT and the tooth stays green.</remarks>
         [Test]
         public void DensePropertyStore_TryGet_ThroughToValue_AllocatesNoGCMemory_ForStringNumberAndBool()
         {
@@ -282,18 +256,11 @@ namespace MapRenderer.Tests.Mvt
         // ── NEW — value-array read-after-dispose (white-box UAF) ──────────────────────────────────
 
         /// <summary>
-        /// Isolates the *values* array's own disposed-collections-safety check: a resolver built with a
-        /// LIVE <c>tagWords</c> array but a SEPARATELY-disposed <c>Values</c> array. <c>TryGetByKeyIndex</c>
-        /// resolves <c>valIdx</c> from the live <c>tagWords</c>, then indexing the disposed <c>values</c>
-        /// array must throw. The tile-level read-after-dispose tooth
-        /// (<c>NativeTagStorageTests.ReadingProperty_AfterTileDisposed_FailsLoud</c>) cannot observe this: it
-        /// disposes the whole layer, and <c>tagWords</c> (read first, inside <c>TryGetByKeyIndex</c>) throws
-        /// before <c>values</c> is ever touched — shadowing the values-array check. This tooth constructs the
-        /// resolver by hand so it can dispose ONLY <c>values</c>, isolating the check the shadow hides.
+        /// Isolates the <c>values</c> array's own disposed-safety check: a hand-built resolver with a LIVE
+        /// <c>tagWords</c> array and a disposed <c>values</c> array must throw on read. The tile-level tooth
+        /// (<c>NativeTagStorageTests.ReadingProperty_AfterTileDisposed_FailsLoud</c>) cannot see this check,
+        /// because <c>tagWords</c> is read first and throws before <c>values</c> is touched.
         /// </summary>
-        /// <remarks>RED-verify: point the resolver at a still-live (undisposed) values array — the
-        /// <c>Throws</c> assertion reds (no exception; a value is returned instead). Restored before
-        /// commit.</remarks>
         [Test]
         public void TryGetByKeyIndex_AfterValuesArrayDisposed_FailsLoud()
         {

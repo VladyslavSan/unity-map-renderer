@@ -1,7 +1,5 @@
-// DataSources/DataSourceTests.cs — tile-feature source, render-path, HTTP and scheduler teeth (EditMode).
-//
-// TileSchedulerOrderingTests.cs stays its own file (fast lane, csproj-registered). No using/alias
-// collision found across the four EditMode files merged here.
+// Tile-feature source, render-path, HTTP and scheduler tests (EditMode). TileSchedulerOrderingTests.cs is
+// separate because Tools/core-tests compiles it.
 //
 // Contents:
 //   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>
@@ -59,12 +57,8 @@ namespace MapRenderer.Tests.DataSources
         private static readonly byte[] MalformedMvtBytes = { 0x1A, 0x64 };
 
         /// <summary>
-        /// <b>T-E2 — the decisive falsifier, inverted.</b> This tooth used to assert that <c>GetTile</c>
-        /// completed cleanly over malformed bytes and only faulted at the first <c>GetOrDecode()</c>: the
-        /// proof the handle was LAZY. Under the eager decode the parse happens inside the task, so the task
-        /// itself faults and <b>no handle is ever minted</b>. The same input, the same seam, the opposite
-        /// answer — and the same decisiveness: a lazy implementation would complete this call and hand back
-        /// a handle.
+        /// Over malformed bytes the eager decode faults the <c>GetTile</c> task itself, and <b>no handle is
+        /// ever minted</b>. A lazy implementation would complete this call and hand back a handle.
         /// </summary>
         [Test]
         public async Task GetTile_MalformedBytes_FaultsTheTask_AndMintsNoHandle()
@@ -90,7 +84,7 @@ namespace MapRenderer.Tests.DataSources
         }
 
         /// <summary>
-        /// <b>T-E1 — the happy path of the same inversion.</b> The awaited task hands back a handle whose
+        /// <b>The happy path of the same inversion.</b> The awaited task hands back a handle whose
         /// tile is ALREADY built: reading it does no work, cannot fault, and yields the same instance every
         /// time. Paired with the malformed case above (which proves the decode ran inside the task), this
         /// pins that a read is a plain field access rather than a deferred parse.
@@ -136,13 +130,9 @@ namespace MapRenderer.Tests.DataSources
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance tests for <see cref="UnityWebRequestDataSource"/>.
-    ///
-    /// Closes the coverage gap: previously no test exercised the 404→Absent mapping, which
-    /// was unreachable dead code (the vendored ToUniTask throws for ProtocolError before
-    /// reaching the responseCode check). The fix wraps the await in a narrow
-    /// catch(UnityWebRequestException when 404/204) that returns TileResponse.Absent.
-    /// These tests prove that fix is load-bearing.
+    /// Tests for <see cref="UnityWebRequestDataSource"/>, including the 404→Absent mapping. The vendored
+    /// ToUniTask throws for any non-2xx status, so only the narrow
+    /// <c>catch (UnityWebRequestException) when 404/204</c> can return TileResponse.Absent.
     /// </summary>
     [TestFixture]
     public class UnityWebRequestDataSourceTests
@@ -202,13 +192,9 @@ namespace MapRenderer.Tests.DataSources
         // ── Tests ─────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// A 404 response from the tile server must yield <c>HasData == false</c> (TileResponse.Absent)
-        /// instead of throwing. This is the primary regression test for the dead-code fix:
-        /// the previous code had the responseCode check AFTER the await, but ToUniTask throws
-        /// UnityWebRequestException for ProtocolError (any non-2xx), so the check was never reached.
-        ///
-        /// The fix: catch UnityWebRequestException with a when-filter on 404/204 and return Absent.
-        /// This test is load-bearing — it would fail on the old code (exception propagates → fail).
+        /// A 404 response must yield <c>HasData == false</c> (TileResponse.Absent) instead of throwing.
+        /// ToUniTask throws UnityWebRequestException for any non-2xx status, so a responseCode check after
+        /// the await never runs; only the when-filtered catch makes this pass.
         /// </summary>
         [UnityTest]
         public IEnumerator FetchAsync_404Response_ReturnsAbsent_HasDataFalse()
@@ -224,9 +210,8 @@ namespace MapRenderer.Tests.DataSources
             try
             {
                 using var source = new UnityWebRequestDataSource(url);
-                // Run FetchAsync as a coroutine so UnityWebRequest's PlayerLoop hook pumps.
-                // Use void-returning Action<T> to force ContinueWith<T>(Action<T>) overload
-                // (avoids the Func<T,TR> overload that would return UniTask<T> and confuse ToCoroutine).
+                // A coroutine, so UnityWebRequest's PlayerLoop hook pumps. The Action<T> cast picks the
+                // void ContinueWith overload that ToCoroutine accepts.
                 yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
                     .ContinueWith((Action<TileResponse>)(r => { response = r; }))
                     .ToCoroutine(ex => { caught = ex; });
@@ -287,18 +272,9 @@ namespace MapRenderer.Tests.DataSources
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Proves that <see cref="FileDataSource"/> feeds the render path correctly: bytes round-trip
-    /// through the source and produce an identical vertex CONTENT HASH (not just count) from the
-    /// decode→assemble→project pipeline.
-    ///
-    /// This is an A-vs-A comparison — the same bytes through two sources must produce identical render
-    /// input — so triangulation contributes nothing to what it proves (dropped; the hash covers
-    /// the assembled ring vertices, outer then holes, projected through the existing
-    /// TileToGeoJob → ProjectPointsJob chain, which is the projection coverage this test actually
-    /// carries). A count-only comparison would be blind to divergent vertex positions; content hash
-    /// guards against any regression in decode / assembly / projection across sources.
-    ///
-    /// HTTP lives in UnityWebRequestDataSource (the Unity layer), not in Core.
+    /// <see cref="FileDataSource"/> feeds the render path: its bytes give the same vertex CONTENT HASH (not
+    /// just count) through decode → assemble → TileToGeoJob → ProjectPointsJob as the fixture bytes. It is an
+    /// A-vs-A comparison, so triangulation adds nothing and is left out.
     /// </summary>
     [TestFixture]
     public class DataSourceRenderPathTests
@@ -320,9 +296,8 @@ namespace MapRenderer.Tests.DataSources
             try
             {
                 using var fileSource = new FileDataSource(tempRoot);
-                // FetchAsync is async (SwitchToThreadPool pattern). It does NOT complete
-                // synchronously, so calling .GetAwaiter().GetResult() immediately throws
-                // "Not yet completed". Parks until the ThreadPool fetch completes.
+                // FetchAsync completes on the ThreadPool, so GetResult() at once throws "Not yet completed".
+                // Park until the fetch completes.
                 var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
                 fetchTask.WaitOffPlayerLoop(10000);
                 Assert.IsTrue(fetchTask.Status.IsCompleted(),
@@ -338,8 +313,7 @@ namespace MapRenderer.Tests.DataSources
             }
 
             // 2. Run the same decode→assemble→project pipeline on each source's bytes; compare the
-            // CONTENT HASH (an A-vs-A comparison — the triangulator contributes nothing to it, see
-            // class doc).
+            // CONTENT HASH.
             string baselineHash = BuildContentHash(fixtureBytes);
             string fileHash     = BuildContentHash(fileBytes);
 
@@ -441,15 +415,9 @@ namespace MapRenderer.Tests.DataSources
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance tests: BYO data-source interface, LRU cache, scheduler deduplication,
-    /// byte-identity (FileDataSource only — HTTP lives in the Unity layer),
-    /// absent-vs-error, and cancellation.
-    ///
-    /// All tests are deterministic and offline (no public endpoints, no Thread.Sleep).
-    /// Timing is controlled via <see cref="UniTaskCompletionSource{T}"/>.
-    ///
-    /// UniTask is used throughout; a test awaits rather than blocking on GetAwaiter().GetResult(), which
-    /// is NOT a blocking wait on a UniTask.
+    /// Data-source interface, LRU cache, scheduler deduplication, FileDataSource byte identity,
+    /// absent-vs-error, and cancellation. Offline and deterministic: <see cref="UniTaskCompletionSource{T}"/>
+    /// controls timing. Tests await, because GetAwaiter().GetResult() does not block on a UniTask.
     /// </summary>
     [TestFixture]
     public class DataSourceTests
@@ -460,9 +428,8 @@ namespace MapRenderer.Tests.DataSources
 
         private static byte[] LoadFixtureBytes()
         {
-            // Try several starting points so the fixture is found whether we are running under Unity
-            // batch mode (cwd = project root, AppContext.BaseDirectory = Editor install dir) or
-            // under `dotnet test` (AppContext.BaseDirectory is near the repo root).
+            // Several starting points: Unity batch mode has cwd = project root, while `dotnet test` has
+            // AppContext.BaseDirectory near the repo root.
             string[] starts = new[]
             {
                 Directory.GetCurrentDirectory(),         // Unity batch-mode cwd = project root
@@ -838,17 +805,10 @@ namespace MapRenderer.Tests.DataSources
         }
 
         /// <summary>
-        /// The behavioural anti-hop tooth: <see cref="TileScheduler"/>'s injectable clock is called
-        /// exactly once on the sync-completing-absent path, inside the post-fetch block, AFTER the
-        /// (removed) thread-pool hop — never on the negative-cache read (which finds nothing on a first
-        /// request), so the single invocation is unambiguous. Every recorded thread id must equal the
-        /// test thread's: a hop would move the clock call onto a pool thread.
-        ///
-        /// EditMode-only, deliberately: thread identity is decisive only when the caller is guaranteed
-        /// not to already be a pool thread — the EditMode test thread is the main thread, never a pool
-        /// thread. Under <c>dotnet test</c>, NUnit may run the test ON a pool thread, and a re-inserted
-        /// hop could then resume on that SAME thread — a vacuous GREEN. That is why this tooth stays out
-        /// of <c>core-tests.csproj</c> rather than moving to the engine-free sibling with T1/T3/T4.
+        /// <see cref="TileScheduler"/>'s injectable clock runs exactly once on the sync-completing-absent
+        /// path, in the post-fetch block, and its thread id must equal the test thread's: a hop would move it
+        /// to a pool thread. Non-obvious why: the test is EditMode-only, because under <c>dotnet test</c> NUnit
+        /// may run it ON a pool thread, where a hop could resume on the same thread and pass vacuously.
         /// </summary>
         [Test]
         public async Task SchedulerCompletion_RunsOnTheFetchCompletingThread_NoHop()

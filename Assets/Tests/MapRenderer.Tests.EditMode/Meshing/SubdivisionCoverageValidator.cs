@@ -7,25 +7,11 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Test-side validator for the globe-fill adaptive SUBDIVISION stage (earcut → 1→4 curvature refine).
-    /// See docs/mesh-triangulation-robustness-design.md (measured root cause: a non-conforming
-    /// adaptive split leaves a T-junction gap where a split triangle's neighbour stays flat).
-    ///
-    /// This is a MANAGED MIRROR of the real Burst <c>GlobeFillSubdivideJob&lt;TProj&gt;</c>
-    /// (Assets/Code/MapRenderer.Jobs/GlobeFillSubdivider.cs) — same constants, same LIFO explicit-stack
-    /// traversal, same 1→4 child push order, same flat/Budget stop test, same <c>Project</c>. Parity with
-    /// the real job is proven separately (Unity-only <c>GlobeSubdivisionJobParityTests</c>) by ORDERED
-    /// OUTPUT-STREAM equality — this class must not diverge from that mirror.
-    ///
-    /// Checks — magnitude AND fidelity AND coverage ("severity, not count"):
-    ///   • MaxGapFracTile  — the worst render-space T-junction gap, as a fraction of the tile's render-space
-    ///                       diagonal span (NOT a raw T-junction tally, which is large and meaningless
-    ///                       even on a correct conforming split).
-    ///   • FlippedTris / DegenerateTris — the 1→4 split must stay orientation-preserving and non-collapsing.
-    ///   • CoverageAreaRelError — subdivision must exactly partition each earcut triangle's area (catches a
-    ///                            "fix" that drops/duplicates sub-triangles without leaving a T-junction).
-    ///   • Subdivided       — curvature FIDELITY: a "fix" that just disables refinement has zero cracks but
-    ///                        restores the sphere-chord faceting the job exists to prevent.
+    /// Validates the globe-fill adaptive SUBDIVISION stage (earcut → 1→4 curvature refine) through a MANAGED
+    /// MIRROR of the Burst <c>GlobeFillSubdivideJob&lt;TProj&gt;</c>. Non-local invariant: the mirror must match
+    /// the job step for step, because <c>GlobeSubdivisionJobParityTests</c> pins ordered output-stream equality.
+    /// It measures the worst T-junction gap, flips/degenerates, per-root coverage and curvature fidelity.
+    /// See docs/mesh-triangulation-robustness-design.md § "Validation instruments".
     /// </summary>
     public static class SubdivisionCoverageValidator
     {
@@ -73,17 +59,9 @@ namespace MapRenderer.Tests
             }
 
             /// <summary>The subdivided mesh is visibly conforming AND geometrically faithful AND actually
-            /// refines curvature. See the class summary for what each clause guards.
-            ///
-            /// <para><b>Curvature fidelity is gated on <see cref="MaxLeafEdgeAngleRad"/></b>, NOT the global
-            /// <see cref="Subdivided"/> flag: a "fix" that leaves the crack-producing roots unsplit but refines
-            /// one unrelated root would satisfy a global "something subdivided" check while restoring the very
-            /// sphere-chord faceting the job exists to prevent. Gating on the worst REMAINING leaf-edge angle
-            /// (≤ the 3° target, with a small margin) instead requires the refinement to actually be WHERE the
-            /// curvature is — a fake fix leaves an over-3° earcut edge as a leaf edge and fails. Caveat: this
-            /// clause presumes the input is neither Budget- nor MaxDepth-limited (the corpus is depth-1,
-            /// no-budget — <see cref="BudgetFired"/>/<see cref="MaxDepthReached"/> pin that); a genuinely
-            /// capped tile can legitimately leave an over-target leaf edge and would need a different gate.</para></summary>
+            /// refines curvature. Curvature is gated on <see cref="MaxLeafEdgeAngleRad"/> (≤ the 3° target), not
+            /// on <see cref="Subdivided"/>, so the refinement must be where the curvature is. Limitation: it
+            /// assumes no Budget or MaxDepth cap (<see cref="BudgetFired"/>/<see cref="MaxDepthReached"/>).</summary>
             public bool Passes(double maxGapFracTile = 0.0005)
                 => MaxGapFracTile <= maxGapFracTile && FlippedTris == 0 && DegenerateTris == 0
                    && CoverageAreaRelError <= 0.001 && Subdivided
@@ -105,12 +83,9 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------------
 
         /// <summary>
-        /// Validate an ALREADY-triangulated result against the managed subdivision mirror — the caller
+        /// Validates an ALREADY-triangulated result against the managed subdivision mirror. The caller
         /// triangulates (via the Burst <c>EarcutJob</c> path) and supplies the flat triangles plus the
         /// per-vertex feature index (see <see cref="BuildRootsFromRaw"/>'s first-index feature pick).
-        /// Mirrors the shape <c>MeshCoverageValidator.ValidateTriangulation</c> already has — this class's
-        /// former <c>Validate</c>/<c>ValidateTileLayer</c> triangulated internally via the managed
-        /// <c>Earcut</c>, retired with it.
         /// </summary>
         public static Report ValidateTriangulation(
             double2[] tileVerts, int[] triangleIndices, int[] vertexFeatureIdx, in TileId id, IProjection projection, double extent)
@@ -142,11 +117,8 @@ namespace MapRenderer.Tests
         }
 
         // -----------------------------------------------------------------------------------------------
-        // Shared analysis over a raw leaf stream — factored so a DIFFERENT leaf stream (e.g. the REAL
-        // Burst job's output, paired against this mirror's lineage by ordered-output-stream equality) can
-        // be fed through the SAME T-junction/coverage/quality analysis. See GlobeSubdivisionJobParityTests
-        // (Unity-only) — it runs THIS mirror to get RootTri/LeafRef lineage, then substitutes
-        // the real job's World/Tile values (paired 1:1 by emission order) before calling this.
+        // Shared analysis over a raw leaf stream, so GlobeSubdivisionJobParityTests can feed the real job's
+        // World/Tile values (paired 1:1 by emission order with this mirror's lineage) through it.
         // -----------------------------------------------------------------------------------------------
 
         internal static Report AnalyzeLeafStream(
@@ -183,12 +155,9 @@ namespace MapRenderer.Tests
             public RootTri(double2 a, double2 b, double2 c, int feature = 0) { A = a; B = b; C = c; Feature = feature; }
         }
 
-        /// <summary>One emitted leaf sub-triangle vertex, tagged with the lineage needed to scope
-        /// T-junction detection: which earcut root it descends from, and the recursion depth it was
-        /// emitted at (used to discriminate a genuine split-inserted vertex from an unrelated same-root
-        /// near-collinear vertex — see case (b) in <see cref="AnalyzeGaps"/>). <see cref="Up"/>/
-        /// <see cref="East"/>/<see cref="Feature"/> are unused by this class's own Report analysis —
-        /// carried only so Edit 4's parity tooth can assert they match the real job's
+        /// <summary>One emitted leaf vertex, tagged with its earcut root and recursion depth, which scope
+        /// T-junction detection (case (b) in <see cref="AnalyzeGaps"/>). <see cref="Up"/>/<see cref="East"/>/
+        /// <see cref="Feature"/> exist only so the parity tooth can match the real job's
         /// <c>GlobeFillVertex</c> stream.</summary>
         internal readonly struct LeafRef
         {
@@ -208,9 +177,8 @@ namespace MapRenderer.Tests
         }
 
         // -----------------------------------------------------------------------------------------------
-        // The managed mirror — EXACT port of GlobeFillSubdivideJob<TProj>.Execute (explicit LIFO stack,
-        // same child push order, same flat/Budget stop test, same Project). Also records lineage the real
-        // job doesn't carry (RootIndex/Depth) for T-junction scoping.
+        // The managed mirror of GlobeFillSubdivideJob<TProj>.Execute (LIFO stack, child order, stop test,
+        // Project), plus the RootIndex/Depth lineage the real job does not carry.
         // -----------------------------------------------------------------------------------------------
 
         private struct V { public double3 World; public double3 Up; public double3 East; public double2 Tile; }
@@ -249,10 +217,8 @@ namespace MapRenderer.Tests
 
                     if (w.depth > maxDepthReached) maxDepthReached = w.depth;
 
-                    // Per-EDGE marking (mesh-triangulation-robustness-design.md): a mark is
-                    // a function of an edge's two endpoints ALONE, so two triangles sharing an edge compute
-                    // the identical mark — conforming without connectivity. Force 0 marks at the depth cap or
-                    // once the budget is exhausted (emit flat, same as today's per-triangle stop test).
+                    // Per-EDGE marks depend on the two endpoints ALONE, so triangles sharing an edge agree
+                    // without connectivity. The depth cap or an exhausted budget forces 0 marks (emit flat).
                     bool overBudget = leaves.Count >= budget;
                     if (overBudget) budgetFired = true;
 
@@ -314,10 +280,8 @@ namespace MapRenderer.Tests
                         else              { apex = w.b; a0 = w.a; c0 = w.c; mVA0 = mAB; mVC0 = mBC; } // unmarked=CA
 
                         stack.Add((apex, mVC0, mVA0, childDepth, w.rootIdx, w.feat)); // corner at apex
-                        // Quad a0-mVA0-mVC0-c0 → pick the SHORTER interior diagonal (deterministic in tile
-                        // space → identical in job & mirror, parity-safe). The fixed long diagonal breeds
-                        // anisotropic cap slivers (worse leaf-edge angle + winding-normal stability); the
-                        // shorter diagonal keeps sub-triangles better-shaped. Both choices preserve winding.
+                        // Quad a0-mVA0-mVC0-c0: the SHORTER diagonal (deterministic in tile space, so parity-safe)
+                        // avoids anisotropic slivers. Both choices preserve winding.
                         if (DistSq(a0.Tile, mVC0.Tile) <= DistSq(mVA0.Tile, c0.Tile))
                         {
                             stack.Add((a0, mVA0, mVC0, childDepth, w.rootIdx, w.feat));
@@ -370,11 +334,8 @@ namespace MapRenderer.Tests
             var adjacency = new List<(int, int, double2, double2)>();
             foreach (var owners in edgeOwners.Values)
             {
-                // mesh boundary (1 owner) or non-manifold (>2). A non-manifold earcut edge (>2 owners, e.g.
-                // where a zero-width bridge seam is retraced) is skipped here — a residual conditional false
-                // negative (review finding): if two of its >2 owners subdivided asymmetrically, that
-                // crack is not surfaced by case (a). Not observed on the corpus (its worst gap IS caught via a
-                // manifold edge); a manifold-only assumption is acceptable for this single-tile testbench.
+                // Skip a mesh boundary (1 owner) or non-manifold edge (>2). Limitation: on a retraced bridge
+                // seam, an asymmetric split between two of its owners is not surfaced here.
                 if (owners.Count != 2) continue;
                 (int root0, int local0) = owners[0];
                 (int root1, _) = owners[1];
@@ -424,11 +385,8 @@ namespace MapRenderer.Tests
             worstAt = default;
             gapBuckets = new int[6];
 
-            // A near-zero-area earcut root is a hole-stitching BRIDGE slit (coast→island), NOT rendered
-            // geometry — but its "edges" span huge tile-space distances, so subdividing it yields degenerate
-            // collinear slivers whose T-junctions against real geometry are PHANTOM (nothing is painted there).
-            // Excluded from gap detection, exactly as they already are from coverage/degenerate analysis
-            // (AnalyzeTriangleQuality) — an earcut concern (scope-fenced), not a subdivision crack.
+            // A near-zero-area root is a hole-stitching BRIDGE slit that paints nothing, so its T-junctions are
+            // phantom. Excluded here as in AnalyzeTriangleQuality: an earcut concern, not a subdivision crack.
             var realRoot = new bool[roots.Count];
             for (int r = 0; r < roots.Count; r++)
                 realRoot[r] = math.abs(SignedArea2(roots[r].A, roots[r].B, roots[r].C)) >= 1.0; // integer-vertex ⇒ real ⇒ |area2|>=1
@@ -451,16 +409,8 @@ namespace MapRenderer.Tests
                 CheckSegment(p, q, 0, sideA, sideB, ref tjCount, ref sumGap, ref maxGap, ref worstAt, gapBuckets);
             }
 
-            // (b) intra-parent, ALGORITHM-AGNOSTIC (no split-event/path lineage): for each earcut root, every
-            // emitted LEAF triangle's own 3 edges is a candidate T-junction segment — a straight tile-space
-            // chord this leaf did NOT split further along. A crack exists if some OTHER leaf descending from
-            // the SAME root has a vertex lying strictly on that chord at a depth STRICTLY DEEPER than this
-            // leaf's own (i.e. a sibling recursed further along the identical physical edge while this leaf
-            // stayed flat). Reuses the SAME CheckSegment primitive as case (a): "mine" = just this edge's own
-            // 2 endpoints (so only genuinely-unmatched deeper points on the "other" side — the whole root's
-            // leaf set — register), "other" = every leaf in the root. Scoping by RootIndex keeps this
-            // lineage-safe (one earcut triangle, one feature) and the Depth-deeper gate rejects unrelated
-            // same-root near-collinearity, identical to case (a)'s discrimination.
+            // (b) intra-parent: a crack exists where another leaf of the SAME root has a vertex strictly on this
+            // leaf's edge at a STRICTLY DEEPER depth. CheckSegment runs with "mine" = the edge's 2 endpoints.
             foreach (var rootLeaves in byRoot.Values)
             {
                 for (int i = 0; i + 2 < rootLeaves.Count; i += 3)
@@ -512,13 +462,8 @@ namespace MapRenderer.Tests
                 if (s < -1e-6 || s > 1.0 + 1e-6) continue;
                 double sClamped = math.clamp(s, 0.0, 1.0);
 
-                // A branch's own un-recursed-further corner can be numerically near-collinear with an
-                // UNRELATED edge (e.g. thin earcut bridge triangles) without ever having been inserted by a
-                // split ON THIS segment. Only a genuine split-inserted point strictly deeper than the node
-                // that OWNS this segment as an edge (Depth > minInteriorDepth — case (a): the root, depth 0;
-                // case (b): the split event's own child depth) — or the segment's own two endpoints (always
-                // trivially present) — may register as a T-junction candidate. This is what keeps case
-                // (a)/(b) lineage-constrained rather than a global collinearity scan.
+                // Non-obvious why: an unrelated corner can be near-collinear by chance, so only a point deeper
+                // than the segment's owner (Depth > minInteriorDepth) or an endpoint may register.
                 bool isEndpoint = sClamped < 1e-9 || sClamped > 1.0 - 1e-9;
                 if (!isEndpoint && lv.Depth <= minInteriorDepth) continue;
 
@@ -594,14 +539,8 @@ namespace MapRenderer.Tests
                 LeafRef a = leaves[i], b = leaves[i + 1], c = leaves[i + 2];
                 double parentArea2 = rootArea2[a.RootIndex];
 
-                // A root that was ALREADY degenerate before subdivision (earcut's own zero-width bridge
-                // triangles, used to stitch a hole into the outer ring) is out of this validator's scope —
-                // it is an earcut concern, out of scope here, not
-                // something subdivision introduced. Only count NEW degeneracy/flips on a root that started
-                // with a real (non-degenerate) area. The 1e-6 cutoff is absolute (review finding),
-                // but roots are earcut output of INTEGER tile-space ring vertices, so any non-degenerate root
-                // has |area2| >= 1 — the cutoff can only ever catch the exact-zero bridge slits, never a
-                // legitimately-tiny real triangle.
+                // Count only NEW degeneracy/flips: skip roots already degenerate (earcut bridge slits). Integer
+                // ring vertices give any real root |area2| >= 1, so the absolute 1e-6 cutoff catches only slits.
                 if (parentArea2 < 1e-6) continue;
 
                 double area2 = SignedArea2(a.Tile, b.Tile, c.Tile);
@@ -611,17 +550,12 @@ namespace MapRenderer.Tests
             }
         }
 
-        // PER-ROOT (not a global total). A global Σsub vs Σearcut lets a dropped leaf region cancel a
-        // duplicated one elsewhere → 0 error on a malformed partition (review finding). Summing each
-        // root's own leaves against that root's own area and taking the MAX relative error closes that hole:
-        // subdivision must partition EACH earcut triangle exactly. Leaves group by RootIndex (lineage the
-        // mirror records). A root already ~zero (earcut's zero-width bridge slit — out of scope, see
-        // AnalyzeTriangleQuality) can't have a meaningful relative error, so it's skipped.
+        // Coverage error is PER-ROOT: a global total lets a dropped region cancel a duplicated one. ~zero
+        // roots (bridge slits) are skipped; they have no meaningful relative error.
         private static double ComputeMaxLeafEdgeAngleRad(List<RootTri> roots, List<LeafRef> leaves)
         {
-            // Curvature fidelity is a property of RENDERED geometry — skip zero-area earcut bridge slits
-            // (their long collinear edges span large angles but paint nothing), same exclusion as the gap +
-            // coverage + degenerate checks.
+            // Curvature fidelity is a property of RENDERED geometry, so zero-area bridge slits are skipped,
+            // as in the gap, coverage and degenerate checks.
             var realRoot = new bool[roots.Count];
             for (int r = 0; r < roots.Count; r++)
                 realRoot[r] = math.abs(SignedArea2(roots[r].A, roots[r].B, roots[r].C)) >= 1.0;
@@ -631,13 +565,8 @@ namespace MapRenderer.Tests
             {
                 int root = leaves[i].RootIndex;
                 if (root < realRoot.Length && !realRoot[root]) continue;
-                // Skip near-degenerate NEEDLE slivers: a high-aspect-ratio earcut triangle (e.g. an
-                // antimeridian-spanning z0 country sliver) has a long edge that subtends a big angle no
-                // amount of subdivision on a needle resolves, but it paints negligible area and its
-                // curvature-fidelity is not a subdivision property. thinness = minAltitude/longestEdge =
-                // area2/longestEdge²; < 0.03 is a ~30:1 needle. Well-formed leaves (~0.3+) are unaffected, so
-                // a genuine "disable subdivision" fix (whole earcut edges as leaf edges, well-formed) still
-                // trips this gate. (Earcut needle geometry is out of scope here, like the bridge slit.)
+                // Skip NEEDLE slivers (thinness = area2/longestEdge² < 0.03, ~30:1): subdivision cannot fix their
+                // angle and they paint ~nothing. Well-formed leaves (~0.3+) still trip the gate.
                 double2 ta = leaves[i].Tile, tb = leaves[i + 1].Tile, tc = leaves[i + 2].Tile;
                 double longestSq = math.max(DistSq(ta, tb), math.max(DistSq(tb, tc), DistSq(tc, ta)));
                 double area2 = math.abs(SignedArea2(ta, tb, tc));

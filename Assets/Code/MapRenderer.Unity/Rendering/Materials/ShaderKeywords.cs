@@ -2,14 +2,10 @@ namespace MapRenderer.Unity.Rendering.Materials
 {
     /// <summary>
     /// Single source of truth for the shader-feature <b>keyword</b> names the map shaders declare
-    /// (<c>#pragma shader_feature_local*</c> in Fill.shader / Line.shader).
-    ///
-    /// <para>These are derived from a material's property values by the editor keyword sync
-    /// (<c>BaseShaderGUI.ValidateMaterial</c> → <c>LitShaderGUI.ValidateMaterial</c> →
-    /// <c>LineShaderGUI.ValidateMaterial</c>, each adding the level's own keywords) — the clean-room
-    /// replacement for URP's editor-only <c>SetMaterialKeywords</c>. The names live in the runtime assembly
-    /// (not the Editor) so the const strings are shareable. We declare ONLY the keywords our shaders actually
-    /// use; this is not a copy of URP's <c>ShaderKeywordStrings</c>.</para>
+    /// (<c>#pragma shader_feature_local*</c> in Fill.shader / Line.shader). The editor keyword sync
+    /// (<c>BaseShaderGUI.ValidateMaterial</c> and its overrides) derives them from a material's property
+    /// values. The names live in the runtime assembly so the const strings are shareable. Only the keywords
+    /// these shaders use are declared.
     /// </summary>
     public static class ShaderKeywords
     {
@@ -34,10 +30,8 @@ namespace MapRenderer.Unity.Rendering.Materials
         public const string AlphaPremultiplyOn       = "_ALPHAPREMULTIPLY_ON";
         public const string AlphaModulateOn          = "_ALPHAMODULATE_ON";
 
-        // Line-only features (Fill.shader does not declare these).
-        // The _OFF polarity is for strip safety: shader_feature_local variants are stripped from a player
-        // build unless some material declares the keyword, so the SHIPPING (AA-on) variant is the one that
-        // carries no keyword. Inverting it makes AA work in the Editor and vanish in a build.
+        // Line-only. Non-obvious why: a build strips a keyword variant no material declares, so the SHIPPING
+        // (AA-on) variant carries no keyword; inverting the _OFF polarity would lose AA in a player build.
         public const string EdgeAntialiasingOff = "_EDGE_ANTIALIASING_OFF";
 
         // Hairline strategy — a keyword SET whose default member is `_` (no keyword). Same strip safety as

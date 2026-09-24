@@ -1,6 +1,5 @@
-// Unity-side (reads SymbolTileBlock's native columns — Core stays engine-free). Not engine-free itself: it
-// reads the block's raw-order NativeArray columns directly, so it is compiled + run only by the Unity EditMode
-// runner, not the engine-free core-tests fast loop.
+// Reads SymbolTileBlock's raw-order NativeArray columns, so it is not engine-free: only the Unity EditMode
+// runner compiles and runs it, not the core-tests fast loop.
 
 using System;
 using System.Collections.Generic;
@@ -13,13 +12,10 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>The pure, off-main cross-tile symbol dedup: <see cref="Run"/> reads an immutable
-    /// <see cref="SymbolSnapshot"/> (its blocks pinned on the main thread) and fills a reused
-    /// <see cref="SymbolReconcileResult"/>, touching no Unity API beyond the block's read-only NativeArray
-    /// columns and no store state — so it runs safely on a thread-pool worker.
-    ///
-    /// <para>Non-reentrant: the reused <see cref="_dedup"/> index assumes the caller runs exactly one
-    /// <see cref="Run"/> at a time. The scan order is byte-identical to the store's inline <c>CollectInto</c>, so
-    /// the store/oracle suite is this method's oracle; winner identity is <c>(BlockId, LocalIndex)</c>.</para>
+    /// <see cref="SymbolSnapshot"/> (blocks pinned on the main thread) and fills a reused
+    /// <see cref="SymbolReconcileResult"/>. It touches no store state and no Unity API beyond the blocks'
+    /// read-only columns, so it runs on a thread-pool worker. It is non-reentrant. Its scan order matches the
+    /// store's <c>CollectInto</c>, whose suite is its oracle. Winner identity is <c>(BlockId, LocalIndex)</c>.
     /// </summary>
     internal sealed class SymbolReconciler
     {
@@ -32,16 +28,11 @@ namespace MapRenderer.Unity.Text
         /// Test-only.</summary>
         internal int LastRunThreadId;
 
-        /// <summary>When non-null, the next <see cref="Run"/> blocks on this gate ONCE (then clears it), so a
-        /// test can PARK the worker in flight (assert one-in-flight / apply-stale / pin lifetime) and release it
-        /// deterministically. A teardown while this is held MUST open the gate first, or the drain hangs. Internal
-        /// test-only.
-        /// <para>Arming this while the owning <c>SymbolSubsystem</c>'s <c>WorkScheduler</c> is an
-        /// <c>InlineWorkScheduler</c> deadlocks the calling thread — <c>ScheduleReconcileIfDirty</c>'s dispatch
-        /// would then run <see cref="Run"/> (and this park) synchronously on that same thread, with no other
-        /// thread able to reach the release. <c>SymbolSubsystem.WorkScheduler</c>'s setter guards the order
-        /// selecting Inline while this is armed; arming this field directly while already Inline is NOT
-        /// guarded (this class has no reference back to the scheduler) — a test must not do both.</para></summary>
+        /// <summary>When non-null, the next <see cref="Run"/> blocks on this gate once and clears it, so a test
+        /// can park the worker in flight. Test-only. A teardown while it is held must open the gate first, or the
+        /// drain hangs. Non-local invariant: arming it under an inline <c>WorkScheduler</c> deadlocks the calling
+        /// thread; <c>SymbolSubsystem.WorkScheduler</c>'s setter rejects Inline while armed, but nothing guards
+        /// arming it while already Inline.</summary>
         internal ManualResetEventSlim GateForTest;
 
         /// <summary>When true, the next <see cref="Run"/> throws once after writing a misaligned
@@ -100,9 +91,8 @@ namespace MapRenderer.Unity.Text
                     if (!_dedup.TryGetValue(key, out DedupEntry cur)
                         || z > cur.Z || (z == cur.Z && tileKey < cur.TileKey))
                     {
-                        // Resolve the pair's rider from the SAME block, so it swaps atomically with the winner
-                        // (never a stale rider against a fresh owner). The bound matches TryGetRider's: an Owner at
-                        // the final raw index has no follower.
+                        // Resolve the rider from the same block, so it swaps atomically with the winner. As in
+                        // TryGetRider, an Owner at the final raw index has no follower.
                         bool hasRider = block.PairRoles[i] == SymbolPairRole.Owner
                             && i + 1 < rawCount && block.PairRoles[i + 1] == SymbolPairRole.Rider;
                         _dedup[key] = new DedupEntry
@@ -139,16 +129,14 @@ namespace MapRenderer.Unity.Text
                 int blockId = result.OrderedBlocks.Count;
                 result.OrderedBlocks.Add(block);
                 int rawCount = block.Kinds.Length;
-                // Carries the previous symbol's emit decision: a rider is emitted iff its owner (the immediately
-                // preceding symbol in this same block) was, so a claim-skipped owner takes its rider with it — no
-                // orphan rider. Reset per slice.
+                // A rider emits iff its owner (the preceding symbol in this block) did, so a claim-skipped owner
+                // takes its rider with it. Reset per slice.
                 bool previousEmitted = false;
                 for (int i = 0; i < rawCount; i++)
                 {
                     bool emit;
-                    // Read the rider role off PairRoles (raw-order), never off Detail[i]: Detail indexes Points[]
-                    // or Curveds[] by Kind, so a curved symbol's Detail would mis-index a point's role. PairRoles
-                    // is valid for every Kind, no gate needed.
+                    // Read the role off raw-order PairRoles, valid for every Kind. Detail[i] indexes Points[] or
+                    // Curveds[] by Kind, so a curved symbol's Detail would mis-index a point's role.
                     if (block.PairRoles[i] == SymbolPairRole.Rider)
                     {
                         // A rider computes no claim key of its own — it inherits its owner's decision.
@@ -179,10 +167,8 @@ namespace MapRenderer.Unity.Text
         }
     }
 
-    // The all-integer cross-tile dedup key — a behaviour-preserving image of CrossTileSymbolKey's EQUALITY
-    // partition. TextId/IconImageId are the interned ids (ordinal), so id-equality ⟺ string-equality and the
-    // equivalence classes are identical to the string key's. A readonly struct : IEquatable so it does not box in
-    // _dedup. Internal top-level (not nested) so this reconciler and the store's plain overloads share one copy.
+    // The all-integer cross-tile dedup key, with the same equality partition as CrossTileSymbolKey: the text and
+    // icon ids are ordinal interned ids, so id-equality ⟺ string-equality. IEquatable, so it does not box.
     internal readonly struct DedupKey : IEquatable<DedupKey>
     {
         public readonly long GridX;
@@ -228,9 +214,8 @@ namespace MapRenderer.Unity.Text
         }
     }
 
-    // All fields ride atomically with the winner, so a finest-zoom overwrite swaps them together (never a stale
-    // ref against a fresh winner). HasRider=false means "no rider" (RiderLocalIndex is meaningless then; a rider
-    // shares its owner's block, so no RiderBlockId). The store's plain overloads leave BlockId/LocalIndex at 0.
+    // All fields swap together on a finest-zoom overwrite. RiderLocalIndex is meaningful only when HasRider; a
+    // rider shares its owner's block. The store's plain overloads leave BlockId/LocalIndex at 0.
     internal struct DedupEntry
     {
         public int Z; public long TileKey; public int BlockId; public int LocalIndex;

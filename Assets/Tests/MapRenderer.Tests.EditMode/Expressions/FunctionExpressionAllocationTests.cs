@@ -1,8 +1,5 @@
-// Unity EditMode ONLY. The zero-allocation tooth uses UnityEngine.TestTools' Is.Not.AllocatingGCMemory() (the
-// Recorder-based meter — the only one that detects GC.Alloc in this runner; GC.GetAllocatedBytesForCurrentThread()
-// is DEAD here, returning 0 for even a 10 MB allocation, so a byte-delta tooth would be vacuous). To avoid the
-// one-shot-lambda JIT false-positive, the EXACT delegate the constraint measures is warmed (50x) before the
-// assertion. NOT registered in core-tests.csproj (it references UnityEngine.TestTools).
+// Unity EditMode ONLY: it uses Is.Not.AllocatingGCMemory(), because GC.GetAllocatedBytesForCurrentThread()
+// reads 0 in this runner. Non-obvious why: the measured delegate is warmed first to keep one-time JIT out.
 
 using NUnit.Framework;
 using UnityEngine.TestTools.Constraints;
@@ -36,9 +33,8 @@ namespace MapRenderer.Tests.Expressions
             var ctx = new EvaluationContext(0.0);
             Assert.That(expr.Evaluate(ctx).AsNumber(), Is.EqualTo(12.0), "fixture sanity: (2*3)+(10-4)");
 
-            // Warm the EXACT measured delegate (JIT its body + fill the thread's buffer pool) so the measured
-            // invocation only exercises the warm rent/return path. A real per-call allocation would still be
-            // caught — the Recorder sees every GC.Alloc; this only removes the one-time JIT from the window.
+            // Warm the EXACT measured delegate (JIT + the thread's buffer pool). A real per-call allocation is
+            // still caught; only the one-time JIT leaves the window.
             TestDelegate act = () => expr.Evaluate(ctx);
             for (int w = 0; w < 50; w++) act();
             Assert.That(act, Is.Not.AllocatingGCMemory(),

@@ -11,47 +11,13 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// Thin input → <see cref="CameraPropertiesUpdate"/> patch translator. All pose math lives in
-    /// <see cref="CameraPoseMath"/> (Core) and <see cref="MapCamera"/> (Unity sync); this class reads
-    /// <c>Mouse.current</c> / <c>Keyboard.current</c> and calls <see cref="View.Camera"/>.Apply with
-    /// instant patches.
-    ///
-    /// <para><b>Input backend: new Input System (<c>UnityEngine.InputSystem</c>).</b>
-    ///   Reads <c>Mouse.current</c> and <c>Keyboard.current</c> directly (no legacy
-    ///   <c>UnityEngine.Input</c>). Controls: left-drag = pan, shift+drag = tilt, ctrl+drag = heading,
-    ///   scroll = zoom-to-cursor, +/=/Q = zoom in, −/E = zoom out.</para>
-    ///
-    /// <para><b>Scroll normalization:</b> <see cref="WheelNotchUnits"/> = 120 so
-    ///   one physical wheel notch ≈ 1 normalized unit.</para>
-    ///
-    /// <para><b>Interaction-point-aware gestures.</b> Zoom uses the cursor as the anchor point
-    ///   (zoom-to-cursor); pan tracks the grabbed ground point that was under the cursor at drag-start
-    ///   (anchored pan). Both delegate to <see cref="ViewInput"/> which carries zero Mercator constants.
-    ///   Screen convention: +x right, +y up, origin bottom-left (Unity mouse position).</para>
-    ///
-    /// <para><b>Device-agnostic seam.</b> All gestures are translated into
-    ///   <see cref="GestureIntent"/> values and dispatched through
-    ///   <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/>. Sensitivity is applied here
-    ///   (before building the intent) so the seam sees device-independent magnitudes. Modifier precedence
-    ///   per frame: shift → <see cref="GestureKind.TiltBy"/> (drag-Y only), else ctrl →
-    ///   <see cref="GestureKind.HeadingBy"/> (drag-X only), else <see cref="GestureKind.PanToAnchor"/>.
-    ///   Sign convention: <c>-delta.y</c> for tilt (drag-up → pitch decreases, toward overhead),
-    ///   <c>+delta.x</c> for heading (drag-right → bearing increases).</para>
-    ///
-    /// <para><b>Ordering:</b> this <c>Update</c> only queues patches onto <see cref="MapCamera.CurrentProperties"/>.
-    ///   The whole per-frame pipeline (camera commit → tile rebase → symbol placement) then runs in one ordered
-    ///   pass in <see cref="MapView.LateUpdate"/> off a single snapshot of those props. That pipeline is in
-    ///   <c>LateUpdate</c> ON PURPOSE: Unity runs every LateUpdate after every Update, so this controller's
-    ///   patches are ALWAYS folded in the same frame they were produced — no sibling-order dependency, no
-    ///   <c>DefaultExecutionOrder</c>, no whole-map-vs-input latency. And because camera, tiles and symbols all
-    ///   read the one snapshot, none can lag the others.</para>
-    ///
-    /// <para><b>Camera-transform helper:</b>
-    ///   <see cref="ApplyCameraTransform(CameraProperties)"/> is a thin delegate to the Core pose math
-    ///   (<c>CameraPoseMath</c>), used by <c>MapRoot</c> frame-0 framing and by
-    ///   <c>CameraTransformTests</c>.</para>
-    ///
-    /// <para>Allocation-free <see cref="Update"/>: struct patches, no LINQ, no closures.</para>
+    /// Thin input → <see cref="CameraPropertiesUpdate"/> patch translator over the new Input System
+    /// (<c>Mouse.current</c>, <c>Keyboard.current</c>). Controls: left-drag = pan, shift+drag = tilt,
+    /// ctrl+drag = heading, scroll = zoom-to-cursor, +/=/Q = zoom in, −/E = zoom out. Each gesture becomes a
+    /// <see cref="GestureIntent"/> for <see cref="ViewInput"/>, with sensitivity applied here first. Update
+    /// allocates nothing in steady state.
+    /// Non-local invariant: <see cref="Update"/> only queues patches, and <see cref="MapView.LateUpdate"/>
+    /// folds them into one camera snapshot in the same frame, because Unity runs every LateUpdate after every Update.
     /// </summary>
     public sealed class Controller : MonoBehaviour
     {
@@ -116,28 +82,21 @@ namespace MapRenderer.App
             // Resolve the active projection once per frame.
             IProjection projection = Map.Camera.Projection;
 
-            // The camera-interaction seam runs entirely in LOGICAL pixels: convert BOTH the viewport and
-            // the cursor at their single read sites, so everything downstream — the ViewContext, the gesture
-            // anchors, ScreenToGround/GroundToScreen — shares the render camera's logical basis. The
-            // division and its unusable-ratio fallback live in DeviceScaling.DeviceToLogicalPx, the same
-            // definition MapCamera.ViewportLogicalPx frames from, so reconstruction and render cannot
-            // diverge.
-            // The viewport is NOT MapCamera.ViewportPx: this component's own serialized Camera
-            // may be null (Map.Camera, already null-checked above, is a different reference), and that
-            // Screen.width/height fallback has no counterpart on MapCamera, which wraps a non-null camera.
+            // Non-local invariant: the interaction seam runs in LOGICAL pixels, converted here by the same
+            // DeviceScaling.DeviceToLogicalPx that MapCamera.ViewportLogicalPx frames from, so input and render
+            // cannot diverge. This is not MapCamera.ViewportPx because this component's Camera may be null,
+            // and the Screen.width/height fallback has no MapCamera counterpart.
             double dpr = Map.Config.DevicePixelRatio;
             double2 vp = DeviceScaling.DeviceToLogicalPx(new double2(
                 Camera != null ? Camera.pixelWidth  : Screen.width,
                 Camera != null ? Camera.pixelHeight : Screen.height), dpr);
 
-            // Device-derived MIN-zoom floor from the logical viewport: the most-zoomed-out level frames the
-            // whole world with breathing room instead of shrinking to a world-square grape. Projection-keyed:
-            // a finite Mercator sheet FILLS the viewport, a cyclic globe FITS with margin.
+            // Min-zoom floor from the logical viewport, keyed on the projection: a finite Mercator sheet fills
+            // the viewport, a cyclic globe fits with margin.
             MinZoom = (float)CameraPoseMath.MinZoomFloor(projection, vp.x, vp.y, MinZoomMargin);
 
-            // Build the per-frame view context (camera + live interaction viewport + projection).
-            // The live viewport is used here so cursor positions and viewport are in the same pixel scale,
-            // which the zoom-pin and pan-pin invariants require.
+            // The live viewport puts the cursor and viewport in the same pixel scale, which the zoom-pin and
+            // pan-pin invariants require.
             var view = new ViewContext
             {
                 Camera     = Map.Camera.CurrentProperties,
@@ -158,12 +117,9 @@ namespace MapRenderer.App
                 Vector2 mousePos = mouse.position.ReadValue();
                 double2 cursor   = DeviceScaling.DeviceToLogicalPx(new double2(mousePos.x, mousePos.y), dpr); // logical px
 
-                // Gate camera input to the Game View. The new Input System reads the OS-level mouse even when the
-                // pointer is over another Editor panel (or another app), so scrolling the Inspector would zoom the
-                // map and stray/momentum trackpad scroll would micro-zoom EVERY frame (macOS: scroll.y is
-                // continuous fractional). Act only when the app is focused AND the cursor is within the viewport.
-                // Ongoing drags are exempt (see the leftButton block) so a drag that starts in-view can continue
-                // past the edge; keyboard zoom needs focus but not the pointer.
+                // Non-obvious why: the new Input System reads the OS-level mouse over any Editor panel or app, so
+                // without this gate an Inspector scroll or trackpad momentum would zoom the map. Ongoing drags are
+                // exempt (see the leftButton block), so a drag that starts in-view can continue past the edge.
                 bool pointerInViewport = cursor.x >= 0.0 && cursor.y >= 0.0 && cursor.x < vp.x && cursor.y < vp.y;
                 bool acceptPointerInput = Application.isFocused && pointerInViewport;
 
@@ -182,15 +138,7 @@ namespace MapRenderer.App
                 }
 
                 // ── Left-drag: modifier decides the gesture ──────────────────────────────────────
-                // Modifier precedence (evaluated each frame):
-                //   shift → TiltBy (drag-Y only; drag-X ignored; _dragging cleared for clean re-capture)
-                //   ctrl  → HeadingBy (drag-X only; drag-Y ignored; _dragging cleared)
-                //   else  → PanToAnchor (anchored pan, grabbed ground captured on first frame)
-                //
-                // Sign convention:
-                //   Tilt:    -delta.y  (drag-UP → pitch decreases, toward overhead)
-                //   Heading: +delta.x  (drag-right → bearing increases)
-                // Start a drag only when the press lands in-view; once dragging, keep going even off the edge.
+                // shift → tilt (-delta.y: drag-up → overhead), else ctrl → heading (+delta.x), else anchored pan.
                 if (mouse.leftButton.isPressed && (_dragging || acceptPointerInput))
                 {
                     bool shift = kb != null && (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed);
@@ -253,9 +201,7 @@ namespace MapRenderer.App
             }
 
             // ── Keyboard zoom (+/= / Q → zoom in; − / E → zoom out) ─────────────────────────────
-            // Null-guarded separately from Mouse.current (each device can be absent independently).
-            // ZoomAtAnchor at the viewport centre → exact centre-zoom feel.
-            // Gated on focus (not pointer) so keyboard zoom doesn't fire while another app/panel has focus.
+            // Zooms at the viewport centre. Gated on app focus only, not on the pointer position.
             if (kb != null && Application.isFocused)
             {
                 float kbStep  = KeyboardZoomStep * Time.deltaTime;
@@ -290,9 +236,8 @@ namespace MapRenderer.App
         {
             if (Camera == null) return;
 
-            // A MapCamera drives the transform from its props on construction (Core pose math); this
-            // one-shot wrapper frames the Unity camera for the given props (initial framing / tests). FOV
-            // and viewport height come from the props / the camera, not from side config.
+            // A MapCamera sets the transform from its props on construction; FOV and viewport height come
+            // from the props and the camera, not from side config.
             _ = new MapCamera(Camera, props, AltitudeMultiplier);
         }
     }
