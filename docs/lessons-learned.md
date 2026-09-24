@@ -205,6 +205,15 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   (item 1) and `docs/symbol-label-perf-design.md` § "The memo is structurally dead under continuous motion".
   (2026-07-25, corrected 2026-07-27.)
 
+- **`DynamicGI.UpdateEnvironment()` on WebGPU writes a garbage ambient probe instead of failing.** The sky
+  convolution needs a synchronous GPU texture readback, which WebGPU lacks. The console logs "Texture
+  Readback is not supported by WebGPU", and `RenderSettings.ambientProbe` then holds garbage
+  (coefficients near 1e34). **The symptom shape:** every URP Lit surface renders flat white, while Unlit
+  surfaces and symbols keep their colours. Because the garbage depends on memory state, the symptom comes
+  and goes with load and build, and a commit bisect finds nothing. **The check:** log the 27 probe
+  coefficients, or set a flat probe and see if colour returns. `MapHost.EnsureEnvironmentLighting`
+  skips the call on WebGPU and validates the probe elsewhere. (2026-09-25.)
+
 ## DOTS / Entities Graphics
 
 - **GC is stop-the-world, so an allocation's cost surfaces as a phantom CPU spike in an unrelated

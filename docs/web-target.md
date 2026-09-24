@@ -36,8 +36,9 @@ Through Unity 6000.5 the web player could have Burst or `com.unity.entities`, no
 trapped during static init before any managed code ran, so the web build shipped Burst-off and therefore
 with every job inline. The 6.6 upgrade removed that constraint at no cost to us: a player with Burst AOT on,
 the Entities package linked, **and** Entities Graphics actually driving the rendering starts and renders
-correctly, colours included. The startup trap and a separate white-fill symptom both went away with the same
-upgrade. That makes worker threads reachable in this project for the first time — see *Threading*.
+correctly, colours included. The startup trap went away with the same upgrade. White Lit fills have a
+separate cause, a corrupt ambient probe, which the host guards (see *Building and running the web
+player*). That makes worker threads reachable in this project for the first time — see *Threading*.
 
 **Measured 2026-08-31, corrected 2026-09-01. A job DOES reach a worker pthread — but only when it is
 Burst-compiled.** The wasm IS compiled for threads (`-pthread`,
@@ -116,9 +117,15 @@ On **Unity 6000.6.0f1 / Burst 2.0** (2026-09-02):
 | on | Minimal | on | **Entities** | **renders** — the combination that used to trap |
 | on | **High** | on | Entities | **renders**, 14.2 MB shippable (vs 17.3 MB at Minimal) |
 
-**If fills ever render white, that is an open bug, not a known-fixed one.** White fills were seen once
-under Burst 1.8 on an experimental Entities-removed tree, never root-caused, and never reproduced on 6.6.
-Nothing here explains them, so treat a recurrence as live and unexplained.
+**White Lit fills on WebGPU come from a corrupt ambient probe.** `DynamicGI.UpdateEnvironment()` convolves
+the sky through a GPU texture readback, which WebGPU does not support (the console logs "Texture Readback is
+not supported by WebGPU"). The probe then holds garbage (coefficients near 1e34), and every Lit layer
+saturates to flat white. Unlit layers and symbols stay coloured, because they have no indirect term. Whether
+the garbage appears depends on memory and timing, so it looks commit- and load-dependent. Garbage can also
+look plausible, so the host does not run the convolution on WebGPU. It sets a flat probe of the ambient colour
+instead (`MapHost.EnsureEnvironmentLighting`), and on other platforms it validates the convolved probe.
+Because web uses this flat fallback ambient, shaded faces can look slightly different from desktop. If Lit
+fills render white again, check the probe first.
 
 On **Unity 6000.5.0f1 / Burst 1.8.29**, kept because a regression will look like this:
 
@@ -393,7 +400,9 @@ Two consequences of the fix are worth stating plainly:
 - **A separate white-fill symptom disappeared with the same upgrade.** Fills rendering white had been seen
   only on an experimental Entities-removed tree under Burst 1.8; it was never reproduced on 6.6. It was
   never root-caused, so it is not *known* to be the same defect — if white fills reappear, treat that as a
-  live unexplained bug, not a known-fixed one.
+  live unexplained bug, not a known-fixed one. **Correction (2026-09-25):** white fills did reappear on 6.6,
+  and the upgrade did not fix them. The cause is a corrupt ambient probe after a WebGPU readback failure; see
+  the white-fill paragraph under *Building and running the web player*.
 
 ### The original investigation (2026-09-01, minimal repro, Unity 6000.5.0f1)
 

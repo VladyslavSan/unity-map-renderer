@@ -3,7 +3,8 @@
 //
 // Contents:
 //   DirectionalLightBootstrapTests  — MapHost.EnsureDirectionalLight adds a light only when the scene has none.
-//   EnvironmentLightingTests        — MapHost.EnsureEnvironmentLighting fires only when the ambient probe is degenerate.
+//   EnvironmentLightingTests        — MapHost.EnsureEnvironmentLighting fires only when the ambient probe is degenerate,
+//                                     and IsUsableAmbientProbe rejects a corrupt probe.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -130,6 +131,7 @@ namespace MapRenderer.Tests.MapViews
                 Assert.Greater(dcTerm, 0f,
                     "EnsureEnvironmentLighting must populate a non-zero ambient probe when the scene's " +
                     "environment lighting was never generated — otherwise faces the sun misses stay black.");
+                Assert.IsTrue(MapHost.IsUsableAmbientProbe(probe), "The populated ambient probe is usable.");
             }
             finally
             {
@@ -205,6 +207,91 @@ namespace MapRenderer.Tests.MapViews
                 RenderSettings.ambientLight = prevLight;
                 RenderSettings.ambientProbe = prevProbe;
             }
+        }
+
+        [Test]
+        public void IsUsableAmbientProbe_FlatAmbientProbe_IsAccepted()
+        {
+            var probe = new SphericalHarmonicsL2();
+            probe.AddAmbientLight(new Color(0.4f, 0.5f, 0.6f, 1f));
+            Assert.IsTrue(MapHost.IsUsableAmbientProbe(probe), "A flat ambient probe is usable.");
+        }
+
+        [TestCase(1.678e34f, TestName = "IsUsableAmbientProbe_WebGpuReadbackGarbage_IsRejected")]
+        [TestCase(float.NaN, TestName = "IsUsableAmbientProbe_NaNCoefficient_IsRejected")]
+        [TestCase(float.PositiveInfinity, TestName = "IsUsableAmbientProbe_InfiniteCoefficient_IsRejected")]
+        [TestCase(-0.5f, TestName = "IsUsableAmbientProbe_NegativeDcTerm_IsRejected")]
+        public void IsUsableAmbientProbe_CorruptDcTerm_IsRejected(float corruptValue)
+        {
+            var probe = new SphericalHarmonicsL2();
+            probe.AddAmbientLight(new Color(0.4f, 0.5f, 0.6f, 1f));
+            probe[0, 0] = corruptValue;
+            Assert.IsFalse(MapHost.IsUsableAmbientProbe(probe), $"A probe with DC term {corruptValue} is unusable.");
+        }
+
+        [Test]
+        public void IsUsableAmbientProbe_GarbageHigherOrderCoefficient_IsRejected()
+        {
+            var probe = new SphericalHarmonicsL2();
+            probe.AddAmbientLight(new Color(0.4f, 0.5f, 0.6f, 1f));
+            probe[2, 7] = -1.275e33f;
+            Assert.IsFalse(MapHost.IsUsableAmbientProbe(probe), "A huge higher-order coefficient is unusable.");
+        }
+
+        [Test]
+        public void IsUsableAmbientProbe_ZeroProbe_IsRejected()
+        {
+            Assert.IsFalse(MapHost.IsUsableAmbientProbe(default), "An all-zero probe is unusable.");
+        }
+
+        private static SphericalHarmonicsL2 FlatProbe(Color color)
+        {
+            var probe = new SphericalHarmonicsL2();
+            probe.AddAmbientLight(color);
+            return probe;
+        }
+
+        [Test]
+        public void ResolveAmbientProbe_TrustedUsableProbe_IsKept()
+        {
+            var convolved = FlatProbe(new Color(0.1f, 0.2f, 0.3f));
+
+            var probe = MapHost.ResolveAmbientProbe(convolved, Color.black, trustConvolution: true);
+
+            Assert.AreEqual(convolved, probe, "A trusted, usable convolved probe is kept.");
+        }
+
+        [Test]
+        public void ResolveAmbientProbe_GarbageProbe_FallsBackToFlatAmbient()
+        {
+            var garbage = FlatProbe(new Color(0.1f, 0.2f, 0.3f));
+            garbage[0, 0] = 1.678e34f;
+            var ambient = new Color(0.6f, 0.7f, 0.8f);
+
+            var probe = MapHost.ResolveAmbientProbe(garbage, ambient, trustConvolution: true);
+
+            Assert.AreEqual(FlatProbe(ambient), probe, "A garbage probe falls back to a flat ambient probe.");
+        }
+
+        [Test]
+        public void ResolveAmbientProbe_UntrustedConvolution_FallsBackEvenWhenPlausible()
+        {
+            var plausible = FlatProbe(new Color(0.1f, 0.2f, 0.3f));
+            var ambient = new Color(0.6f, 0.7f, 0.8f);
+
+            var probe = MapHost.ResolveAmbientProbe(plausible, ambient, trustConvolution: false);
+
+            Assert.AreEqual(FlatProbe(ambient), probe,
+                "An untrusted convolution (WebGPU) falls back to a flat ambient probe, however plausible it looks.");
+        }
+
+        [Test]
+        public void ResolveAmbientProbe_DarkAmbient_IsRaisedToFallbackFloor()
+        {
+            var probe = MapHost.ResolveAmbientProbe(default, new Color(0.212f, 0.5f, 0f), trustConvolution: true);
+
+            Assert.AreEqual(FlatProbe(new Color(0.4f, 0.5f, 0.4f)), probe,
+                "Each fallback channel is raised to at least 0.4, and a brighter channel is kept.");
         }
     }
 }

@@ -7,6 +7,8 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.View;
 using Unity.Mathematics;
+using GraphicsDeviceType = UnityEngine.Rendering.GraphicsDeviceType;
+using SphericalHarmonicsL2 = UnityEngine.Rendering.SphericalHarmonicsL2;
 
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Map;
@@ -246,9 +248,9 @@ namespace MapRenderer.App
 
         /// <summary>
         /// Ensures <see cref="RenderSettings.ambientProbe"/> is non-degenerate: without it, URP Lit renders black
-        /// every face whose <c>N·L</c> ≤ 0, such as walls facing away from the sun. It recomputes only when the
-        /// probe's DC term is near zero, so a host scene's own probe stays untouched. It runs once at startup,
-        /// because nothing changes the sky or ambient settings later. A no-op under
+        /// every face whose <c>N·L</c> ≤ 0, such as walls facing away from the sun. It recomputes once at startup,
+        /// only when the probe's DC term is near zero, so a host scene's own probe stays untouched. On WebGPU, or
+        /// when the recompute is unusable, it sets a flat probe of the ambient colour. A no-op under
         /// <see cref="RenderMode.Unlit"/>: the unlit shader twins have no indirect term.
         /// </summary>
         /// <param name="mode">The active render mode (<see cref="MapMaterialSet.RenderMode"/>); only
@@ -261,7 +263,55 @@ namespace MapRenderer.App
             double dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
             if (dcTerm > 1e-6) return; // already has a real probe — don't clobber a host's baked lighting
 
-            DynamicGI.UpdateEnvironment();
+            // WebGPU has no texture readback, so the sky convolution returns garbage there.
+            bool trustConvolution = SystemInfo.graphicsDeviceType != GraphicsDeviceType.WebGPU;
+            if (trustConvolution) DynamicGI.UpdateEnvironment();
+            RenderSettings.ambientProbe = ResolveAmbientProbe(RenderSettings.ambientProbe,
+                RenderSettings.ambientLight * RenderSettings.ambientIntensity, trustConvolution);
+        }
+
+        /// <summary>
+        /// Returns <paramref name="convolved"/> when it is trusted and usable. Otherwise returns a flat probe of
+        /// <paramref name="ambient"/>, with each channel raised to at least <see cref="MinFallbackAmbient"/>.
+        /// </summary>
+        /// <param name="convolved">The probe <c>DynamicGI.UpdateEnvironment</c> produced.</param>
+        /// <param name="trustConvolution">False when the device cannot run the convolution.</param>
+        internal static SphericalHarmonicsL2 ResolveAmbientProbe(SphericalHarmonicsL2 convolved, Color ambient,
+                                                                 bool trustConvolution)
+        {
+            if (trustConvolution && IsUsableAmbientProbe(convolved)) return convolved;
+
+            var flat = new SphericalHarmonicsL2();
+            flat.AddAmbientLight(new Color(math.max(ambient.r, MinFallbackAmbient),
+                                           math.max(ambient.g, MinFallbackAmbient),
+                                           math.max(ambient.b, MinFallbackAmbient)));
+            return flat;
+        }
+
+        /// <summary>Bound far above the coefficients of a real sky; readback garbage exceeds it by decades.</summary>
+        private const float MaxProbeCoefficient = 1e4f;
+
+        /// <summary>Darkest channel value of the fallback probe. A flat 0.4 renders correctly on web.</summary>
+        private const float MinFallbackAmbient = 0.4f;
+
+        /// <summary>
+        /// True when every coefficient is finite and within <see cref="MaxProbeCoefficient"/>, and the DC term
+        /// is non-negative in every channel and non-zero in at least one.
+        /// </summary>
+        internal static bool IsUsableAmbientProbe(SphericalHarmonicsL2 probe)
+        {
+            float dcTerm = 0f;
+            for (int channel = 0; channel < 3; channel++)
+            {
+                for (int coefficient = 0; coefficient < 9; coefficient++)
+                {
+                    float value = probe[channel, coefficient];
+                    if (!(math.abs(value) <= MaxProbeCoefficient)) return false; // also rejects NaN and ±Inf
+                }
+                if (probe[channel, 0] < 0f) return false;
+                dcTerm += probe[channel, 0];
+            }
+            return dcTerm > 1e-6f;
         }
 
         /// <summary>
