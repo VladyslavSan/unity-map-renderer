@@ -70,6 +70,10 @@ namespace MapRenderer.Tests
         private bool _ambientSaved;
         private (UnityEngine.Rendering.AmbientMode mode, Color light) _savedAmbient;
 
+        // The scene whose GameObjects are live. Render() has no culling mask, so a second live scene would
+        // draw into this one's frame.
+        private static VisualScene _liveInstance;
+
         /// <summary>Private — a scene is started via <see cref="New"/> and built fluently.</summary>
         private VisualScene() { }
 
@@ -193,6 +197,12 @@ namespace MapRenderer.Tests
             if (!_cameraSet)
                 throw new InvalidOperationException(
                     "VisualScene.Camera(...) must be called before Render() — the composer has no default pose.");
+
+            if (_liveInstance != null && _liveInstance != this)
+                throw new InvalidOperationException(
+                    "Another VisualScene is still undisposed; its camera would draw this scene's geometry " +
+                    "too. Dispose it before rendering another.");
+            _liveInstance = this;
 
             // ── Lit-ambient recipe — REQUIRED: fill is URP Lit and renders near-black at ambient-only.
             // Non-obvious why: no QualitySettings.SetQualityLevel here. Quality level 0 can swap in a different
@@ -322,6 +332,8 @@ namespace MapRenderer.Tests
         /// <c>Teardown()</c>, which is harmless: <c>MapView.Teardown</c> is safe to call twice.</summary>
         public void Dispose()
         {
+            if (_liveInstance == this) _liveInstance = null;
+
             _mapView?.Teardown();
 
             if (_cameraGo != null) { UnityEngine.Object.DestroyImmediate(_cameraGo); _cameraGo = null; }

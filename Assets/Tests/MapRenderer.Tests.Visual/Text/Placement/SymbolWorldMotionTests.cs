@@ -980,24 +980,28 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void ConstantTextColor_RenderedPixel_RidesTheUniformOnceNotSquared()
         {
-            using var whiteScene = BuildScene("#ffffff");
-            VisualFrame whiteFrame = whiteScene.Render(SizePx);
+            // Dispose the white scene first: a live VisualScene draws into another scene's frame.
+            (int x0, int x1, int y0, int y1) box;
+            double3 whiteSample;
+            using (var whiteScene = BuildScene("#ffffff"))
+            {
+                VisualFrame whiteFrame = whiteScene.Render(SizePx);
 
-            // Locate the glyph from the white arm's render. Both arms share IDENTICAL geometry, so the same box
-            // samples the same pixels in the grey arm.
-            whiteFrame.InkStatsIn(0, 0, whiteFrame.Width, whiteFrame.Height, out double2 centroid, out int inkCount);
-            TestContext.WriteLine($"[SymbolTextColorRender] white ink centroid={centroid} count={inkCount}");
-            Assert.Greater(inkCount, 0, "the white arm must render some ink to locate the glyph from.");
+                // Locate the glyph from the white arm's render. Both arms share identical geometry, so the same
+                // box samples the same pixels in the grey arm.
+                whiteFrame.InkStatsIn(0, 0, whiteFrame.Width, whiteFrame.Height, out double2 centroid, out int inkCount);
+                TestContext.WriteLine($"[SymbolTextColorRender] white ink centroid={centroid} count={inkCount}");
+                Assert.Greater(inkCount, 0, "the white arm must render some ink to locate the glyph from.");
 
-            int cx = (int)math.round(centroid.x), cy = (int)math.round(centroid.y);
-            int x0 = cx - SampleHalf, x1 = cx + SampleHalf + 1;
-            int y0 = cy - SampleHalf, y1 = cy + SampleHalf + 1;
+                int cx = (int)math.round(centroid.x), cy = (int)math.round(centroid.y);
+                box = (cx - SampleHalf, cx + SampleHalf + 1, cy - SampleHalf, cy + SampleHalf + 1);
 
-            double3 whiteSample = SampleLinearBox(whiteFrame, x0, y0, x1, y1);
+                whiteSample = SampleLinearBox(whiteFrame, box.x0, box.y0, box.x1, box.y1);
+            }
 
             using var greyScene = BuildScene("#808080");
             VisualFrame greyFrame = greyScene.Render(SizePx);
-            double3 greySample = SampleLinearBox(greyFrame, x0, y0, x1, y1);
+            double3 greySample = SampleLinearBox(greyFrame, box.x0, box.y0, box.x1, box.y1);
 
             double3 ratio = greySample / whiteSample;
             const double expected = 0.2158; // linear(0x80/255)
