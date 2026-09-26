@@ -17,7 +17,7 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
@@ -26,7 +26,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Tiles;
 
 

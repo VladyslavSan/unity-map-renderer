@@ -1,4 +1,4 @@
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 
 namespace MapRenderer.Unity.Jobs.Tiles
 {

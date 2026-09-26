@@ -20,7 +20,7 @@ using MapRenderer.Unity.Jobs.Symbols;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Text.Placement
 {
@@ -344,7 +344,7 @@ namespace MapRenderer.Unity.Text.Placement
         private readonly MapCamera _camera;
 
         /// <summary>Default world materials — the fallback for slots with no per-layer material (owned instead
-        /// by <c>Style.SymbolRenderLayer</c>), cloned since <see cref="Tick"/> mutates them every frame.</summary>
+        /// by <c>SymbolRenderLayer</c>), cloned since <see cref="Tick"/> mutates them every frame.</summary>
         /// <param name="worldTextBase">The only world-anchored point-text draw path; no <c>Shader.Find</c> fallback, the caller must supply it.</param>
         /// <param name="worldIconBase">The world-anchored icon draw path; null leaves world icons inert.</param>
         public SymbolPlacementSystem(MapCamera camera, Material worldTextBase, Material worldIconBase = null)

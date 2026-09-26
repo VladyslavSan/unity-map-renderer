@@ -18,9 +18,9 @@ using MapRenderer.Unity.Rendering.Meshing;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using System.Globalization;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Map;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Tests.Visual
 {

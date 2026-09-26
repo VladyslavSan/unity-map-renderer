@@ -4,6 +4,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Common;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {
@@ -210,7 +211,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Estimated VRAM bytes for a prepared mesh — vertex buffer (stream 0's stride, since every
         /// built mesh has a populated stream 0) times vertex count, plus a flat 4 bytes/index (UInt32
-        /// index format — see <see cref="Style.MeshDataPayload.Upload"/>). <see langword="null"/> (the
+        /// index format — see <see cref="MeshDataPayload.Upload"/>). <see langword="null"/> (the
         /// empty-layer marker) is 0 bytes.</summary>
         private static long EstimateBytes(Mesh m)
         {

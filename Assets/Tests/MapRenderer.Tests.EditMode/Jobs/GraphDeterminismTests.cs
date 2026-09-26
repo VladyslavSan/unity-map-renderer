@@ -44,12 +44,12 @@ using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Unity.Burst;
 using MapRenderer.Core.GeoJson;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using Unity.Jobs.LowLevel.Unsafe;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using Object = UnityEngine.Object;
 
 

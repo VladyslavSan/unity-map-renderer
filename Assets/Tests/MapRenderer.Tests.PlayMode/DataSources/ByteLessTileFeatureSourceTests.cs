@@ -11,7 +11,7 @@ using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;

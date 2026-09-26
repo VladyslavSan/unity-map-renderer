@@ -191,7 +191,7 @@ float3 Line_VertexExtrude(
     // A frame constant has no depth term, no direction, no sign, and is identical at every vertex so any
     // interpolant is exact. It removes all four.
     // The world-metre width mode is untouched: pxToWorld is 1.0 there, and so is the factor below.
-    // CPU mirror: LineDash.DashCoverage's `metersPerDashUnit` (Core/Style/Line/LineDash.cs).
+    // CPU mirror: LineDash.DashCoverage's `metersPerDashUnit` (Unity/Style/Line/LineDash.cs).
     float dashMetersPerUnit = _Width * input.widthScale *
                               ((_WidthIsPixels > 0.5) ? _MapFrameMetersPerDevicePixel : 1.0);
 
@@ -258,7 +258,7 @@ float3 Line_VertexExtrude(
 
     // ── line-offset ───────────────────────────────────────────────────────────
     // Shift the band centre perpendicular to the centerline. ×sideAndDist.x so both station vertices shift by
-    // the same world vector. Layer-level (not per-feature). CPU mirror: LineOffset (Core/Style/LineOffset.cs).
+    // the same world vector. Layer-level (not per-feature). CPU mirror: LineOffset (Unity/Style/Line/LineOffset.cs).
     offsetWS += unitDir_WS * input.sideAndDist.x * (miter * _LineOffset * pxToWorld);
 
     // ── Surface-normal lift (0.001 world-meters) ─────────────────────────────
@@ -467,7 +467,7 @@ float LineCoverage(float side, float innerFrac, float dashU)
     // period = sum of all _DashArray entries (in line-width units).
     // phase  = fmod(dashU, period) — position within one dash cycle.
     //
-    // CPU mirror: LineDash.DashCoverage (Assets/Code/MapRenderer.Core/Style/Line/LineDash.cs).
+    // CPU mirror: LineDash.DashCoverage (Assets/Code/MapRenderer.Unity/Style/Line/LineDash.cs).
     if (_DashCount >= 0.5)
     {
         // Compute period from the active entries only (unused slots are 0, contribute 0).

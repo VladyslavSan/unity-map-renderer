@@ -1,7 +1,6 @@
 // Engine-free: no UnityEngine dependency.
 
 using System.Collections.Generic;
-using MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Core.Text.Placement
 {

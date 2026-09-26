@@ -6,8 +6,8 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
-using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Unity.Style;
+using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Rendering.Materials;
 using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
 using MapRenderer.Unity.Rendering.Meshing;
@@ -87,9 +87,9 @@ namespace MapRenderer.Tests
             var fillShader = MapMaterialSetTestUtil.Load().FillMaterial.shader;
             var mat = new Material(fillShader) { name = "FillSceneHelper_Fill" };
             FillMaterialTweaker.ApplyPainterContract(mat);
-            var applier = new MapRenderer.Unity.Rendering.Style.ZoomStyleApplier(mat);
+            var applier = new MapRenderer.Unity.Rendering.Layers.ZoomStyleApplier(mat);
             MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(new MapRenderer.Unity.Rendering.Style.StyleFrameInputs(styleZoom, 1.0, 0.0));
+            applier.ApplyZoom(new MapRenderer.Unity.Rendering.Layers.StyleFrameInputs(styleZoom, 1.0, 0.0));
             mr.sharedMaterial = mat;
 
             // FitToView: scale+center so the mesh fits in viewSize world units. Skipped when the caller

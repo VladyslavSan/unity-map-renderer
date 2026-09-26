@@ -2,11 +2,11 @@
 // `Color`, so it never picks which of the suite's two Color bindings a call site meant.
 
 using MapRenderer.Core.Json;
-using Background = MapRenderer.Core.Style.Background;
-using Fill = MapRenderer.Core.Style.Fill;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
-using Line = MapRenderer.Core.Style.Line;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using Background = MapRenderer.Unity.Style.Background;
+using Fill = MapRenderer.Unity.Style.Fill;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
+using Line = MapRenderer.Unity.Style.Line;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests
 {

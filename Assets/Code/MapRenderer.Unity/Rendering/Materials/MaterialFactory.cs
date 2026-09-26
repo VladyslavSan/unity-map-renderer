@@ -1,11 +1,12 @@
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.Style;
-using Line = MapRenderer.Core.Style.Line;
-using Fill = MapRenderer.Core.Style.Fill;
-using Background = MapRenderer.Core.Style.Background;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
+using MapRenderer.Unity.Style;
+using Line = MapRenderer.Unity.Style.Line;
+using Fill = MapRenderer.Unity.Style.Fill;
+using Background = MapRenderer.Unity.Style.Background;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Materials
 {
@@ -42,7 +43,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// <summary>
         /// Binds constant/zoom paint properties from <paramref name="paint"/> to the material.
         /// </summary>
-        public static void BindFillPaintToApplier(Fill.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
+        public static void BindFillPaintToApplier(Fill.PaintProperties paint, ZoomStyleApplier applier, Material mat)
         {
             // fill-color: Constant/Zoom rides _BaseColor, and StyledFillTileBuilder leaves the vertex white; data-driven
             // bakes into the COLOR stream. The fragment multiplies uniform × vertex, so writing both squares the colour.
@@ -113,10 +114,10 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// </summary>
         /// <param name="paint">The layer's parsed fill-extrusion paint properties.</param>
         /// <param name="applier">The layer's per-frame zoom→uniform applier; constant bindings apply
-        /// immediately, Zoom-kind bindings queue for the next <see cref="Style.ZoomStyleApplier.ApplyZoom"/>.</param>
+        /// immediately, Zoom-kind bindings queue for the next <see cref="ZoomStyleApplier.ApplyZoom"/>.</param>
         /// <param name="mat">The layer's cloned material instance (from <see cref="CreateFillExtrusionMaterial"/>)
         /// to bind onto and defensively reset.</param>
-        public static void BindFillExtrusionPaintToApplier(FillExtrusion.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
+        public static void BindFillExtrusionPaintToApplier(FillExtrusion.PaintProperties paint, ZoomStyleApplier applier, Material mat)
         {
             if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
@@ -175,7 +176,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// data-driven expression is spec-invalid — fall to the material's inherited default rather than
         /// bind it.
         /// </summary>
-        public static void BindBackgroundPaintToApplier(Background.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
+        public static void BindBackgroundPaintToApplier(Background.PaintProperties paint, ZoomStyleApplier applier, Material mat)
         {
             if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
@@ -224,7 +225,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// Data-driven properties (Feature/Composite color) are handled by StyledLineTileBuilder bake;
         /// only Constant/Zoom-kind properties are bound here as uniforms.
         /// </summary>
-        public static void BindLinePaintToApplier(Line.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
+        public static void BindLinePaintToApplier(Line.PaintProperties paint, ZoomStyleApplier applier, Material mat)
         {
             // line-color: bind only for non-data-driven (Constant/Zoom). Data-driven → vertex bake.
             // The color rides the standard _BaseColor.

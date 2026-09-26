@@ -22,10 +22,10 @@ using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRe
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Tile;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -834,7 +834,7 @@ namespace MapRenderer.Tests.Visual
 
             // Line-only style: one render layer (a line) → _layerMaterials[0] = layer[0].
             Assert.That(set.Count, Is.EqualTo(1), "Line-only style must have exactly 1 render layer.");
-            Assert.IsInstanceOf<MapRenderer.Core.Style.Line.StyleLayer>(set[0].StyleLayer,
+            Assert.IsInstanceOf<MapRenderer.Unity.Style.Line.StyleLayer>(set[0].StyleLayer,
                 "The single render layer must be a line.");
 
             Material mat = set[0].Material;

@@ -22,7 +22,7 @@ using System.Collections.Generic;
 using MapRenderer.Core.Text;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using UnityEngine;
@@ -31,7 +31,7 @@ using MapRenderer.Unity.Rendering.Map;
 using System.Threading.Tasks;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 using System.Globalization;
@@ -1170,7 +1170,7 @@ namespace MapRenderer.Tests.Text.Placement
             => new SymbolStyle.StyleLayer
             {
                 Id = "points",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"icon-image\":\"marker\",\"icon-size\":2}"),
@@ -1182,7 +1182,7 @@ namespace MapRenderer.Tests.Text.Placement
             => new SymbolStyle.StyleLayer
             {
                 Id = "roads",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "roads",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}"),
@@ -2890,7 +2890,7 @@ namespace MapRenderer.Tests.Text.Placement
             => new SymbolStyle.StyleLayer
             {
                 Id = "labels",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}"),
@@ -2904,7 +2904,7 @@ namespace MapRenderer.Tests.Text.Placement
             SymbolStyle.StyleLayer layer = CentroidsLayer();
 
             // Independent extractor pass (Slice 2) gives the ground-truth text/anchor/ordinal per symbol.
-            var extracted = new List<SymbolStyle.SymbolFeature>();
+            var extracted = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, extracted);
 
             using var manager = BuildGlyphManager();
@@ -3011,7 +3011,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── Per-symbol build isolation: one symbol whose build throws (e.g. a deferred mixed-direction
         //    bidi NotSupportedException) must be SKIPPED, never abort the whole tile's symbols. ──
 
-        private static SymbolStyle.SymbolFeature PointSymbol(string text) => new SymbolStyle.SymbolFeature
+        private static SymbolFeature PointSymbol(string text) => new SymbolFeature
         {
             Text = text,
             Placement = SymbolPlacement.Point,
@@ -3027,7 +3027,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Two LTR symbols around one MIXED symbol ('A' U+0041 + Arabic beh U+0628), which CodepointTextShaper
             // rejects (single-run bidi). The missing Arabic range caches empty in Pass 1; Pass 2's shaper throws.
-            var symbols = new List<SymbolStyle.SymbolFeature>
+            var symbols = new List<SymbolFeature>
             {
                 PointSymbol("Aruba"),
                 PointSymbol("Aب"),
@@ -3061,7 +3061,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var manager = new GlyphManager(source);
             var builder = new StyledSymbolTileBuilder(manager);
 
-            var symbols = new List<SymbolStyle.SymbolFeature> { PointSymbol("Aruba") };
+            var symbols = new List<SymbolFeature> { PointSymbol("Aruba") };
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(
                 0, new FontStack { Names = new[] { FontName } }, symbols);
             var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer };
@@ -3082,7 +3082,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── Icon symbols ride the same Shape loop as text, but must never touch the
         //    shaper/resolver/glyph-fetch machinery (an icon-only layer may carry no text-font at all). ──
 
-        private static SymbolStyle.SymbolFeature Icon(in SymbolQuad iconQuad) => new SymbolStyle.SymbolFeature
+        private static SymbolFeature Icon(in SymbolQuad iconQuad) => new SymbolFeature
         {
             Kind = SymbolKind.Icon,
             IconQuad = iconQuad,
@@ -3107,7 +3107,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var manager = new GlyphManager(source);
             var builder = new StyledSymbolTileBuilder(manager);
 
-            var symbols = new List<SymbolStyle.SymbolFeature> { Icon(SampleIconQuad) };
+            var symbols = new List<SymbolFeature> { Icon(SampleIconQuad) };
             // No text-font at all — FontStack.Names left default/empty, mirroring an icon-only style layer.
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(), symbols);
 
@@ -3129,7 +3129,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
 
-            var symbols = new List<SymbolStyle.SymbolFeature>
+            var symbols = new List<SymbolFeature>
             {
                 PointSymbol("Aruba"),
                 Icon(SampleIconQuad),
@@ -3160,7 +3160,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             var pathRender = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
             var anchors = new[] { new LineAnchor(0, 0.5f) };
-            var alongLine = new SymbolStyle.SymbolFeature
+            var alongLine = new SymbolFeature
             {
                 Kind = SymbolKind.Icon,
                 Placement = SymbolPlacement.Line,
@@ -3177,7 +3177,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 42L,
             };
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(),
-                new List<SymbolStyle.SymbolFeature> { alongLine });
+                new List<SymbolFeature> { alongLine });
 
             var output = new SymbolTileBuffer();
             builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
@@ -3226,22 +3226,22 @@ namespace MapRenderer.Tests.Text.Placement
             const long tileKey = 99L;
             const int pairId = 7;
 
-            var ownerSymbol = new SymbolStyle.SymbolFeature
+            var ownerSymbol = new SymbolFeature
             {
                 Kind = SymbolKind.Icon, IconQuad = SampleIconQuad, Placement = SymbolPlacement.Point,
                 AnchorRender = default, PaddingPx = 3f, SortKey = 0f, TileKey = tileKey,
                 PairRole = SymbolPairRole.Owner, PairId = pairId,
             };
-            var riderSymbol = new SymbolStyle.SymbolFeature
+            var riderSymbol = new SymbolFeature
             {
                 Kind = SymbolKind.Icon, IconQuad = SampleIconQuad, Placement = SymbolPlacement.Point,
                 AnchorRender = default, PaddingPx = 3f, SortKey = 0f, TileKey = tileKey,
                 PairRole = SymbolPairRole.Rider, PairId = pairId,
             };
             var layer1 = new StyledSymbolTileBuilder.ExtractedLayer(
-                materialIndex, new FontStack(), new List<SymbolStyle.SymbolFeature> { ownerSymbol });
+                materialIndex, new FontStack(), new List<SymbolFeature> { ownerSymbol });
             var layer2 = new StyledSymbolTileBuilder.ExtractedLayer(
-                materialIndex, new FontStack(), new List<SymbolStyle.SymbolFeature> { riderSymbol });
+                materialIndex, new FontStack(), new List<SymbolFeature> { riderSymbol });
 
             var buffer = new SymbolTileBuffer();
             // "processor 1" and "processor 2" — mirrors TileSymbolLayerProcessor's one-Shape-call-per-layer
@@ -3260,7 +3260,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally { block.Dispose(); }
         }
 
-        private static void AssertNamedSymbol(List<SymbolStyle.SymbolFeature> extracted, SymbolTileBuffer buffer,
+        private static void AssertNamedSymbol(List<SymbolFeature> extracted, SymbolTileBuffer buffer,
             string name, int expectedQuads)
         {
             int idx = extracted.FindIndex(e => e.Text == name);

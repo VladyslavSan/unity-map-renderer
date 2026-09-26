@@ -15,9 +15,9 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Map;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual

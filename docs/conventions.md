@@ -625,7 +625,7 @@ Name a variable, parameter, or out-parameter for its role, never its position or
 corners, box edges), use those names; a positional name hides which corner or edge a reader is looking at.
 
 **A `using X = Namespace.Type;` alias must be spelled out too.** A disambiguating alias is fine —
-`using SymbolStyle = MapRenderer.Core.Style.Symbol;` avoids a real collision with the base style
+`using SymbolStyle = MapRenderer.Unity.Style.Symbol;` avoids a real collision with the base style
 hierarchy — but the alias itself must read as a name, never an abbreviation. Add an alias only to break an
 actual collision, and keep it descriptive when you do.
 

@@ -4,6 +4,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Backend
 {
@@ -13,7 +14,7 @@ namespace MapRenderer.Unity.Rendering.Backend
     /// draw item per (tile, layer) mesh and is driven by a per-frame <see cref="Rebuild"/>;
     /// <c>TileManager</c> holds exactly one, uniformly, through this interface. Non-local invariant: every
     /// implementation must TRANSPORT construction's per-slot shadow list (each layer's
-    /// <c>Style.IRenderLayer.CastShadows</c>, indexed by <c>materialIndex</c>; absent or short slot ⇒
+    /// <c>IRenderLayer.CastShadows</c>, indexed by <c>materialIndex</c>; absent or short slot ⇒
     /// <see cref="UnityEngine.Rendering.ShadowCastingMode.Off"/>) verbatim and never re-derive it from the
     /// layer type or material, or the backends drift apart.
     /// </summary>
@@ -51,7 +52,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <summary>
         /// Declares whether a layer SLOT draws at all. A gated-out slot submits no draw item — to the
         /// camera view or the light view — so a layer outside its zoom range costs no vertex and no draw
-        /// call. Pushed per frame from <c>Style.IFadeableRenderLayer.PaintsSomething</c>; an unchanged
+        /// call. Pushed per frame from <c>IFadeableRenderLayer.PaintsSomething</c>; an unchanged
         /// value must cost nothing, and a slot never declared draws. Non-local invariant: the three
         /// implementations differ in mechanism but must agree on the outcome, including for an item added
         /// while the slot is already gated.

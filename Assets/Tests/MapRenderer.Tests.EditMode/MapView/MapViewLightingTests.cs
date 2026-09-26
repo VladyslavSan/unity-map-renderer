@@ -25,11 +25,11 @@ using UnityEngine.Rendering;
 using Unity.Mathematics;
 using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Core.Json;
 using SkyPropertyId = MapRenderer.Unity.Rendering.ShaderProperties.Sky.PropertyId;
-using StyleTransition = MapRenderer.Unity.Rendering.Style.StyleTransition;
+using StyleTransition = MapRenderer.Unity.Rendering.Layers.StyleTransition;
 
 
 namespace MapRenderer.Tests.MapViews

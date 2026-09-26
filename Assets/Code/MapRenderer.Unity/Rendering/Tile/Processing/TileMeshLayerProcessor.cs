@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing

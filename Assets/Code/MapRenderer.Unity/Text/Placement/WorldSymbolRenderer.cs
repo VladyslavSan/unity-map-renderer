@@ -9,13 +9,13 @@ using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Common;
 using MapRenderer.Unity.Rendering.Backend;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Text.Placement
 {
@@ -134,7 +134,7 @@ namespace MapRenderer.Unity.Text.Placement
 
         /// <summary>A leaf's settings, applied once at creation: DontSave, and no shadows. Non-obvious why: a
         /// symbol is a billboard above the ground, so a cast shadow is a floating dark quad and a received one
-        /// darkens the glyphs. <c>Style.IRenderLayer.CastShadows</c> holds the tile-geometry half.</summary>
+        /// darkens the glyphs. <c>IRenderLayer.CastShadows</c> holds the tile-geometry half.</summary>
         private static MeshNode NewLeaf(string name)
         {
             var node = new MeshNode(name);

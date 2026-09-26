@@ -5,7 +5,7 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Geo;

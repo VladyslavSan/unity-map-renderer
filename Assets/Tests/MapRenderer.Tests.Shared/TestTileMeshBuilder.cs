@@ -12,9 +12,9 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Lines;
-using Fill = MapRenderer.Core.Style.Fill;
-using Line = MapRenderer.Core.Style.Line;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
+using Fill = MapRenderer.Unity.Style.Fill;
+using Line = MapRenderer.Unity.Style.Line;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 
@@ -232,7 +232,7 @@ namespace MapRenderer.Tests
         /// <summary>The ordinal-bearing selection for one style layer over one decoded layer — the production
         /// pairing (<c>TileMeshLayerProcessor</c> resolves the layer once, then selects against it).</summary>
         internal static List<SelectedTileFeature> Select(
-            MapRenderer.Core.Style.StyleLayer styleLayer, ITileLayer tileLayer, double zoom)
+            MapRenderer.Unity.Style.StyleLayer styleLayer, ITileLayer tileLayer, double zoom)
         {
             var selected = new List<SelectedTileFeature>();
             FeatureSelector.SelectFeatures(styleLayer, tileLayer, zoom, selected);

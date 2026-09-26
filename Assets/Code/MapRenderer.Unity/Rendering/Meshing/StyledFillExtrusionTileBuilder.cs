@@ -11,9 +11,9 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile.Processing;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
                                                         // 'Color' ambiguous with UnityEngine's
 

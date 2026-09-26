@@ -1,4 +1,4 @@
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 
 namespace MapRenderer.Unity.Rendering.Source

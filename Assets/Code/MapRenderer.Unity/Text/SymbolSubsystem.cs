@@ -7,7 +7,7 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Text.Placement;
@@ -22,7 +22,7 @@ using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Common;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Unity.Text
 {

@@ -22,7 +22,7 @@ using UnityEngine.TestTools.Constraints;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
@@ -32,7 +32,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
 using Is = UnityEngine.TestTools.Constraints.Is;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Tiles;
 using System.Threading;
 using MapRenderer.Core.Text;
@@ -42,8 +42,8 @@ using MapRenderer.Unity.Concurrency;
 using MapRenderer.Tests.Text.Placement; // TestSymbolTileBuffer
 using System.Reflection;
 using System.Text.RegularExpressions;
-using MapRenderer.Core.Style.Symbol;
-using StyleLayer = MapRenderer.Core.Style.StyleLayer;
+using MapRenderer.Unity.Style.Symbol;
+using StyleLayer = MapRenderer.Unity.Style.StyleLayer;
 using TextAnchor = MapRenderer.Core.Text.TextAnchor;
 
 
@@ -617,9 +617,9 @@ namespace MapRenderer.Tests.Text
         {
             using var manager = new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
             var builder = new StyledSymbolTileBuilder(manager);
-            var symbols = new List<Symbol.SymbolFeature>
+            var symbols = new List<SymbolFeature>
             {
-                new Symbol.SymbolFeature
+                new SymbolFeature
                 {
                     Text = MixedDirectionText,
                     Placement = SymbolPlacement.Point,

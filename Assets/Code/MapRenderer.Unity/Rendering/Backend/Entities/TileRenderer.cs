@@ -12,6 +12,7 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.View;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Common;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Backend.Entities
 {
@@ -135,7 +136,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// Optional per-layer style ids parallel to <paramref name="layerMaterials"/>, used only to name the
         /// layer entities in the Editor's Entities Hierarchy. When null/short, the material name is used.
         /// </param>
-        /// <param name="layerShadowModes">Optional per-layer <c>Style.IRenderLayer.CastShadows</c> parallel to
+        /// <param name="layerShadowModes">Optional per-layer <c>IRenderLayer.CastShadows</c> parallel to
         /// <paramref name="layerMaterials"/>; null/short ⇒ <see cref="ShadowCastingMode.Off"/>.</param>
         public TileRenderer(
             IReadOnlyList<Material> layerMaterials,

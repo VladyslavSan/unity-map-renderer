@@ -3,14 +3,14 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapView;
@@ -114,15 +114,15 @@ namespace MapRenderer.Tests
             }
         }
 
-        /// <summary>Number of fill render layers MapView built from the style. Counts by Core style type over
+        /// <summary>Number of fill render layers MapView built from the style. Counts by style layer type over
         /// the one ordered render-layer list — the production type carries no fill/line discriminator (the
         /// unification's point), so the fill/line split lives here in the test assembly.</summary>
         public static int FillLayerCount(this MapViewComponent view)
-            => CountLayersOfType<MapRenderer.Core.Style.Fill.StyleLayer>(view);
+            => CountLayersOfType<MapRenderer.Unity.Style.Fill.StyleLayer>(view);
 
         /// <summary>Number of line render layers MapView built from the style (see <see cref="FillLayerCount"/>).</summary>
         public static int LineLayerCount(this MapViewComponent view)
-            => CountLayersOfType<MapRenderer.Core.Style.Line.StyleLayer>(view);
+            => CountLayersOfType<MapRenderer.Unity.Style.Line.StyleLayer>(view);
 
         private static int CountLayersOfType<T>(MapViewComponent view)
         {

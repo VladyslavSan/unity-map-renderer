@@ -21,10 +21,10 @@
 //   TextWrapTests                 — T5 (greedy word-wrap, golden line assignment) and T6 (whitespace advances the pen but emits no quad).
 
 using NUnit.Framework;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Tests.Style; // SymbolTestFixtures lives in the Style test folder
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using System;
 using System.Collections.Generic;
 using System.IO;

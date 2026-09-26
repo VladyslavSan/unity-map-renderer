@@ -5,10 +5,10 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests
 {
@@ -16,7 +16,7 @@ namespace MapRenderer.Tests
     /// Shared, engine-free fixture plumbing for the symbol-extraction test files: the walk-up loaders (which
     /// have to work under Unity batch mode AND <c>dotnet test</c>, whose working directories differ), the
     /// parsed-once Liberty style, and the <see cref="PointStageInput"/> adapter that turns a real extractor
-    /// <see cref="SymbolStyle.SymbolFeature"/> into a staging input. One copy, so fixture paths and staging
+    /// <see cref="SymbolFeature"/> into a staging input. One copy, so fixture paths and staging
     /// fields do not drift between files.
     /// </summary>
     internal static class SymbolTestFixtures
@@ -86,11 +86,11 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Hand-builds the <see cref="PointStageInput"/> for one half of a pair from the REAL
-        /// extractor's own <see cref="SymbolStyle.SymbolFeature"/> — mirrors
+        /// extractor's own <see cref="SymbolFeature"/> — mirrors
         /// <c>SymbolTileBlockBaker.BuildPointInput</c>'s field math (the Unity-only bake step itself
         /// can't run headlessly — no Unity.Collections in Tools/core-tests — so this is the engine-free
         /// subset: Color/FadeId are placeholders the callers set or ignore).</summary>
-        public static PointStageInput StageInputFor(SymbolStyle.SymbolFeature symbol, SymbolKind atlasKind,
+        public static PointStageInput StageInputFor(SymbolFeature symbol, SymbolKind atlasKind,
             float2 boundsMin, float2 boundsMax, float2 screenPx, float textSizePx)
             => new PointStageInput
             {

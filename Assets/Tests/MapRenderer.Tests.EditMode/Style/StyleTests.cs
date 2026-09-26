@@ -16,23 +16,23 @@
 //   IconImageResolverTests      — Symbol.IconImageResolver.Resolve: token sugar + expression form -> sprite name.
 //   LightSkyTests               — root light/sky blocks: parse, spec defaults, malformed input.
 //
-// LineOffsetTests.cs stays its own file: its `using MapRenderer.Core.Style.Line;` (a namespace import, for
-// LineOffset) brings `MapRenderer.Core.Style.Line.StyleLayer` into scope, colliding with the bare
-// `StyleLayer` (MapRenderer.Core.Style.StyleLayer) used above (CS0104).
+// LineOffsetTests.cs stays its own file: its `using MapRenderer.Unity.Style.Line;` (a namespace import, for
+// LineOffset) brings `MapRenderer.Unity.Style.Line.StyleLayer` into scope, colliding with the bare
+// `StyleLayer` (MapRenderer.Unity.Style.StyleLayer) used above (CS0104).
 
 using System;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Expressions;
 using System.Linq;
 using System.Reflection;
-using Fill = MapRenderer.Core.Style.Fill;
-using Line = MapRenderer.Core.Style.Line;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
-using Background = MapRenderer.Core.Style.Background;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
+using Fill = MapRenderer.Unity.Style.Fill;
+using Line = MapRenderer.Unity.Style.Line;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
+using Background = MapRenderer.Unity.Style.Background;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text.Sprites;
@@ -237,6 +237,65 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(StyleParser.DefaultScheme, tj.Scheme);
             Assert.AreEqual(StyleParser.DefaultSourceMaxZoom, tj.MaxZoom);
             Assert.IsNotNull(tj.Bounds);
+        }
+
+        // =========================================================================================
+        // 5b. The parser is the ONE place that decides "malformed" — a typed flag, not a re-read of Raw.
+        //     Absent stays unmalformed; a present non-array value, wrong shape, a non-number element, and
+        //     an out-of-range value (south > north, or a longitude outside [-180, 180]) all set it, on
+        //     both StyleParser.ParseSource's own bounds AND TileJsonParser's, and SourceResolver carries
+        //     the TileJSON one onto the resolved SourceDefinition.
+        // =========================================================================================
+        [Test]
+        public void BoundsMalformed_IsATypedFlag_NotARawReread()
+        {
+            SourceDefinition Source(string boundsJson) => StyleParser.Parse($@"{{
+                ""sources"": {{ ""v"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""]
+                    {(boundsJson == null ? "" : $@", ""bounds"": {boundsJson}")} }} }}
+            }}").Sources["v"];
+
+            SourceDefinition absent = Source(null);
+            Assert.IsFalse(absent.BoundsMalformed, "an absent bounds key is not malformed");
+            CollectionAssert.AreEqual(StyleParser.DefaultBounds, absent.Bounds);
+
+            SourceDefinition wrongLength = Source("[0, 0, 180]");
+            Assert.IsTrue(wrongLength.BoundsMalformed, "a 3-element array is not [west, south, east, north]");
+            CollectionAssert.AreEqual(StyleParser.DefaultBounds, wrongLength.Bounds);
+
+            SourceDefinition notAnArray = Source(@"""x""");
+            Assert.IsTrue(notAnArray.BoundsMalformed,
+                "a PRESENT bounds key that is not an array must be malformed, not treated as absent");
+            CollectionAssert.AreEqual(StyleParser.DefaultBounds, notAnArray.Bounds);
+
+            SourceDefinition jsonNull = Source("null");
+            Assert.IsTrue(jsonNull.BoundsMalformed, "a PRESENT bounds key holding JSON null must be malformed");
+
+            SourceDefinition nonNumber = Source(@"[0, 0, 180, ""x""]");
+            Assert.IsTrue(nonNumber.BoundsMalformed,
+                "a non-number element must be REJECTED, not silently coerced by AsDouble()");
+            CollectionAssert.AreEqual(StyleParser.DefaultBounds, nonNumber.Bounds);
+
+            SourceDefinition southPastNorth = Source("[0, 10, 180, 0]");
+            Assert.IsTrue(southPastNorth.BoundsMalformed, "south (10) > north (0) is not a valid box");
+
+            SourceDefinition lonOutOfRange = Source("[-200, 0, 180, 10]");
+            Assert.IsTrue(lonOutOfRange.BoundsMalformed, "west (-200) is outside [-180, 180]");
+
+            SourceDefinition valid = Source("[0, 0, 180, 10]");
+            Assert.IsFalse(valid.BoundsMalformed);
+            CollectionAssert.AreEqual(new[] { 0.0, 0.0, 180.0, 10.0 }, valid.Bounds);
+
+            // TileJsonParser shares the same validation, and SourceResolver carries its flag onto the
+            // resolved SourceDefinition (mirroring how it already carries Bounds itself).
+            var tileJson = TileJsonParser.Parse(@"{ ""tiles"": [""https://x/{z}/{x}/{y}.pbf""], " +
+                                                 @"""bounds"": [0, 10, 180, 0] }");
+            Assert.IsTrue(tileJson.BoundsMalformed, "TileJsonParser must validate bounds the same way");
+
+            var resolvedFromUrl = new SourceDefinition { Type = SourceType.Vector, Url = "u" };
+            SourceResolver.Resolve(resolvedFromUrl, tileJson);
+            Assert.IsTrue(resolvedFromUrl.BoundsMalformed,
+                "SourceResolver must carry the TileJSON's BoundsMalformed flag onto the resolved source, " +
+                "the same way it already carries Bounds itself");
         }
 
         // =========================================================================================
@@ -982,7 +1041,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void StyleLayer_ExposesParsedLayout()
         {
-            var style = MapRenderer.Core.Style.StyleParser.Parse(@"{
+            var style = MapRenderer.Unity.Style.StyleParser.Parse(@"{
                 ""version"": 8,
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://e.invalid/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [ { ""id"": ""f"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""l"",
@@ -3111,7 +3170,7 @@ namespace MapRenderer.Tests.Style
         public void ShaderPointers_InLineDashSource_ResolveOnDisk()
         {
             string sourcePath = FindRepoFile(
-                "Assets", "Code", "MapRenderer.Core", "Style", "Line", "LineDash.cs");
+                "Assets", "Code", "MapRenderer.Unity", "Style", "Line", "LineDash.cs");
             Assert.That(sourcePath, Is.Not.Null,
                 $"LineDash.cs not found. Tried walking up 16 levels from " +
                 $"cwd={Directory.GetCurrentDirectory()} and AppContext.BaseDirectory={AppContext.BaseDirectory}");
@@ -3150,7 +3209,7 @@ namespace MapRenderer.Tests.Style
             return new Line.StyleLayer
             {
                 Id          = "test-dash",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Line,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Line,
                 SourceLayer = "roads",
                 Paint       = TestStyle.LinePaint(paintJson),
                 Layout      = TestStyle.LineLayout(),

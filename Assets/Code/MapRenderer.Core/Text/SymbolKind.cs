@@ -3,10 +3,10 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Distinguishes a <see cref="Style.Symbol.SymbolFeature"/>'s payload: a shaped text run
-    /// (<see cref="Style.Symbol.SymbolFeature.Text"/>) or a sprite icon (<see cref="Style.Symbol.SymbolFeature.IconQuad"/>).
+    /// Distinguishes a <see cref="Placement.SymbolFeature"/>'s payload: a shaped text run
+    /// (<see cref="Placement.SymbolFeature.Text"/>) or a sprite icon (<see cref="Placement.SymbolFeature.IconQuad"/>).
     /// <see cref="Text"/> is the zero value so every existing text symbol (which never sets
-    /// <see cref="Style.Symbol.SymbolFeature.Kind"/>) stays <see cref="Text"/> by default.
+    /// <see cref="Placement.SymbolFeature.Kind"/>) stays <see cref="Text"/> by default.
     /// </summary>
     public enum SymbolKind
     {

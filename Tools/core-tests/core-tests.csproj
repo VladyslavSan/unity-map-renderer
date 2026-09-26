@@ -143,22 +143,22 @@
     <!-- GeoJSON S2: deterministic JSON serialization, the inline-`data` half of SourceKey's identity. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Json/JsonCanonical.cs" />
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Json/JsonCanonicalTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleLayerType.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/SourceDefinition.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleDocument.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleParser.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleLight.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleSky.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLayerType.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SourceDefinition.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleDocument.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleParser.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLight.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleSky.cs" />
     <!-- S83a: TileJSON model+parser + SourceDefinition resolution (engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/TileJson.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/SourceResolver.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/TileJson.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SourceResolver.cs" />
 
     <!-- S11: type assertions (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Assertions.cs" />
 
-    <!-- S60: StyleProperty<T> replaces PaintPropertyEvaluator + DataDrivenPaintEvaluator (Core, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleProperty.cs" />
+    <!-- S60: StyleProperty<T> replaces PaintPropertyEvaluator + DataDrivenPaintEvaluator (engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleProperty.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/InternalsVisibleTo.cs" />
 
     <!-- S09: clean-room expression evaluation engine (Core, engine-free) -->
@@ -260,36 +260,36 @@
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->
 
-    <!-- S59: per-feature-type Style namespaces (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/PropertyNames.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/PaintProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/FillPattern.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/LayoutProperties.cs" />
-    <!-- S23 I1: fill-extrusion style plumbing (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/PropertyNames.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/PaintProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PropertyNames.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PaintProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LayoutProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/PropertyNames.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/PaintProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/StyleLayer.cs" />
+    <!-- S59: per-feature-type Style namespaces (engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Fill/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Fill/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Fill/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Fill/FillPattern.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Fill/LayoutProperties.cs" />
+    <!-- S23 I1: fill-extrusion style plumbing (engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/FillExtrusion/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/FillExtrusion/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/FillExtrusion/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Line/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Line/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Line/LayoutProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Line/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Background/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Background/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Background/StyleLayer.cs" />
 
-    <!-- S105 Slice 1: Symbol style layer + text-field resolver (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/PropertyNames.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/PaintProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/LayoutProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/TextFieldResolver.cs" />
+    <!-- S105 Slice 1: Symbol style layer + text-field resolver (engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/LayoutProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/TextFieldResolver.cs" />
 
     <!-- Slice A: text layout-options wiring (LayoutProperties → TextLayoutOptions), engine-free -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/TextLayoutOptionsBuilder.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/TextLayoutOptionsBuilder.cs" />
 
     <!-- S105 Slice 2: point-feature extraction (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/SymbolFeature.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolFeature.cs" />
 
     <!-- S105 Slice 2: A3 extraction over the fixture centroids layer (shared verbatim) -->
 
@@ -315,12 +315,12 @@
          AssetDatabase-based MapShaderPath is Editor-only and cannot be registered here). -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Structure/EngineFreeShaderPaths.cs" />
 
-    <!-- S43: LineDash (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LineDash.cs" />
+    <!-- S43: LineDash (engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Line/LineDash.cs" />
 
-    <!-- S44: LineOffset (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LineOffset.cs" />
-    <!-- S44: LineOffsetTests stays its own file (UMR-176): its `using MapRenderer.Core.Style.Line;`
+    <!-- S44: LineOffset (engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Line/LineOffset.cs" />
+    <!-- S44: LineOffsetTests stays its own file (UMR-176): its `using MapRenderer.Unity.Style.Line;`
          collides with StyleTests.cs's bare `StyleLayer` (CS0104) — see the file's own header. -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/LineOffsetTests.cs" />
 
@@ -390,7 +390,7 @@
     <!-- I3: icon labels — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolKind.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/IconImageResolver.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/IconImageResolver.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IconQuadLayout.cs" />
     <!-- UMR-176 round B: StyleTests.cs — 12 formerly-separate fast-lane Style fixtures (TileJson/
          StyleProperty/StyleLayerEagerParse/FillLayout/FillPattern/FillExtrusionPaint/LinePaint/

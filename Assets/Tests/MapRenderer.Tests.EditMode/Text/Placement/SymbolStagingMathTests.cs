@@ -31,7 +31,7 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Geo;
 using System.Collections.Generic;
 using System;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.View;
 
 

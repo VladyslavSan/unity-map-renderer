@@ -204,10 +204,11 @@ injected defects — lives with those tests, not here.
 
 ## 7. Grounding (touch points)
 
-Core: `Style/Symbol/LayoutProperties` (`SymbolPlacement`, `ParsePlacement`, `ParseAlignment`),
-`Style/Symbol/IconImageResolver`, `Text/AlignmentMode` (+ `AlignmentResolution`),
+Core: `Text/AlignmentMode` (+ `AlignmentResolution`),
 `Text/Placement/LineAnchorPlacement` / `LineAnchor`, `Text/Placement/SymbolCollision`,
-`Text/Placement/SymbolStagingMath`. Unity: `Text/SymbolFeatureExtractor` (the placement/geometry gate, the
+`Text/Placement/SymbolStagingMath`. Unity: `Style/Symbol/LayoutProperties` (`SymbolPlacement`,
+`ParsePlacement`, `ParseAlignment`), `Style/Symbol/IconImageResolver`,
+`Text/SymbolFeatureExtractor` (the placement/geometry gate, the
 icon path, the line and point branches), `Text/SymbolSubsystem` (`TryBeginBuild`, `PumpBuilds`,
 `FetchSpriteSheetAsync` — D6), `Rendering/Tile/Processing/TileSymbolLayerProcessor` (the atlas is a ctor
 arg — D6 defers its construction), `Text/StyledSymbolTileBuilder` (the point vs. curved branches),

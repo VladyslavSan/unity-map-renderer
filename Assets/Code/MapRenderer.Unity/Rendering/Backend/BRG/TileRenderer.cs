@@ -10,6 +10,7 @@ using UnityEngine.Rendering;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.View;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Backend.BRG
 {
@@ -99,7 +100,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>Constructs the BRG and registers each layer material — the one ordered, FULL-WIDTH
         /// per-layer list in SLOT order (<c>index == materialIndex == AddTileLayer index ==
-        /// <see cref="Style.IRenderLayer.DrawIndex"/></c>). Materials are referenced, not owned. See
+        /// <see cref="IRenderLayer.DrawIndex"/></c>). Materials are referenced, not owned. See
         /// `docs/tile-pipeline-design.md` for the null-placeholder note.</summary>
         /// <param name="layerMaterials">The full-width per-layer material list, indexed by slot.</param>
         /// <param name="layerShadowModes">Per-layer shadow declarations; see <see cref="ShadowModeFor"/>.</param>
@@ -206,7 +207,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
-        /// <paramref name="materialIndex"/> is the layer's global slot (<see cref="Style.IRenderLayer.DrawIndex"/>)
+        /// <paramref name="materialIndex"/> is the layer's global slot (<see cref="IRenderLayer.DrawIndex"/>)
         /// into the full-width material list; null (non-tile-mesh) slots never receive this call.
         /// BRG draws a flat instance buffer and ignores <paramref name="tileId"/>.
         /// </summary>

@@ -13,7 +13,7 @@ using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests
 {

@@ -334,8 +334,9 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   1. Asserts a shape — source text, the file tree, or reflection that IS the assertion — → `Structure/`.
   2. Renders/reads pixels back, or needs a GPU → `Visual/`.
   3. Needs real frames to settle → PlayMode, under its topic's folder.
-  4. Every named type is `Core`/BCL/NUnit/`Unity.Mathematics` → EditMode under its topic's folder, **and**
-     add the `<Compile Include>` to `Tools/core-tests/core-tests.csproj` in the same commit.
+  4. Every named type is `Core`/`MapRenderer.Unity.Style`/BCL/NUnit/`Unity.Mathematics` → EditMode under its
+     topic's folder, **and** add the `<Compile Include>` to `Tools/core-tests/core-tests.csproj` in the
+     same commit.
   5. Otherwise → EditMode under its topic's folder.
   The topic is one word from the commit-scope vocabulary (`docs/commit-conventions.md`). Only `camera` and
   `projection` are one folder matching the word; every other topic's default folder has its own

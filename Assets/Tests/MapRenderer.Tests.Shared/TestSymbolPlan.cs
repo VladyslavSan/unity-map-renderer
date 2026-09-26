@@ -7,7 +7,7 @@
 using System;
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
