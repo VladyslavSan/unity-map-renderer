@@ -9,11 +9,11 @@ using SymbolStyle = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Symbol <see cref="IRenderLayer"/>: <see cref="RenderLayerBuild.FramePlaced"/> (rebuilt every frame from
-    /// placement) / <see cref="DrawPersistence.Persistent"/>. It owns the per-layer text and icon material
-    /// clones and is drawn by <see cref="Placement.WorldSymbolRenderer"/>. Collision stays global; only the draw
-    /// is per layer. NOT an <see cref="IFadeableRenderLayer"/>: the symbol shaders have no <c>_Opacity</c>, and
-    /// symbols carry their own per-symbol fade and zoom gate (<c>SymbolPlacementSystem</c>).
+    /// Symbol <see cref="IRenderLayer"/>: its geometry is rebuilt every frame from placement. It owns the
+    /// per-layer text and icon material clones and is drawn by <see cref="Placement.WorldSymbolRenderer"/>.
+    /// Collision stays global; only the draw is per layer. NOT an <see cref="IFadeableRenderLayer"/>: the
+    /// symbol shaders have no <c>_Opacity</c>, and symbols carry their own per-symbol fade and zoom gate
+    /// (<c>SymbolPlacementSystem</c>).
     /// </summary>
     internal sealed class SymbolRenderLayer : IRenderLayer
     {
@@ -21,10 +21,7 @@ namespace MapRenderer.Unity.Rendering.Style
         private static readonly int HaloColorId = Shader.PropertyToID("_HaloColor");
 
         public MapRenderer.Core.Style.StyleLayer StyleLayer   { get; private set; }
-        public RenderLayerBuild                  Build        => RenderLayerBuild.FramePlaced;
-        public DrawPersistence                   Persistence  => DrawPersistence.Persistent;
         public int                               DrawIndex    { get; }
-        public int                               TransitioningCount => _applier?.TransitioningCount ?? 0;
 
         /// <summary>The text sits at <see cref="LayerSubSlot.Above"/>, over this layer's own icon at
         /// <see cref="LayerSubSlot.Base"/>. Non-obvious why: both shaders are <c>ZWrite Off</c> /
@@ -57,8 +54,10 @@ namespace MapRenderer.Unity.Rendering.Style
         public SymbolStyle.StyleLayer SymbolLayer { get; private set; }
 
         /// <summary>Carries <c>_TextColor</c>/<c>_HaloColor</c> across a restyle ease (mirrors
-        /// <see cref="FillRenderLayer"/>). <c>null</c> when <see cref="WorldTextMaterial"/> is null.</summary>
-        private readonly ZoomStyleApplier _applier;
+        /// <see cref="FillRenderLayer"/>). <c>null</c> when <see cref="WorldTextMaterial"/> is null.
+        /// Internal, not private: MapRenderer.Tests.Shared's RenderLayerTestExtensions reads it to sum
+        /// still-easing bindings — no reader outside this class.</summary>
+        internal ZoomStyleApplier Applier { get; }
 
         private SymbolRenderLayer(SymbolStyle.StyleLayer layer,
             Material worldTextMaterial, Material worldIconMaterial, int drawIndex,
@@ -69,7 +68,7 @@ namespace MapRenderer.Unity.Rendering.Style
             WorldTextMaterial = worldTextMaterial;
             WorldIconMaterial = worldIconMaterial;
             DrawIndex         = drawIndex;
-            _applier          = applier;
+            Applier           = applier;
         }
 
         /// <summary>Never returns null (unlike Fill/Line's <c>TryCreate</c>): the 1:1 slot↔subsystem-ordinal
@@ -151,7 +150,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>Re-evaluates every QUEUED binding at the live zoom and device-pixel ratio, every frame
         /// — this is what carries a restyle's colour ease. A settled Constant binding is not queued and is
         /// never re-pushed.</summary>
-        public void ApplyZoom(in StyleFrameInputs inputs) => _applier?.ApplyZoom(inputs);
+        public void ApplyZoom(in StyleFrameInputs inputs) => Applier?.ApplyZoom(inputs);
 
         /// <summary>
         /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
@@ -163,9 +162,9 @@ namespace MapRenderer.Unity.Rendering.Style
             var typed = (SymbolStyle.StyleLayer)layer;
             StyleLayer  = typed;
             SymbolLayer = typed;
-            if (_applier == null) return;
-            _applier.SetTransition(transition, nowSeconds);
-            BindTextPaint(WorldTextMaterial, _applier, typed.Paint);
+            if (Applier == null) return;
+            Applier.SetTransition(transition, nowSeconds);
+            BindTextPaint(WorldTextMaterial, Applier, typed.Paint);
         }
 
         /// <summary>Re-stamps BOTH materials — <see cref="Material"/> at <see cref="LayerSubSlot.Above"/>

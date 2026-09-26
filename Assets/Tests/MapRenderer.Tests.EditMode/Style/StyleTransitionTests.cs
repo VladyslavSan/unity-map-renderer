@@ -173,7 +173,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(oracleB.g, atEnd.g, 0f, "t>=1 G must be bit-exact target.");
             Assert.AreEqual(oracleB.b, atEnd.b, 0f, "t>=1 B must be bit-exact target.");
             Assert.AreEqual(oracleB.a, atEnd.a, 0f, "t>=1 A must be bit-exact target.");
-            Assert.AreEqual(0, set.TransitioningCount, "settled after t>=1.");
+            Assert.AreEqual(0, set.TransitioningCount(), "settled after t>=1.");
         }
 
         // ── 4. Zoom change mid-transition moves both endpoints ───────────────────────────────
@@ -268,7 +268,7 @@ namespace MapRenderer.Tests.Style
                 "drive precondition: a discriminant-only restyle must still take the in-place path.");
             set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, now)); // the frame SetStyle itself would drive
 
-            Assert.AreEqual(0, set.TransitioningCount, "a discriminant-only restyle must arm nothing.");
+            Assert.AreEqual(0, set.TransitioningCount(), "a discriminant-only restyle must arm nothing.");
             Assert.AreEqual(1f, set[0].Material.GetFloat(ShaderProperties.Fill.PropertyId.FillTranslateAnchor),
                 "the uniform must already be at its new value.");
         }
@@ -333,7 +333,7 @@ namespace MapRenderer.Tests.Style
             Color restyled = set[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
 
             AssertApprox(oracle, restyled, "Instant must match a fresh build of the SAME style, same frame.", 0f);
-            Assert.AreEqual(0, set.TransitioningCount, "Instant must arm nothing.");
+            Assert.AreEqual(0, set.TransitioningCount(), "Instant must arm nothing.");
         }
 
         // ── 13-15. Alloc-free at every phase — the loop the 5 per-commit teeth cannot see ────
@@ -510,13 +510,13 @@ namespace MapRenderer.Tests.Style
                 "drive precondition: the first A1->B restyle must take the in-place path.");
             set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.0));
             Assert.AreSame(mat0, set[0].Material, "first restyle must keep the material.");
-            Assert.Greater(set.TransitioningCount, 0, "first restyle must have armed a transition.");
+            Assert.Greater(set.TransitioningCount(), 0, "first restyle must have armed a transition.");
 
             Assert.IsTrue(set.TryRestyleInPlace(styleB, styleA2, StyleTransition.Default, 1.0),
                 "drive precondition: the second B->A2 restyle must ALSO take the in-place path.");
             set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.0));
             Assert.AreSame(mat0, set[0].Material, "second restyle must ALSO keep the material.");
-            Assert.Greater(set.TransitioningCount, 0, "second restyle must ALSO have armed a transition.");
+            Assert.Greater(set.TransitioningCount(), 0, "second restyle must ALSO have armed a transition.");
         }
     }
 
@@ -896,11 +896,12 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <see cref="RenderLayerSet.TransitioningCount"/> is <c>&gt; 0</c> mid-ease and
-        /// <c>== 0</c> once settled — a SEPARATE injection from
+        /// <see cref="RenderLayerTestExtensions.TransitioningCount(RenderLayerSet)"/> is <c>&gt; 0</c> mid-ease
+        /// and <c>== 0</c> once settled — a SEPARATE injection from
         /// <see cref="SymbolRestyle_MidEase_TextColorLiesBetweenTheEndpoints"/>'s, because that test's defect
-        /// (an immediate snap) would also red this. RED-verify: make <c>SymbolRenderLayer.TransitioningCount</c>
-        /// return <c>0</c> unconditionally — the mid-ease clause fires while the mid-ease colour test stays green.
+        /// (an immediate snap) would also red this. RED-verify: change the extension's
+        /// <c>SymbolRenderLayer s =&gt; s.Applier</c> arm to <c>null</c> — the mid-ease clause fires while
+        /// the mid-ease colour test stays green.
         /// </summary>
         [Test]
         public void SymbolRestyle_TransitioningCount_RisesThenSettles()
@@ -913,10 +914,10 @@ namespace MapRenderer.Tests.Style
 
                 double mid = StyleTransition.Default.DurationSeconds / 2.0;
                 set.ApplyZoom(new StyleFrameInputs(8.0, 1.0, mid));
-                Assert.Greater(set.TransitioningCount, 0, "mid-ease, at least one binding must still be easing.");
+                Assert.Greater(set.TransitioningCount(), 0, "mid-ease, at least one binding must still be easing.");
 
                 set.ApplyZoom(new StyleFrameInputs(8.0, 1.0, StyleTransition.Default.DurationSeconds));
-                Assert.AreEqual(0, set.TransitioningCount, "settled at exactly the transition duration.");
+                Assert.AreEqual(0, set.TransitioningCount(), "settled at exactly the transition duration.");
         }
 
         // ── the symbol applier's own zero-alloc tooth ─────────────────────────────────────────

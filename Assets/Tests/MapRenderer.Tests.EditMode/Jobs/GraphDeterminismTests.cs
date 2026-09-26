@@ -2653,14 +2653,11 @@ namespace MapRenderer.Tests.Jobs
             public RecordingTileMeshRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
 
             public StyleLayer       StyleLayer      { get; }
-            public RenderLayerBuild Build           => RenderLayerBuild.TileMesh;
-            public DrawPersistence  Persistence     => DrawPersistence.Persistent;
             public int              DrawIndex       => 0;
             public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material         Material        => null;
             public void ApplyZoom(in StyleFrameInputs inputs) { }
-            public int TransitioningCount => 0;
             public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
             public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }

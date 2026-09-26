@@ -84,7 +84,7 @@ tile-scoped decode and the cross-layer shared atlas forbid the second.
   once, shared across every layer of that source, and each layer processes **its source's decoded tile**.
 - **A null-source layer (background) needs no fetch or decode.** `BackgroundQuad` synthesizes a
   full-tile-extent quad per covered tile, and `TileManager.KickSourcelessBackground` schedules it straight into
-  the build graph with no worker pass. Background is a **source-less `TileMesh` layer**, not a bespoke world quad.
+  the build graph with no worker pass. Background is a **source-less, per-tile layer**, not a bespoke world quad.
 - **Sources are peers behind one seam.** `ITileFeatureSource.GetTile(TileId)` returns a
   `SharedDisposable<IDecodedTile>`. MVT = fetch bytes + decode protobuf; GeoJSON = load the dataset once +
   slice client-side; a raster source (not built) would be fetch bytes + a texture artifact. Source output is
@@ -92,7 +92,7 @@ tile-scoped decode and the cross-layer shared atlas forbid the second.
 
 Because every per-tile layer projects through the same `IProjection` as fill/line, background is
 **projection-correct** (flat on Mercator, curved on the sphere), and tile layers go through the **active
-`ITileRenderBackend`** (Entities/BRG/GameObjects). Only **symbols** stay `FramePlaced` — genuinely
+`ITileRenderBackend`** (Entities/BRG/GameObjects). Only **symbols** stay frame-placed — genuinely
 screen-space, the one non-tile kind. A new layer kind (heatmap, circle, raster) is a processor, not a new
 subsystem; a new source kind is a new `ITileFeatureSource`.
 

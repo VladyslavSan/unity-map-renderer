@@ -15,31 +15,29 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Fill-extrusion <see cref="ITileMeshRenderLayer"/>: a <c>fill-extrusion</c> layer as a runtime render
-    /// object, <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
-    /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> builds the roof and walls, which the vertex
-    /// shader extrudes along a per-vertex <c>sec φ</c>-baked up. <see cref="TryCreate"/> clones the
+    /// object. <see cref="Meshing.StyledFillExtrusionTileBuilder"/> builds the roof and walls, which the
+    /// vertex shader extrudes along a per-vertex <c>sec φ</c>-baked up. <see cref="TryCreate"/> clones the
     /// <c>Map/FillExtrusion</c> base (<see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/>).
     /// </summary>
     internal sealed class FillExtrusionRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {
-        private readonly ZoomStyleApplier _applier;
+        // internal, not private: MapRenderer.Tests.Shared's RenderLayerTestExtensions reads it to sum
+        // still-easing bindings — no reader outside this class.
+        internal ZoomStyleApplier Applier { get; }
         private FillExtrusion.PaintProperties _paint;
 
         public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
-        public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
-        public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.On;
         public Material                          Material    { get; }
-        public int                               TransitioningCount => _applier.TransitioningCount;
 
         private FillExtrusionRenderLayer(
             FillExtrusion.StyleLayer layer, Material material, ZoomStyleApplier applier, int drawIndex)
         {
             StyleLayer = layer;
             Material   = material;
-            _applier   = applier;
+            Applier    = applier;
             _paint     = layer.Paint;
             DrawIndex  = drawIndex;
         }
@@ -80,12 +78,12 @@ namespace MapRenderer.Unity.Rendering.Style
         public bool FadesGradually => false;
 
         /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
-        public void SetFade(float amount) => _applier.SetFade(amount);
+        public void SetFade(float amount) => Applier.SetFade(amount);
 
         /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
-        public bool PaintsSomething => !_applier.EffectiveOpacityIsZero;
+        public bool PaintsSomething => !Applier.EffectiveOpacityIsZero;
 
-        public void ApplyZoom(in StyleFrameInputs inputs) => _applier.ApplyZoom(inputs);
+        public void ApplyZoom(in StyleFrameInputs inputs) => Applier.ApplyZoom(inputs);
 
         /// <summary>
         /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
@@ -96,8 +94,8 @@ namespace MapRenderer.Unity.Rendering.Style
             var typed = (FillExtrusion.StyleLayer)layer;
             StyleLayer = typed;
             _paint     = typed.Paint;
-            _applier.SetTransition(transition, nowSeconds);
-            Materials.MaterialFactory.BindFillExtrusionPaintToApplier(_paint, _applier, Material);
+            Applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindFillExtrusionPaintToApplier(_paint, Applier, Material);
         }
 
         /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>

@@ -21,7 +21,6 @@ namespace MapRenderer.Unity.Rendering.Style
     /// Wraps <see cref="Meshing.StyledLineTileBuilder"/>. Line width in pixel mode is resolved in screen
     /// space by the shader; the per-frame work here is a zoom-dependent dasharray re-evaluated in
     /// <see cref="ApplyZoom"/>.
-    /// Axes (design "Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
     internal sealed class LineRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {
@@ -43,16 +42,16 @@ namespace MapRenderer.Unity.Rendering.Style
 
         private Line.PaintProperties  _paint;
         private Line.LayoutProperties _layout;
-        private readonly ZoomStyleApplier      _applier;
+
+        // internal, not private: MapRenderer.Tests.Shared's RenderLayerTestExtensions reads it to sum
+        // still-easing bindings — no reader outside this class.
+        internal ZoomStyleApplier Applier { get; }
 
         public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
-        public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
-        public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
-        public int                               TransitioningCount => _applier.TransitioningCount;
 
         private LineRenderLayer(
             Line.StyleLayer layer, Material material, Line.PaintProperties paint,
@@ -62,7 +61,7 @@ namespace MapRenderer.Unity.Rendering.Style
             Material   = material;
             _paint     = paint;
             _layout    = layout;
-            _applier   = applier;
+            Applier    = applier;
             DrawIndex  = drawIndex;
         }
 
@@ -95,16 +94,16 @@ namespace MapRenderer.Unity.Rendering.Style
         public bool FadesGradually => true;
 
         /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
-        public void SetFade(float amount) => _applier.SetFade(amount);
+        public void SetFade(float amount) => Applier.SetFade(amount);
 
         /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
-        public bool PaintsSomething => !_applier.EffectiveOpacityIsZero;
+        public bool PaintsSomething => !Applier.EffectiveOpacityIsZero;
 
         public void ApplyZoom(in StyleFrameInputs inputs)
         {
             using (PmZoomLines.Auto())
             {
-                _applier.ApplyZoom(inputs);
+                Applier.ApplyZoom(inputs);
 
                 // Re-evaluate the dasharray per frame ONLY when it depends on zoom. A constant dash is set
                 // once at bind time, so it costs no per-frame eval or allocation.
@@ -126,8 +125,8 @@ namespace MapRenderer.Unity.Rendering.Style
             StyleLayer = typed;
             _paint     = typed.Paint;
             _layout    = typed.Layout;
-            _applier.SetTransition(transition, nowSeconds);
-            Materials.MaterialFactory.BindLinePaintToApplier(_paint, _applier, Material);
+            Applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindLinePaintToApplier(_paint, Applier, Material);
         }
 
         /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>

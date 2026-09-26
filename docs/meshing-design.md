@@ -10,7 +10,7 @@ How the stages chain as Burst jobs is `docs/job-scheduling-design.md`; how a til
 1. **[Mesh pipeline](#1-mesh-pipeline)** — how MVT bytes become a mesh, per geometry kind (fill vs line orderings, the build/consume loop).
 2. **[Line antialiasing](#2-line-antialiasing)** — what the line shader does at the edge, and why the ramp straddles the styled edge.
 3. **[Lit rendering](#3-lit-rendering)** — the shared URP shader convention (Lit and Unlit): mirror-copy structure, multi-pass, styling as material properties.
-4. **[Render-layer model](#4-render-layer-model)** — `IRenderLayer`/`RenderLayerSet`: every painted kind first-class along four orthogonal axes.
+4. **[Render-layer model](#4-render-layer-model)** — `IRenderLayer`/`RenderLayerSet`: every painted kind first-class, with a uniform draw order and shadow-casting contract.
 
 ---
 
@@ -483,56 +483,61 @@ requirement"); no `MaterialPropertyBlock` on batched renderers; DOTS-instanced p
 # 4. Render-layer model
 
 `ARCHITECTURE.md` §"Layer ordering": *"the style is an ordered list of layers, composited in order."* The
-`IRenderLayer`/`RenderLayerSet` model makes that true for **everything the style can paint**: every painted layer
-gets a uniform place along four orthogonal axes — **build/lifetime** (how its geometry comes to exist), **draw
-order** (its slot in the global painter's chain), **presence** (whether a backend redraws it by itself or an
-orchestrator must re-issue it), and **shadow casting** (whether it is drawn into the shadow map). The axes are
-named and kept separate; the model does NOT pretend symbols build like fills.
+`IRenderLayer`/`RenderLayerSet` model makes that true for **everything the style can paint**: every painted
+layer takes a uniform **global draw order** (its slot in the one ordered painter's chain) and declares its
+own **shadow casting** (whether it is drawn into the shadow map) — the two cross-kind contracts. How a
+layer's geometry comes to exist differs by kind and is NOT a member of the interface; production reads it
+off the layer's runtime type instead (see "Per-kind pinning" below). Every kind today is also redrawn by
+its own backend or persistent renderer, with no per-camera orchestrator re-issuing the draw — a uniform fact
+of the current implementers, not a member either.
 
 Fill, line, symbol, background and fill-extrusion are all first-class in the one ordered model. Raster is a
 **reserved seat** — one class + one factory arm, not built.
 
-## The four axes, pinned per kind
+## Per-kind pinning
 
-Every painted layer declares:
-- **build kind** — `TileMesh` (built once per tile, Burst pipeline, backend-registered) / `FramePlaced` (rebuilt
-  every frame from screen-space placement). The axis is `{ TileMesh, FramePlaced }`; a view-refreshed,
-  self-built mesh is not a kind, because background is a per-tile `TileMesh` layer.
-- **draw persistence** — `Persistent` (a backend redraws it every render on its own) / `Immediate` (an
-  orchestrator must re-issue it every camera render).
+Every painted layer declares, via `IRenderLayer`:
 - **global draw index** — its slot in the one ordered painter chain.
 - **shadow casting** — `IRenderLayer.CastShadows`, a `ShadowCastingMode` the backends transport verbatim
   (see "Locked decisions → Shadows").
 
-| Layer kind | Build (lifetime) | Presence | Draw slot |
-|---|---|---|---|
-| **Fill** | `TileMesh` — once per `(tile,layer)`, Burst kernels, `Mesh.MeshData` | `Persistent` — backend redraws (BRG `OnPerformCulling` / EG entities / MeshRenderers) | global index |
-| **Line** | `TileMesh` (same) | `Persistent` | global index |
-| **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — a persistent per-slot `MeshRenderer` (`WorldSymbolRenderer`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** |
-| **Background** | `TileMesh` — per-covered-tile, source-less (`BackgroundQuad` + `TileBuildGraph`) | `Persistent` — one quad per covered tile, same as fill/line | global index |
-| **Fill-extrusion** | `TileMesh` (+ ZWrite on) — `FillExtrusionRenderLayer` / `StyledFillExtrusionTileBuilder` | `Persistent` | global index |
-| **Raster** *(reserved seat, not built)* | `TileMesh` — per-tile textured quad | `Persistent` | global index |
+A layer's geometry-build path is not a member of the interface — production dispatches on the layer's
+runtime type instead, and there are three paths:
+- **Feature-driven, per tile** — `ITileMeshRenderLayer` (fill, line, fill-extrusion): built once per
+  `(tile, layer)` by the Burst pipeline off the tile's selected features, registered with the backend.
+  `TileManager.ComputeDenseLayerIds` dispatches on this interface.
+- **Source-less, per tile** — `BackgroundRenderLayer`: no features to select, so
+  `TileManager.KickSourcelessBackground` meshes its per-covered-tile quad directly via `TileBuildGraph`.
+  `TileManager` dispatches on this CONCRETE TYPE — `BackgroundRenderLayer` does NOT implement
+  `ITileMeshRenderLayer`.
+- **Frame-placed** — `SymbolRenderLayer`: rebuilt every frame from screen-space placement (global collision
+  → per-slot billboard mesh), never the Burst tile pipeline.
 
-The build kinds genuinely differ and the model **names** the difference: `TileMesh` layers participate in the
-tile produce/consume loop and the `ITileRenderBackend`; `FramePlaced` layers participate in the per-frame
-placement loop. What is **uniform** across all of them is registration (one factory), draw order (one index),
-presence (one enum), material ownership, and `ApplyZoom`. `ARCHITECTURE.md`'s "two geometry classes" is this
-build/lifetime axis — symbol build is per-frame collision, NOT the Burst mesh pipeline.
+| Layer kind | Geometry build | Draw slot |
+|---|---|---|
+| **Fill** | `ITileMeshRenderLayer` — once per `(tile,layer)`, Burst kernels, `Mesh.MeshData`; backend redraws (BRG `OnPerformCulling` / EG entities / MeshRenderers) | global index |
+| **Line** | `ITileMeshRenderLayer` (same) | global index |
+| **Symbol/text** | Frame-placed — global collision → per-slot billboard mesh rebuilt every `Tick`; a persistent per-slot `MeshRenderer` (`WorldSymbolRenderer`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** |
+| **Background** | Source-less, per-covered-tile (`BackgroundQuad` + `TileBuildGraph`) — dispatched by concrete type, NOT `ITileMeshRenderLayer` | global index |
+| **Fill-extrusion** | `ITileMeshRenderLayer` (+ ZWrite on) — `FillExtrusionRenderLayer` / `StyledFillExtrusionTileBuilder` | global index |
+| **Raster** *(reserved seat, not built)* | Per-tile textured quad — feature-driven vs. source-less dispatch is open (see "Non-goals / open questions") | global index |
+
+`ITileMeshRenderLayer` layers and `BackgroundRenderLayer` both participate in the tile produce/consume loop
+and the `ITileRenderBackend`; `SymbolRenderLayer` participates in the per-frame placement loop instead. What
+is **uniform** across all five kinds is registration (one factory), draw order (one index), material
+ownership, and `ApplyZoom`. `ARCHITECTURE.md`'s "two geometry classes" is this build distinction — symbol
+build is per-frame collision, NOT the Burst mesh pipeline.
 
 ## Interface shape
 
-`IRenderLayer` splits into a base (the uniform axes) plus per-build-kind capability interfaces. Abridged —
-`IRenderLayer.cs` and `ITileMeshRenderLayer.cs` carry every member and its contract:
+`IRenderLayer` is the base (the uniform members); `ITileMeshRenderLayer` is the one capability interface a
+feature-driven layer (fill, line, fill-extrusion) also implements. Abridged — `IRenderLayer.cs` and
+`ITileMeshRenderLayer.cs` carry every member and its contract:
 
 ```csharp
-internal enum RenderLayerBuild { TileMesh, FramePlaced }
-internal enum DrawPersistence  { Persistent, Immediate }
-
 internal interface IRenderLayer : IDisposable
 {
     StyleLayer        StyleLayer      { get; }
-    RenderLayerBuild  Build           { get; }  // lifetime class — which loop feeds it
-    DrawPersistence   Persistence     { get; }  // who re-draws it each render
     int               DrawIndex       { get; }  // the slot: backend materialIndex; stable across an in-place restyle
     ShadowCastingMode CastShadows     { get; }  // transported verbatim by every backend
     LayerSubSlot      MaterialSubSlot { get; }  // Base, or Above for symbol text over its own icon
@@ -542,9 +547,10 @@ internal interface IRenderLayer : IDisposable
     void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds);
 }
 
-// Feature-driven TileMesh capability (fill, line, fill-extrusion). Every implementer meshes on the job graph;
-// there is no synchronous mesh-write member. Background is TileMesh too, but source-less: it has no
-// features, so TileManager.KickSourcelessBackground schedules its quad directly.
+// Feature-driven tile-mesh capability (fill, line, fill-extrusion). Every implementer meshes on the job graph;
+// there is no synchronous mesh-write member. Background is ALSO built once per tile, but does NOT implement
+// this interface — it has no features, so TileManager.KickSourcelessBackground schedules its quad directly,
+// dispatched by concrete type (see "Per-kind pinning" above).
 internal interface ITileMeshRenderLayer : IRenderLayer
 {
     ILayerMeshBuild BuildGraphRequest(IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
@@ -553,9 +559,12 @@ internal interface ITileMeshRenderLayer : IRenderLayer
 ```
 
 Concrete: `FillRenderLayer`, `LineRenderLayer`, `SymbolRenderLayer`, `BackgroundRenderLayer`,
-`FillExtrusionRenderLayer`; a raster layer would be one more. **Adding a kind = one class + one
-`RenderLayerFactory` arm** — no edits to the layer set, the backends, the tile consume loop, or an
-orchestrator (they all operate on the axes, not the concrete types).
+`FillExtrusionRenderLayer`; a raster layer would be one more. **Adding a feature-driven kind (fill-extrusion's
+shape) is one class + one `RenderLayerFactory` arm** — no edits to the layer set, the backends, or the tile
+consume loop, because those dispatch on `ITileMeshRenderLayer`, not the concrete type. A source-less kind
+(background's shape) is NOT this cheap: `TileManager` already branches on `BackgroundRenderLayer`'s own
+concrete type in three places (the background material scan, `KickSourcelessBackground`, the
+has-a-background check), so a second source-less kind would need its own such branches too.
 
 ## Locked decisions
 
@@ -626,7 +635,7 @@ background=3000  land=3002  road=3004  road-label=3006/3007  building=3008  plac
 Symbols take their declared slot rather than one overlay queue above everything, so the mutual order of two
 symbol layers, and of a symbol layer and the layers around it, is the style's.
 
-## Symbols: presence via persistent renderers
+## Symbols: drawn by persistent renderers
 
 Symbols draw as **persistent per-slot `MeshRenderer`s** (`WorldSymbolRenderer`), not immediate-mode
 `Graphics.RenderMesh`. `Tick` does everything up to and including the per-slot mesh write (project → collide →
@@ -634,13 +643,13 @@ fade/emit → mesh upload) and swaps the renderer's mesh; Unity redraws it every
 render automatically. This: (i) avoids the Editor "blink" of immediate mode (a Game-View repaint without the
 player loop gets no re-submission) with **no `beginCameraRendering` orchestrator**; (ii) inherits deterministic
 `renderQueue` ordering against BRG tiles (URP's `CommonTransparent` sort ranks `renderQueue` above the
-camera-distance tiebreak); (iii) is headless-testable, so ordering and presence are checked by snapshot tests
+camera-distance tiebreak); (iii) is headless-testable, so ordering and redraw are checked by snapshot tests
 rather than manual Editor checks. The shader's `"Queue" = "Overlay"` tag is only the demo/no-style fallback
 default; `ZTest Always` is the symbol regime (`docs/depth-and-render-regimes-design.md`).
 
-An `Immediate` draw persistence + a `beginCameraRendering` orchestrator remain the model's vocabulary for a
-future `CommandBuffer`/`ScriptableRenderPass` fallback (e.g. a symbol needing draw state a `MeshRenderer` can't
-express) — no implementor today.
+A future `CommandBuffer`/`ScriptableRenderPass` fallback (e.g. a symbol needing draw state a `MeshRenderer`
+can't express) would need a `beginCameraRendering` orchestrator to re-issue its draw every render — no
+implementor today.
 
 ## Background: a real layer, not a camera hack
 
@@ -659,11 +668,11 @@ globe/tile-cover limitation shared by fill/line, owned by `docs/projection-globe
 
 ## Fill-extrusion and the raster seat
 
-- **Fill-extrusion** = `TileMesh` + `Persistent` + ZWrite on. One `ITileMeshRenderLayer` class + one factory
+- **Fill-extrusion** = per-tile, backend-redrawn, ZWrite on. One `ITileMeshRenderLayer` class + one factory
   arm. Both the roof and the walls mesh on the job graph: `FillExtrusionMeshGraph.Schedule` builds both, owned
   by `TileBuildGraph.LayerBuild` via `ITileMeshRenderLayer.BuildGraphRequest`, with no managed prologue step.
   How its depth composes with the transparent band is `docs/depth-and-render-regimes-design.md`.
-- **Raster** (not built) = `TileMesh` + `Persistent`: a quad per tile, textured from a raster source, registered
+- **Raster** (not built) = per-tile, backend-redrawn: a quad per tile, textured from a raster source, registered
   via `AddTileLayer`. The model change is zero — the OPEN problem is per-tile texture binding under the
   per-layer-material invariant (per-layer materials are shared across tiles; a raster tile needs its own
   texture → texture-array / BRG per-instance texture id / per-tile material).
@@ -671,8 +680,12 @@ globe/tile-cover limitation shared by fill/line, owned by `docs/projection-globe
 ## Non-goals / open questions
 
 - Symbol BUILD stays per-frame placement — never folded into the Burst tile-mesh pipeline. The three tile
-  backends stay Persistent tile-mesh engines; they learn nothing about symbols or backgrounds (null slots
-  aside).
+  backends stay engines that redraw tile meshes on their own; they learn nothing about symbols or
+  backgrounds (null slots aside).
 - **Line-following labels behind buildings.** Symbols stay `ZTest Always`, and "labels unoccluded by 3D" is the
   point-label default. Whether line-following labels should be hidden behind fill-extrusion is open.
 - **Raster per-tile texture vs per-layer material** — open; decided with the raster layer.
+- **Raster's dispatch path.** `ITileMeshRenderLayer` is now feature-driven (it selects features to mesh), and
+  a raster tile has none — it is a fetched texture, not a Burst mesh build. Whether raster follows the
+  feature-driven path or background's source-less, dispatch-by-runtime-type path is open, decided with the
+  raster layer.

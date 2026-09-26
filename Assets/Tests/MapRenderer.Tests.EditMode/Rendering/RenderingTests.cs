@@ -729,7 +729,7 @@ namespace MapRenderer.Tests.Rendering
                 Assert.AreSame(layer, created.StyleLayer, "the render layer must reference its source StyleLayer.");
                 Assert.AreEqual(drawIndex, created.DrawIndex, "the factory must set DrawIndex from its parameter.");
                 Assert.IsInstanceOf<FillExtrusion.StyleLayer>(created.StyleLayer);
-                Assert.IsInstanceOf<ITileMeshRenderLayer>(created, "fill-extrusion is a TileMesh layer.");
+                Assert.IsInstanceOf<ITileMeshRenderLayer>(created, "fill-extrusion is a tile-mesh layer.");
             }
             finally
             {
@@ -1256,20 +1256,14 @@ namespace MapRenderer.Tests.Rendering
         }
 
         [Test]
-        public void Build_Axes_MatchTheDesignsPinning()
+        public void Build_TileMeshCapability_MatchesEachLayerKind()
         {
             using var set = Build(InterleavedStyleJson);
 
-            // Background is a source-less per-covered-tile TileMesh layer — ViewGeometry
-            // is REMOVED (design: "The RenderLayerBuild.ViewGeometry enum decision").
-            Assert.AreEqual(RenderLayerBuild.TileMesh, set[0].Build, "background is TileMesh.");
-            Assert.AreEqual(RenderLayerBuild.TileMesh,     set[1].Build, "fill is TileMesh.");
-            Assert.AreEqual(RenderLayerBuild.FramePlaced,  set[2].Build, "symbol is FramePlaced.");
-            Assert.AreEqual(RenderLayerBuild.TileMesh,     set[3].Build, "line is TileMesh.");
-            Assert.AreEqual(RenderLayerBuild.TileMesh,     set[4].Build, "fill is TileMesh.");
-
-            // Only the TileMesh layers implement the mesh-build capability — the tile produce loop's filter
-            // (TileManager.ComputeDenseLayerIds) relies on exactly this.
+            // Only the feature-driven kinds (fill, line, fill-extrusion) implement the mesh-build
+            // capability — the tile produce loop's filter (TileManager.ComputeDenseLayerIds) relies on
+            // exactly this. Background is built per tile too, but source-less: TileManager kicks it by
+            // its own concrete type, so it must NOT implement this interface.
             Assert.IsNotInstanceOf<ITileMeshRenderLayer>(set[0], "background is not a tile-mesh layer.");
             Assert.IsInstanceOf<ITileMeshRenderLayer>(set[1], "fill IS a tile-mesh layer.");
             Assert.IsNotInstanceOf<ITileMeshRenderLayer>(set[2], "symbol is not a tile-mesh layer.");

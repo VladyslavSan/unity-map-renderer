@@ -362,8 +362,8 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(materialB == null, // Unity fake-null: true only once Destroy actually ran.
                 "B's Material must be destroyed — the tombstone swap disposes it exactly once.");
 
-            Assert.Greater(layerA.TransitioningCount, 0, "A's fill-color changed — its uniform must be easing.");
-            Assert.AreEqual(0, layerC.TransitioningCount, "C is byte-identical — nothing to ease.");
+            Assert.Greater(layerA.TransitioningCount(), 0, "A's fill-color changed — its uniform must be easing.");
+            Assert.AreEqual(0, layerC.TransitioningCount(), "C is byte-identical — nothing to ease.");
         }
 
         // Fill, symbol, fill restyled to (C, S, A): every slot survives, only declared order changes. The
@@ -607,7 +607,7 @@ namespace MapRenderer.Tests.Style
             var set = new RenderLayerSet();
             set.Build(style, 0.0, MapMaterialSetTestUtil.Load());
 
-            Assert.AreEqual(0, set.TransitioningCount, "the very first build must arm no transition.");
+            Assert.AreEqual(0, set.TransitioningCount(), "the very first build must arm no transition.");
             Color pushed = set[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
             Assert.AreEqual(new Color(0.4f, 0.6f, 0.8f, 1f).r, pushed.r, 1e-4f,
                 "frame 0 must already read the style's own value — nothing to ease from.");
@@ -627,10 +627,10 @@ namespace MapRenderer.Tests.Style
                 "drive precondition: a paint-only, gate-eligible restyle must take the in-place path.");
 
             set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.15));
-            Assert.Greater(set.TransitioningCount, 0, "mid-way through the default duration, still easing.");
+            Assert.Greater(set.TransitioningCount(), 0, "mid-way through the default duration, still easing.");
 
             set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.30));
-            Assert.AreEqual(0, set.TransitioningCount, "settled at exactly the default duration (300ms).");
+            Assert.AreEqual(0, set.TransitioningCount(), "settled at exactly the default duration (300ms).");
 
             // Second clause: a root `transition` block and a `fill-color-transition` key give IDENTICAL timing,
             // because MapView.StyleTransition is the only source. The keys sit on BOTH sides, so the gate's
@@ -651,7 +651,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(set2.TryRestyleInPlace(oldStyleWithHints, newStyleWithHints, StyleTransition.Default, 0.0),
                 "drive precondition: the extra keys are identical on both sides, so the gate must still accept.");
             set2.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.30));
-            Assert.AreEqual(0, set2.TransitioningCount,
+            Assert.AreEqual(0, set2.TransitioningCount(),
                 "a root/per-property transition block in the STYLE must be inert — timing comes only from " +
                 "MapView.StyleTransition (decision 0a); a 5s duration in the JSON must not extend this " +
                 "300ms settle.");

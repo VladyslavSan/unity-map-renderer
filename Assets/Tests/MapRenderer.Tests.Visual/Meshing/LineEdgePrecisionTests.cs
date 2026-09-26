@@ -2702,8 +2702,6 @@ namespace MapRenderer.Tests.Visual
         {
             private readonly Fill.PaintProperties _paint;
             public StyleLayer StyleLayer { get; }
-            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
-            public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -2716,7 +2714,6 @@ namespace MapRenderer.Tests.Visual
             }
 
             public void ApplyZoom(in StyleFrameInputs inputs) { }
-            public int TransitioningCount => 0;
             public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
             public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }

@@ -15,13 +15,10 @@ namespace MapRenderer.Unity.Rendering.Style
         public TombstoneRenderLayer(int slot) => DrawIndex = slot;
 
         public StyleLayer        StyleLayer  => null;
-        public RenderLayerBuild  Build       => RenderLayerBuild.TileMesh;
-        public DrawPersistence   Persistence => DrawPersistence.Persistent;
         public int               DrawIndex   { get; }
         public LayerSubSlot      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode CastShadows => ShadowCastingMode.Off;
         public Material          Material    => null;
-        public int               TransitioningCount => 0;
 
         public void ApplyZoom(in StyleFrameInputs inputs) { }
         public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }

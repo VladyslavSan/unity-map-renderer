@@ -2051,24 +2051,8 @@ namespace MapRenderer.Tests.Structure
                 (offenders.Count > 0 ? offenders[0].Value : string.Empty));
         }
 
-        /// <summary><c>RenderLayerBuild.ViewGeometry</c> is REMOVED, not left
-        /// dead. Compile-enforced (the enum member no longer exists, so any surviving reference is a compile
-        /// error) — this grep is a redundant, documentation-grade guard over the production assembly.</summary>
-        [Test]
-        public void RenderLayerBuild_ViewGeometry_HasNoProductionReferences()
-        {
-            string root = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
-            foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
-            {
-                string text = File.ReadAllText(file);
-                Assert.IsFalse(text.Contains("RenderLayerBuild.ViewGeometry"),
-                    $"'{file}' references the REMOVED RenderLayerBuild.ViewGeometry member (" +
-                    "background's build kind collapsed to TileMesh).");
-            }
-        }
-
         /// <summary><c>BackgroundRenderLayer</c> has no <c>SetVisible</c> gate: background is a per-covered-tile
-        /// TileMesh layer projected like fill/line, so the globe renders it curved instead of hiding it. The
+        /// layer projected like fill/line, so the globe renders it curved instead of hiding it. The
         /// scan covers only <c>BackgroundRenderLayer.cs</c>; a <c>MapView</c> call would not compile without
         /// the method.</summary>
         [Test]
@@ -2080,7 +2064,7 @@ namespace MapRenderer.Tests.Structure
             string text = File.ReadAllText(file);
             Assert.IsFalse(text.Contains("SetVisible("),
                 "BackgroundRenderLayer.cs must contain ZERO 'SetVisible(' — the Mercator-only background " +
-                "gate method is deleted; background is a backend-owned per-tile TileMesh layer now.");
+                "gate method is deleted; background is a backend-owned per-tile layer now.");
         }
     }
 

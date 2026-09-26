@@ -7,31 +7,30 @@ using Background = MapRenderer.Core.Style.Background;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Background <see cref="IRenderLayer"/>: a source-less per-covered-tile <see cref="RenderLayerBuild.TileMesh"/>
-    /// layer. <see cref="Tile.Processing.BackgroundQuad"/> makes one full-tile quad per covered tile, and the
-    /// backend owns every quad mesh. It is coplanar with fills and lines; every flat layer is ZWrite-off
-    /// (<see cref="Materials.BaseTweaker.ApplyBaseContract"/>), so <c>renderQueue</c> alone decides the composite.
-    /// See docs/meshing-design.md § "Background: a real layer, not a camera hack".
+    /// Background <see cref="IRenderLayer"/>: a source-less per-covered-tile layer, built once per tile like
+    /// <see cref="ITileMeshRenderLayer"/> but NOT one — it has no features to select, so
+    /// <see cref="Tile.Processing.BackgroundQuad"/> makes one full-tile quad per covered tile directly. Every
+    /// flat layer is ZWrite-off (<see cref="Materials.BaseTweaker.ApplyBaseContract"/>), so <c>renderQueue</c>
+    /// alone decides the composite. See docs/meshing-design.md § "Background: a real layer, not a camera hack".
     /// </summary>
     internal sealed class BackgroundRenderLayer : IRenderLayer, IFadeableRenderLayer
     {
         public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
-        public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
-        public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; } // owned fill-base clone; null iff FillMaterial unassigned (slot kept, never shows)
-        public int                               TransitioningCount => _applier?.TransitioningCount ?? 0;
 
-        private readonly ZoomStyleApplier _applier; // null iff Material null
+        // internal, not private: MapRenderer.Tests.Shared's RenderLayerTestExtensions reads it to sum
+        // still-easing bindings — no reader outside this class. Null iff Material null.
+        internal ZoomStyleApplier Applier { get; }
 
         private BackgroundRenderLayer(
             MapRenderer.Core.Style.StyleLayer layer, Material material, ZoomStyleApplier applier, int drawIndex)
         {
             StyleLayer = layer;
             Material   = material;
-            _applier   = applier;
+            Applier    = applier;
             DrawIndex  = drawIndex;
         }
 
@@ -64,12 +63,12 @@ namespace MapRenderer.Unity.Rendering.Style
         public bool FadesGradually => true;
 
         /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
-        public void SetFade(float amount) => _applier?.SetFade(amount);
+        public void SetFade(float amount) => Applier?.SetFade(amount);
 
         /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
-        public bool PaintsSomething => !_applier?.EffectiveOpacityIsZero ?? true;
+        public bool PaintsSomething => !Applier?.EffectiveOpacityIsZero ?? true;
 
-        public void ApplyZoom(in StyleFrameInputs inputs) => _applier?.ApplyZoom(inputs);
+        public void ApplyZoom(in StyleFrameInputs inputs) => Applier?.ApplyZoom(inputs);
 
         /// <summary>
         /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
@@ -79,10 +78,10 @@ namespace MapRenderer.Unity.Rendering.Style
         public void Restyle(MapRenderer.Core.Style.StyleLayer layer, in StyleTransition transition, double nowSeconds)
         {
             StyleLayer = layer;
-            if (_applier == null) return;
+            if (Applier == null) return;
             var typed = (Background.StyleLayer)layer;
-            _applier.SetTransition(transition, nowSeconds);
-            Materials.MaterialFactory.BindBackgroundPaintToApplier(typed.Paint, _applier, Material);
+            Applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindBackgroundPaintToApplier(typed.Paint, Applier, Material);
         }
 
         /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>

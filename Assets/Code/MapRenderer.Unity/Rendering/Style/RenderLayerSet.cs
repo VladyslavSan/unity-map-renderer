@@ -168,19 +168,6 @@ namespace MapRenderer.Unity.Rendering.Style
             return f.Current;
         }
 
-        /// <summary>Entries currently easing, summed across every layer. No production consumer — see
-        /// <see cref="IRenderLayer.TransitioningCount"/> for why it stays anyway.</summary>
-        internal int TransitioningCount
-        {
-            get
-            {
-                int n = 0;
-                for (int i = 0; i < _layers.Count; i++)
-                    n += _layers[i].TransitioningCount;
-                return n;
-            }
-        }
-
         /// <summary>
         /// An ID-KEYED diff — the exits are named and explained in `docs/tile-pipeline-design.md`.
         /// Returns <c>false</c> (unmodified) on ANY refusal — the

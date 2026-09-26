@@ -21,7 +21,7 @@ namespace MapRenderer.Unity.Rendering.Style
     {
         // ── Binding entry — NOT a ValueTuple (an 8-element tuple boxes into TRest and allocates) ─────
 
-        private struct Binding<T>
+        internal struct Binding<T>
         {
             public int Id;
             public StyleProperty<T> Target;
@@ -36,14 +36,16 @@ namespace MapRenderer.Unity.Rendering.Style
 
         // ── Typed binding lists — no boxing ──────────────────────────────────────────────────────
 
-        private readonly List<Binding<float>>     _floatBindings = new List<Binding<float>>();
-        private readonly List<Binding<CoreColor>> _colorBindings = new List<Binding<CoreColor>>();
+        // internal, not private: MapRenderer.Tests.Shared's RenderLayerTestExtensions counts each list's
+        // still-easing entries (Origin != null) — no production reader.
+        internal readonly List<Binding<float>>     _floatBindings = new List<Binding<float>>();
+        internal readonly List<Binding<CoreColor>> _colorBindings = new List<Binding<CoreColor>>();
 
         // ── Device-pixel bindings — logical px in, the consumer's space out ──────────────────────
         // Separate lists: they never take the bind-time constant shortcut (see BindDevicePixelFloat).
 
-        private readonly List<Binding<float>>   _devicePixelFloatBindings   = new List<Binding<float>>();
-        private readonly List<Binding<double2>> _devicePixelVectorBindings = new List<Binding<double2>>();
+        internal readonly List<Binding<float>>   _devicePixelFloatBindings   = new List<Binding<float>>();
+        internal readonly List<Binding<double2>> _devicePixelVectorBindings = new List<Binding<double2>>();
 
         private readonly Material _material;
 
@@ -138,19 +140,6 @@ namespace MapRenderer.Unity.Rendering.Style
                     if (_floatBindings[i].ScaledByFade) return _floatBindings[i].LastPushed;
                 return 1f;
             }
-        }
-
-        /// <summary>Entries currently easing (across all four lists) — read by teeth only.</summary>
-        internal int TransitioningCount
-            => CountTransitioning(_floatBindings) + CountTransitioning(_colorBindings)
-             + CountTransitioning(_devicePixelFloatBindings) + CountTransitioning(_devicePixelVectorBindings);
-
-        private static int CountTransitioning<T>(List<Binding<T>> list)
-        {
-            int n = 0;
-            for (int i = 0; i < list.Count; i++)
-                if (list[i].Origin != null) n++;
-            return n;
         }
 
         // ── Binding API ───────────────────────────────────────────────────────────────────────────
@@ -258,7 +247,7 @@ namespace MapRenderer.Unity.Rendering.Style
             var b = list[i];
             if (_pendingTransition.IsInstant)
             {
-                // A plain bind that arms nothing: an instant restyle must leave TransitioningCount == 0.
+                // A plain bind that arms nothing: an instant restyle must leave every entry settled (Origin == null).
                 b.Target = prop;
                 b.Origin = null;
                 b.Discrete = discrete;

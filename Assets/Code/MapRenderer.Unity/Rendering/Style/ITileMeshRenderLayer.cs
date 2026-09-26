@@ -11,10 +11,10 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// The <see cref="RenderLayerBuild.TileMesh"/> capability — built once per <c>(tile, layer)</c> by the
-    /// Burst mesh pipeline (job-scheduling-design.md) and registered with a
-    /// <see cref="Backend.ITileRenderBackend"/>. Symbols/text are NOT this capability — per ARCHITECTURE
-    /// they are a separate, placed-every-frame path, not a built-mesh static layer.
+    /// The feature-driven tile-mesh capability — built once per <c>(tile, layer)</c> by the Burst mesh
+    /// pipeline (job-scheduling-design.md) and registered with a <see cref="Backend.ITileRenderBackend"/>.
+    /// Symbols/text are NOT this capability — per ARCHITECTURE they are a separate, placed-every-frame
+    /// path, not a built-mesh static layer.
     /// </summary>
     internal interface ITileMeshRenderLayer : IRenderLayer
     {

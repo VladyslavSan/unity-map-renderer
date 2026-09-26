@@ -19,7 +19,6 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <summary>
     /// Fill <see cref="ITileMeshRenderLayer"/>: a MapLibre <c>fill</c> layer as a runtime render object.
     /// Wraps <see cref="Meshing.StyledFillTileBuilder"/>.
-    /// Axes (design "Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
     internal sealed class FillRenderLayer : ITileMeshRenderLayer, ISpriteConsumerRenderLayer, IFadeableRenderLayer
     {
@@ -39,7 +38,10 @@ namespace MapRenderer.Unity.Rendering.Style
         private Fill.PaintProperties  _paint;
 
         private Fill.LayoutProperties _layout;
-        private readonly ZoomStyleApplier      _applier;
+
+        // internal, not private: MapRenderer.Tests.Shared's RenderLayerTestExtensions reads it to sum
+        // still-easing bindings — no reader outside this class.
+        internal ZoomStyleApplier Applier { get; }
 
         // The sprite's resolved rect + logical size. What reaches the shader is this run through
         // Fill.FillPattern.RepeatsPerWorldUnit for the live zoom and the chosen sizing — see PushPatternScale.
@@ -48,13 +50,10 @@ namespace MapRenderer.Unity.Rendering.Style
         private double                      _lastZoom;
 
         public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
-        public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
-        public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
-        public int                               TransitioningCount => _applier.TransitioningCount;
 
         private FillRenderLayer(
             Fill.StyleLayer layer, Material material, Fill.PaintProperties paint,
@@ -64,7 +63,7 @@ namespace MapRenderer.Unity.Rendering.Style
             Material   = material;
             _paint     = paint;
             _layout    = layout;
-            _applier   = applier;
+            Applier    = applier;
             DrawIndex  = drawIndex;
             // Seed the pattern-scale zoom: TryCreate bypasses ApplyZoom, and a zoom of 0 gives WorldAbsolute a
             // whole-world repeat count for a sprite that resolves before the first Tick.
@@ -101,16 +100,16 @@ namespace MapRenderer.Unity.Rendering.Style
         public bool FadesGradually => true;
 
         /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
-        public void SetFade(float amount) => _applier.SetFade(amount);
+        public void SetFade(float amount) => Applier.SetFade(amount);
 
         /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
-        public bool PaintsSomething => !_applier.EffectiveOpacityIsZero;
+        public bool PaintsSomething => !Applier.EffectiveOpacityIsZero;
 
         public void ApplyZoom(in StyleFrameInputs inputs)
         {
             using (PmZoomFills.Auto())
             {
-                _applier.ApplyZoom(inputs);
+                Applier.ApplyZoom(inputs);
                 _lastZoom = inputs.Zoom;
                 PushPatternScale();
             }
@@ -127,8 +126,8 @@ namespace MapRenderer.Unity.Rendering.Style
             StyleLayer = typed;
             _paint     = typed.Paint;
             _layout    = typed.Layout;
-            _applier.SetTransition(transition, nowSeconds);
-            Materials.MaterialFactory.BindFillPaintToApplier(_paint, _applier, Material);
+            Applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindFillPaintToApplier(_paint, Applier, Material);
         }
 
         /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>

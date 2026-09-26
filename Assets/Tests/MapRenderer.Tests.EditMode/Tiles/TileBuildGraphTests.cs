@@ -1032,14 +1032,11 @@ namespace MapRenderer.Tests.Tiles
             public NoGeometryTileMeshRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
 
             public StyleLayer       StyleLayer      { get; }
-            public RenderLayerBuild Build           => RenderLayerBuild.TileMesh;
-            public DrawPersistence  Persistence     => DrawPersistence.Persistent;
             public int              DrawIndex       => 0;
             public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material         Material        => null;
             public void ApplyZoom(in StyleFrameInputs inputs) { }
-            public int TransitioningCount => 0;
             public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
             public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
@@ -1263,14 +1260,11 @@ namespace MapRenderer.Tests.Tiles
         private sealed class CountedGraphInputRenderLayer : ITileMeshRenderLayer
         {
             public StyleLayer StyleLayer { get; }
-            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
-            public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
             public void ApplyZoom(in StyleFrameInputs inputs) { }
-            public int TransitioningCount => 0;
             public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
             public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
@@ -1297,14 +1291,11 @@ namespace MapRenderer.Tests.Tiles
         private sealed class ThrowingGraphInputRenderLayer : ITileMeshRenderLayer
         {
             public StyleLayer StyleLayer { get; }
-            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
-            public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
             public void ApplyZoom(in StyleFrameInputs inputs) { }
-            public int TransitioningCount => 0;
             public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
             public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
@@ -1842,8 +1833,6 @@ namespace MapRenderer.Tests.Tiles
         {
             private readonly Fill.PaintProperties _paint;
             public StyleLayer StyleLayer { get; }
-            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
-            public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors FillRenderLayer
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -1856,7 +1845,6 @@ namespace MapRenderer.Tests.Tiles
             }
 
             public void ApplyZoom(in StyleFrameInputs inputs) { }
-            public int TransitioningCount => 0;
             public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
             public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
