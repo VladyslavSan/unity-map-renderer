@@ -691,14 +691,13 @@ namespace MapRenderer.Tests.Meshing
         private static string FixturePath =>
             Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
 
-        // A 31x floor below the pre-flatten baseline (~2,023,424 B/build on the full fixture).
-        private const long Ceiling = 65_536;
+        // FillMeshGraph.Schedule allocates nothing managed on the calling (measuring) thread — see
+        // AllocEventsTotal for the meter. The retired 13-array shape (13 events) and a single stray
+        // ToArray (1 event) both fail this deterministically; a bytes-not-events limitation is unavoidable
+        // (one huge buffer still reads as one event) but out of reach of a thread-local event counter.
+        private const long EventCeiling = 0;
 
-        // GC.GetTotalMemory's own noise floor (brief: only trustworthy at >= ~100 KB/op) — the calibration
-        // canary must clear this by a wide margin to prove the meter is alive.
-        private const long CalibrationFloor = 100_000;
-
-        /// <summary>One materialized fixture (a prefix of the "countries" layer's polygon features) plus the
+        /// <summary>One materialized fixture (the real "countries" layer's polygon features) plus the
         /// derived <see cref="FillMeshPipeline.LayerInput"/> ready to <c>Schedule</c> repeatedly.</summary>
         private readonly struct Fixture
         {
@@ -720,10 +719,10 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        /// <summary>Materializes the first <paramref name="featureLimit"/> polygon features of the real
-        /// "countries" layer (sample-tile.bytes) — a real, non-synthetic corpus, so the tooth measures the
-        /// actual per-polygon shapes (rings, holes) FillMeshGraph.Schedule sees in production.</summary>
-        private static Fixture BuildFixture(int featureLimit)
+        /// <summary>Materializes the real "countries" layer (sample-tile.bytes) — a real, non-synthetic
+        /// corpus, so the tooth measures the actual per-polygon shapes (rings, holes)
+        /// FillMeshGraph.Schedule sees in production.</summary>
+        private static Fixture BuildFixture()
         {
             FileAssert.Exists(FixturePath);
             byte[] mvtBytes = File.ReadAllBytes(FixturePath);
@@ -732,7 +731,7 @@ namespace MapRenderer.Tests.Meshing
 
             var kinds    = new List<TileGeometryType>();
             var commands = new List<uint[]>();
-            for (int fi = 0; fi < layer.Kinds.Count && kinds.Count < featureLimit; fi++)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
                 if (layer.Kinds[fi] == TileGeometryType.Polygon && layer.Commands[fi] != null)
                 { kinds.Add(layer.Kinds[fi]); commands.Add(layer.Commands[fi]); }
 
@@ -752,9 +751,13 @@ namespace MapRenderer.Tests.Meshing
             return new Fixture(geometry, visitOrder, input, geometry.RingCount);
         }
 
-        /// <summary>Bytes/build over a warmed loop, guarded against a Gen0 collection firing inside the
-        /// measurement window (which would deflate — or invert — the delta).</summary>
-        private static long BytesPerBuild(in FillMeshPipeline.LayerInput input, int iterations)
+        /// <summary>Main-thread GC.Alloc allocation-event TOTAL across a warmed loop of <paramref
+        /// name="iterations"/> builds — NOT divided per build: integer division would let 1-9 stray events
+        /// across 10 builds silently read as 0. <c>Recorder.Get("GC.Alloc")</c> filtered to the current
+        /// thread, immune to other threads' allocations (docs/gc-and-allocation-design.md § "Measuring GC in
+        /// tests"). Not <c>GC.GetTotalMemory</c> or <c>GC.GetAllocatedBytesForCurrentThread()</c> (reads a
+        /// constant 0 in this Unity Mono runner).</summary>
+        private static long AllocEventsTotal(in FillMeshPipeline.LayerInput input, int iterations)
         {
             // Warm-up: JIT compilation and any one-shot first-touch allocation must not land in the window.
             for (int w = 0; w < 3; w++)
@@ -764,111 +767,62 @@ namespace MapRenderer.Tests.Meshing
                 warm.Dispose();
             }
 
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            int collectionsBefore = GC.CollectionCount(0);
-            long before = GC.GetTotalMemory(false);
-
-            for (int i = 0; i < iterations; i++)
+            var recorder = UnityEngine.Profiling.Recorder.Get("GC.Alloc");
+            recorder.enabled = false; // flush the recorder's own creation-time samples first
+            recorder.FilterToCurrentThread();
+            recorder.enabled = true;
+            try
             {
-                FillGraphOutput b = FillMeshGraph.Schedule(input);
-                b.Handle.Complete();
-                b.Dispose();
+                // Calibration: a known allocation inside the window proves the recorder is live this run —
+                // an empty window can otherwise report the PREVIOUS window's value, not a fresh zero.
+                var sentinel = new object();
+                GC.KeepAlive(sentinel);
+
+                for (int i = 0; i < iterations; i++)
+                {
+                    FillGraphOutput b = FillMeshGraph.Schedule(input);
+                    b.Handle.Complete();
+                    b.Dispose();
+                }
+            }
+            finally
+            {
+                recorder.enabled = false;
+                recorder.CollectFromAllThreads();
             }
 
-            long after = GC.GetTotalMemory(false);
-            int collectionsAfter = GC.CollectionCount(0);
-
-            Assert.AreEqual(collectionsBefore, collectionsAfter,
-                "a Gen0 collection fired inside the measurement window — the byte delta is unreliable here; " +
-                "this indicates a flaky run, not a pipeline result.");
-
-            return (after - before) / iterations;
-        }
-
-        /// <summary>Proves GC.GetTotalMemory is a LIVE meter in this run before the pipeline tooth below
-        /// trusts it — GC.GetAllocatedBytesForCurrentThread is dead in this same Mono runner (see
-        /// FillMeshBuildBuffersPoolTests), and a silently-dead meter would make every assertion below
-        /// vacuous.</summary>
-        [Test]
-        public void Calibration_GetTotalMemory_ReadsALiveAllocation()
-        {
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            long before = GC.GetTotalMemory(false);
-            byte[] block = new byte[8 << 20];
-            block[0] = 1; // defeat dead-store elimination
-            long after = GC.GetTotalMemory(false);
-
-            Assert.Greater(after - before, CalibrationFloor,
-                "GC.GetTotalMemory must read a live 8 MiB allocation well clear of its own noise floor, or " +
-                "the meter is dead in this run and the tooth below cannot be trusted.");
-            GC.KeepAlive(block);
+            Assert.GreaterOrEqual(recorder.sampleBlockCount, 1,
+                "calibration: the recorder must see at least the sentinel allocation, or it is dead this run.");
+            return recorder.sampleBlockCount - 1;
         }
 
         /// <summary>
-        /// The flatten's headline tooth: per-polygon handle-arrays measured 2,023,424 B/build on
-        /// this exact fixture before the flatten (~43,000 allocations). RED-verify by restoring the retired
-        /// `new NativeArray&lt;T&gt;[polyCount]` shape and confirming this blows the ceiling.
+        /// The flatten's headline tooth: pre-flatten, this allocated 13 per-stream
+        /// `new NativeArray&lt;T&gt;[polyCount]` handle arrays per build (2,023,424 B via GC.GetTotalMemory
+        /// on this fixture, 13 GC.Alloc events on the measuring thread). RED-verified by restoring that shape:
+        /// events go from 0 to 13.
         /// </summary>
         [Test]
-        public void Schedule_FullFixture_AllocatesUnder65536BytesPerBuild()
+        public void Schedule_FullFixture_AllocatesNothingOnCallingThread()
         {
-            Fixture fx = BuildFixture(featureLimit: int.MaxValue);
+            Fixture fx = BuildFixture();
             try
             {
                 Assert.Greater(fx.RingCount, 1000,
                     "precondition: the full fixture must be the large real-data corpus (hundreds of features, " +
                     "thousands of rings) — a small fixture couldn't have exercised the pre-flatten cost either.");
 
-                long bytesPerBuild = BytesPerBuild(fx.Input, iterations: 10);
+                const int iterations = 10;
+                long totalEvents = AllocEventsTotal(fx.Input, iterations);
+                TestContext.WriteLine($"MEASURE allocEventsTotal={totalEvents}");
 
-                Assert.LessOrEqual(bytesPerBuild, Ceiling,
-                    $"FillMeshGraph.Schedule allocated {bytesPerBuild} B/build over the full fixture " +
-                    $"({fx.RingCount} rings) — must stay under the {Ceiling} B ceiling (31x below the " +
-                    "pre-flatten ~2,023,424 B/build baseline on this same fixture).");
+                Assert.LessOrEqual(totalEvents, EventCeiling * iterations,
+                    $"FillMeshGraph.Schedule made {totalEvents} main-thread GC allocation event(s) across " +
+                    $"{iterations} builds over the full fixture ({fx.RingCount} rings) — must allocate nothing " +
+                    "managed on the calling thread (check that Jobs > Leak Detection is not 'Enabled With " +
+                    "Stack Trace', which records a managed stack per native allocation).");
             }
             finally { fx.Dispose(); }
-        }
-
-        /// <summary>
-        /// The pre-flatten cost scaled ~linearly with ring count (one managed NativeArray handle allocated
-        /// per polygon, per stream). Flattened, it allocates a FIXED set of buffers sized once — so
-        /// bytes/build must stay near its floor across meaningfully different ring counts, not grow with them.
-        /// RED-verify the same way as the ceiling tooth: restoring the per-polygon arrays reintroduces the
-        /// scaling and blows this spread by roughly two orders of magnitude.
-        /// </summary>
-        [Test]
-        public void Schedule_AllocationDoesNotScaleWithRingCount()
-        {
-            Fixture small  = BuildFixture(featureLimit: 20);
-            Fixture medium = BuildFixture(featureLimit: 80);
-            Fixture large  = BuildFixture(featureLimit: int.MaxValue);
-            try
-            {
-                Assert.Less(small.RingCount, medium.RingCount,
-                    "precondition: the three fixtures must actually differ in ring count.");
-                Assert.Less(medium.RingCount, large.RingCount,
-                    "precondition: the three fixtures must actually differ in ring count.");
-
-                long smallBpb  = BytesPerBuild(small.Input,  iterations: 10);
-                long mediumBpb = BytesPerBuild(medium.Input, iterations: 10);
-                long largeBpb  = BytesPerBuild(large.Input,  iterations: 10);
-
-                Assert.LessOrEqual(smallBpb,  Ceiling);
-                Assert.LessOrEqual(mediumBpb, Ceiling);
-                Assert.LessOrEqual(largeBpb,  Ceiling);
-
-                // The ceiling above cannot catch a small per-ring allocation; this spread cap does, because even
-                // ~16 B/ring over thousands of extra rings adds tens of KB per build.
-                long spread = Math.Abs(largeBpb - smallBpb);
-                Assert.Less(spread, 4_096,
-                    $"bytes/build spread across ring counts {small.RingCount}/{medium.RingCount}/{large.RingCount} " +
-                    $"was {spread} B (small={smallBpb}, medium={mediumBpb}, large={largeBpb} B/build) — " +
-                    "allocation is still scaling with ring count; the flatten did not eliminate the per-polygon cost.");
-            }
-            finally { small.Dispose(); medium.Dispose(); large.Dispose(); }
         }
     }
 

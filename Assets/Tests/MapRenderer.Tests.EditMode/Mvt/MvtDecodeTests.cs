@@ -7,7 +7,7 @@
 //   MvtDecodePresizeTests             — the decoded value table is sized to the exact decoded count, no growth over-allocation.
 //   KeyBindingHoistTests              — FeatureSelector's per-layer bind step resolves a filter's constant-key names once per call, not once per feature.
 //   NativeTagStorageTests             — DensePropertyStore's flattened tag-word buffer: a shared Allocator.Persistent MvtLayer.FeatureTagWords view.
-//   DecodeGeometryFlattenAllocTests   — the decode-geometry-flatten allocation tooth, calibrated against a live GC.GetTotalMemory canary.
+//   DecodeGeometryFlattenAllocTests   — the decode-geometry-flatten allocation tooth, measured as a per-thread GC.Alloc event count.
 
 using System;
 using System.IO;
@@ -1149,7 +1149,7 @@ namespace MapRenderer.Tests.Mvt
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // DecodeGeometryFlattenAllocTests — the decode-geometry-flatten allocation tooth, GC.GetTotalMemory calibrated
+    // DecodeGeometryFlattenAllocTests — the decode-geometry-flatten allocation tooth, per-thread GC.Alloc-event calibrated
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -1157,13 +1157,11 @@ namespace MapRenderer.Tests.Mvt
     {
         private static readonly TileId FixtureTileId = new TileId { Z = 0, X = 0, Y = 0 };
 
-        // GC.GetTotalMemory's own noise floor (brief: only trustworthy at >= ~100 KB/op) — the calibration
-        // canary must clear this by a wide margin to prove the meter is alive.
-        private const long CalibrationFloor = 100_000;
-
-        // The ceiling sits between the green allocation and a per-feature uint[] regression, with more
-        // than CalibrationFloor of margin on each side.
-        private const long Ceiling = 150_000;
+        // Main-thread GC.Alloc event ceiling per decode (see AllocEventsPerDecode for the meter). Green
+        // reads ~2,213 events/tile; reinstating the retired per-feature uint[] copy in DecodeLayer reads ~2,708.
+        // Known limit: this counts EVENTS, not bytes — a single large buffer added back in one place would
+        // move this ceiling by only 1, same as the small allocation next to it.
+        private const long EventCeiling = 2_500;
 
         private static byte[] LoadFixture()
         {
@@ -1183,29 +1181,12 @@ namespace MapRenderer.Tests.Mvt
                 $" and AppContext.BaseDirectory={AppContext.BaseDirectory}");
         }
 
-        /// <summary>Proves GC.GetTotalMemory is a LIVE meter in this run before the decode tooth below trusts
-        /// it — GC.GetAllocatedBytesForCurrentThread is dead in this same Mono runner, and a silently-dead
-        /// meter would make the assertion below vacuous.</summary>
-        [Test]
-        public void Calibration_GetTotalMemory_ReadsALiveAllocation()
-        {
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            long before = GC.GetTotalMemory(false);
-            byte[] block = new byte[8 << 20];
-            block[0] = 1; // defeat dead-store elimination
-            long after = GC.GetTotalMemory(false);
-
-            Assert.Greater(after - before, CalibrationFloor,
-                "GC.GetTotalMemory must read a live 8 MiB allocation well clear of its own noise floor, or " +
-                "the meter is dead in this run and the tooth below cannot be trusted.");
-            GC.KeepAlive(block);
-        }
-
-        /// <summary>Bytes/decode over a warmed loop, guarded against a Gen0 collection firing inside the
-        /// measurement window. The decoded tile is disposed INSIDE the loop: its layers mint
-        /// Allocator.Persistent native buffers that GC.GetTotalMemory cannot see, but leaking them across N
-        /// iterations still costs real process memory, so each iteration must clean up after itself.</summary>
-        private static long BytesPerDecode(byte[] bytes, int iterations)
+        /// <summary>Main-thread GC.Alloc allocation-event count per decode, over a warmed loop —
+        /// <c>Recorder.Get("GC.Alloc")</c> filtered to the current thread, immune to the other threads'
+        /// allocations that make <c>GC.GetTotalMemory</c> unreliable here (docs/gc-and-allocation-design.md
+        /// § "Measuring GC in tests"). The tile is disposed INSIDE the loop: its layers mint
+        /// Allocator.Persistent buffers this meter cannot see, so each iteration must clean up after itself.</summary>
+        private static long AllocEventsPerDecode(byte[] bytes, int iterations)
         {
             // Warm-up: JIT compilation and any one-shot first-touch allocation must not land in the window.
             for (int w = 0; w < 3; w++)
@@ -1214,32 +1195,37 @@ namespace MapRenderer.Tests.Mvt
                 warm.Dispose();
             }
 
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-
-            int collectionsBefore = GC.CollectionCount(0);
-            long before = GC.GetTotalMemory(false);
-
-            for (int i = 0; i < iterations; i++)
+            var recorder = UnityEngine.Profiling.Recorder.Get("GC.Alloc");
+            recorder.enabled = false; // flush the recorder's own creation-time samples first
+            recorder.FilterToCurrentThread();
+            recorder.enabled = true;
+            try
             {
-                var tile = MvtDecoder.Decode(FixtureTileId, bytes);
-                tile.Dispose();
+                // Calibration: a known allocation inside the window proves the recorder is live this run —
+                // an empty window can otherwise report the PREVIOUS window's value, not a fresh zero.
+                var sentinel = new object();
+                GC.KeepAlive(sentinel);
+
+                for (int i = 0; i < iterations; i++)
+                {
+                    var tile = MvtDecoder.Decode(FixtureTileId, bytes);
+                    tile.Dispose();
+                }
+            }
+            finally
+            {
+                recorder.enabled = false;
+                recorder.CollectFromAllThreads();
             }
 
-            long after = GC.GetTotalMemory(false);
-            int collectionsAfter = GC.CollectionCount(0);
-
-            Assert.AreEqual(collectionsBefore, collectionsAfter,
-                "a Gen0 collection fired inside the measurement window — the byte delta is unreliable here; " +
-                "this indicates a flaky run, not a decode result.");
-
-            return (after - before) / iterations;
+            Assert.GreaterOrEqual(recorder.sampleBlockCount, 1,
+                "calibration: the recorder must see at least the sentinel allocation, or it is dead this run.");
+            return (recorder.sampleBlockCount - 1) / iterations;
         }
 
         /// <summary>
         /// The flatten's headline tooth: MvtDecoder.Decode's per-feature geometry uint[] was the single
-        /// biggest decode allocation site (see the file header for the green/RED-verify figures).
+        /// biggest decode allocation site (see EventCeiling's comment for the green/RED-verify figures).
         /// RED-verify by reinstating an equivalent per-feature uint[] copy of the flattened commands inside
         /// MvtDecoder.DecodeLayer, before the materializer runs.
         /// </summary>
@@ -1248,13 +1234,13 @@ namespace MapRenderer.Tests.Mvt
         {
             byte[] bytes = LoadFixture();
 
-            long bytesPerDecode = BytesPerDecode(bytes, iterations: 20);
-            TestContext.WriteLine($"MEASURE bytesPerDecode={bytesPerDecode}");
+            long eventsPerDecode = AllocEventsPerDecode(bytes, iterations: 20);
+            TestContext.WriteLine($"MEASURE allocEventsPerDecode={eventsPerDecode}");
 
-            Assert.LessOrEqual(bytesPerDecode, Ceiling,
-                $"MvtDecoder.Decode allocated {bytesPerDecode} B/tile on sample-tile.bytes — must stay under " +
-                $"the {Ceiling} B ceiling. 2a removes the per-feature geometry uint[] (the largest single " +
-                "site); the residual is tags/Value-table/husks/strings, left to a later retention-pooling stage.");
+            Assert.LessOrEqual(eventsPerDecode, EventCeiling,
+                $"MvtDecoder.Decode made {eventsPerDecode} main-thread GC allocation event(s)/tile on " +
+                $"sample-tile.bytes — must stay under {EventCeiling}; the residual is tags/Value-table/husks/" +
+                "strings.");
         }
     }
 }

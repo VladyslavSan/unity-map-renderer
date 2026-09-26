@@ -1,10 +1,12 @@
 // Engine-free (pure Core types + NUnit) — a core-tests-ONLY file (lives in Tools/core-tests/, NOT the Assets
 // EditMode tree, so Unity never compiles it). SymbolTileBuffer/ShapedSymbol have no UnityEngine/
 // Unity.Collections dependency, so this runs in the fast dotnet project. It stays out of EditMode on purpose:
-// GC.GetAllocatedBytesForCurrentThread AND GC.GetTotalMemory are both dead/coarse in the Unity Mono EditMode
-// runner (a 400 KB calibration alloc read 16 KB via GetTotalMemory there), so this byte-delta tooth can only
-// discriminate in the CoreCLR dotnet runner. The EditMode
-// zero-alloc coverage for this subsystem uses the Recorder-based Is.Not.AllocatingGCMemory() instead.
+// GC.GetAllocatedBytesForCurrentThread reads a constant 0 in the Unity Mono EditMode runner
+// (docs/gc-and-allocation-design.md § 6), so this byte-delta tooth can only discriminate in the CoreCLR
+// dotnet runner. The EditMode zero-alloc coverage for this subsystem uses the Recorder-based
+// Is.Not.AllocatingGCMemory() instead.
+//
+// Per-thread counter; GetTotalMemory is process-wide, so other threads' allocations land in its window.
 
 using System;
 using NUnit.Framework;
@@ -33,8 +35,9 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolTileBufferAllocTests
     {
-        // GC.GetTotalMemory's own noise floor (brief: only trustworthy at >= ~100 KB/op).
-        private const long CalibrationFloor = 100_000;
+        // GC.GetAllocatedBytesForCurrentThread's noise floor: a small, deterministic, exact counter — no
+        // GC-timing dependence, so a modest floor is enough to prove it discriminates at all.
+        private const long CalibrationFloor = 10_000;
 
         private static readonly SymbolQuad[] SampleQuads =
         {
@@ -62,22 +65,23 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        /// <summary>Proves GC.GetTotalMemory is a LIVE meter in this run before the warm-reuse tooth below
-        /// trusts it — a silently-dead meter would make that assertion vacuous.</summary>
+        /// <summary>Proves GC.GetAllocatedBytesForCurrentThread is a LIVE meter in this run before the
+        /// warm-reuse tooth below trusts it — a silently-dead meter (constant 0, as in Unity Mono) would make
+        /// that assertion vacuous.</summary>
         [Test]
-        public void GetTotalMemory_IsALiveMeterInThisRun()
+        public void GetAllocatedBytesForCurrentThread_IsALiveMeterInThisRun()
         {
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            long before = GC.GetTotalMemory(true);
+            long before = GC.GetAllocatedBytesForCurrentThread();
             var boxes = new object[2000];
             for (int i = 0; i < boxes.Length; i++) boxes[i] = new byte[200]; // ~400 KB, well clear of the floor
-            long after = GC.GetTotalMemory(false);
+            long after = GC.GetAllocatedBytesForCurrentThread();
             GC.KeepAlive(boxes);
             Assert.Greater(after - before, CalibrationFloor,
-                "calibration canary: GetTotalMemory must be a live, discriminating meter in this run");
+                "calibration canary: GetAllocatedBytesForCurrentThread must be a live, discriminating meter " +
+                "in this run");
         }
 
-        /// <summary>The 3b tooth: once <see cref="SymbolTileBuffer"/>'s pools have grown to a batch's steady
+        /// <summary>Once <see cref="SymbolTileBuffer"/>'s pools have grown to a batch's steady
         /// size (warm-up loop below), repeated <see cref="SymbolTileBuffer.Clear"/> + repopulate over the
         /// SAME batch size must not measurably allocate — <c>List&lt;T&gt;.Clear</c> keeps its backing array,
         /// and every <c>Add</c> below writes a value-type <see cref="ShapedSymbol"/>/<see cref="SymbolQuad"/>
@@ -94,11 +98,10 @@ namespace MapRenderer.Tests.Text.Placement
             // JIT settle) BEFORE the metered iteration — mirrors DecodeGeometryFlattenAllocTests' warmed loop.
             for (int w = 0; w < 5; w++) FillOnce(buffer, symbolCount);
 
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            long before = GC.GetTotalMemory(true);
+            long before = GC.GetAllocatedBytesForCurrentThread();
             const int iterations = 20;
             for (int it = 0; it < iterations; it++) FillOnce(buffer, symbolCount);
-            long after = GC.GetTotalMemory(false);
+            long after = GC.GetAllocatedBytesForCurrentThread();
             GC.KeepAlive(buffer);
 
             long bytesPerOp = (after - before) / iterations;

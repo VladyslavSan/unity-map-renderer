@@ -136,3 +136,7 @@ one-line takeaways so a doc reader here does not repeat the discovery:
   yes/no*, not a byte count; **warm the exact measured delegate** first (a one-shot lambda's JIT can
   register a false positive); and a **single** call can be alloc-free while a **run of N** trips it, so
   measure over a loop. Always **canary** any GC meter against a known allocation before trusting a `0`.
+- **For a numeric ceiling (not just yes/no), read the same recorder directly:** `Recorder.Get("GC.Alloc")`,
+  filtered to the current thread, `sampleBlockCount` after N calls — counts allocation events on that
+  thread only, proportional, immune to another thread's heap traffic. A zero-sample window can report the
+  PREVIOUS window's value instead of a fresh zero, so never trust a single zero reading alone.
