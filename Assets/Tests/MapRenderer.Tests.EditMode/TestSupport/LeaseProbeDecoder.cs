@@ -5,8 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Mvt;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Tests
 {

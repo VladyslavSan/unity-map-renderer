@@ -101,9 +101,9 @@ memory".
 
 ## The design
 
-### Type shape and the assembly boundary
+### Type shape and the Core/Unity boundary
 
-`TileGeometryBuffers` (`MapRenderer.Jobs`) is Waist 1. It holds `NativeArray`s, so it cannot sit on an
+`TileGeometryBuffers` (`MapRenderer.Unity.Jobs`) is Waist 1. It holds `NativeArray`s, so it cannot sit on an
 engine-free Core interface.
 
 ```csharp
@@ -132,18 +132,18 @@ slicer maps one source feature to one kind), so the per-feature column plus `Rin
 kind fully. A physical per-ring column is an optional Burst-locality denormalization — adopt it only on a
 profile, never as a correctness claim.
 
-**The blittable/managed split lands on the assembly boundary:**
+**The blittable/managed split lands on the Core/Unity assembly boundary:**
 
 - **Core** keeps the **managed evaluation surface** — `IFeature` (id, properties, `GeometryType`) and the
   `TileGeometryType` enum. Filters and selection read only these; they never read coordinates.
-- **Jobs** owns the **blittable geometry** — `TileGeometryBuffers`, the materializers that fill it, the
-  decoders, and the decoded-tile types (`IDecodedTile` / `ITileLayer`).
+- **Unity's `Jobs/` folder** owns the **blittable geometry** — `TileGeometryBuffers`, the materializers that
+  fill it, the decoders, and the decoded-tile types (`IDecodedTile` / `ITileLayer`).
 
 So a decoded tile is `{ blittable tile-local geometry on the layer, managed property bags on the features }`.
 Properties cannot be blittable, because the filter and expression layer needs `string → Value`. Nothing on
 the feature carries coordinates, and the evaluation surface carries no geometry-join concern either: the
 join rides **beside** the feature, as the ordinal in the `(Ordinal, Feature)` pairs `FeatureSelector` returns
-(`MapRenderer.Jobs/Tiles/FeatureSelector.cs`).
+(`MapRenderer.Unity/Jobs/Tiles/FeatureSelector.cs`).
 
 ### Ownership and lifetime
 
@@ -260,13 +260,13 @@ format pays the slicing cost. Scoping a new format's Stage 1 as "add a decoder c
 
 ## Grounding (file:symbol touch points)
 
-`MapRenderer.Jobs/Geometry/`: `TileGeometryBuffers` (Waist 1 — the fence, the two backing modes, the
+`MapRenderer.Unity/Jobs/Geometry/`: `TileGeometryBuffers` (Waist 1 — the fence, the two backing modes, the
 ownership tiers), `ITileGeometryMaterializer` + `PathGeometryMaterializer` (the format-less producer),
 `RingClipJob`, `RingSelectJob`.
-`MapRenderer.Jobs/Mvt/`: `MvtDecodeJob` (kind-agnostic path walk, no `math.*`), `MvtGeometryMaterializer`,
+`MapRenderer.Unity/Jobs/Mvt/`: `MvtDecodeJob` (kind-agnostic path walk, no `math.*`), `MvtGeometryMaterializer`,
 `MvtModels.MvtLayer.Geometry` / `AdoptGeometry` (write-once buffer ownership).
-`MapRenderer.Jobs/Tiles/`: `IDecodedTile` / `ITileLayer`, `FeatureSelector` (the ordinal join), `GeoJsonTile`.
-`MapRenderer.Jobs/Fill/`: `FillMeshGraph.Schedule` (the clip→assemble→earcut→tile-to-geo→project order),
+`MapRenderer.Unity/Jobs/Tiles/`: `IDecodedTile` / `ITileLayer`, `FeatureSelector` (the ordinal join), `GeoJsonTile`.
+`MapRenderer.Unity/Jobs/Fill/`: `FillMeshGraph.Schedule` (the clip→assemble→earcut→tile-to-geo→project order),
 `RingAssemblyJob` (signed-area classification + `DegenerateThreshold`), `EarcutJob` (the tile-scale epsilons).
 `TileToGeoJob` (tile-local→geodetic), `ProjectPointsJob<TProj>` (geodetic→world),
 `ProjectionDispatch` (the Burst-dispatch precedent).

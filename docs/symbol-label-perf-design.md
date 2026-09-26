@@ -203,7 +203,7 @@ later; the trade reverses only if a profile shows the synchronous gather itself 
 
 ### 10.6 The gather runs as a synchronous Burst job
 
-`SymbolGatherJob` (`Assets/Code/MapRenderer.Jobs/Symbols/SymbolGatherJob.cs`) is the compaction: one
+`SymbolGatherJob` (`Assets/Code/MapRenderer.Unity/Jobs/Symbols/SymbolGatherJob.cs`) is the compaction: one
 `[BurstCompile(CompileSynchronously = true)] IJob`, run synchronously (`.Run()`) inside the frame's gather
 step, strictly before the rest of the tick. It is one job, not two passes: pass 1 totals the per-pool
 sizes, pass 2 resizes the output `NativeList<T>`s once and fills them.
@@ -211,7 +211,7 @@ sizes, pass 2 resizes the output `NativeList<T>`s once and fills them.
 **Storage: a per-frame view table over unchanged block storage.** `SymbolTileBlock` keeps its
 `NativeArray<T>` fields unchanged. Immediately before the job runs, `BuildBlockViews`
 (`SymbolPlacementSystem.cs`) builds a reusable `NativeList<BlockView>` — one entry per block the plan
-references — where `BlockView` (`Assets/Code/MapRenderer.Jobs/Symbols/BlockView.cs`) holds non-owning
+references — where `BlockView` (`Assets/Code/MapRenderer.Unity/Jobs/Symbols/BlockView.cs`) holds non-owning
 `UnsafeList<T>` views over each field, built from the block's existing native arrays. Converting block
 storage itself to `UnsafeList<T>`, or building a bake-time mega-buffer with a generation counter, were
 both considered and rejected: either would touch on the order of a hundred call sites outside the gather

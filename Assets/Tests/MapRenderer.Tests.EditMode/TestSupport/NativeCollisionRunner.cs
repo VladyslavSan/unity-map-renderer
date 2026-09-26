@@ -6,7 +6,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs.Symbols;
+using MapRenderer.Unity.Jobs.Symbols;
 
 namespace MapRenderer.Tests.TestSupport
 {

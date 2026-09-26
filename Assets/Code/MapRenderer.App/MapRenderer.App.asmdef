@@ -4,7 +4,6 @@
     "references": [
         "MapRenderer.Core",
         "MapRenderer.Unity",
-        "MapRenderer.Jobs",
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
         "Unity.Collections",

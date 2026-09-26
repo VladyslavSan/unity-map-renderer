@@ -2,7 +2,7 @@ using System.Threading;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {

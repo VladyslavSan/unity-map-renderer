@@ -4,7 +4,7 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {

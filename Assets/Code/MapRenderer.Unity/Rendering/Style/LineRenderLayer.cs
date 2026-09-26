@@ -6,14 +6,14 @@ using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Core.Expressions;
 using Line = MapRenderer.Core.Style.Line;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
-using MapRenderer.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Lines;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>

@@ -13,7 +13,7 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.View;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;

@@ -7,9 +7,9 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Meshing
 {

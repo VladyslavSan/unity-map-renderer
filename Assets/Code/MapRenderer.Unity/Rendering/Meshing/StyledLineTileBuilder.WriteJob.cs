@@ -4,7 +4,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Lines;
 
 namespace MapRenderer.Unity.Rendering.Meshing
 {

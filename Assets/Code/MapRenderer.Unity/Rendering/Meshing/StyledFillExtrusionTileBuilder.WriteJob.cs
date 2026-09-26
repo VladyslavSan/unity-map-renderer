@@ -4,7 +4,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Projection;
+using MapRenderer.Unity.Jobs.Projection;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     public static partial class StyledFillExtrusionTileBuilder

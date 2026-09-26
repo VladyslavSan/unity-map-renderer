@@ -402,7 +402,7 @@ material-bound seam), `SymbolRenderLayer` (colour tints only — the halo is not
 straddle pad, the hairline floor, `_Blur`), `Fill/Fill_VertexModify.hlsl` and `PixelsToWorld.hlsl`
 (`MapPixelsToWorld`), `Symbol/Text/SymbolTextWorld_ForwardPass.hlsl` (the SDF coverage ramp and halo widen),
 `Symbol/Text/SymbolText_Input.hlsl` (`_ScreenParamsLogical` versus `_SdfAaDevicePx`).
-`MapRenderer.Jobs/Symbols/SymbolProjectionJob` — the logical-px placement input.
+`MapRenderer.Unity/Jobs/Symbols/SymbolProjectionJob` — the logical-px placement input.
 `MapRenderer.Core/`: `Coordinates/WebMercator.TilePixelSize` / `GroundResolution` (the logical-pixel
 definition), `Coordinates/WebMercatorProjection` (the pixel↔ground service),
 `Text/Placement/SymbolStagingMath` / `SymbolBox` / `SymbolViewTransform` (the collision space),

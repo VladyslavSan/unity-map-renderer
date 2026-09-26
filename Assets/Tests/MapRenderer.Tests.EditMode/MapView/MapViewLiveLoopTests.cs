@@ -20,8 +20,8 @@ using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>

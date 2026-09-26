@@ -178,7 +178,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     `var x = Field; if (x.IsCreated) x.Dispose(); Field = x;`. A second `Dispose()` on an already-disposed
     array throws; `NativeArray<T>` has no internal early-return, so the guard **is** the idempotency
     mechanism and the writeback is what lets it see the disposed state. Prior art:
-    `MvtLayer.Dispose` (`Mvt/MvtModels.cs:196-222`).
+    `MvtLayer.Dispose` (`Mvt/MvtModels.cs:150-176`).
   - *Measured, the expensive way:* sweeping all 57 on the assumption they were redundant **reddened 106
     tests**. Exactly **7** were load-bearing (`MvtModels.cs` ×4, `NativeFilterEvaluator.cs` ×2,
     `MvtValueCompactionTests.cs` ×1 — a test that disposes once in its body and again in `finally`).

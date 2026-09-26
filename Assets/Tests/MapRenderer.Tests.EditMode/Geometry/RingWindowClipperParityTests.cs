@@ -7,7 +7,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Geometry;
 namespace MapRenderer.Tests.Geometry
 {
     /// <summary>

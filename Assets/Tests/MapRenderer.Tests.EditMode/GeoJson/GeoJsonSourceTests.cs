@@ -16,7 +16,7 @@ using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;

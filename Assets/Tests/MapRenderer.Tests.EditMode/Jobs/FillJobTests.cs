@@ -14,15 +14,15 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 using System.IO;
 using UnityEngine;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.GeoJson;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using System;
 
 

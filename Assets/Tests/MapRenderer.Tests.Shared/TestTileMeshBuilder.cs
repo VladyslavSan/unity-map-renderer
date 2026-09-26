@@ -10,12 +10,12 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Lines;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests

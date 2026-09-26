@@ -8,10 +8,10 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Unity.Rendering.Style

@@ -13,7 +13,7 @@ using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using System.Linq;
 using System.Reflection;
 using Unity.Collections;

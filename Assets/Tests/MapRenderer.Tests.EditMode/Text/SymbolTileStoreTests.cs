@@ -33,7 +33,7 @@ using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Symbol = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using System.Threading;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;

@@ -23,9 +23,9 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Mvt;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using System.Text.RegularExpressions;
 using System.Linq;
@@ -33,7 +33,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using Unity.Jobs.LowLevel.Unsafe;
 using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 using Unity.Collections.LowLevel.Unsafe;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 
 namespace MapRenderer.Tests.Structure
 {
@@ -51,12 +51,12 @@ namespace MapRenderer.Tests.Structure
     [TestFixture]
     public class NeutralGeometryPathTests
     {
-        /// <summary>The three production assemblies, reached through one type each rather than by name — a
-        /// typo in an assembly-name string would silently scan nothing.</summary>
+        /// <summary>The two production assemblies, reached through one type each rather than by name — a
+        /// typo in an assembly-name string would silently scan nothing. <c>MvtFeature</c> and
+        /// <c>ITileFeatureSource</c> both live in MapRenderer.Unity, so one entry covers both.</summary>
         private static Assembly[] ProductionAssemblies => new[]
         {
             typeof(IFeature).Assembly,             // MapRenderer.Core
-            typeof(MvtFeature).Assembly,           // MapRenderer.Jobs
             typeof(ITileFeatureSource).Assembly,   // MapRenderer.Unity
         };
 
@@ -72,21 +72,20 @@ namespace MapRenderer.Tests.Structure
         /// anyone having to remember to update a list of names.</summary>
         private static readonly string[] DecoderFolders =
         {
-            Path.Combine("Code", "MapRenderer.Jobs", "Mvt"),
-            Path.Combine("Code", "MapRenderer.Jobs", "Tiles"),
+            Path.Combine("Code", "MapRenderer.Unity", "Jobs", "Mvt"),
+            Path.Combine("Code", "MapRenderer.Unity", "Jobs", "Tiles"),
             Path.Combine("Code", "MapRenderer.Core", "GeoJson"),
         };
 
         /// <summary>Individual decoder/producer files that sit beside, not inside, a decoder folder.</summary>
         private static readonly string[] DecoderFiles =
         {
-            Path.Combine("Code", "MapRenderer.Jobs", "MvtDecodeJob.cs"),
-            Path.Combine("Code", "MapRenderer.Jobs", "MvtGeometryMaterializer.cs"),
             // The MVT *source* implementation: it resolves the MVT decoder for a fetch and is by definition
             // format-specific — the polymorphic seam it satisfies (ITileFeatureSource) is not.
             Path.Combine("Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing", "MvtTileFeatureSource.cs"),
-            // The GeoJSON *source* lives in MapRenderer.Unity: ITileFeatureSource returns a UniTask, which
-            // MapRenderer.Jobs does not reference, so a decoder folder is not available to it.
+            // The GeoJSON *source* implementation: like MvtTileFeatureSource above, it binds
+            // ITileFeatureSource to a concrete format and is by definition format-specific — the polymorphic
+            // seam it satisfies is not.
             Path.Combine("Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing", "GeoJsonTileFeatureSource.cs"),
         };
 
@@ -127,8 +126,8 @@ namespace MapRenderer.Tests.Structure
 
             Assert.IsEmpty(offenders,
                 "every production type whose name announces a wire format must be declared under a decoder " +
-                "folder (MapRenderer.Jobs/Mvt, MapRenderer.Jobs/Tiles, MapRenderer.Core/GeoJson, or the two " +
-                "named producer files). Fenced by LOCATION, not by an allow-list of names: an allow-list is " +
+                "folder (MapRenderer.Unity/Jobs/Mvt, MapRenderer.Unity/Jobs/Tiles, MapRenderer.Core/GeoJson, " +
+                "or the two named producer files). Fenced by LOCATION, not by an allow-list of names: an allow-list is " +
                 "what rotted, because a new format-named type was simply added to it. " +
                 $"Offenders: {string.Join(", ", offenders)}");
         }
@@ -273,15 +272,16 @@ namespace MapRenderer.Tests.Structure
         // ── Helpers ───────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>Maps a top-level type NAME to the repo-relative path of the file that declares it, by
-        /// scanning the three production source trees. Source-scanned rather than reflected because .NET
-        /// exposes no declaration path, and location is the fence.</summary>
+        /// scanning the two production source trees (MapRenderer.Unity's recursive walk already covers its
+        /// nested Jobs/ folder). Source-scanned rather than reflected because .NET exposes no declaration
+        /// path, and location is the fence.</summary>
         private static Dictionary<string, string> SourceDeclarationIndex()
         {
             var index = new Dictionary<string, string>();
             string codeRoot = Path.Combine(Application.dataPath, "Code");
             DirectoryAssert.Exists(codeRoot);
 
-            foreach (string assemblyDir in new[] { "MapRenderer.Core", "MapRenderer.Jobs", "MapRenderer.Unity" })
+            foreach (string assemblyDir in new[] { "MapRenderer.Core", "MapRenderer.Unity" })
             {
                 string root = Path.Combine(codeRoot, assemblyDir);
                 DirectoryAssert.Exists(root);
@@ -417,7 +417,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void DecodeLayerFreesTheMvtCommandBuffersItBuilds_ExactlyOnceOnEveryExitPath()
         {
-            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs", "Mvt", "MvtDecoder.cs");
+            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs", "Mvt", "MvtDecoder.cs");
             FileAssert.Exists(path);
             string source = File.ReadAllText(path);
             string body = StripLineComments(
@@ -517,7 +517,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FlattenFeatureColumnPublishesEachRefOutputBeforeItCanThrow()
         {
-            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs", "Mvt", "MvtDecoder.cs");
+            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs", "Mvt", "MvtDecoder.cs");
             FileAssert.Exists(path);
             string source = File.ReadAllText(path);
             string body = StripLineComments(
@@ -556,7 +556,7 @@ namespace MapRenderer.Tests.Structure
         }
 
         private static string MaterializerPath() => Path.Combine(
-            Application.dataPath, "Code", "MapRenderer.Jobs", "Mvt", "MvtGeometryMaterializer.cs");
+            Application.dataPath, "Code", "MapRenderer.Unity", "Jobs", "Mvt", "MvtGeometryMaterializer.cs");
 
         private static string MaterializerSource()
         {
@@ -711,10 +711,11 @@ namespace MapRenderer.Tests.Structure
                     "feature's 1-point path has no area at all, and a straight road has exactly zero.");
             }
 
-            // Clause 2: MvtGeometry.Decode has no production call site left anywhere.
+            // Clause 2: MvtGeometry.Decode has no production call site left anywhere. Two roots, not three:
+            // MapRenderer.Unity's recursive walk already covers its nested Jobs/ folder.
             const string decodeCallForm = "MvtGeometry.Decode(";
             var offenders = new List<string>();
-            foreach (string assembly in new[] { "MapRenderer.Core", "MapRenderer.Jobs", "MapRenderer.Unity" })
+            foreach (string assembly in new[] { "MapRenderer.Core", "MapRenderer.Unity" })
             {
                 string root = Path.Combine(Application.dataPath, "Code", assembly);
                 DirectoryAssert.Exists(root);
@@ -873,7 +874,8 @@ namespace MapRenderer.Tests.Structure
         /// <summary>Tokens that must be PRESENT. Without them a renamed, gutted or deleted file would satisfy
         /// every "count is zero" claim above trivially — the easiest kind of tooth to make vacuous.</summary>
         // The required tokens name the mechanism the file uses: the borrowed buffer type, the ordinal join,
-        // and the job graph it schedules (the ring read and ribbon build live in MapRenderer.Jobs/LineMeshGraph.cs).
+        // and the job graph it schedules (the ring read and ribbon build live in
+        // MapRenderer.Unity/Jobs/Lines/LineMeshGraph.cs).
         private static readonly string[] RequiredTokens =
         {
             "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "new LayerInput", "LineStreamWriteJob",
@@ -1112,6 +1114,13 @@ namespace MapRenderer.Tests.Structure
         {
             string root = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
             DirectoryAssert.Exists(root);
+            // Jobs/ is excluded: its one legitimate decode call site (ITileDecoder.cs) is pinned by
+            // MapRendererJobs_DecodesMvtOnlyInsideMvtTileDecoder below.
+            string jobsRoot = Path.Combine(root, "Jobs");
+            DirectoryAssert.Exists(jobsRoot);
+            // Separator-suffixed so a sibling folder merely PREFIXED by "Jobs" (e.g. a hypothetical
+            // "JobsUtil") cannot false-positive on StartsWith.
+            string jobsRootPrefix = jobsRoot + Path.DirectorySeparatorChar;
 
             string[] files = Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories);
             Assert.Greater(files.Length, 0, $"expected at least one .cs file under {root}");
@@ -1119,13 +1128,14 @@ namespace MapRenderer.Tests.Structure
             var offenders = new System.Collections.Generic.List<string>();
             foreach (string file in files)
             {
+                if (file.StartsWith(jobsRootPrefix, StringComparison.Ordinal)) continue;
                 if (CountOccurrences(StripLineComments(File.ReadAllText(file)), DecodeCallForm) > 0)
                     offenders.Add(file);
             }
 
             Assert.IsEmpty(offenders,
-                $"no file under MapRenderer.Unity may call '{DecodeCallForm}' — the " +
-                $"sole production decode site is MvtTileDecoder in Core; found it in: {string.Join(", ", offenders)}");
+                $"no file under MapRenderer.Unity may call '{DecodeCallForm}' — the sole production decode " +
+                $"site is MvtTileDecoder (Jobs/Tiles/ITileDecoder.cs); found it in: {string.Join(", ", offenders)}");
 
             // TileDecodeDispatch.cs, the ONE place a decode is dispatched, reads through the injected
             // ITileDecoder, not MvtDecoder.
@@ -1148,7 +1158,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void MapRendererJobs_DecodesMvtOnlyInsideMvtTileDecoder()
         {
-            string jobsRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
+            string jobsRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
             DirectoryAssert.Exists(jobsRoot);
 
             string[] files = Directory.GetFiles(jobsRoot, "*.cs", SearchOption.AllDirectories);
@@ -1168,7 +1178,7 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.IsEmpty(offenders,
-                $"only Tiles/ITileDecoder.cs may call '{DecodeCallForm}' under MapRenderer.Jobs; " +
+                $"only Tiles/ITileDecoder.cs may call '{DecodeCallForm}' under MapRenderer.Unity/Jobs; " +
                 $"found it in: {string.Join(", ", offenders)}");
             Assert.AreEqual(1, tileDecoderCount,
                 $"Tiles/ITileDecoder.cs must call '{DecodeCallForm}' exactly once — MvtTileDecoder.Decode, " +
@@ -1202,9 +1212,8 @@ namespace MapRenderer.Tests.Structure
         public void WriteIntoPath_ReferencesNoMvtCarrierTypes()
         {
             string unityRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
-            // FeatureSelector and SourceLayerResolver left MapRenderer.Core for MapRenderer.Jobs
-            // along with the rest of the decode seam. Same two files, same claim, new root.
-            string jobsRoot  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
+            // FeatureSelector and SourceLayerResolver live under Jobs/Tiles, not MapRenderer.Core.
+            string jobsRoot  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
 
             (string root, string relativePath)[] scanned =
             {
@@ -1249,7 +1258,8 @@ namespace MapRenderer.Tests.Structure
             (string relativePath, string[] required)[] mechanisms =
             {
                 // Both files BORROW the layer's buffer; `tileLayer` exists only because the LAYER owns the
-                // geometry. The line row names the job graph it schedules (MapRenderer.Jobs/LineMeshGraph.cs).
+                // geometry. The line row names the job graph it schedules
+                // (MapRenderer.Unity/Jobs/Lines/LineMeshGraph.cs).
                 (Path.Combine("Rendering", "Meshing", "StyledLineTileBuilder.cs"),
                     new[] { "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "LayerInput" }),
                 (Path.Combine("Text", "SymbolFeatureExtractor.cs"),
@@ -2170,16 +2180,16 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void GraphBuilderSources_CarryNeitherSafetyDisableAttribute()
         {
-            string jobsDir    = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
-            string meshingDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Meshing");
-            DirectoryAssert.Exists(jobsDir);
-            DirectoryAssert.Exists(meshingDir);
+            // The whole MapRenderer.Unity tree, not just Jobs/ + Rendering/Meshing/ — strictly stronger, and
+            // nothing outside those two subtrees carries either forbidden token today, so widening costs
+            // nothing and catches a future violation anywhere in the assembly.
+            string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            DirectoryAssert.Exists(unityDir);
 
             var files = new List<string>();
-            files.AddRange(Directory.GetFiles(jobsDir, "*.cs", SearchOption.AllDirectories));
-            files.AddRange(Directory.GetFiles(meshingDir, "*.cs", SearchOption.AllDirectories));
+            files.AddRange(Directory.GetFiles(unityDir, "*.cs", SearchOption.AllDirectories));
 
-            Assert.GreaterOrEqual(files.Count, 10,
+            Assert.GreaterOrEqual(files.Count, 200,
                 "precondition: the enumeration must find a plausible number of production files, or a moved " +
                 "directory / wrong Application.dataPath join would make every assertion below vacuous");
             Assert.IsTrue(files.Exists(f => Path.GetFileName(f) == "FillMeshGraph.cs"),
@@ -2245,15 +2255,14 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void GraphNodes_DeclaringASizingOwnedBufferStruct_MatchTheKnownConsumerSet()
         {
-            string jobsDir    = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
-            string meshingDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Meshing");
-            DirectoryAssert.Exists(jobsDir);
-            DirectoryAssert.Exists(meshingDir);
+            // The whole MapRenderer.Unity tree, not just Jobs/ + Rendering/Meshing/ — same widening as
+            // GraphBuilderSources_CarryNeitherSafetyDisableAttribute above, for the same reason.
+            string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            DirectoryAssert.Exists(unityDir);
 
             var files = new List<string>();
-            files.AddRange(Directory.GetFiles(jobsDir, "*.cs", SearchOption.AllDirectories));
-            files.AddRange(Directory.GetFiles(meshingDir, "*.cs", SearchOption.AllDirectories));
-            Assert.GreaterOrEqual(files.Count, 10,
+            files.AddRange(Directory.GetFiles(unityDir, "*.cs", SearchOption.AllDirectories));
+            Assert.GreaterOrEqual(files.Count, 200,
                 "precondition: the enumeration must find a plausible number of production files, or a moved " +
                 "directory / wrong Application.dataPath join would make the consumer set below vacuously small");
 
@@ -2277,7 +2286,7 @@ namespace MapRenderer.Tests.Structure
 
         private static string FillMeshGraphSource()
         {
-            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs", "Fill", "FillMeshGraph.cs");
+            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs", "Fill", "FillMeshGraph.cs");
             FileAssert.Exists(path);
             return File.ReadAllText(path);
         }
@@ -2309,7 +2318,7 @@ namespace MapRenderer.Tests.Structure
     /// <summary>
     /// No production code references a symbol whose only caller was the synchronous fill pipeline. Stop
     /// rule: <see cref="ForbiddenPatterns"/> derives from that predicate, not a hand-picked list. The scan is
-    /// identifier-anchored over <c>MapRenderer.Jobs/</c> and <c>MapRenderer.Unity/Rendering/</c>, comments
+    /// identifier-anchored over <c>MapRenderer.Unity/Jobs/</c> and <c>MapRenderer.Unity/Rendering/</c>, comments
     /// stripped. <c>ProjectPointsJob.Run</c> cannot be anchored, so
     /// <see cref="ProjectPointsJobConstructionFenceTests"/> fences its construction site instead.
     /// </summary>
@@ -2338,7 +2347,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ProductionSources_ContainNoRetiredSynchronousPipelineReferences()
         {
-            string jobsDir   = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
+            string jobsDir   = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
             string unityDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering");
             DirectoryAssert.Exists(jobsDir);
             DirectoryAssert.Exists(unityDir);
@@ -2349,7 +2358,7 @@ namespace MapRenderer.Tests.Structure
 
             // Non-vacuity: guards a path typo silently scanning zero files.
             Assert.GreaterOrEqual(files.Count, 50,
-                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Jobs/ + " +
+                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Unity/Jobs/ + " +
                 $"MapRenderer.Unity/Rendering/ (found {files.Count}) — a path typo would silently scan nothing.");
 
             var violations = new List<string>();
@@ -2364,7 +2373,7 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.IsEmpty(violations,
-                "production source under MapRenderer.Jobs/ or MapRenderer.Unity/Rendering/ references " +
+                "production source under MapRenderer.Unity/Jobs/ or MapRenderer.Unity/Rendering/ references " +
                 "a symbol mesher other than the graph — the graph is the only mesher:\n" +
                 string.Join("\n", violations));
         }
@@ -2498,7 +2507,7 @@ namespace MapRenderer.Tests.Structure
 
         private static List<string> ScanFiles()
         {
-            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
+            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
             string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering");
             DirectoryAssert.Exists(jobsDir);
             DirectoryAssert.Exists(unityDir);
@@ -2510,7 +2519,7 @@ namespace MapRenderer.Tests.Structure
             // Non-vacuity: guards a path typo silently scanning zero files — same floor as
             // FillMeshPipelineRetirementFenceTests' own scan.
             Assert.GreaterOrEqual(files.Count, 50,
-                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Jobs/ + " +
+                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Unity/Jobs/ + " +
                 $"MapRenderer.Unity/Rendering/ (found {files.Count}) — a path typo would silently scan nothing.");
             return files;
         }
@@ -2552,7 +2561,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ProjectPointsJob_AppearsInExactlyTheTwoExpectedProductionFiles()
         {
-            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
+            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
             string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering");
             DirectoryAssert.Exists(jobsDir);
             DirectoryAssert.Exists(unityDir);
@@ -2563,7 +2572,7 @@ namespace MapRenderer.Tests.Structure
 
             // Non-vacuity: guards a path typo silently scanning zero files — same floor as the sibling fences.
             Assert.GreaterOrEqual(files.Count, 50,
-                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Jobs/ + " +
+                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Unity/Jobs/ + " +
                 $"MapRenderer.Unity/Rendering/ (found {files.Count}) — a path typo would silently scan nothing.");
 
             var actual = new List<string>();
@@ -2683,7 +2692,7 @@ namespace MapRenderer.Tests.Structure
 
         private static List<string> ScanFiles()
         {
-            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
+            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
             string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering");
             DirectoryAssert.Exists(jobsDir);
             DirectoryAssert.Exists(unityDir);
@@ -2695,7 +2704,7 @@ namespace MapRenderer.Tests.Structure
             // Non-vacuity: guards a path typo silently scanning zero files — same floor as
             // WallChainCallerFenceTests' own scan.
             Assert.GreaterOrEqual(files.Count, 50,
-                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Jobs/ + " +
+                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Unity/Jobs/ + " +
                 $"MapRenderer.Unity/Rendering/ (found {files.Count}) — a path typo would silently scan nothing.");
             return files;
         }
@@ -2723,7 +2732,7 @@ namespace MapRenderer.Tests.Structure
 // Disambiguate from UnityEngine.RenderMode (Canvas) — the map's render mode is the material-set one.
 
     /// <summary>
-    /// <b>Mesh preparation never branches on render mode</b>: no file in <c>MapRenderer.Jobs</c>,
+    /// <b>Mesh preparation never branches on render mode</b>: no file in <c>MapRenderer.Unity/Jobs</c>,
     /// <c>Rendering/Meshing</c> or <c>Rendering/Tile</c> names <see cref="RenderMode"/>; material and lighting
     /// folders may. A comment-stripped source scan sees a branch that reflection cannot, and the token is
     /// <c>typeof(RenderMode).Name</c>, so a rename re-aims it. Limitation: a quoted string reds falsely, and an
@@ -2737,7 +2746,7 @@ namespace MapRenderer.Tests.Structure
         /// tree reds this fixture instead of silently scanning nothing — the fence fails closed.</summary>
         private static readonly (string Path, int MinFiles)[] FencedRoots =
         {
-            (Path.Combine("Code", "MapRenderer.Jobs"),                          40),
+            (Path.Combine("Code", "MapRenderer.Unity", "Jobs"),                  40),
             (Path.Combine("Code", "MapRenderer.Unity", "Rendering", "Meshing"),  10),
             (Path.Combine("Code", "MapRenderer.Unity", "Rendering", "Tile"),     15),
         };

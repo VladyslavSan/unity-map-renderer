@@ -28,19 +28,19 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Lines;
-using MapRenderer.Jobs.Projection;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Projection;
 using MapRenderer.Unity.Rendering.Tile;
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Tiles;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Unity.Burst;
 using MapRenderer.Core.GeoJson;
@@ -451,11 +451,9 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void NoProductionSignature_TakesBothATileGeometryBuffersAndATileId()
         {
-            Assembly[] production =
-            {
-                typeof(TileGeometryBuffers).Assembly,   // MapRenderer.Jobs
-                typeof(ITileFeatureSource).Assembly,    // MapRenderer.Unity
-            };
+            // TileGeometryBuffers and ITileFeatureSource both live in MapRenderer.Unity, so one entry
+            // covers both.
+            Assembly[] production = { typeof(ITileFeatureSource).Assembly };
 
             var offenders   = new List<string>();
             int bufferSites = 0;
@@ -1416,7 +1414,7 @@ namespace MapRenderer.Tests.Jobs
             {
                 byte[] bytes = System.IO.File.ReadAllBytes(path);
                 var tileId = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
-                using var mvtTile = MapRenderer.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
+                using var mvtTile = MapRenderer.Unity.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
                 foreach (var layer in mvtTile.Layers)
                 {
                     var geometry = layer.Geometry;
@@ -1596,7 +1594,7 @@ namespace MapRenderer.Tests.Jobs
             {
                 byte[] bytes = System.IO.File.ReadAllBytes(path);
                 var tileId = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
-                using var mvtTile = MapRenderer.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
+                using var mvtTile = MapRenderer.Unity.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
                 foreach (var layer in mvtTile.Layers)
                 {
                     var geometry = layer.Geometry;
@@ -1664,7 +1662,7 @@ namespace MapRenderer.Tests.Jobs
             {
                 byte[] bytes = System.IO.File.ReadAllBytes(path);
                 var tileId = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
-                using var mvtTile = MapRenderer.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
+                using var mvtTile = MapRenderer.Unity.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
                 foreach (var layer in mvtTile.Layers)
                 {
                     var geometry = layer.Geometry;

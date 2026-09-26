@@ -27,11 +27,11 @@ using System.IO;
 using UnityEngine.TestTools;
 using Unity.Mathematics;
 using Unity.Profiling;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 
 
 namespace MapRenderer.Tests.MapViews
@@ -558,7 +558,7 @@ namespace MapRenderer.Tests.MapViews
             var    fillLayer = style.Layers[0];
             var    paint     = ((Fill.StyleLayer)fillLayer).Paint;
             var    features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var    mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+            var    mvtLayer  = MapRenderer.Unity.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer);
             Assert.Greater(features.Count, 0);

@@ -13,14 +13,14 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Tiles;
 using System.Linq;
 using System.Reflection;
 
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Mvt
 
         private static string ReadMvtDecoderSource()
         {
-            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs", "Mvt", "MvtDecoder.cs");
+            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs", "Mvt", "MvtDecoder.cs");
             FileAssert.Exists(path);
             return File.ReadAllText(path);
         }
@@ -600,8 +600,8 @@ namespace MapRenderer.Tests.Mvt
         }
     }
 
-// EditMode only (decodes a real MVT fixture through MvtDecoder, which lives in MapRenderer.Jobs and is not
-// compiled by the Tools/core-tests seam).
+// EditMode only (decodes a real MVT fixture through MvtDecoder, which lives under MapRenderer.Unity/Jobs and
+// is not compiled by the Tools/core-tests seam).
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // MvtDecodePresizeTests — the decoded value table is sized to the exact decoded count

@@ -14,8 +14,8 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.View.Camera;
@@ -24,8 +24,8 @@ using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>

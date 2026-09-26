@@ -13,8 +13,8 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Text
@@ -62,7 +62,7 @@ namespace MapRenderer.Unity.Text
             // runs at display time on the live camera zoom.
 
             // Fully qualified: a `using MapRenderer.Core.Style;` would make StyleLayer ambiguous.
-            ITileLayer tileLayer = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(layer, tile);
+            ITileLayer tileLayer = MapRenderer.Unity.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(layer, tile);
             if (tileLayer == null) return;
 
             // The buffer is the one authority for address and extent. The IsCreated guard makes reading

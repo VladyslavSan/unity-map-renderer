@@ -3,7 +3,6 @@
     "rootNamespace": "MapRenderer.Tests",
     "references": [
         "MapRenderer.Core",
-        "MapRenderer.Jobs",
         "MapRenderer.Unity",
         "MapRenderer.App",
         "MapRenderer.Unity.Editor",

@@ -1,8 +1,8 @@
 using UnityEngine;
 using Unity.Collections;
 using Unity.Jobs;
-using MapRenderer.Jobs.Lines;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Rendering.Meshing

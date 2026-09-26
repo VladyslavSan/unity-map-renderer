@@ -9,8 +9,8 @@ using Unity.Mathematics;
 using Unity.Collections;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Meshing

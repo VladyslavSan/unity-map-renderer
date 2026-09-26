@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using Unity.Jobs;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>

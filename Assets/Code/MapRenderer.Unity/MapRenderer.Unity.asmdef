@@ -3,7 +3,6 @@
     "rootNamespace": "MapRenderer.Unity",
     "references": [
         "MapRenderer.Core",
-        "MapRenderer.Jobs",
         "Unity.Mathematics",
         "Unity.Mathematics.Extensions",
         "Unity.Collections",

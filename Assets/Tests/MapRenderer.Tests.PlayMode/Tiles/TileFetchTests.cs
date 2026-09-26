@@ -20,7 +20,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.Collections.Generic;
 using Unity.Profiling;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;

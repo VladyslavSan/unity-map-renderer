@@ -9,7 +9,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Lines;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Unity.Rendering.Meshing;
 namespace MapRenderer.Tests

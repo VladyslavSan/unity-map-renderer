@@ -30,13 +30,13 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using LineStyleLayer = MapRenderer.Core.Style.Line.StyleLayer;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Core.Tiles;
 using System;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -49,8 +49,8 @@ using Unity.Jobs;
 using Line = MapRenderer.Core.Style.Line;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Json;
-using MapRenderer.Jobs.Lines;
-using MapRenderer.Jobs.Projection;
+using MapRenderer.Unity.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Projection;
 using MvtCommandStream = MapRenderer.Tests.Jobs.MvtCommandStream;
 using Object = UnityEngine.Object;
 
@@ -298,7 +298,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Tests for <see cref="EarcutJobPolygonRunner"/>, the driver for <see cref="MapRenderer.Jobs.Fill.EarcutJob"/>,
+    /// Tests for <see cref="EarcutJobPolygonRunner"/>, the driver for <see cref="MapRenderer.Unity.Jobs.Fill.EarcutJob"/>,
     /// in tile-space double2 (Y-down). A simple polygon with holes gives outerVerts + 2·holeCount − 2 triangles,
     /// and Σ|triArea| equals |outerArea| − Σ|holeAreas| within epsilon.
     /// </summary>

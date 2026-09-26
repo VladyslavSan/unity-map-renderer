@@ -11,8 +11,8 @@ using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Materials;
 using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     /// <summary>

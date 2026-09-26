@@ -24,13 +24,13 @@ using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Unity.Mathematics;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs.Lines;
+using MapRenderer.Unity.Jobs.Lines;
 using MapRenderer.Core.Json;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Tests.Jobs;
 using Color = UnityEngine.Color;                  // aliased: MapRenderer.Core.Expressions has its own Color
 using Cysharp.Threading.Tasks;
@@ -45,7 +45,7 @@ using MapRenderer.Core.Text;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests.Tiles;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using Object = UnityEngine.Object;
 

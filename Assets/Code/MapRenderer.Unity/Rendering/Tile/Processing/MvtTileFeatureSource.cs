@@ -3,7 +3,7 @@ using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing

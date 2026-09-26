@@ -32,7 +32,7 @@ using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Collections;
 using Unity.Jobs;
-using MapRenderer.Jobs.Symbols;
+using MapRenderer.Unity.Jobs.Symbols;
 using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -40,7 +40,7 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Tests; // TestGlyphSource
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.Rendering;

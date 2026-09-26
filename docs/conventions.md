@@ -466,7 +466,7 @@ disposed *again* — the copy-mutate-writeback idempotency idiom:
 A second `Dispose()` on an already-disposed `NativeArray<T>` throws; the type has no internal early-return,
 so the guard **is** the idempotency mechanism, and the writeback is what lets the guard observe the disposed
 state on the next call. Prior art with the reasoning in its own summary: `MvtLayer.Dispose`
-(`Assets/Code/MapRenderer.Jobs/Mvt/MvtModels.cs:196-222`).
+(`Assets/Code/MapRenderer.Unity/Jobs/Mvt/MvtModels.cs:150-176`).
 
 **The discriminator is "can this release site run twice on the SAME, already-disposed instance?"** — not
 "might this value be absent?". A never-allocated `default(NativeArray<T>)` disposes cleanly, so absence is
@@ -521,7 +521,7 @@ cannot see whether the type argument holds a container:
   because every projection struct is stateless; load-bearing the moment one holds a container.
 
 **Sweep verdict: no — not as its own change, and not opportunistically.** A repo-wide audit enumerated every
-`[ReadOnly]` under `MapRenderer.Jobs/` and `MapRenderer.Unity/Rendering/Meshing/` (147 real attribute sites
+`[ReadOnly]` under `MapRenderer.Unity/Jobs/` and `MapRenderer.Unity/Rendering/Meshing/` (147 real attribute sites
 across 27 files; 117 on containers, 30 not). The cost of "tidying" the 30 is a 12-file diff that changes no
 behaviour and whose one plausible mechanical form — strip it from anything that isn't a `Native*` —
 introduces a real schedule-time throw. Opportunistic removal is *worse* than a deliberate sweep here,

@@ -97,9 +97,9 @@ Three lanes. Take the **first** one whose entry condition holds.
   - Runs in about 0.1 s through `dotnet test`, with no Editor and no project lock. 104 files are in it.
   - It compiles the real `MapRenderer.Core` sources plus the EditMode test file **verbatim** — one source,
     two runners. `Unity.Mathematics` is a shim under `Tools/core-tests/Shim/`.
-  - `MapRenderer.Jobs`, `Unity.Collections` and `UnityEngine` all disqualify. `Unity.Collections` is the
-    one people miss: `Filters/FeatureSelectorNativeFilterTests.cs` names no `UnityEngine` type and is still
-    engine-bound.
+  - `MapRenderer.Unity` (including its `Jobs` namespace), `Unity.Collections` and `UnityEngine` all
+    disqualify. `Unity.Collections` is the one people miss: `Filters/FeatureSelectorNativeFilterTests.cs`
+    names no `UnityEngine` type and is still engine-bound.
   - **The `<Compile Include>` entry in `Tools/core-tests/core-tests.csproj` moves in the SAME commit as
     the file.** Nothing tells you otherwise: the file compiles and passes in EditMode either way.
     `Expressions/EvalArgBuffersReclamationTests.cs` is engine-free, its `Core` dependency is already in the

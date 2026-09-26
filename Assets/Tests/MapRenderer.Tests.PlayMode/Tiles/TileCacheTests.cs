@@ -13,15 +13,15 @@ using UnityEngine.TestTools;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 
 
 namespace MapRenderer.Tests.PlayMode.Tiles

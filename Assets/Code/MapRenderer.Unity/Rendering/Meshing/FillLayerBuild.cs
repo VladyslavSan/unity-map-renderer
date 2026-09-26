@@ -2,9 +2,9 @@ using UnityEngine;
 using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Rendering.Meshing

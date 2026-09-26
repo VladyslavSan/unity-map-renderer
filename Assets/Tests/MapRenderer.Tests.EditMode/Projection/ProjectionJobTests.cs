@@ -6,8 +6,8 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Projection;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Projection;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Projection
