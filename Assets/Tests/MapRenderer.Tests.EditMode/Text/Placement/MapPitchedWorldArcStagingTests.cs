@@ -3008,6 +3008,52 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
+        // ── UMR-227 part C: the builder wire (StyledSymbolTileBuilder.Shape → CurvedTextLayout.Layout)
+        //    that threads text-letter-spacing onto CURVED text — dropping the 4th argument at the call site
+        //    leaves the extractor-only teeth green, so this must go through the real BuildAsync path. ──
+
+        private static SymbolStyle.StyleLayer GeolinesLayer(float letterSpacingEm)
+            => new SymbolStyle.StyleLayer
+            {
+                Id = "lines",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "geolines",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout(
+                    "{\"text-field\":\"AB\",\"text-font\":[\"" + FontName + "\"],\"symbol-placement\":\"line-center\"," +
+                    "\"text-letter-spacing\":" + letterSpacingEm.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}"),
+            };
+
+        [Test]
+        public async Task Build_CurvedLineText_LetterSpacing_WidensConsecutiveArcCentersBy12PxPerGap()
+        {
+            using var manager = BuildGlyphManager();
+
+            SymbolTileBuffer zero = await BuildSymbols(GeolinesLayer(0f), manager);
+            SymbolTileBuffer spaced = await BuildSymbols(GeolinesLayer(0.5f), manager);
+
+            Assert.Greater(zero.Symbols.Count, 0, "the geolines LineString layer yields curved text symbols");
+            Assert.AreEqual(zero.Symbols.Count, spaced.Symbols.Count, "same feature set");
+
+            ShapedSymbol zeroFirst = zero.Symbols[0];
+            ShapedSymbol spacedFirst = spaced.Symbols[0];
+            Assert.AreEqual(SymbolKind.Text, zeroFirst.Kind);
+            Assert.Greater(zeroFirst.GlyphCount, 1, "need at least two glyphs to see a gap");
+            Assert.AreEqual(zeroFirst.GlyphCount, spacedFirst.GlyphCount, "same shaped run, same glyph count");
+
+            const float expectedGapGrowth = 12f; // 0.5em * TextQuadLayout.OneEm (24)
+            for (int i = 1; i < zeroFirst.GlyphCount; i++)
+            {
+                float zeroGap = zero.Glyphs[zeroFirst.GlyphStart + i].ArcCenter
+                    - zero.Glyphs[zeroFirst.GlyphStart + i - 1].ArcCenter;
+                float spacedGap = spaced.Glyphs[spacedFirst.GlyphStart + i].ArcCenter
+                    - spaced.Glyphs[spacedFirst.GlyphStart + i - 1].ArcCenter;
+                Assert.AreEqual(expectedGapGrowth, spacedGap - zeroGap, 1e-3f,
+                    $"gap {i} must widen by exactly 0.5em (12px) — dropping the letter-spacing argument at " +
+                    "the CurvedTextLayout.Layout call site leaves this at 0");
+            }
+        }
+
         // ── Per-symbol build isolation: one symbol whose build throws (e.g. a deferred mixed-direction
         //    bidi NotSupportedException) must be SKIPPED, never abort the whole tile's symbols. ──
 

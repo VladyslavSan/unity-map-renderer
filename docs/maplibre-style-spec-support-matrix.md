@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 51 supported, 57 partial, 6 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 52 supported, 56 partial, 6 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -250,7 +250,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `text-size` | `supported` | |
 | `text-max-width` | `supported` | |
 | `text-line-height` | `supported` | |
-| `text-letter-spacing` | `partial` | Point text and upright line text only. Curved line text ignores it. |
+| `text-letter-spacing` | `supported` | |
 | `text-justify` | `partial` | Constant only; the spec also allows data-driven. |
 | `text-radial-offset` | `supported` | |
 | `text-variable-anchor` | `not supported` | Placement tries one anchor only. |

@@ -1216,6 +1216,68 @@ namespace MapRenderer.Tests.Style
             }
         }
 
+        // ── text-letter-spacing on curved (along-line) text — UMR-227 part C ────────────────────────
+
+        /// <summary>The extractor must evaluate <c>text-letter-spacing</c> at the BUILD zoom and stamp it
+        /// onto a CURVED line symbol's <see cref="SymbolStyle.SymbolFeature.LetterSpacingEm"/>. The builder
+        /// wire that feeds this value into <c>CurvedTextLayout</c> is pinned separately by
+        /// <c>StyledSymbolTileBuilderTests.Build_CurvedLineText_LetterSpacing_WidensConsecutiveArcCentersBy12PxPerGap</c>.
+        /// RED against an extractor that never reads <c>text-letter-spacing</c> for the curved branch.</summary>
+        [Test]
+        public void Extract_LinePlacement_StampsLetterSpacing_ConstantValue()
+        {
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
+            var projection = new WebMercatorProjection();
+
+            var layer = new SymbolStyle.StyleLayer
+            {
+                Id = "lines",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "geolines",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout(
+                    "{\"text-field\":\"AB\",\"symbol-placement\":\"line-center\",\"text-letter-spacing\":0.2}"),
+            };
+
+            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, lineSymbols);
+
+            Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
+            SymbolStyle.SymbolFeature first = lineSymbols[0];
+            Assert.AreEqual("AB", first.Text);
+            Assert.AreEqual(0.2f, first.LetterSpacingEm, 1e-6f,
+                "the extractor must evaluate text-letter-spacing at the build zoom and stamp it onto the curved symbol");
+        }
+
+        /// <summary>Pins that the extractor evaluates <c>text-letter-spacing</c> AT THE BUILD ZOOM, not a
+        /// fixed default — a zoom-interpolated expression must read back the value for the passed-in zoom,
+        /// not (say) always the first stop.</summary>
+        [Test]
+        public void Extract_LinePlacement_StampsLetterSpacing_ZoomInterpolated_AtTheBuildZoom()
+        {
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
+            var projection = new WebMercatorProjection();
+
+            var layer = new SymbolStyle.StyleLayer
+            {
+                Id = "lines",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "geolines",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout(
+                    "{\"text-field\":\"AB\",\"symbol-placement\":\"line-center\"," +
+                    "\"text-letter-spacing\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,0,10,1]}"),
+            };
+
+            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 5.0, projection, lineSymbols);
+
+            Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
+            Assert.AreEqual(0.5f, lineSymbols[0].LetterSpacingEm, 1e-6f,
+                "at build zoom 5, halfway between the 0/10 stops, the interpolated value must be 0.5 — " +
+                "not the first stop's 0 or the last stop's 1");
+        }
+
         // ── Mercator extractor length-identity — the engine-free half of the byte-identity invariant ─────────
 
         [Test]

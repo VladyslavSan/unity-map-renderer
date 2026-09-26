@@ -179,6 +179,10 @@ namespace MapRenderer.Unity.Text
                 float      sortKey    = layout.SymbolSortKey.Evaluate(zoom, feature);
                 float      spacing    = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, feature)); // px, >= 1 (spec)
                 float      maxAngle   = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees
+                // Curved branch only. TryEvaluate: a value that cannot evaluate falls back to 0, not a
+                // failed tile build.
+                float letterSpacingEm = 0f;
+                if (isLine && !textAtAnchors) layout.TextLetterSpacing.TryEvaluate(zoom, feature, out letterSpacingEm);
                 SymbolPaint symbolPaint = EvaluatePaint(paint, zoom, feature);
 
                 // The icon quad/paint are feature-constant (icon-size/-padding/-opacity don't vary per
@@ -300,6 +304,7 @@ namespace MapRenderer.Unity.Text
                                 SortKey         = sortKey,
                                 SpacingPx       = spacing,
                                 MaxAngleDeg     = maxAngle,
+                                LetterSpacingEm = letterSpacingEm,
                                 KeepUpright     = layout.TextKeepUpright,
                                 AllowOverlap    = layout.TextAllowOverlap,
                                 IgnorePlacement = layout.TextIgnorePlacement,

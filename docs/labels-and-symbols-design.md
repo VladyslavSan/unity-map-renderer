@@ -505,7 +505,8 @@ different anchors/rotations instead of N sharing one. The rest is two pure Core 
   advance-center, and **vertically on the run's optical (cap-band) centre** — the same
   `TextQuadLayout.OpticalCentreBelowReferencePx` a centre-anchored point label applies (`docs/road-shields-design.md`
   D12), so a curved and a point label of the same string sit the same way on their anchor.
-  `ArcCenter` = cumulative advance to that center.
+  `ArcCenter` = cumulative advance to that center. The pen advances by the glyph's advance plus
+  `text-letter-spacing`, as in `TextQuadLayout`.
 
   > **Rejected: centering each glyph on its own ink.** The centering above adds exactly **one constant per
   > LABEL**, with no per-glyph term, so every glyph in a run keeps its exact relative offset and descenders
