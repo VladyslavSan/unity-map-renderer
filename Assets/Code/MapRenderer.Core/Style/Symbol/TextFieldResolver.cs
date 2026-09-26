@@ -18,7 +18,8 @@ namespace MapRenderer.Core.Style.Symbol
         /// Resolve <paramref name="textField"/> (a layer's raw <c>text-field</c> JSON) for
         /// <paramref name="feature"/>. Returns the label string, or <c>null</c> to skip the feature.
         /// </summary>
-        public static string Resolve(JsonValue textField, IFeature feature)
+        /// <param name="zoom">The caller's build zoom (see the matrix's † note).</param>
+        public static string Resolve(JsonValue textField, IFeature feature, double zoom)
         {
             if (textField == null || feature == null) return null;
 
@@ -29,7 +30,7 @@ namespace MapRenderer.Core.Style.Symbol
             }
             else if (textField.IsArray)
             {
-                resolved = EvaluateExpression(textField, feature);
+                resolved = EvaluateExpression(textField, feature, zoom);
             }
             else
             {
@@ -77,12 +78,12 @@ namespace MapRenderer.Core.Style.Symbol
         }
 
         // Parse + evaluate an expression-form text-field. Any parse/eval failure → null (skip).
-        private static string EvaluateExpression(JsonValue expressionJson, IFeature feature)
+        private static string EvaluateExpression(JsonValue expressionJson, IFeature feature, double zoom)
         {
             try
             {
                 Expression expr = ParsedExpressions.GetValue(expressionJson, ParseCallback);
-                Value result = expr.Evaluate(new EvaluationContext(0.0, feature));
+                Value result = expr.Evaluate(new EvaluationContext(zoom, feature));
                 return result.IsNull ? null : result.ToDisplayString();
             }
             catch

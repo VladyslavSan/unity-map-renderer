@@ -947,6 +947,45 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(SymbolKind.Text, symbols[0].Kind);
         }
 
+        // ── icon-image must read the CALLER's zoom (not always 0); icon-padding must fall back
+        // instead of dropping the tile's whole extraction on a malformed zoom expression ────────
+
+        [Test]
+        public void Extract_IconImageZoomStep_ResolvesAtTheBuildZoom_NotZero()
+        {
+            var tile = OnePointTile(new double2(100, 200));
+            var atlas = LoadAtlas();
+            var layer = PointLayer("{\"icon-image\":[\"step\",[\"zoom\"],\"marker\",5,\"star\"]}");
+
+            var low = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), low, atlas);
+            Assert.AreEqual(1, low.Count);
+            AssertQuadEqual(IconQuadLayout.Layout(MarkerEntry, SheetSize, 1f, TextAnchor.Center, float2.zero),
+                low[0].IconQuad);
+
+            var high = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 8.0, new WebMercatorProjection(), high, atlas);
+            Assert.AreEqual(1, high.Count);
+            AssertQuadEqual(IconQuadLayout.Layout(StarEntry, SheetSize, 1f, TextAnchor.Center, float2.zero),
+                high[0].IconQuad);
+        }
+
+        [Test]
+        public void Extract_IconPaddingMismatchedZoomArray_FallsBackInsteadOfDroppingTheTile()
+        {
+            var tile = OnePointTile(new double2(100, 200));
+            var atlas = LoadAtlas();
+            var layer = PointLayer(
+                "{\"icon-image\":\"marker\",\"icon-padding\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2],10,[8,16]]}");
+
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            Assert.DoesNotThrow(() =>
+                SymbolFeatureExtractor.Extract(layer, tile, TileId0, 5.0, new WebMercatorProjection(), symbols, atlas),
+                "a malformed zoom-interpolated icon-padding must not take out this tile's whole extraction");
+            Assert.AreEqual(1, symbols.Count);
+            Assert.AreEqual(2f, symbols[0].PaddingPx, 1e-6, "falls back to the spec default (2px)");
+        }
+
         private static void AssertQuadEqual(in SymbolQuad expected, in SymbolQuad actual)
         {
             const float eps = 1e-5f;

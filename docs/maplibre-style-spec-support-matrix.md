@@ -42,7 +42,7 @@ marked † is otherwise complete; its status does not count this limit. The desi
   `fill-antialias`, `fill-extrusion-translate`, `fill-extrusion-vertical-gradient` and `line-dasharray`
   catch the error and use their default.
 - In a property whose note starts with "Constant only", or in a pattern name, any expression gives that
-  property's default. `text-font` is different; see its row.
+  property's default.
 - In a layer `filter`, the style load checks it once and logs one warning if it does not compile (an
   unsupported operator or a malformed filter). That layer takes no draw slot (`RenderLayerFactory`'s
   `UnsupportedFilter`, the same compatibility summary as an unsupported layer `type`) and draws or labels
@@ -219,8 +219,7 @@ Owning designs: [`line-rendering-design.md`](line-rendering-design.md),
 ### `symbol` — layout
 
 Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
-[`road-shields-design.md`](road-shields-design.md). Every value in this table is †, except `text-field` and
-`icon-image`.
+[`road-shields-design.md`](road-shields-design.md). Every value in this table is †.
 
 | Property | Status | Note |
 |---|---|---|
@@ -237,17 +236,17 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `icon-size` | `supported` | |
 | `icon-text-fit` | `not supported` | Not built. |
 | `icon-text-fit-padding` | `not supported` | Not built. |
-| `icon-image` | `partial` | Evaluated at zoom 0: a zoom expression always takes its zoom-0 value. The `image` operator is not built. |
+| `icon-image` | `partial` | The `image` operator is not built. |
 | `icon-rotate` | `supported` | |
-| `icon-padding` | `partial` | A single number only. The per-side array form fails the style parse. |
+| `icon-padding` | `partial` | A number, or the spec's `[top,right,bottom,left]` array (1-4 entries), parse and evaluate. Collision applies one isotropic value: the largest entry. It does not apply a value per side. A zoom expression with mismatched stop lengths falls back to the spec default (2px) for that feature, instead of failing the tile's whole label build. |
 | `icon-keep-upright` | `not supported` | Always `false`, the spec default. |
 | `icon-offset` | `partial` | Constant only; the spec also allows zoom and data-driven. |
 | `icon-anchor` | `partial` | Constant only; the spec also allows data-driven. |
 | `icon-pitch-alignment` | `partial` | Constant only. Used only for icons that follow a line. Point icons always stand upright (`viewport`). |
 | `text-pitch-alignment` | `partial` | Constant only. Used only for curved line text. Point text always stands upright (`viewport`). |
 | `text-rotation-alignment` | `partial` | Constant only. `viewport-glyph` is not built and reads as `auto`. Under line placement, `viewport` gives upright text at each anchor instead of curved text: [`road-shields-design.md`](road-shields-design.md) § 3 (D4). |
-| `text-field` | `partial` | Evaluated at zoom 0: a zoom expression always takes its zoom-0 value. `format` is not built, so that feature gets no text. |
-| `text-font` | `partial` | A constant font stack only; the spec also allows data-driven. An expression does not fall back: its array items are read as font names, which gives wrong glyphs or no text. |
+| `text-field` | `partial` | `format` is not built, so that feature gets no text. |
+| `text-font` | `partial` | Constant and zoom expressions evaluate correctly. In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there fails the style parse. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
 | `text-size` | `supported` | |
 | `text-max-width` | `supported` | |
 | `text-line-height` | `supported` | |

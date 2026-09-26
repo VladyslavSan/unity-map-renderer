@@ -131,11 +131,8 @@ namespace MapRenderer.Core.Expressions.Ops
             if (a.Type == ValueType.Number && b.Type == ValueType.Number)
                 return Value.Number(a.AsNumber() + (b.AsNumber() - a.AsNumber()) * t);
 
-            // Accept Color stops or CSS color strings (production styles use string color stops). ColorParser
-            // matches only real color syntax, so arbitrary strings are not mis-coerced.
-            if (Coercions.TryToColor(a, out Color ca) && Coercions.TryToColor(b, out Color cb))
-                return LerpColor(ca, cb, t);
-
+            // Checked BEFORE colour coercion: the spec gives a colour as a string or an rgb()/rgba()
+            // expression, never a bare number array, so a number-array stop always means an array output.
             if (a.Type == ValueType.Array && b.Type == ValueType.Array)
             {
                 var array = a.AsArray();
@@ -148,6 +145,11 @@ namespace MapRenderer.Core.Expressions.Ops
                         array[i].AsNumber() + (barr[i].AsNumber() - array[i].AsNumber()) * t);
                 return Value.Array(result);
             }
+
+            // Accept Color stops or CSS color strings (production styles use string color stops). ColorParser
+            // matches only real color syntax, so arbitrary strings are not mis-coerced.
+            if (Coercions.TryToColor(a, out Color ca) && Coercions.TryToColor(b, out Color cb))
+                return LerpColor(ca, cb, t);
 
             throw new ExpressionEvaluationException(
                 $"interpolate: cannot interpolate {ValueTypes.TypeOfName(a.Type)} outputs.");

@@ -145,7 +145,7 @@ namespace MapRenderer.Unity.Text
                     continue;
 
                 // Text and icon are independent: a feature is skipped only when neither resolves.
-                string text = TextFieldResolver.Resolve(layout.TextField, feature);
+                string text = TextFieldResolver.Resolve(layout.TextField, feature, zoom);
                 if (text != null)
                 {
                     // text-transform: case-fold the resolved symbol before it is shaped downstream.
@@ -162,7 +162,7 @@ namespace MapRenderer.Unity.Text
                 // icon to the projected tangent.
                 if ((!isLine || iconAtAnchors || iconAlongLine) && spriteAtlas != null)
                 {
-                    iconImage = IconImageResolver.Resolve(layout.IconImage, feature);
+                    iconImage = IconImageResolver.Resolve(layout.IconImage, feature, zoom);
                     if (iconImage != null)
                         hasIcon = spriteAtlas.Index.TryGetSprite(iconImage, out iconEntry);
                 }
@@ -191,7 +191,9 @@ namespace MapRenderer.Unity.Text
                 if (hasIcon)
                 {
                     float iconSize = layout.IconSize.Evaluate(zoom, feature);
-                    iconPadding = layout.IconPadding.Evaluate(zoom, feature);
+                    // TryEvaluate, not Evaluate: a malformed zoom-interpolated array (mismatched stop
+                    // lengths) must not take out this tile's whole label build; it falls back to 2px.
+                    layout.IconPadding.TryEvaluate(zoom, feature, out iconPadding);
                     // Degrees to radians only; the clockwise-positive sense is kept. The single sign flip is
                     // in SymbolBearing.IconRotationRadians, below both icon emit shapes.
                     iconRotateRadians = math.radians(layout.IconRotate.Evaluate(zoom, feature));
