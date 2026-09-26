@@ -136,7 +136,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 | Key | Status | Note |
 |---|---|---|
 | `data` | `partial` | An inline object only. A URL string skips the source with a warning. |
-| `maxzoom` | `partial` | Read, but an absent key gives 22 (the vector default), not the spec's 18. |
+| `maxzoom` | `partial` | Defaults to 18 (the spec value) when absent. A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom — the same per-source-overzoom limit as the vector row. |
 | `buffer` / `tolerance` | `not supported` | The slicer uses fixed defaults (`GeoJsonSliceOptions.Default`). |
 | `cluster`, `clusterRadius`, `clusterMaxZoom`, `clusterMinPoints`, `clusterProperties` | `not supported` | No clustering. |
 | `lineMetrics` | `not supported` | `line-gradient` is not built. |

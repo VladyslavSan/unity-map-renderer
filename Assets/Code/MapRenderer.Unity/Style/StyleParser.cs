@@ -18,6 +18,7 @@ namespace MapRenderer.Unity.Style
         public const string DefaultScheme = "xyz";
         public const int DefaultSourceMinZoom = 0;
         public const int DefaultSourceMaxZoom = 22;
+        public const int DefaultGeoJsonSourceMaxZoom = 18;
         public static readonly double[] DefaultBounds = { -180.0, -85.051129, 180.0, 85.051129 };
 
         /// <summary>Parse from a JSON string.</summary>
@@ -73,7 +74,8 @@ namespace MapRenderer.Unity.Style
             // Vector-source defaults. (Other source types carry these keys too; applying the vector
             // defaults is harmless for them and the raw object is always retained for later stages.)
             src.MinZoom = json.GetInt("minzoom", DefaultSourceMinZoom);
-            src.MaxZoom = json.GetInt("maxzoom", DefaultSourceMaxZoom);
+            src.MaxZoom = json.GetInt("maxzoom",
+                src.Type == SourceType.GeoJson ? DefaultGeoJsonSourceMaxZoom : DefaultSourceMaxZoom);
             src.Scheme = json.GetString("scheme", DefaultScheme);
             src.Bounds = ParseBounds(json, out src.BoundsMalformed);
 

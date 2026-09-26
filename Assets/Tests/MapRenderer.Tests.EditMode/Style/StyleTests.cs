@@ -321,6 +321,29 @@ namespace MapRenderer.Tests.Style
             var emptyTiles = new SourceDefinition { Url = "https://x/tiles.json", Tiles = new string[0] };
             Assert.IsTrue(SourceResolver.NeedsTileJson(emptyTiles), "empty tiles[] treated as absent");
         }
+
+        // =========================================================================================
+        // 7. geojson `maxzoom` defaults to the spec's 18, not the vector default of 22.
+        // =========================================================================================
+        [Test]
+        public void MaxZoomDefault_Is18ForGeoJson_22ForVectorAndOthers()
+        {
+            SourceDefinition GeoJson(string maxZoomJson = null) => StyleParser.Parse($@"{{
+                ""sources"": {{ ""g"": {{ ""type"": ""geojson"", ""data"": {{ ""type"": ""FeatureCollection"",
+                    ""features"": [] }}{(maxZoomJson == null ? "" : $@", ""maxzoom"": {maxZoomJson}")} }} }}
+            }}").Sources["g"];
+
+            Assert.AreEqual(StyleParser.DefaultGeoJsonSourceMaxZoom, GeoJson().MaxZoom,
+                "an absent maxzoom on a geojson source must default to the spec's 18, not the vector default");
+            Assert.AreEqual(12, GeoJson("12").MaxZoom, "an explicit maxzoom is read as-is");
+
+            SourceDefinition vector = StyleParser.Parse(@"{
+                ""sources"": { ""v"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } }
+            }").Sources["v"];
+            Assert.AreEqual(StyleParser.DefaultSourceMaxZoom, vector.MaxZoom,
+                "a vector source's absent maxzoom must stay the vector default (22), unaffected by the " +
+                "geojson-specific default");
+        }
     }
 
 
