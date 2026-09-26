@@ -43,10 +43,10 @@ marked † is otherwise complete; its status does not count this limit. The desi
   catch the error and use their default.
 - In a property whose note starts with "Constant only", or in a pattern name, any expression gives that
   property's default. `text-font` is different; see its row.
-- In a layer `filter`, the style load does not check it. It throws each time a tile selects features for
-  that layer, and each failure logs one warning. For a fill, line or fill-extrusion layer, that tile's mesh
-  build stops at that layer: the layer and every mesh layer after it in the same build draw nothing for
-  the tile. For a symbol layer, the whole label build for that tile fails.
+- In a layer `filter`, the style load checks it once and logs one warning if it does not compile (an
+  unsupported operator or a malformed filter). That layer takes no draw slot (`RenderLayerFactory`'s
+  `UnsupportedFilter`, the same compatibility summary as an unsupported layer `type`) and draws or labels
+  nothing; every other layer, mesh or symbol, still draws.
 - In `text-field` or `icon-image`, that feature gets no text or no icon. The rest of the layer draws.
 
 ---

@@ -721,7 +721,7 @@ namespace MapRenderer.Tests.Rendering
             StyleLayer layer = style.Layers[0];
 
             const int drawIndex = 3;
-            IRenderLayer created = RenderLayerFactory.Create(layer, settings, 0.0, drawIndex, out _);
+            IRenderLayer created = RenderLayerFactory.Create(layer, settings, 0.0, drawIndex, out _, out _);
             try
             {
                 Assert.IsNotNull(created, "a fill-extrusion layer with a configured material set must produce a render layer.");
@@ -766,6 +766,48 @@ namespace MapRenderer.Tests.Rendering
     ""layers"": [
         { ""id"": ""fill-a"",    ""type"": ""fill"",   ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
         { ""id"": ""symbol-nosrc"", ""type"": ""symbol"", ""layout"": { ""text-field"": ""{NAME}"" } }
+    ]
+}";
+
+        // Same three layers/ids as UnsupportedFilterInterleavedStyleJson below, but fill-b's filter still
+        // compiles — the "before" half of a restyle that turns it unsupported.
+        private const string ValidFilterInterleavedStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
+        { ""id"": ""fill-b"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""b"",
+          ""filter"": [""=="", ""class"", ""x""],
+          ""paint"": { ""fill-color"": [""rgba"",0,0,255,1] } },
+        { ""id"": ""line-c"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""c"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1] } }
+    ]
+}";
+
+        // "within" is a real MapLibre expression operator (support-matrix: not supported). A fill layer
+        // between two valid ones, so the survivors' contiguity is observable across the skip — same shape
+        // as CircleInterleavedStyleJson.
+        private const string UnsupportedFilterInterleavedStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
+        { ""id"": ""fill-b"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""b"",
+          ""filter"": [""within"", {""type"": ""Polygon"", ""coordinates"": [[[0,0],[1,0],[1,1],[0,0]]]}],
+          ""paint"": { ""fill-color"": [""rgba"",0,0,255,1] } },
+        { ""id"": ""line-c"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""c"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1] } }
+    ]
+}";
+
+        // Same unsupported filter, on a symbol layer between two symbol layers that DO label.
+        private const string UnsupportedFilterInterleavedSymbolStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""symbol-a"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""a"", ""layout"": { ""text-field"": ""{name}"" } },
+        { ""id"": ""symbol-b"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""b"",
+          ""filter"": [""within"", {""type"": ""Polygon"", ""coordinates"": [[[0,0],[1,0],[1,1],[0,0]]]}],
+          ""layout"": { ""text-field"": ""{name}"" } },
+        { ""id"": ""symbol-c"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""c"", ""layout"": { ""text-field"": ""{name}"" } }
     ]
 }";
 
@@ -827,6 +869,116 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual("symbol-nosrc", skip.Id);
             Assert.AreEqual(LayerSkipReason.GenuinelyUnpainted, skip.Reason,
                 "a source-less symbol layer is a by-design skip, not a compatibility gap.");
+        }
+
+        /// <summary>UMR-223: a filter naming an unsupported operator (here <c>within</c>) is reported ONCE at
+        /// style load, and only its own layer is skipped — fill-a and line-c either side of it still take a
+        /// slot. RED recipe: remove the <see cref="RenderLayerFactory"/> filter-compile check in
+        /// <see cref="RenderLayerFactory.Create"/> — fill-b then takes slot 1 (set.Count becomes 3) and the
+        /// skip-reason assertion below fails.</summary>
+        [Test]
+        public void Build_UnsupportedFilterLayer_ReportedAsUnsupportedFilter_SupportedLayersStillRender()
+        {
+            using RenderLayerSet set = Build(UnsupportedFilterInterleavedStyleJson);
+
+            Assert.AreEqual(2, set.Count, "fill-a and line-c must both still take a slot.");
+            Assert.AreEqual(1, set.SkippedLayers.Count, "exactly fill-b is skipped.");
+
+            SkippedLayer skip = set.SkippedLayers[0];
+            Assert.AreEqual("fill-b", skip.Id, "the summary must name the skipped layer's OWN id.");
+            Assert.AreEqual("fill", skip.RawType, "an unsupported filter does not change the reported kind.");
+            Assert.AreEqual(LayerSkipReason.UnsupportedFilter, skip.Reason,
+                "an unsupported filter operator must report UnsupportedFilter — not UnsupportedKind, and not " +
+                "a throw that reaches the caller.");
+            StringAssert.Contains("within", skip.Detail,
+                "the summary must name WHICH operator failed, not just that one did — the same detail the " +
+                "old per-tile log carried.");
+
+            Assert.AreEqual("fill-a", set[0].StyleLayer.Id);
+            Assert.AreEqual("line-c", set[1].StyleLayer.Id);
+        }
+
+        /// <summary>The same unsupported filter on a SYMBOL layer: only symbol-b is skipped, so
+        /// <c>MapView.SetStyle</c>'s <c>_symbolStyleLayers</c> (built from <see cref="RenderLayerSet.Layers"/>,
+        /// see that call site) never carries it — symbol-a and symbol-c still label. RED recipe: same as
+        /// above.</summary>
+        [Test]
+        public void Build_UnsupportedFilterSymbolLayer_ReportedAsUnsupportedFilter_OtherSymbolLayersStillRender()
+        {
+            using RenderLayerSet set = Build(UnsupportedFilterInterleavedSymbolStyleJson);
+
+            Assert.AreEqual(2, set.Count, "symbol-a and symbol-c must both still take a slot.");
+            Assert.AreEqual(1, set.SkippedLayers.Count, "exactly symbol-b is skipped.");
+
+            SkippedLayer skip = set.SkippedLayers[0];
+            Assert.AreEqual("symbol-b", skip.Id);
+            Assert.AreEqual(LayerSkipReason.UnsupportedFilter, skip.Reason);
+
+            Assert.AreEqual("symbol-a", set[0].StyleLayer.Id);
+            Assert.AreEqual("symbol-c", set[1].StyleLayer.Id);
+        }
+
+        /// <summary>An unsupported filter is a real compatibility gap, so <see cref="MapView.LogSkippedLayers"/>
+        /// must warn about it exactly like <see cref="LayerSkipReason.UnsupportedKind"/> does.</summary>
+        [Test]
+        public void LogSkippedLayers_WarnsForUnsupportedFilter()
+        {
+            using RenderLayerSet set = Build(UnsupportedFilterInterleavedStyleJson);
+
+            // Names which operator failed, not just that one did — the detail the old per-tile log carried.
+            LogAssert.Expect(LogType.Warning, new Regex("fill-b.*UnsupportedFilter.*within"));
+            MapView.LogSkippedLayers(set.SkippedLayers);
+            LogAssert.NoUnexpectedReceived();
+        }
+
+        /// <summary>Mirrors <see cref="TryGetFetchSource_RefusesALayerThatCanNeverDraw"/> for a filter, not a
+        /// draw gate: a layer whose filter cannot compile must not register its source either, or a source no
+        /// drawing layer reads still gets fetched and MVT-decoded for nothing (the invariant
+        /// <see cref="RenderLayerFactory.TryGetFetchSource"/>'s own doc states).</summary>
+        [Test]
+        public void TryGetFetchSource_RefusesAnUnsupportedFilterLayer()
+        {
+            StyleDocument doc = StyleParser.Parse(UnsupportedFilterInterleavedStyleJson);
+            var fetched = new List<string>();
+            foreach (StyleLayer sl in doc.Layers)
+                if (RenderLayerFactory.TryGetFetchSource(sl, out string sid))
+                    fetched.Add(sl.Id);
+
+            CollectionAssert.AreEquivalent(new[] { "fill-a", "line-c" }, fetched,
+                "fill-b's filter cannot compile, so it must not register 's' as a fetch source either — " +
+                "the other two layers on 's' already do, so the source is still fetched for them.");
+        }
+
+        /// <summary>UMR-223, through the real <see cref="MapView.SetStyle(StyleDocument,string,System.Threading.CancellationToken)"/>
+        /// path: a filter change is never an in-place restyle (<see cref="SurvivingLayerGate"/> refuses it —
+        /// <c>filter</c> sits inside the compared signature), so this always takes the full-rebuild arm. When
+        /// fill-b's filter turns unsupported, the rebuild must skip ONLY fill-b; fill-a and line-c keep their
+        /// slots. RED recipe: same as <see cref="Build_UnsupportedFilterLayer_ReportedAsUnsupportedFilter_SupportedLayersStillRender"/>.</summary>
+        [Test]
+        public void SetStyle_FullRebuild_FilterTurnsUnsupported_OnlyThatLayerIsSkipped()
+        {
+            MapViewComponent view = RestyleHarness.NewRestyleView(SampleTileFixture.Bytes(), out GameObject go);
+            Track(go);
+            try
+            {
+                RestyleHarness.SpinToCompleted(view.SetStyle(StyleParser.Parse(ValidFilterInterleavedStyleJson), "v1"));
+                Assert.AreEqual(3, view.View.Layers.Count, "all three layers must render while every filter compiles.");
+
+                RestyleHarness.SpinToCompleted(view.SetStyle(StyleParser.Parse(UnsupportedFilterInterleavedStyleJson), "v2"));
+
+                Assert.AreEqual(2, view.View.Layers.Count, "fill-a and line-c must both still take a slot after the rebuild.");
+                Assert.AreEqual("fill-a", view.View.Layers[0].StyleLayer.Id);
+                Assert.AreEqual("line-c", view.View.Layers[1].StyleLayer.Id);
+
+                Assert.AreEqual(1, view.View.Layers.SkippedLayers.Count, "exactly fill-b is skipped.");
+                SkippedLayer skip = view.View.Layers.SkippedLayers[0];
+                Assert.AreEqual("fill-b", skip.Id);
+                Assert.AreEqual(LayerSkipReason.UnsupportedFilter, skip.Reason);
+            }
+            finally
+            {
+                view.Teardown();
+            }
         }
 
         /// <summary>MapView.LogSkippedLayers must warn for an actual compatibility gap but stay silent for a
@@ -1153,7 +1305,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""f"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""fill-color"": ""#ff0000"" } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _, detail: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, SquareFeature()); }
             finally { created?.Dispose(); }
         }
@@ -1167,7 +1319,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""fe"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""fill-extrusion-height"": 30 } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _, detail: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, SquareFeature()); }
             finally { created?.Dispose(); }
         }
@@ -1184,7 +1336,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""l"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""line-color"": ""#000000"" } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _, detail: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, LineFeature()); }
             finally { created?.Dispose(); }
         }
@@ -1404,7 +1556,7 @@ namespace MapRenderer.Tests.Rendering
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _);
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _, out _);
                 if (sl.LayerType == StyleLayerType.Raster)
                 {
                     Assert.IsNull(layer, $"'{sl.Id}' (raster) is genuinely unpainted — no slot.");
@@ -1428,7 +1580,7 @@ namespace MapRenderer.Tests.Rendering
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _);
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _, out _);
                 switch (sl)
                 {
                     case Symbol.StyleLayer:

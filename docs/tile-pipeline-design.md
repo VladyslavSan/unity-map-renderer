@@ -388,6 +388,10 @@ draw is never fetched and its tiles are never decoded. Both are the author's int
 limitation, so `MapView.LogSkippedLayers` stays silent about them, as it already does for a source-less symbol
 layer.
 
+`RenderLayerFactory.Create` and `TryGetFetchSource` both refuse a third case the table above does not list:
+a `filter` that does not compile (`LayerSkipReason.UnsupportedFilter`). Unlike the two above, this is a real compatibility gap, not the
+author's intent, so `LogSkippedLayers` warns about it.
+
 A **zoom-dependent** or **feature-dependent** opacity is not in that table. Neither reduces to a decision that
 holds for the whole session: the first changes with the camera, and the second cannot be represented by any
 single per-layer scalar.

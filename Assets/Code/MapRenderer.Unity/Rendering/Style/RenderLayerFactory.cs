@@ -1,3 +1,5 @@
+using MapRenderer.Core.Expressions;
+using MapRenderer.Core.Filters;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
@@ -18,12 +20,15 @@ namespace MapRenderer.Unity.Rendering.Style
     {
         /// <summary>Creates the render layer for <paramref name="layer"/> at global slot
         /// <paramref name="drawIndex"/>, or <c>null</c> with <paramref name="reason"/> set to why
-        /// (<see cref="LayerSkipReason.None"/> for a real layer). <see cref="RenderLayerSet.Build"/> collects
-        /// the reasons into a style-load compatibility summary.</summary>
+        /// (<see cref="LayerSkipReason.None"/> for a real layer) and <paramref name="detail"/> set for
+        /// <see cref="LayerSkipReason.UnsupportedFilter"/> (null otherwise). <see cref="RenderLayerSet.Build"/>
+        /// collects the reasons into a style-load compatibility summary.</summary>
         public static IRenderLayer Create(
             StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex,
-            out LayerSkipReason reason)
+            out LayerSkipReason reason, out string detail)
         {
+            detail = null;
+
             // `visibility: none` takes no slot for THIS style load. A restyle can still flip it on in place:
             // SurvivingLayerGate ignores layout.visibility, so it never rebuilds a layer for that alone.
             if (layer is { Visible: false })
@@ -40,13 +45,19 @@ namespace MapRenderer.Unity.Rendering.Style
                 return null;
             }
 
+            if (DrawsFromSource(layer) && !FilterCompiles(layer, out detail))
+            {
+                reason = LayerSkipReason.UnsupportedFilter;
+                return null;
+            }
+
             (IRenderLayer created, LayerSkipReason skipReason) = layer switch
             {
                 Fill.StyleLayer f                          => WithMaterialReason(FillRenderLayer.TryCreate(f, settings, initialZoom, drawIndex)),
                 Line.StyleLayer l                           => WithMaterialReason(LineRenderLayer.TryCreate(l, settings, initialZoom, drawIndex)),
-                // Source != null mirrors SymbolSubsystem.SetStyle's skip, which keeps the 1:1 slot↔subsystem
+                // DrawsFromSource mirrors SymbolSubsystem.SetStyle's skip, which keeps the 1:1 slot↔subsystem
                 // ordinal mapping.
-                Symbol.StyleLayer s when s.Source != null   => (SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex), LayerSkipReason.None),
+                Symbol.StyleLayer s when DrawsFromSource(s) => (SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex), LayerSkipReason.None),
                 // A source-less symbol layer has nothing to place — by design, not a compatibility gap.
                 Symbol.StyleLayer                           => ((IRenderLayer)null, LayerSkipReason.GenuinelyUnpainted),
                 Background.StyleLayer b                     => (BackgroundRenderLayer.Create(b, settings, initialZoom, drawIndex), LayerSkipReason.None),
@@ -87,25 +98,51 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>
         /// The ONE registry of "which style layers fetch MVT tiles"; <see cref="Map.MapView.BuildSourceSpecs"/>
-        /// derives its source-ids from it. True iff <paramref name="layer"/> is fill, line, symbol or
-        /// fill-extrusion, is visible, is not authored fully-transparent, AND declares a non-empty
-        /// <c>source</c>. So nothing fetches a source no drawing layer reads, and non-MVT bytes stay out of
-        /// the MVT decode. A pure predicate with no material or layer-set state.
+        /// derives its source-ids from it. True iff <paramref name="layer"/> <see cref="DrawsFromSource"/>, is
+        /// visible, is not authored fully-transparent, AND its filter compiles. So nothing fetches a source no
+        /// drawing layer reads, and non-MVT bytes stay out of the MVT decode. A pure predicate with no material
+        /// or layer-set state.
         /// </summary>
         internal static bool TryGetFetchSource(StyleLayer layer, out string sourceId)
         {
-            if (layer != null
+            if (DrawsFromSource(layer)
                 && layer.Visible
                 && !AuthoredFullyTransparent(layer)
-                && layer.LayerType is StyleLayerType.Fill or StyleLayerType.Line or StyleLayerType.Symbol
-                    or StyleLayerType.FillExtrusion
-                && !string.IsNullOrEmpty(layer.Source))
+                && FilterCompiles(layer, out _))
             {
                 sourceId = layer.Source;
                 return true;
             }
             sourceId = null;
             return false;
+        }
+
+        /// <summary>True iff <paramref name="layer"/> is a kind <c>FeatureSelector</c> ever filters — fill,
+        /// line, symbol or fill-extrusion, with a non-empty <c>source</c>. The shared classifier behind
+        /// <see cref="TryGetFetchSource"/> and the filter check in <see cref="Create"/>, so the two never
+        /// disagree about which layers a filter can affect.</summary>
+        private static bool DrawsFromSource(StyleLayer layer)
+            => layer != null
+            && layer.LayerType is StyleLayerType.Fill or StyleLayerType.Line or StyleLayerType.Symbol
+                or StyleLayerType.FillExtrusion
+            && !string.IsNullOrEmpty(layer.Source);
+
+        /// <summary>True iff <paramref name="layer"/>'s <c>filter</c> compiles; otherwise <paramref name="error"/>
+        /// carries the failed compile's message. A load-time pre-check of the compile that
+        /// <c>FeatureSelector.FilterFor</c> repeats per filter node at tile build.</summary>
+        private static bool FilterCompiles(StyleLayer layer, out string error)
+        {
+            try
+            {
+                CompiledFilter.Compile(layer.Filter);
+                error = null;
+                return true;
+            }
+            catch (ExpressionParseException ex)
+            {
+                error = ex.Message;
+                return false;
+            }
         }
     }
 
@@ -145,5 +182,10 @@ namespace MapRenderer.Unity.Rendering.Style
         /// compatibility gap. A zoom- or feature-dependent opacity is not this: those layers are built and
         /// the per-frame draw gate decides them.</summary>
         FullyTransparent,
+
+        /// <summary>The layer's <c>filter</c> does not compile — an unsupported operator or a malformed
+        /// filter (<see cref="ExpressionParseException"/> from <see cref="CompiledFilter.Compile"/>) — a
+        /// real compatibility gap.</summary>
+        UnsupportedFilter,
     }
 }

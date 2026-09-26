@@ -86,12 +86,13 @@ namespace MapRenderer.Unity.Rendering.Style
             foreach (var sl in style.Layers)
             {
                 IRenderLayer layer = RenderLayerFactory.Create(
-                    sl, settings, initialZoom, drawIndex, out LayerSkipReason skipReason);
+                    sl, settings, initialZoom, drawIndex, out LayerSkipReason skipReason, out string detail);
                 if (layer == null)
                 {
                     // Unsupported kind, unconfigured material, or genuinely unpainted by design — no slot;
                     // recorded instead of silently dropped.
-                    _skippedLayers.Add(new SkippedLayer { Id = sl.Id, RawType = sl.RawType, Reason = skipReason });
+                    _skippedLayers.Add(new SkippedLayer
+                        { Id = sl.Id, RawType = sl.RawType, Reason = skipReason, Detail = detail });
                     continue;
                 }
 
@@ -315,5 +316,10 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>Why <see cref="RenderLayerFactory"/> returned no layer for this entry.</summary>
         public LayerSkipReason Reason { get; init; }
+
+        /// <summary>Extra detail for <see cref="LayerSkipReason.UnsupportedFilter"/> — the failed compile's
+        /// own message (e.g. <c>Unknown expression operator "within".</c>), so a warning names which operator
+        /// failed. Null for every other reason.</summary>
+        public string Detail { get; init; }
     }
 }
