@@ -17,9 +17,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     {
         /// <summary>Worker-thread entry point: read the already-decoded tile off the handle, run every
         /// <paramref name="processors"/> entry in order, then settle every one of them exactly once. Fault
-        /// policy: a processor exception aborts the REMAINING invocations for this pass, but every
-        /// processor — invoked or not — is still <c>Release</c>d, returning it to its pool. Does NOT
-        /// release <paramref name="decode"/> — the caller owns that reference.
+        /// policy: a processor exception is caught PER PROCESSOR and logged, so one layer's throw does not
+        /// stop its siblings from building; every processor — faulted or not — is still <c>Release</c>d,
+        /// returning it to its pool. Does NOT release <paramref name="decode"/> — the caller owns that
+        /// reference.
         ///
         /// <para>Non-local invariant: if <paramref name="token"/> is already cancelled, the processing block
         /// is skipped entirely, so a build queued but not yet started never touches <c>decode.Value</c> —
@@ -60,35 +61,36 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
                 if (!token.IsCancellationRequested)
                 {
-                    try
+                    // No pass-scoped store: the decoded tile owns one buffer per source-layer, minted once
+                    // inside the decode, so a source-layer named by N style layers is materialized once.
+                    IDecodedTile tile = decode.Value;
+                    for (int i = 0; i < count; i++)
                     {
-                        // No pass-scoped store: the decoded tile owns one buffer per source-layer, minted once
-                        // inside the decode, so a source-layer named by N style layers is materialized once.
-                        IDecodedTile tile = decode.Value;
-                        for (int i = 0; i < count; i++)
-                        {
-                            // Teardown cancellation: abort the remaining layers of a build already mid-pass,
-                            // falling through to the settle loop below, same as the top-of-function skip.
-                            if (token.IsCancellationRequested) break;
+                        // Teardown cancellation: abort the remaining layers of a build already mid-pass,
+                        // falling through to the settle loop below, same as the top-of-function skip.
+                        if (token.IsCancellationRequested) break;
 
+                        try
+                        {
                             ITileMeshLayerProcessor processor = processors[i];
 
                             // A WorkerThenMain processor here would run with no main-thread tail: a programming
-                            // error, caught inside the same settlement boundary as any other fault.
+                            // error, caught inside the same per-processor boundary as any other fault.
                             if (processor.Phase != LayerPhase.WorkerOnly)
                                 throw new System.NotSupportedException(
                                     $"{processor.Phase} is not supported by the mesh worker pass (reserved for the symbol worker pass).");
 
                             processor.ProcessOnWorker(tile, in passContext);
                         }
-                    }
-                    catch (System.Exception ex)
-                    {
-                        // Non-obvious why: this log is the only signal in a release player, which has no DEBUG
-                        // assertion or NativeContainer check for a late read of freed decode buffers. The symbol
-                        // cadence logs the same way (SymbolSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff).
-                        UnityEngine.Debug.LogWarning(
-                            $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
+                        catch (System.Exception ex)
+                        {
+                            // Non-obvious why: this log is the only signal in a release player, which has no DEBUG
+                            // assertion or NativeContainer check for a late read of freed decode buffers. The symbol
+                            // cadence logs the same way (SymbolSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff).
+                            UnityEngine.Debug.LogWarning(
+                                $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}, " +
+                                $"layer slot {i}: {ex.Message}");
+                        }
                     }
                 }
 

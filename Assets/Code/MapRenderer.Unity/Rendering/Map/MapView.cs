@@ -407,7 +407,8 @@ namespace MapRenderer.Unity.Rendering.Map
             => CommitProbe != null ? () => CommitProbe(CommitPhase.SourcesTeardownRecord) : null;
 
         /// <summary>Warns once, naming every layer <see cref="Style.RenderLayerSet.Build"/> skipped
-        /// for a compatibility reason (unsupported kind / unconfigured material). By-design skips stay silent:
+        /// for a compatibility reason (unsupported kind / unconfigured material / unsupported filter). By-design
+        /// skips stay silent:
         /// <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/>, <see cref="Style.LayerSkipReason.Hidden"/>
         /// and <see cref="Style.LayerSkipReason.FullyTransparent"/>. Internal so a test can exercise the
         /// suppression directly.</summary>
@@ -420,7 +421,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 if (s.Reason is Style.LayerSkipReason.GenuinelyUnpainted
                              or Style.LayerSkipReason.Hidden
                              or Style.LayerSkipReason.FullyTransparent) continue;
-                problems.Add($"'{s.Id}' ({s.RawType}): {s.Reason}");
+                string detail = s.Detail != null ? $" — {s.Detail}" : "";
+                problems.Add($"'{s.Id}' ({s.RawType}): {s.Reason}{detail}");
             }
             if (problems.Count > 0)
                 Debug.LogWarning(

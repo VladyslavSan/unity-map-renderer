@@ -51,10 +51,10 @@ internal interface ITileLayerProcessor
   processors and **rejects** `WorkerThenMain`, because the mesh pass has no main-thread tail to give it; a
   mesh processor requesting one is a programming error, not a phase to downgrade. `RunSymbolWorkerPass` invokes
   only `WorkerThenMain` processors, and the coordinator batches their tails after the hop to main.
-- **Mesh fault policy: every processor settles once.** A processor exception aborts the remaining invocations
-  of the pass, but every processor — invoked or not — is still released, once, in dense order, so nothing a kick
-  allocated is stranded. A cancelled lifetime token skips the processing block and falls through to the same
-  settle loop.
+- **Mesh fault policy: every processor settles once.** A processor exception is caught and logged per
+  processor, so the other processors still run. Every processor is released once, in dense order, so nothing
+  a kick allocated is stranded. A cancelled lifetime token skips the remaining invocations and falls through
+  to the same settle loop.
 - **Symbol fault policy: faults propagate.** The symbol pass holds only managed state, so there is nothing to
   strand; swallowing a fault would let a tail commit an empty or partial extraction.
 

@@ -902,9 +902,10 @@ namespace MapRenderer.Tests.Tiles
 
     /// <summary>
     /// Pins that <see cref="TileLayerProcessorRunner.RunWorkerPass"/> shares one <see cref="IDecodedTile"/>
-    /// across every processor in dense order, and keeps the fault policy (abort-on-first-fault,
-    /// settle-every-processor). The decode happens BEFORE the lease exists (at the source's <c>GetTile</c>),
-    /// so these fixtures decode, then wrap, and release in a <c>finally</c>, as the kick lambda does.
+    /// across every processor in dense order, and keeps the fault policy (isolate-per-processor,
+    /// settle-every-processor — UMR-223). The decode happens BEFORE the lease exists (at the source's
+    /// <c>GetTile</c>), so these fixtures decode, then wrap, and release in a <c>finally</c>, as the kick
+    /// lambda does.
     /// </summary>
     [TestFixture]
     public class TileLayerProcessorRunnerTests
@@ -1161,10 +1162,13 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Fault-parity: a processor throws ──────────────────────────────────────────────────────────
 
-        /// <summary>A processor fault stops the later processors, but every processor still returns to
-        /// <see cref="TileMeshLayerProcessorPool"/> exactly once and no graph request is left un-taken.</summary>
+        /// <summary>UMR-223: a processor fault is isolated to its own slot — a later processor still runs —
+        /// and every processor still returns to <see cref="TileMeshLayerProcessorPool"/> exactly once. RED
+        /// recipe: move the <c>try</c>/<c>catch</c> in <see cref="TileLayerProcessorRunner.RunWorkerPass"/>
+        /// out of the loop so it wraps the whole loop — p2 is then never invoked and <c>log.Count</c> drops
+        /// to 1.</summary>
         [Test]
-        public void RunWorkerPass_WhenAProcessorThrows_StopsLaterProcessors_ButReleasesEveryProcessor()
+        public void RunWorkerPass_WhenAProcessorThrows_IsolatesTheFault_LaterProcessorsStillRun()
         {
             var log = new List<(int order, IDecodedTile tile)>();
             var p0 = new RecordingProcessor(0, log);
@@ -1178,14 +1182,17 @@ namespace MapRenderer.Tests.Tiles
             try { output = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
             finally { decode.Release(); }
 
-            Assert.AreEqual(1, log.Count, "only the processor BEFORE the fault runs");
-            Assert.AreEqual(0, log[0].order);
+            Assert.AreEqual(2, log.Count, "p0 and p2 must both run — only p1 (the faulting slot) is skipped");
+            Assert.AreEqual(0, log[0].order, "p0 ran before the fault");
+            Assert.AreEqual(2, log[1].order, "p2 ran AFTER the fault — the isolation this test pins");
 
             Assert.AreEqual(1, p0.ReleaseCallCount, "p0 (ran normally) still settles exactly once");
             Assert.AreEqual(1, p1.ReleaseCallCount, "p1 (threw) still settles exactly once");
-            Assert.AreEqual(1, p2.ReleaseCallCount, "p2 (never invoked) still settles exactly once — every processor returns to its pool");
+            Assert.AreEqual(1, p2.ReleaseCallCount, "p2 (ran normally, after the fault) still settles exactly once");
 
             Assert.AreEqual(3, output.Layers.Length);
+            Assert.AreSame(p2.Build, output.Layers[2],
+                "p2's own build must reach its dense slot — the fault two slots earlier must not lose it");
         }
 
         // ── The fault is VISIBLE, not just survivable ─────────────────────────────────────────────────

@@ -19,12 +19,12 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     {
         /// <summary>True iff the worker attempt produced a graph build — at
         /// most once, and BEFORE <see cref="Release"/> (which returns the processor to a pool). False when
-        /// the worker attempt produced no work (an empty selection, a faulted decode, or a processor never
-        /// reached after an earlier one faulted).</summary>
+        /// the worker attempt produced no work (an empty selection, a faulted decode, a fault before it
+        /// produced a build, or teardown cancellation before this processor ran).</summary>
         bool TryTakeGraphRequest(out ILayerMeshBuild build);
 
-        /// <summary>Called exactly once after the worker attempt (successful, faulted, or skipped after an
-        /// earlier fault) to return this processor to its pool. Never disposes/consumes the graph build —
+        /// <summary>Called exactly once after the worker attempt (successful, faulted, or skipped by
+        /// cancellation) to return this processor to its pool. Never disposes/consumes the graph build —
         /// the caller owns whatever <see cref="TryTakeGraphRequest"/> already handed it.</summary>
         void Release();
     }
