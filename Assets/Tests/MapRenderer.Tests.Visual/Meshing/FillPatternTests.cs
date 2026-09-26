@@ -37,11 +37,11 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The black-region fix, at the pixel level. A <c>fill-pattern</c> layer usually declares no
-    /// <c>fill-color</c>, so it inherits <c>rgba(0,0,0,1)</c>, which <c>StyledFillTileBuilder</c> bakes into the
-    /// COLOR stream; a renderer that ignores the pattern paints the layer solid black (docs/fill-parity-design.md).
-    /// <see cref="UnresolvedPattern_PaintsNothing"/> asserts the BACKGROUND fraction, so a shader that ignores the
-    /// pattern cannot pass it. <c>FillPatternTests</c> pins the resolve arithmetic engine-free.
+    /// The black-region fix and the fill-color tint, at the pixel level. A <c>fill-pattern</c> layer usually
+    /// declares no <c>fill-color</c>; its absent colour binds white, and an explicit one tints the sprite
+    /// (docs/fill-parity-design.md). <see cref="UnresolvedPattern_PaintsNothing"/> asserts the BACKGROUND
+    /// fraction, so a shader that ignores the pattern cannot pass it. <c>FillPatternTests</c> pins the resolve
+    /// arithmetic engine-free.
     /// </summary>
     [TestFixture]
     public class FillPatternSnapshotTests : BaseTestFixture
@@ -54,8 +54,8 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         private static readonly Color32 Bg32 = new Color32(26, 28, 38, 255);
 
-        // Opaque black — what a fill-pattern layer's fill-color defaults to, and the colour a renderer
-        // that never consults the pattern paints these regions. Baking it here is what makes the tooth faithful rather than modelled.
+        // An explicit opaque-black fill-color: on an unresolved pattern it must still paint nothing, and a
+        // renderer that never consults the pattern would paint these regions solid black.
         private const string OpaqueBlack = "[\"rgba\",0,0,0,1]";
 
         /// <summary>Any zoom works — these teeth assert colour, not size — but it must be a real one so the
@@ -136,12 +136,14 @@ namespace MapRenderer.Tests.Visual
                 "(the original black-regions defect).");
         }
 
-        // ── The positive half: a resolved pattern samples the SHEET, not fill-color ──────────────
+        // ── The positive half: a resolved pattern with no fill-color paints the untinted SHEET ───
 
+        /// <summary>A pattern layer that sets no fill-color paints the sprite untinted, never black: its absent
+        /// fill-color binds white, and the sprite is multiplied by it.</summary>
         [Test]
-        public void ResolvedPattern_SamplesTheSheetInsteadOfFillColor()
+        public void ResolvedPattern_WithoutFillColor_PaintsTheUntintedSprite()
         {
-            var (mapGo, mat) = FillSceneHelper.BuildFillGo(fillColorExpression: OpaqueBlack);
+            var (mapGo, mat) = FillSceneHelper.BuildFillGo(fillPattern: "solid", omitFillColor: true);
             Track(mapGo);
             var (camGo, camera) = BuildCamera();
             Track(camGo);
@@ -169,8 +171,9 @@ namespace MapRenderer.Tests.Visual
             Assert.Greater(verdict.FilledFraction, 0.02f,
                 "a RESOLVED pattern must paint — this is the other side of the clip.");
 
-            // The sprite is green; fill-color is black. Green dominance proves the sprite REPLACED the
-            // colour rather than tinting or being ignored. (Lit shading scales magnitude, not hue order.)
+            // The sprite is green and the layer sets no fill-color. Green dominance proves the sprite reached the
+            // screen untinted: a black default would leave every channel near zero. (Lit shading scales
+            // magnitude, not hue order.)
             double meanG = 0, meanR = 0, meanB = 0;
             int n = 0;
             for (int i = 0; i < SnapW * SnapH; i++)
@@ -186,10 +189,112 @@ namespace MapRenderer.Tests.Visual
             Debug.Log($"[FillPatternSnapshotTests] resolved mean RGB = ({meanR:F1}, {meanG:F1}, {meanB:F1})");
 
             Assert.Greater(meanG, meanR + 10.0,
-                $"the green sprite must dominate the black fill-color (mean G={meanG:F1} vs R={meanR:F1}) — " +
-                "if they match, the pattern is being ignored and fill-color is still painting.");
+                $"the green sprite must show untinted (mean G={meanG:F1} vs R={meanR:F1}) — if they match, the " +
+                "sprite is tinted black by a spec-default fill-color, or the pattern is ignored.");
             Assert.Greater(meanG, meanB + 10.0,
                 $"mean G={meanG:F1} must exceed mean B={meanB:F1} for a green sprite.");
+        }
+
+        /// <summary>A pattern layer that sets fill-color multiplies the sprite by it: a white sprite under a red
+        /// fill-color paints red.</summary>
+        [Test]
+        public void ResolvedPattern_WithFillColor_TintsTheSprite()
+        {
+            var (mapGo, mat) = FillSceneHelper.BuildFillGo(fillColorExpression: "[\"rgba\",255,0,0,1]",
+                                                           fillPattern: "solid");
+            Track(mapGo);
+            var (camGo, camera) = BuildCamera();
+            Track(camGo);
+            ResolveSolidSheet(mat, Track(BuildSolidSheet(Color.white)));
+
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
+            snap.Render(camera);
+            snap.WritePng("fill-pattern-tinted.png");
+
+            double3 mean = MeanFilledRgb(snap.Pixels);
+            Assert.Greater(mean.x, mean.y + 10.0,
+                $"a white sprite under a red fill-color must paint red (mean RGB {mean}); equal channels mean the " +
+                "fill-color is ignored on the pattern layer.");
+            Assert.Greater(mean.x, mean.z + 10.0, $"mean R must exceed mean B (mean RGB {mean}).");
+        }
+
+        /// <summary>A data-driven fill-color tints a pattern too: it bakes into the vertex colour, which the
+        /// pattern branch multiplies in. The expression reads a feature, and yields red for every feature.</summary>
+        [Test]
+        public void ResolvedPattern_WithDataDrivenFillColor_TintsTheSprite()
+        {
+            var (mapGo, mat) = FillSceneHelper.BuildFillGo(
+                fillColorExpression: "[\"case\",[\"has\",\"no-such-property\"],\"#0000ff\",\"#ff0000\"]",
+                fillPattern: "solid");
+            Track(mapGo);
+            var (camGo, camera) = BuildCamera();
+            Track(camGo);
+            ResolveSolidSheet(mat, Track(BuildSolidSheet(Color.white)));
+
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
+            snap.Render(camera);
+            snap.WritePng("fill-pattern-tinted-data-driven.png");
+
+            double3 mean = MeanFilledRgb(snap.Pixels);
+            Assert.Greater(mean.x, mean.y + 10.0,
+                $"a white sprite under a data-driven red fill-color must paint red (mean RGB {mean}); equal " +
+                "channels mean the baked vertex colour does not reach the pattern branch.");
+            Assert.Greater(mean.x, mean.z + 10.0, $"mean R must exceed mean B (mean RGB {mean}).");
+        }
+
+        /// <summary>The tint rule reaches only pattern layers: a solid fill that sets no fill-color keeps the
+        /// spec default, opaque black, not the pattern layer's white.</summary>
+        [Test]
+        public void SolidFill_WithoutFillColor_StaysSpecBlack()
+        {
+            var (mapGo, _) = FillSceneHelper.BuildFillGo(omitFillColor: true);
+            Track(mapGo);
+            var (camGo, camera) = BuildCamera();
+            Track(camGo);
+
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
+            snap.Render(camera);
+            snap.WritePng("fill-solid-default-black.png");
+
+            Assert.Greater(SnapshotCoverage.Analyse(snap.Pixels, Bg32).FilledFraction, 0.02f,
+                "precondition: the fill must cover part of the frame.");
+            double3 mean = MeanFilledRgb(snap.Pixels);
+            // Lit black still picks up a little ambient and specular (a blue channel near 25); lit white is
+            // near 150.
+            Assert.Less(math.cmax(mean), 60.0,
+                $"a solid fill with no fill-color must paint the spec's black (mean RGB {mean}).");
+        }
+
+        /// <summary>Resolves the 2×2 "solid" sprite of <paramref name="sheet"/> onto the material.</summary>
+        private static void ResolveSolidSheet(Material mat, Texture2D sheet)
+        {
+            Assert.IsTrue(FillStyle.FillPattern.TryResolve("solid", SheetView(2), out var pattern),
+                "fixture sheet must resolve");
+            mat.SetTexture(FillShaderProps.TexturePropertyId.PatternMap, sheet);
+            mat.SetVector (FillShaderProps.PropertyId.PatternRect,
+                new Vector4((float)pattern.Rect.x, (float)pattern.Rect.y,
+                            (float)pattern.Rect.z, (float)pattern.Rect.w));
+            double2 repeats = FillStyle.FillPattern.RepeatsPerWorldUnit(
+                pattern, FillStyle.FillPatternSizing.ScreenRelative, DiagnosticZoom, 0.0);
+            mat.SetVector (FillShaderProps.PropertyId.PatternScale,
+                new Vector4((float)repeats.x, (float)repeats.y, 0f, 0f));
+        }
+
+        /// <summary>Mean RGB (0-255) of the pixels that differ from the background.</summary>
+        private static double3 MeanFilledRgb(Frame frame)
+        {
+            double3 sum = 0.0;
+            int n = 0;
+            for (int i = 0; i < frame.Pixels.Length; i++)
+            {
+                Color32 c = frame.Pixels[i];
+                if (math.abs(c.r - Bg32.r) + math.abs(c.g - Bg32.g) + math.abs(c.b - Bg32.b) <= SnapshotCoverage.Tolerance)
+                    continue;
+                sum += new double3(c.r, c.g, c.b);
+                n++;
+            }
+            Assert.Greater(n, 0, "expected non-background pixels to average");
+            return sum / n;
         }
 
         // ── The sprite's ALPHA must reach the framebuffer, not just its RGB ──────────────────────
@@ -416,8 +521,9 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         private static readonly Color32 Bg32 = new Color32(26, 28, 38, 255);
 
-        private const string OpaqueBlack = "[\"rgba\",0,0,0,1]";
         private const double DiagnosticZoom = 14.0;
+
+        private static readonly int BaseColorId = MapRenderer.Unity.Rendering.ShaderProperties.PropertyId.BaseColor;
 
         /// <summary>Repeats forced high enough that many tiling seams land inside the frame — one seam would
         /// be a weak probe, since a border tap only shows up AT a seam.</summary>
@@ -426,15 +532,20 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void PatternThroughARepackedSheet_NeverSamplesTheBorderOrTheNeighbour()
         {
-            var (mapGo, mat) = FillSceneHelper.BuildFillGo(fillColorExpression: OpaqueBlack);
+            // A real pattern layer with no fill-color: the parser's white default keeps the sprite untinted, so
+            // its two hues stay measurable.
+            var (mapGo, mat) = FillSceneHelper.BuildFillGo(fillPattern: "A", omitFillColor: true);
             Track(mapGo);
             var (camGo, camera) = BuildCamera();
             Track(camGo);
             SpriteSheet sheet = null; // not a UnityEngine.Object — disposed below, outside the bag
             try
             {
-                // Baseline first: the SAME geometry painted with the opaque-black fill colour, i.e. full
-                // coverage. Without it "no transparent pixels" would also pass on an empty render.
+                // Baseline first: the SAME geometry painted solid, i.e. full coverage. Without it "no transparent
+                // pixels" would also pass on an empty render. It paints black, as the coverage reference always
+                // has: a lighter edge counts more antialiased pixels as filled. The layer colour is then restored.
+                Color layerColor = mat.GetColor(BaseColorId);
+                mat.SetColor(BaseColorId, Color.black);
                 mat.SetFloat(FillShaderProps.PropertyId.FillPattern, 0f);
                 using var opaque = new SnapshotRenderer(SnapW, SnapH);
                 opaque.Render(camera);
@@ -455,6 +566,7 @@ namespace MapRenderer.Tests.Visual
                     pattern, FillStyle.FillPatternSizing.WorldAbsolute, DiagnosticZoom,
                     worldPeriodMetres: FillSceneHelperWorldSpan / MinimumRepeats);
 
+                mat.SetColor(BaseColorId, layerColor);
                 mat.SetFloat(FillShaderProps.PropertyId.FillPattern, 1f);
                 mat.SetTexture(FillShaderProps.TexturePropertyId.PatternMap, sheet.Texture);
                 mat.SetVector(FillShaderProps.PropertyId.PatternRect,

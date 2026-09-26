@@ -31,15 +31,20 @@ namespace MapRenderer.Unity.Rendering.Style
         };
 
         /// <summary>
-        /// Root minus layers: covers sprite/glyphs/sources/light/terrain/name/version and every unknown
-        /// root key in one comparison. sprite matters most: the in-place path never re-fetches it.
+        /// Root minus <c>layers</c>, <c>light</c> and <c>sky</c>: covers sprite/glyphs/sources/terrain/name/version
+        /// and every unknown root key in one comparison. sprite matters most: the in-place path never re-fetches
+        /// it. <c>light</c> and <c>sky</c> are free because <c>MapView.SetStyle</c> re-applies them on every
+        /// restyle and no tile mesh bakes them.
         /// </summary>
         internal static bool RootMatches(StyleDocument oldStyle, StyleDocument newStyle)
         {
             if (oldStyle == null || newStyle == null) return false; // fail closed, as everything here does
-            return JsonCanonical.Write(WithoutMember(oldStyle.Root, "layers"))
-                == JsonCanonical.Write(WithoutMember(newStyle.Root, "layers"));
+            return JsonCanonical.Write(WithoutMembers(oldStyle.Root, RootFreeKeys))
+                == JsonCanonical.Write(WithoutMembers(newStyle.Root, RootFreeKeys));
         }
+
+        /// <summary>The root keys <see cref="RootMatches"/> leaves out of its comparison.</summary>
+        private static readonly string[] RootFreeKeys = { "layers", "light", "sky" };
 
         internal static bool LayerSurvives(StyleLayer oldLayer, StyleLayer newLayer)
         {
@@ -52,7 +57,8 @@ namespace MapRenderer.Unity.Rendering.Style
         /// (presence changes the binding set), non-data-driven on BOTH sides, and for the symbol colours equal
         /// in alpha (<see cref="ConstantAlphaMatches"/>). Non-obvious why: a data-driven colour is baked, so a
         /// change between two <c>["get",…]</c> colours that passed would leave every tile on the old colour.
-        /// A parse failure counts as data-driven (fail closed).
+        /// A parse failure counts as data-driven (fail closed). <see cref="PatternTintMayAppear"/> is the one
+        /// exception to "present in both".
         /// </summary>
         private static HashSet<string> FreelyTransitionableKeys(StyleLayer oldLayer, StyleLayer newLayer)
         {
@@ -63,14 +69,33 @@ namespace MapRenderer.Unity.Rendering.Style
 
             foreach (string key in TransitionablePaintKeys)
             {
-                if (!oldPaint.TryGet(key, out JsonValue oldValue)) continue;
-                if (!newPaint.TryGet(key, out JsonValue newValue)) continue;
+                bool hasOld = oldPaint.TryGet(key, out JsonValue oldValue);
+                bool hasNew = newPaint.TryGet(key, out JsonValue newValue);
+                if (hasOld != hasNew && PatternTintMayAppear(key, oldPaint, newPaint)
+                    && IsFreeAtKind(key, hasOld ? oldValue : newValue))
+                {
+                    free.Add(key);
+                    continue;
+                }
+                if (!hasOld || !hasNew) continue;
                 if (!IsFreeAtKind(key, oldValue) || !IsFreeAtKind(key, newValue)) continue;
                 if (IsSymbolColor(key) && !ConstantAlphaMatches(oldValue, newValue)) continue;
                 free.Add(key);
             }
             return free;
         }
+
+        /// <summary>
+        /// True when <c>fill-color</c> may appear or vanish in place: both paints set <c>fill-pattern</c> to a
+        /// sprite name, the pattern-layer test <c>PaintProperties.Parse</c> uses. An absent fill-color on a pattern
+        /// layer binds white, so the binding set does not change. The signature keeps <c>fill-pattern</c>, so a
+        /// pattern that differs still refuses.
+        /// </summary>
+        private static bool PatternTintMayAppear(string key, JsonValue oldPaint, JsonValue newPaint)
+            => key == "fill-color" && IsPatternName(oldPaint.Get("fill-pattern")) && IsPatternName(newPaint.Get("fill-pattern"));
+
+        /// <summary>True when <paramref name="pattern"/> is a sprite-name string.</summary>
+        private static bool IsPatternName(JsonValue pattern) => pattern?.AsString(null) != null;
 
         /// <summary>The two symbol paint colours that ride a uniform only at <c>Constant</c> — see
         /// <see cref="SymbolTextColorCarrier"/>.</summary>
@@ -159,6 +184,7 @@ namespace MapRenderer.Unity.Rendering.Style
 
         private static JsonValue WithoutMembers(JsonValue obj, IReadOnlyCollection<string> keys)
         {
+            if (obj == null || !obj.IsObject) return obj;
             var members = new Dictionary<string, JsonValue>(obj.Members);
             foreach (string key in keys) members.Remove(key);
             return JsonValue.OfObject(members);

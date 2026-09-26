@@ -151,6 +151,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/SourceDefinition.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleDocument.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleParser.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleLight.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleSky.cs" />
     <!-- S83a: TileJSON model+parser + SourceDefinition resolution (engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/TileJson.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/SourceResolver.cs" />

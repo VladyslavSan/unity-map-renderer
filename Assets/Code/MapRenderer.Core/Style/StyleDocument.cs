@@ -5,8 +5,8 @@ namespace MapRenderer.Core.Style
 {
     /// <summary>
     /// The parsed root of a MapLibre Style document: typed common fields, the ordered layer list, and the
-    /// named sources. Root keys the renderer does not model (<c>center</c>, <c>light</c>, <c>terrain</c>, …)
-    /// survive on <see cref="Root"/> as raw JSON. <see cref="Layers"/> keeps the declared order, which is the
+    /// named sources. Root keys the renderer does not model (<c>center</c>, <c>terrain</c>, …) survive on
+    /// <see cref="Root"/> as raw JSON. <see cref="Layers"/> keeps the declared order, which is the
     /// painter's order (<c>Rendering/LayerDrawOrder.cs</c>).
     /// </summary>
     public sealed class StyleDocument
@@ -28,6 +28,14 @@ namespace MapRenderer.Core.Style
 
         /// <summary>Layers in declared (paint) order (root <c>layers</c>). Never null.</summary>
         public readonly List<StyleLayer> Layers = new List<StyleLayer>();
+
+        /// <summary>Root <c>light</c> block. Never null; spec defaults when the key is absent (including
+        /// for a hand-built <see cref="StyleDocument"/> that never sets it).</summary>
+        public StyleLight Light = StyleLight.Parse(null);
+
+        /// <summary>Root <c>sky</c> block. Never null; spec defaults when the key is absent (including
+        /// for a hand-built <see cref="StyleDocument"/> that never sets it).</summary>
+        public StyleSky Sky = StyleSky.Parse(null);
 
         /// <summary>The full original root JSON object (preserves all unknown/forward-compat keys).</summary>
         public JsonValue Root;

@@ -248,10 +248,33 @@ Anything else — a reach into `Common/`, into a sibling kind, or outside `Map/`
   `Fill_VertexModify.hlsl`, `Line_VertexExtrude.hlsl`, `PixelsToWorld.hlsl`.
 - Shaders declare `Shader "Map/<Kind>"` (e.g. `Map/Fill`, `Map/Line`), the unlit twins `Map/<Kind>Unlit`.
 - Materials bind their shader **by GUID** (the `.mat`'s `m_Shader` guid → the `.shader.meta` guid), so
-  renaming the `Shader "…"` string does not break a material. Only `Shader.Find("Map/<Kind>")` (used
-  in tests) depends on the declared name.
+  renaming the `Shader "…"` string does not break a material. `Shader.Find` depends on the declared name:
+  the tests use it, and so does `SkyGradient` for `Map/Sky` (see "The sky" below).
 - The custom inspector is bound via `CustomEditor` by C# class name, not shader name — unaffected by
   shader renames.
+
+## The sky
+
+`Sky/Sky.shader` (`Map/Sky`) is the one shader outside `Map/`: it draws no layer kind, it is a skybox.
+`SkyGradient` binds a runtime instance to the camera's `Skybox` component, never `RenderSettings.skybox`,
+so the ambient convolution and the default reflection do not see it. No asset references it, so it is in
+GraphicsSettings' Always Included Shaders (`SkyShader_IsInAlwaysIncludedShaders`). It is also the one
+shader that takes world `+Y` as up with no mesh frame. That holds on both projections, because globe
+tiles are rebased into the look-at tangent frame. The blend spans the visible sky strip: from
+`_MapEdgeElevation`, the ray elevation where the rendered map ends (the far cut, or the globe's limb when
+nearer), to `_SkyTopElevation`, the ray through the top of the screen. So the colour depends on the view,
+not only on the ray's direction. `SkyGradient.UpdateMapEdge` pushes both every frame from the committed
+camera.
+
+## The haze
+
+Every fill/line map forward pass mixes URP linear fog per fragment, with depth counted from the near plane
+(`EveryMapForwardPass_IncludesUrpFog`). The Unlit twins carry view-space z to the fragment instead of a
+per-vertex factor, so a tile-sized triangle does not clamp the fog at its vertices. `DistanceHaze` is the
+only writer of the `RenderSettings` fog fields. The symbol shaders do not mix fog colour per fragment: they
+scale alpha by the fog visibility at the anchor, computed once per vertex, so a label fades out in full haze
+and collision is unchanged. `Map/Sky` takes no fog. Fog stripping is Custom and keeps Linear only (`FogStripping_KeepsTheHazeFogMode`), because
+no scene enables fog and Automatic stripping would drop the variants the haze turns on at runtime.
 
 ## Lines fork on purpose
 

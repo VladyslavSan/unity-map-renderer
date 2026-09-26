@@ -300,18 +300,16 @@ void LitPassFragment(
     surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 
-    // [MAP DELTA] fill-pattern: the sprite REPLACES the layer colour — per the Style Spec, fill-color is not
-    // used AT ALL on a pattern layer, so both the vColor bake and _BaseColor are overwritten rather than
-    // tinted (a pattern layer's fill-color is Constant/Zoom, so its spec default, opaque black, rides
-    // _BaseColor and leaves vColor white — so _BaseColor is the one that would paint these layers black).
-    // fill-opacity still applies: it is the one paint property that survives, so _Opacity is re-applied
-    // here on top of the sprite's own alpha.
+    // [MAP DELTA] fill-pattern: the sprite's rgb is multiplied by the layer colour (_BaseColor × vColor), and
+    // its alpha replaces the colour's. A departure from the Style Spec, which ignores fill-color here: on a
+    // pattern layer an absent fill-color defaults to WHITE (PaintProperties.Parse), so the sprite shows
+    // untinted, and an explicit one tints it. fill-opacity is re-applied on top of the sprite's own alpha.
     bool  patternClipped;
     half4 patternTexel = SampleFillPattern(input.uv, patternClipped);
     clip(patternClipped ? -1.0 : 1.0);
     if (_FillPattern >= 0.5)
     {
-        surfaceData.albedo = patternTexel.rgb;
+        surfaceData.albedo = patternTexel.rgb * _BaseColor.rgb * input.vColor.rgb;
         surfaceData.alpha  = patternTexel.a * _Opacity;
     }
 

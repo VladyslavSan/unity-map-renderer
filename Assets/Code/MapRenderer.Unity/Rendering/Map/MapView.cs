@@ -193,6 +193,39 @@ namespace MapRenderer.Unity.Rendering.Map
         // Production symbols (real map data), fed to SymbolPlacementSystem.Tick each frame.
         internal readonly SymbolSubsystem SymbolSubsystem;
 
+        /// <summary>The sun light writer, wired to a scene <see cref="Light"/> via
+        /// <see cref="SetSunLightTarget"/>. Null until wired (e.g. in tests that never wire one); a style
+        /// applies over it on every <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        internal SunLight SunLight { get; private set; }
+
+        /// <summary>Points the sun light writer at <paramref name="light"/> (the scene's directional
+        /// light, from <c>MapHost.EnsureDirectionalLight</c>). Replaces any previous target.</summary>
+        internal void SetSunLightTarget(Light light) => SunLight = new SunLight(light);
+
+        /// <summary>The sky gradient writer, wired to a camera via <see cref="SetSkyTarget"/>. Null until
+        /// wired; a style applies over it on every <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        internal SkyGradient SkyGradient { get; private set; }
+
+        /// <summary>Paints the style's sky behind <paramref name="camera"/> (<c>MapHost</c> passes
+        /// <c>Camera.main</c>). Disposes any previous sky first.</summary>
+        internal void SetSkyTarget(UnityEngine.Camera camera)
+        {
+            SkyGradient?.Dispose();
+            SkyGradient = new SkyGradient(camera);
+        }
+
+        /// <summary>The distance haze writer, created by <see cref="EnableHaze"/>. Null until enabled; a style
+        /// applies over it on every <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        internal DistanceHaze DistanceHaze { get; private set; }
+
+        /// <summary>Starts writing the style's haze to the process-global <c>RenderSettings</c> fog every
+        /// frame (<c>MapHost</c> calls it). Opt-in, so a view that never enables it leaves the fog alone.</summary>
+        internal void EnableHaze()
+        {
+            DistanceHaze?.Dispose();
+            DistanceHaze = new DistanceHaze();
+        }
+
         // Reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
         // fresh list; the single registry (RenderLayerFactory) is walked once via Layers.Layers.
         private readonly List<Symbol.StyleLayer> _symbolStyleLayers = new List<Symbol.StyleLayer>();
@@ -309,6 +342,12 @@ namespace MapRenderer.Unity.Rendering.Map
             _style  = style;
             StyleId = styleId;
             CommitProbe?.Invoke(CommitPhase.IdentityCommitted);
+
+            // Re-applied on EVERY style change (in-place or full rebuild), clearing any runtime override. They ease
+            // on the layer paint's transition and clock; LateUpdate advances them.
+            SunLight?.ApplyStyle(style.Light, Camera.CurrentProperties.Zoom, transition, now);
+            SkyGradient?.ApplyStyle(style.Sky, Camera.CurrentProperties.Zoom, transition, now);
+            DistanceHaze?.ApplyStyle(style.Sky, Camera.CurrentProperties.Zoom, transition, now);
 
             if (inPlace)
             {
@@ -528,6 +567,11 @@ namespace MapRenderer.Unity.Rendering.Map
             Camera.DevicePixelRatio = _config.DevicePixelRatio;
             using (PmCameraAdvance.Auto())
                 Camera.SyncToCamera();
+            SunLight?.Advance(NowSeconds);
+            SkyGradient?.Advance(NowSeconds);
+            DistanceHaze?.Advance(NowSeconds); // before UpdateRange, which writes the fog colour
+            SkyGradient?.UpdateMapEdge(Camera); // reads the pose just committed
+            DistanceHaze?.UpdateRange(Camera);
 
             // ONE snapshot for the rest of the frame — tiles and symbols share it, so they can't diverge.
             CameraProperties   cameraProperties = Camera.CurrentProperties;
@@ -708,7 +752,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Disposes the tiles, then the layer materials, then the symbol placement system, then the symbol
-        /// subsystem; idempotent. Non-local invariant: tiles go first because their renderers reference layer
+        /// subsystem, then the sky and the haze; idempotent. Non-local invariant: tiles go first because their renderers reference layer
         /// materials, and <see cref="Layers"/> goes before <see cref="SymbolPlacementSystem"/> because a symbol
         /// layer's presenter must not outlive the slot <see cref="Mesh"/> that system owns.
         /// </summary>
@@ -720,6 +764,8 @@ namespace MapRenderer.Unity.Rendering.Map
             DisposeStep(Layers,      nameof(Layers));
             DisposeStep(SymbolPlacementSystem,      nameof(SymbolPlacementSystem));
             DisposeStep(SymbolSubsystem,     nameof(SymbolSubsystem));     // destroy the shared glyph atlas texture + manager
+            DisposeStep(SkyGradient,         nameof(SkyGradient));         // restore the camera clear, destroy the sky material
+            DisposeStep(DistanceHaze,        nameof(DistanceHaze));        // restore the RenderSettings fog
 
             static void DisposeStep(System.IDisposable subsystem, string name)
             {

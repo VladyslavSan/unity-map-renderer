@@ -742,6 +742,72 @@ namespace MapRenderer.Tests.Style
                 "text-halo-color, must survive the gate — this is the stage's deliverable.");
         }
 
+        /// <summary>
+        /// On a pattern layer an absent fill-color binds white, so fill-color may appear or vanish in place when
+        /// both sides carry the SAME fill-pattern. Everywhere else a presence change still refuses. RED-verify:
+        /// drop the pattern test from <c>PatternTintMayAppear</c> (the solid cases survive); add fill-pattern to
+        /// the transitionable keys (the differing-pattern case survives).
+        /// </summary>
+        /// <param name="oldPaint">The old fill layer's paint members.</param>
+        /// <param name="newPaint">The new fill layer's paint members.</param>
+        [TestCase(@"""fill-pattern"": ""p""", @"""fill-pattern"": ""p"", ""fill-color"": ""#4a5261""", true,
+                  TestName = "PatternLayer_GainingFillColor_Survives")]
+        [TestCase(@"""fill-pattern"": ""p"", ""fill-color"": ""#4a5261""", @"""fill-pattern"": ""p""", true,
+                  TestName = "PatternLayer_LosingFillColor_Survives")]
+        [TestCase(@"""fill-opacity"": 0.5", @"""fill-opacity"": 0.5, ""fill-color"": ""#4a5261""", false,
+                  TestName = "SolidLayer_GainingFillColor_IsRefused")]
+        [TestCase(@"""fill-opacity"": 0.5, ""fill-color"": ""#4a5261""", @"""fill-opacity"": 0.5", false,
+                  TestName = "SolidLayer_LosingFillColor_IsRefused")]
+        [TestCase(@"""fill-pattern"": ""p""", @"""fill-pattern"": ""q"", ""fill-color"": ""#4a5261""", false,
+                  TestName = "PatternLayer_DifferentPattern_GainingFillColor_IsRefused")]
+        [TestCase(@"""fill-pattern"": ""p""", @"""fill-pattern"": ""p"", ""fill-color"": [""get"", ""c""]", false,
+                  TestName = "PatternLayer_GainingDataDrivenFillColor_IsRefused")]
+        [TestCase(@"""fill-pattern"": [""get"", ""p""]", @"""fill-pattern"": [""get"", ""p""], ""fill-color"": ""#4a5261""", false,
+                  TestName = "ExpressionPatternLayer_GainingFillColor_IsRefused")]
+        public void FillColorPresenceChange_SurvivesOnlyOnTheSamePattern(string oldPaint, string newPaint, bool survives)
+        {
+            Assert.AreEqual(survives, WholeDocumentGate.AllLayersSurvive(FillStyle(oldPaint), FillStyle(newPaint)),
+                survives ? "fill-color appearing or vanishing on the same pattern must survive in place."
+                         : "this fill-color presence change must refuse the in-place gate.");
+        }
+
+        private static StyleDocument RootStyle(string extraRootJson) => StyleParser.Parse($@"{{
+    ""version"": 8, ""name"": ""T"", {extraRootJson}
+    ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
+    ""layers"": [ {{ ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill0"" }} ]
+}}");
+
+        /// <summary>
+        /// <c>light</c> and <c>sky</c> are free at the root: MapView re-applies them on every restyle, and no tile
+        /// mesh bakes them. Any other root difference, alone or beside them, still refuses. RED-verify: compare
+        /// the root minus <c>layers</c> only (the sky/light cases refuse; the refusing cases stay green).
+        /// </summary>
+        /// <param name="oldRoot">Root members of the old style, each followed by a comma.</param>
+        /// <param name="newRoot">Root members of the new style, differing only as the case describes.</param>
+        [TestCase(@"""sky"": { ""sky-color"": ""#88bbff"", ""fog-color"": ""#ffffff"" },",
+                  @"""sky"": { ""sky-color"": ""#070a14"", ""fog-color"": ""#171b26"" },", true,
+                  TestName = "RootMatches_SkyOnlyDifference_Survives")]
+        [TestCase("", @"""sky"": { ""sky-color"": ""#070a14"" },", true,
+                  TestName = "RootMatches_SkyAddedOnly_Survives")]
+        [TestCase(@"""light"": { ""color"": ""#ffffff"", ""intensity"": 0.5 },",
+                  @"""light"": { ""color"": ""#203060"", ""intensity"": 0.1 },", true,
+                  TestName = "RootMatches_LightOnlyDifference_Survives")]
+        [TestCase(@"""glyphs"": ""https://a/{fontstack}/{range}.pbf"",",
+                  @"""glyphs"": ""https://b/{fontstack}/{range}.pbf"",", false,
+                  TestName = "RootMatches_OtherRootKeyDifference_Refuses")]
+        [TestCase(@"""sky"": { ""sky-color"": ""#88bbff"" }, ""sprite"": ""https://a/sprite"",",
+                  @"""sky"": { ""sky-color"": ""#070a14"" }, ""sprite"": ""https://b/sprite"",", false,
+                  TestName = "RootMatches_SkyPlusOtherRootKeyDifference_Refuses")]
+        public void RootMatches_FreesOnlyLightAndSky(string oldRoot, string newRoot, bool survives)
+        {
+            StyleDocument oldStyle = RootStyle(oldRoot), newStyle = RootStyle(newRoot);
+            Assert.AreNotEqual(JsonCanonical.Write(oldStyle.Root), JsonCanonical.Write(newStyle.Root),
+                "fixture: the two roots must differ.");
+            Assert.AreEqual(survives, SurvivingLayerGate.RootMatches(oldStyle, newStyle),
+                survives ? "a light/sky-only root difference must survive the gate."
+                         : "a root difference outside light/sky must refuse the gate.");
+        }
+
         /// <summary>A synthetic pair differing only in a Constant text-color survives — the
         /// non-vacuity control for <see cref="SymbolLayer_ZoomKindTextColorChange_IsRefused"/> (same fixture
         /// shape, opposite verdict). RED-verify: remove text-color from TransitionablePaintKeys.</summary>

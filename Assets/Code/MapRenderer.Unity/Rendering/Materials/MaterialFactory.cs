@@ -75,8 +75,8 @@ namespace MapRenderer.Unity.Rendering.Materials
 
             // fill-pattern: flag the layer, and start it UNRESOLVED (zero-area rect ⇒ the shader clips).
             // Non-obvious why: the sprite sheet is fetched asynchronously and cannot exist yet at
-            // material-build time; FillRenderLayer.SetSprites resolves it once the sheet lands, and a
-            // pattern layer must NOT fall back to fill-color, whose spec default is opaque black.
+            // material-build time; FillRenderLayer.SetSprites resolves it once the sheet lands, and an
+            // unresolved pattern layer must paint nothing rather than fall back to a plain fill-color.
             mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, paint.PatternName != null ? 1f : 0f);
             mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
         }

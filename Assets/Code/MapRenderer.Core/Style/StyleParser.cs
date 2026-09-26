@@ -50,6 +50,9 @@ namespace MapRenderer.Core.Style
                     doc.Layers.Add(ParseLayer(layerJson, fillAntialiasDefault));
             }
 
+            doc.Light = StyleLight.Parse(root.Get("light"));
+            doc.Sky = StyleSky.Parse(root.Get("sky"));
+
             return doc;
         }
 

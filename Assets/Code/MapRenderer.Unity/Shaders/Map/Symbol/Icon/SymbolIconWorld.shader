@@ -54,6 +54,7 @@ Shader "Map/Symbol/IconWorld"
             #pragma vertex   SymbolIconWorldPassVertex
             #pragma fragment SymbolIconWorldPassFragment
 
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Fog.hlsl"
             #include "SymbolIcon_Input.hlsl"
             #include "SymbolIconWorld_ForwardPass.hlsl"
             ENDHLSL

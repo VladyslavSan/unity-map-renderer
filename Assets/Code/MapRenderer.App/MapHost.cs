@@ -100,10 +100,20 @@ namespace MapRenderer.App
 
             // 3. Both render modes need the light: URP Lit shades with it, and the unlit fill-extrusion twin
             //    reads its direction for a half-Lambert. Only the ambient probe below is Unlit-gated.
-            EnsureDirectionalLight();
+            Light sunLight = EnsureDirectionalLight();
 
             // 3.5. After EnsureDirectionalLight, so a procedural skybox convolves against the real sun.
             EnsureEnvironmentLighting(renderMode);
+
+            // 3.6. Point the sun writer at the bootstrap light BEFORE SetStyle (step 4), so the first
+            //      style load applies its `light` block instead of leaving the bootstrap Euler(60,30,0).
+            if (mapView != null) mapView.SetSunLightTarget(sunLight);
+
+            // 3.7. Same ordering reason: the first style load paints its `sky` behind Camera.main.
+            if (mapView != null) mapView.SetSkyTarget(Camera.main);
+
+            // 3.8. Same ordering reason: the first style load sets the haze's fog colour.
+            if (mapView != null) mapView.EnableHaze();
 
             // 4. SetStyle is async (style doc + any TileJSON) and fire-and-forget; tiles stream in as it completes.
             if (mapView != null)
@@ -123,8 +133,8 @@ namespace MapRenderer.App
             if (ctrl != null && ctrl.Camera != null)
                 ctrl.ApplyCameraTransform(initialView);
 
-            // Set on Camera.main, so it applies without a Controller. This clear is the sky above the horizon and
-            // the no-style default; a style's `background` layer paints the ground, so the two do not compete.
+            // Set on Camera.main, so it applies without a Controller. The sky (step 3.7) replaces this clear; it
+            // shows only when the sky shader is missing from the build.
             var mainCam = Camera.main;
             if (mainCam != null && mainCam.backgroundColor == default)
                 mainCam.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
@@ -325,11 +335,11 @@ namespace MapRenderer.App
         /// (<c>InternalsVisibleTo</c>) can call it directly without going through the MonoBehaviour
         /// <see cref="Start"/> lifecycle. See <c>FillExtrusion_UnlitForwardPass.hlsl</c> for the shading
         /// side that consumes this light.</remarks>
-        internal static void EnsureDirectionalLight()
+        internal static Light EnsureDirectionalLight()
         {
             var existing = Object.FindAnyObjectByType<Light>();
             if (existing != null && existing.type == LightType.Directional)
-                return;
+                return existing;
 
             var lightGo = new GameObject("MapDirectionalLight");
             var light   = lightGo.AddComponent<Light>();
@@ -340,6 +350,7 @@ namespace MapRenderer.App
             light.shadows              = LightShadows.Soft;
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
             Debug.Log("[MapHost] Created directional light (none found in scene).");
+            return light;
         }
     }
 }

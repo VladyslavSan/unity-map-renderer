@@ -80,7 +80,9 @@ Varyings LineUnlitPassVertex(LineAttributes input)
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
 
     output.positionCS = vertexInput.positionCS;
-    output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
+    // View-space z, not a fog factor: the fragment computes fog per pixel, as the Lit twin does, so a
+    // tile-sized triangle does not clamp the factor at its vertices.
+    output.fogCoord = vertexInput.positionVS.z;
 
     // LINE DELTA: uv carries the line parameterization, NOT TRANSFORM_TEX'd (coverage needs raw dashU).
     output.uv = float4(dashU, side, innerFrac, hairlineScale);
@@ -121,7 +123,8 @@ void LineUnlitPassFragment(
     InitializeInputData(input, inputData);
 
     half4 color = UniversalFragmentUnlit(inputData, albedo, alpha);
-    color.rgb = MixFog(color.rgb, input.fogCoord);
+    // Fog depth counts from the near plane, as InitializeInputDataFog does for the Lit twin.
+    color.rgb = MixFog(color.rgb, ComputeFogFactorZ0ToFar(max(-input.fogCoord - _ProjectionParams.y, 0.0)));
     color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
 
     outColor = color;

@@ -14,6 +14,7 @@
 //   TextFieldResolverTests      — Symbol.TextFieldResolver.Resolve: token sugar + expression form -> label.
 //   LineDashTests               — Line.LineDash: dash coverage, zoom-stability, width coupling, dasharray parse/eval.
 //   IconImageResolverTests      — Symbol.IconImageResolver.Resolve: token sugar + expression form -> sprite name.
+//   LightSkyTests               — root light/sky blocks: parse, spec defaults, malformed input.
 //
 // LineOffsetTests.cs stays its own file: its `using MapRenderer.Core.Style.Line;` (a namespace import, for
 // LineOffset) brings `MapRenderer.Core.Style.Line.StyleLayer` into scope, colliding with the bare
@@ -1331,19 +1332,26 @@ namespace MapRenderer.Tests.Style
 
         // ── The paint side of the same defect ────────────────────────────────────────────────────
 
+        /// <summary>
+        /// A pattern layer's absent fill-color defaults to white, because the shader multiplies the sprite by
+        /// it: white leaves the sprite untinted. A solid fill keeps the spec's opaque black. Liberty's
+        /// road_area_pattern is the pattern case verbatim.
+        /// </summary>
         [Test]
-        public void PatternLayerWithoutFillColor_StillCarriesTheOpaqueBlackDefault()
+        public void FillColorDefault_IsWhiteOnAPatternLayer_AndBlackOnASolidFill()
         {
-            // Liberty's road_area_pattern verbatim: its Color is the spec default, opaque black, so the
-            // shader must clip an unresolved pattern rather than fall through to the colour path.
-            var paint = TestStyle.FillPaint(@"{""fill-pattern"":""pedestrian_polygon""}");
+            var pattern = TestStyle.FillPaint(@"{""fill-pattern"":""pedestrian_polygon""}").Color.Evaluate(0.0);
+            Assert.AreEqual((1.0, 1.0, 1.0, 1.0), (pattern.R, pattern.G, pattern.B, pattern.A),
+                "a pattern layer with no fill-color must default to opaque white, so the sprite shows untinted.");
 
-            Assert.AreEqual("pedestrian_polygon", paint.PatternName);
-            var color = paint.Color.Evaluate(0.0);
-            Assert.AreEqual(0.0, color.R, 1e-9, "fill-color default is opaque black …");
-            Assert.AreEqual(0.0, color.G, 1e-9);
-            Assert.AreEqual(0.0, color.B, 1e-9);
-            Assert.AreEqual(1.0, color.A, 1e-9, "… fully opaque — hence solid black regions, not faint ones");
+            var solid = TestStyle.FillPaint(@"{""fill-opacity"":0.5}").Color.Evaluate(0.0);
+            Assert.AreEqual((0.0, 0.0, 0.0, 1.0), (solid.R, solid.G, solid.B, solid.A),
+                "a solid fill with no fill-color must keep the spec default, opaque black.");
+
+            // An expression fill-pattern is not a sprite name, so the layer draws as a solid fill: black.
+            var expression = TestStyle.FillPaint(@"{""fill-pattern"":[""get"",""p""]}").Color.Evaluate(0.0);
+            Assert.AreEqual((0.0, 0.0, 0.0, 1.0), (expression.R, expression.G, expression.B, expression.A),
+                "a layer whose fill-pattern is an expression draws solid, so it must keep opaque black.");
         }
     }
 
@@ -3148,6 +3156,212 @@ namespace MapRenderer.Tests.Style
         {
             Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("''"), Marker),
                 "an empty/whitespace resolution must skip, mirroring TextFieldResolver");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // LightSkyTests — root light/sky blocks: parse, spec defaults, malformed input
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="StyleLight.Parse"/> and <see cref="StyleSky.Parse"/>: spec defaults when the block or a key is
+    /// absent, explicit values parse, and malformed values fall back rather than throw (except a
+    /// malformed color/number expression, which throws at eager parse like every other paint property).
+    /// </summary>
+    [TestFixture]
+    public class LightSkyTests
+    {
+        private static JsonValue Root(string json) => JsonParser.Parse(json);
+
+        // ── light: defaults ──────────────────────────────────────────────────────
+
+        [Test]
+        public void Light_AbsentBlock_UsesSpecDefaults()
+        {
+            var light = StyleLight.Parse(null);
+
+            var pos = light.Position.Evaluate(0.0);
+            Assert.AreEqual(1.15, pos.Radial, 1e-6);
+            Assert.AreEqual(210.0, pos.Azimuthal.Degrees, 1e-6);
+            Assert.AreEqual(30.0, pos.Polar.Degrees, 1e-6);
+
+            var c = light.Color.Evaluate(0.0);
+            Assert.AreEqual(1.0, c.R, 1e-6);
+            Assert.AreEqual(1.0, c.G, 1e-6);
+            Assert.AreEqual(1.0, c.B, 1e-6);
+            Assert.AreEqual(1.0, c.A, 1e-6);
+
+            Assert.AreEqual(0.5f, light.Intensity.Evaluate(0.0), 1e-6f);
+        }
+
+        // ── light: explicit parse ────────────────────────────────────────────────
+
+        [Test]
+        public void Light_ExplicitValues_Parse()
+        {
+            var root = Root("{\"light\":{\"position\":[2.0,90,45],\"color\":\"#ff0000\",\"intensity\":0.8}}");
+            var light = StyleLight.Parse(root.Get("light"));
+
+            var pos = light.Position.Evaluate(0.0);
+            Assert.AreEqual(2.0, pos.Radial, 1e-6);
+            Assert.AreEqual(90.0, pos.Azimuthal.Degrees, 1e-6);
+            Assert.AreEqual(45.0, pos.Polar.Degrees, 1e-6);
+
+            var c = light.Color.Evaluate(0.0);
+            Assert.AreEqual(1.0, c.R, 1e-4);
+            Assert.AreEqual(0.0, c.G, 1e-4);
+
+            Assert.AreEqual(0.8f, light.Intensity.Evaluate(0.0), 1e-6f);
+        }
+
+        [Test]
+        public void Light_AnchorKey_IsIgnored()
+        {
+            // anchor is parsed by no member of Light; a style setting it must not throw and must still
+            // apply the other keys.
+            var root = Root("{\"light\":{\"anchor\":\"viewport\",\"intensity\":0.9}}");
+            var light = StyleLight.Parse(root.Get("light"));
+
+            Assert.AreEqual(0.9f, light.Intensity.Evaluate(0.0), 1e-6f);
+        }
+
+        // ── light: malformed input ───────────────────────────────────────────────
+
+        [Test]
+        public void Light_MalformedPositionArray_FallsBackToDefault()
+        {
+            var root = Root("{\"light\":{\"position\":[1.0]}}"); // too few elements
+            var light = StyleLight.Parse(root.Get("light"));
+
+            var pos = light.Position.Evaluate(0.0);
+            Assert.AreEqual(1.15, pos.Radial, 1e-6, "A short position array must fall back to the default.");
+        }
+
+        [Test]
+        public void Light_NonArrayPosition_FallsBackToDefault()
+        {
+            var root = Root("{\"light\":{\"position\":\"nope\"}}");
+            var light = StyleLight.Parse(root.Get("light"));
+
+            var pos = light.Position.Evaluate(0.0);
+            Assert.AreEqual(1.15, pos.Radial, 1e-6);
+        }
+
+        [Test]
+        public void Light_ZoomExpressionColor_Classifies()
+        {
+            var root = Root("{\"light\":{\"color\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,\"#000000\",10,\"#ffffff\"]}}");
+            var light = StyleLight.Parse(root.Get("light"));
+
+            Assert.AreEqual(ExpressionKind.Zoom, light.Color.Kind);
+        }
+
+        [Test]
+        public void Light_MalformedColor_Throws()
+        {
+            // Unlike position, color is expression-backed: a bad value throws at eager parse, like any
+            // other paint color, instead of falling back to the default.
+            var root = Root("{\"light\":{\"color\":\"notacolor\"}}");
+            Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
+        }
+
+        // ── sky: defaults ─────────────────────────────────────────────────────────
+
+        [Test]
+        public void Sky_AbsentBlock_UsesSpecDefaults()
+        {
+            var sky = StyleSky.Parse(null);
+
+            var sc = sky.SkyColor.Evaluate(0.0);
+            Assert.AreEqual(0x88 / 255.0, sc.R, 1e-4);
+            Assert.AreEqual(0xC6 / 255.0, sc.G, 1e-4);
+            Assert.AreEqual(0xFC / 255.0, sc.B, 1e-4);
+
+            var hc = sky.HorizonColor.Evaluate(0.0);
+            Assert.AreEqual(1.0, hc.R, 1e-4);
+            Assert.AreEqual(1.0, hc.G, 1e-4);
+            Assert.AreEqual(1.0, hc.B, 1e-4);
+
+            var fc = sky.FogColor.Evaluate(0.0);
+            Assert.AreEqual(1.0, fc.R, 1e-4);
+        }
+
+        // ── sky: explicit parse ──────────────────────────────────────────────────
+
+        [Test]
+        public void Sky_FogColorOnly_ParsesFogLeavesOthersDefault()
+        {
+            var root = Root("{\"sky\":{\"fog-color\":\"#ff0000\"}}");
+            var sky  = StyleSky.Parse(root.Get("sky"));
+
+            var fc = sky.FogColor.Evaluate(0.0);
+            Assert.AreEqual(1.0, fc.R, 1e-4);
+            Assert.AreEqual(0.0, fc.G, 1e-4);
+
+            var sc = sky.SkyColor.Evaluate(0.0);
+            Assert.AreEqual(0x88 / 255.0, sc.R, 1e-4);
+        }
+
+        [Test]
+        public void Sky_AllThreeColors_Parse()
+        {
+            var root = Root("{\"sky\":{\"sky-color\":\"#010203\",\"horizon-color\":\"#040506\",\"fog-color\":\"#070809\"}}");
+            var sky  = StyleSky.Parse(root.Get("sky"));
+
+            Assert.AreEqual(0x01 / 255.0, sky.SkyColor.Evaluate(0.0).R, 1e-4);
+            Assert.AreEqual(0x04 / 255.0, sky.HorizonColor.Evaluate(0.0).R, 1e-4);
+            Assert.AreEqual(0x07 / 255.0, sky.FogColor.Evaluate(0.0).R, 1e-4);
+        }
+
+        // ── sky: unmodeled blend keys are ignored, not thrown ───────────────────
+
+        [Test]
+        public void Sky_BlendKeys_AreIgnored()
+        {
+            var root = Root(
+                "{\"sky\":{\"sky-horizon-blend\":0.2,\"horizon-fog-blend\":0.3,\"fog-ground-blend\":0.4," +
+                "\"atmosphere-blend\":0.5,\"fog-color\":\"#00ff00\"}}");
+            var sky = StyleSky.Parse(root.Get("sky"));
+
+            Assert.AreEqual(1.0, sky.FogColor.Evaluate(0.0).G, 1e-4);
+        }
+
+        [Test]
+        public void Sky_ZoomExpressionFogColor_Classifies()
+        {
+            var root = Root(
+                "{\"sky\":{\"fog-color\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,\"#000000\",10,\"#ffffff\"]}}");
+            var sky = StyleSky.Parse(root.Get("sky"));
+
+            Assert.AreEqual(ExpressionKind.Zoom, sky.FogColor.Kind);
+        }
+
+        // ── StyleParser integration ──────────────────────────────────────────────
+
+        [Test]
+        public void StyleParser_PopulatesLightAndSky()
+        {
+            var doc = StyleParser.Parse(
+                "{\"version\":8,\"layers\":[],\"light\":{\"intensity\":0.7}," +
+                "\"sky\":{\"fog-color\":\"#123456\"}}");
+
+            Assert.IsNotNull(doc.Light);
+            Assert.AreEqual(0.7f, doc.Light.Intensity.Evaluate(0.0), 1e-6f);
+
+            Assert.IsNotNull(doc.Sky);
+            Assert.AreEqual(0x12 / 255.0, doc.Sky.FogColor.Evaluate(0.0).R, 1e-4);
+        }
+
+        [Test]
+        public void StyleParser_AbsentLightAndSky_UseDefaults()
+        {
+            var doc = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+
+            Assert.IsNotNull(doc.Light);
+            Assert.AreEqual(0.5f, doc.Light.Intensity.Evaluate(0.0), 1e-6f);
+
+            Assert.IsNotNull(doc.Sky);
+            Assert.AreEqual(1.0, doc.Sky.FogColor.Evaluate(0.0).R, 1e-4);
         }
     }
 }

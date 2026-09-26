@@ -145,6 +145,13 @@ duration.** A compatible restyle (§ "Style switching", sub-topic 4) and a camer
   property, and `BindOrRetarget` arms them on a retarget. The layer-level fade (`minzoom`/`maxzoom`/
   `visibility`) eases the same way, one level up, in `RenderLayerSet.AdvanceFade` — the target/duration/clock
   are the *set*'s, not any one layer's, so no transition and no clock cross `IFadeableRenderLayer`.
+- **The scene writers outside the render layers.** `SunLight`, `SkyGradient` and `DistanceHaze` ease the
+  root `light` and `sky` values on the same `StyleTransition`, clock and smoothstep curve (`StyleEase`).
+  `MapView.SetStyle` arms them on every restyle, and `MapView.LateUpdate` advances them before the fog is
+  written. A restyle mid-ease starts from the value last written. A runtime override stops the ease and wins.
+  The first style and an instant transition snap. The haze switch turns on when the ease starts, so the fog
+  colour eases visibly instead of popping on at the end. Because every restyle re-applies these two root
+  keys and no tile mesh bakes them, `SurvivingLayerGate.RootMatches` leaves them out of its comparison.
 - **How it composes with continuous zoom interpolation** — the fill/line/bg zoom path is already *continuous*
   (evaluates every frame) but not *eased* across a discrete change (a restyle, or a stepped property). Easing
   layers on top of, not instead of, continuous interpolation: both the origin and the target of an easing

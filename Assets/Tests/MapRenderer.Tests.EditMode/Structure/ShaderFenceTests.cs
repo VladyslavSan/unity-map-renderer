@@ -11,6 +11,8 @@
 //   MdCitationFenceTests                   — every *.md citation in source resolves to a tracked file.
 //   PreparedKeyShapeStructureTests         — PreparedKey's recorded field-count shape.
 //   RenderLayerRegistryStructureTests      — RenderLayerFactory is the sole StyleLayer-subtype dispatch point.
+//   SkyShaderStructureTests                — Map/Sky ships in every build; the sky writer never touches scene lighting.
+//   HazeFogStructureTests                  — the build keeps the haze's fog variants; every map forward pass takes fog.
 
 using System;
 using System.Collections.Generic;
@@ -2079,6 +2081,91 @@ namespace MapRenderer.Tests.Structure
             Assert.IsFalse(text.Contains("SetVisible("),
                 "BackgroundRenderLayer.cs must contain ZERO 'SetVisible(' — the Mercator-only background " +
                 "gate method is deleted; background is a backend-owned per-tile TileMesh layer now.");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SkyShaderStructureTests — Map/Sky ships in every build; the sky writer never touches scene lighting
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class SkyShaderStructureTests
+    {
+        private static string SkyShaderPath => Path.Combine(ShaderPropertyParser.ShadersDir, "Sky", "Sky.shader");
+
+        [Test]
+        public void SkyShader_IsInAlwaysIncludedShaders()
+        {
+            // Non-obvious why: SkyGradient reaches the shader only by Shader.Find, and no asset references
+            // it, so a player build strips it unless GraphicsSettings lists it.
+            Match guid = Regex.Match(File.ReadAllText(SkyShaderPath + ".meta"), @"^guid:\s*([0-9a-f]{32})",
+                                     RegexOptions.Multiline);
+            Assert.That(guid.Success, "Sky.shader.meta has no guid.");
+
+            string settings = File.ReadAllText(
+                Path.Combine(ShaderPropertyParser.RepoRoot, "ProjectSettings", "GraphicsSettings.asset"));
+            Match included = Regex.Match(settings, @"m_AlwaysIncludedShaders:\s*\n((?:\s+- .*\n)+)");
+            Assert.That(included.Success, "GraphicsSettings.asset has no m_AlwaysIncludedShaders list.");
+            Assert.That(included.Groups[1].Value, Does.Contain("guid: " + guid.Groups[1].Value),
+                "Map/Sky is not in Always Included Shaders; a player build would render no sky.");
+        }
+
+        [Test]
+        public void SkyGradient_NeverWritesSceneLighting()
+        {
+            // RenderSettings.skybox feeds the ambient convolution and the default reflection. The sky must
+            // ride a camera Skybox component so lighting stays as MapHost set it.
+            string path = Path.Combine(ShaderPropertyParser.RenderingDir, "Map", "SkyGradient.cs");
+            var code = File.ReadAllLines(path).Where(line => !line.TrimStart().StartsWith("//"));
+            string joined = string.Join("\n", code);
+
+            Assert.That(joined, Does.Not.Contain("RenderSettings"), "SkyGradient.cs must not use RenderSettings.");
+            Assert.That(joined, Does.Not.Contain("DynamicGI"), "SkyGradient.cs must not use DynamicGI.");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // HazeFogStructureTests — the build keeps the haze's fog variants; every map forward pass takes fog
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class HazeFogStructureTests
+    {
+        [Test]
+        public void FogStripping_KeepsTheHazeFogMode()
+        {
+            // Non-obvious why: automatic stripping keeps only the fog modes the build's scenes use, and no scene
+            // enables fog, so a player build would strip the variants DistanceHaze switches on at runtime.
+            string settings = File.ReadAllText(
+                Path.Combine(ShaderPropertyParser.RepoRoot, "ProjectSettings", "GraphicsSettings.asset"));
+            FogMode hazeMode = MapRenderer.Unity.Rendering.Map.DistanceHaze.HazeFogMode;
+            string keepKey = hazeMode switch
+            {
+                FogMode.Linear             => "m_FogKeepLinear",
+                FogMode.Exponential        => "m_FogKeepExp",
+                FogMode.ExponentialSquared => "m_FogKeepExp2",
+                _                          => throw new ArgumentOutOfRangeException(),
+            };
+
+            Assert.That(settings, Does.Match(@"\n  m_FogStripping: 1\r?\n"),
+                "Fog stripping must be Custom (1); Automatic (0) strips the runtime haze variants.");
+            Assert.That(settings, Does.Match($@"\n  {keepKey}: 1\r?\n"),
+                $"{keepKey} must be 1: DistanceHaze uses {hazeMode} fog.");
+        }
+
+        [Test]
+        public void EveryMapForwardPass_IncludesUrpFog()
+        {
+            var offenders = Directory.EnumerateFiles(
+                    Path.Combine(ShaderPropertyParser.ShadersDir, "Map"), "*.shader", SearchOption.AllDirectories)
+                .Where(path => File.ReadAllText(path).Contains("\"UniversalForward\""))
+                .Where(path => !File.ReadAllText(path).Contains("ShaderLibrary/Fog.hlsl"))
+                .Select(path => path.Replace(ShaderPropertyParser.RepoRoot, string.Empty))
+                .ToList();
+
+            Assert.That(offenders, Is.Empty,
+                "These map shaders have a forward pass without URP Fog.hlsl, so the haze skips them:\n" +
+                string.Join("\n", offenders));
         }
     }
 }

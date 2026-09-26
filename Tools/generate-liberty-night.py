@@ -75,9 +75,42 @@ def walk(node, in_color: bool):
     return node
 
 
+# liberty.json has no root "sky" block (day styles fall back to the spec's light-sky
+# defaults), so there is nothing to invert. Night gets a fixed sky block instead: horizon
+# and fog share one dark blue-grey close to the background/water tones below so the map
+# edge dissolves with no seam, and the zenith goes to a deeper navy for contrast.
+NIGHT_SKY = {
+    "sky-color": "#070a14",
+    "horizon-color": "#171b26",
+    "fog-color": "#171b26",
+}
+
+# liberty.json has no root "light" block either, so the day style lights with the spec
+# defaults. Night gets a cool, dim moonlight: only colour and intensity, so a day/night
+# restyle eases the tint and brightness while "position" keeps the spec-default direction.
+NIGHT_LIGHT = {
+    "color": "#a9b8d8",
+    "intensity": 0.35,
+}
+
+# Every fill-pattern layer gets this dark, cool fill-color, which tints its sprite for night.
+NIGHT_PATTERN_TINT = "#4a5261"
+
+# Background near the land-fill composite so tile pop-in doesn't flash, in the fog's cool hue.
+NIGHT_BACKGROUND = "#14171e"
+
+
 def main() -> None:
     style = json.loads(SRC.read_text())
     style["layers"] = [walk(layer, False) for layer in style["layers"]]
+    for layer in style["layers"]:
+        paint = layer.get("paint", {})
+        if layer["type"] == "background":
+            paint["background-color"] = NIGHT_BACKGROUND
+        if "fill-pattern" in paint:
+            paint["fill-color"] = NIGHT_PATTERN_TINT
+    style["sky"] = NIGHT_SKY
+    style["light"] = NIGHT_LIGHT
     DST.write_text(json.dumps(style, indent=2) + "\n")
 
 

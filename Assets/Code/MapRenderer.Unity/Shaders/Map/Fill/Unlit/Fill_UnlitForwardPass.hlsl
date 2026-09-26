@@ -19,7 +19,7 @@
 //     authored alpha). No InitializeStandardLitSurfaceData, no InputData, no
 //     UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit (URP's own no-lighting exit point)
 //     composes the final color instead.
-//   • Keeps the fill-pattern branch (SampleFillPattern + clip) verbatim from Fill_LitForwardPass.hlsl.
+//   • Keeps the fill-pattern branch (SampleFillPattern + clip + tint) in step with Fill_LitForwardPass.hlsl.
 
 #ifndef MAP_FORWARD_UNLIT_PASS_INCLUDED
 #define MAP_FORWARD_UNLIT_PASS_INCLUDED
@@ -90,7 +90,9 @@ Varyings UnlitPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
     output.uv = TRANSFORM_TEX(input.texcoord, _BaseMap);
-    output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
+    // View-space z, not a fog factor: the fragment computes fog per pixel, as the Lit twin does, so a
+    // tile-sized triangle does not clamp the factor at its vertices.
+    output.fogCoord = vertexInput.positionVS.z;
 
     // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
@@ -118,15 +120,15 @@ void UnlitPassFragment(
     half3 albedo = texColor.rgb * _BaseColor.rgb * input.vColor.rgb;
     half  alpha  = texColor.a   * _BaseColor.a   * input.vColor.a * _Opacity;
 
-    // [MAP DELTA] fill-pattern: the sprite REPLACES the layer colour — verbatim from
-    // Fill_LitForwardPass.hlsl (fill-color is not used at all on a pattern layer; fill-opacity still
-    // applies on top of the sprite's own alpha).
+    // [MAP DELTA] fill-pattern — the rule of Fill_LitForwardPass.hlsl: the sprite's rgb times the layer
+    // colour (white when fill-color is absent, so the sprite shows untinted), the sprite's alpha times
+    // _Opacity.
     bool  patternClipped;
     half4 patternTexel = SampleFillPattern(input.uv, patternClipped);
     clip(patternClipped ? -1.0 : 1.0);
     if (_FillPattern >= 0.5)
     {
-        albedo = patternTexel.rgb;
+        albedo = patternTexel.rgb * _BaseColor.rgb * input.vColor.rgb;
         alpha  = patternTexel.a * _Opacity;
     }
 
@@ -146,7 +148,8 @@ void UnlitPassFragment(
     SETUP_DEBUG_TEXTURE_DATA(inputData, UNDO_TRANSFORM_TEX(input.uv, _BaseMap));
 
     half4 color = UniversalFragmentUnlit(inputData, albedo, alpha);
-    color.rgb = MixFog(color.rgb, input.fogCoord);
+    // Fog depth counts from the near plane, as InitializeInputDataFog does for the Lit twin.
+    color.rgb = MixFog(color.rgb, ComputeFogFactorZ0ToFar(max(-input.fogCoord - _ProjectionParams.y, 0.0)));
     color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
 
     outColor = color;

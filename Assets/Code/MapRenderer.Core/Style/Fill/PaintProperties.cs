@@ -13,7 +13,9 @@ namespace MapRenderer.Core.Style.Fill
     public sealed class PaintProperties
     {
         /// <summary>
-        /// fill-color: polygon interior fill color. Default opaque black rgba(0,0,0,1).
+        /// fill-color: polygon interior fill color. Default opaque black rgba(0,0,0,1), except on a
+        /// <c>fill-pattern</c> layer, where it defaults to white: the shader multiplies the sprite by it, so an
+        /// absent fill-color leaves the sprite untinted (a departure from the spec, docs/fill-parity-design.md).
         /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<Color> Color { get; init; }
@@ -107,12 +109,16 @@ namespace MapRenderer.Core.Style.Fill
         {
             bool anyPresent = false;
 
-            // fill-color: default rgba(0,0,0,1)
+            // fill-color: default rgba(0,0,0,1); white on a pattern layer, where it tints the sprite. A pattern
+            // layer is one whose fill-pattern is a sprite name, the same test the material flag uses.
+            JsonValue patternJson = paint?.Get(PropertyNames.FillPattern);
+            string patternName = patternJson?.AsString(null);
+            var colorDefault = patternName != null ? new Color(1f, 1f, 1f, 1f) : new Color(0f, 0f, 0f, 1f);
             JsonValue colorJson = paint?.Get(PropertyNames.FillColor);
             if (colorJson != null) anyPresent = true;
             StyleProperty<Color> color = colorJson != null
-                ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
-                : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
+                ? new StyleProperty<Color>(colorJson, colorDefault, v => v.AsColorCoerced())
+                : new StyleProperty<Color>(colorDefault);
 
             // fill-opacity: default 1.0
             JsonValue opacityJson = paint?.Get(PropertyNames.FillOpacity);
@@ -176,9 +182,7 @@ namespace MapRenderer.Core.Style.Fill
             StyleProperty<float> translateAnchor = new StyleProperty<float>(anchorVal);
 
             // fill-pattern
-            JsonValue patternJson = paint?.Get(PropertyNames.FillPattern);
             if (patternJson != null) anyPresent = true;
-            string patternName = patternJson?.AsString(null);
 
             // x-fill-pattern-metres (engine extension): a present, positive period switches the layer to
             // world-absolute sizing; absent or unusable values keep screen-relative, so it never costs the layer.

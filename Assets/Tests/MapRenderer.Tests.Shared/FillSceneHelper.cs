@@ -44,13 +44,17 @@ namespace MapRenderer.Tests
             bool fitToView = true,         // false ⇒ identity transform; the caller places the GO itself
             // Test-only oracle knob — see SyncMeshWrite.Fill. Production never sets it; a fixture that
             // measures the boundary band's own contribution renders the same scene with and without it.
-            bool suppressBoundaryBand = false)
+            bool suppressBoundaryBand = false,
+            // A style-level fill-pattern (the material starts unresolved), and whether fill-color is left out
+            // entirely so the parser's own default binds — the shape of a real pattern layer.
+            string fillPattern = null,
+            bool omitFillColor = false)
         {
             byte[] bytes = SampleTileFixture.Bytes();
             using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
 
             // Build a minimal StyleLayer matching the layer name + optional color expression.
-            var styleLayerJson = BuildStyleLayerJson(layerName, fillColorExpression);
+            var styleLayerJson = BuildStyleLayerJson(layerName, fillColorExpression, fillPattern, omitFillColor);
             var style = StyleParser.Parse(styleLayerJson);
             var fillStyleLayer = style.Layers[0];
             var paint = ((Fill.StyleLayer)fillStyleLayer).Paint;
@@ -113,11 +117,15 @@ namespace MapRenderer.Tests
         /// <see cref="FeatureSelector.SelectFeatures"/> picks up the right source layer.
         /// When <paramref name="colorExpr"/> is non-null it is embedded as <c>fill-color</c>.
         /// </summary>
-        private static string BuildStyleLayerJson(string layerName, string colorExpr)
+        private static string BuildStyleLayerJson(string layerName, string colorExpr, string fillPattern,
+                                                  bool omitFillColor)
         {
             string fillColor = colorExpr != null
                 ? colorExpr
                 : "[\"rgba\",200,200,200,1]";
+            var paint = new System.Collections.Generic.List<string>();
+            if (!omitFillColor) paint.Add(@"""fill-color"": " + fillColor);
+            if (fillPattern != null) paint.Add(@"""fill-pattern"": """ + fillPattern + @"""");
 
             return @"{
     ""version"": 8,
@@ -131,9 +139,7 @@ namespace MapRenderer.Tests
             ""type"": ""fill"",
             ""source"": ""maplibre"",
             ""source-layer"": """ + layerName + @""",
-            ""paint"": {
-                ""fill-color"": " + fillColor + @"
-            }
+            ""paint"": { " + string.Join(", ", paint) + @" }
         }
     ]
 }";

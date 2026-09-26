@@ -28,10 +28,22 @@ A failing colour expression paints white, not black: `StyleProperty.TryEvaluate`
 
 ### The spec rule
 
-When `fill-pattern` is present, `fill-color` is **not used at all**, and a layer whose pattern image cannot be
-resolved is **not painted**. A pattern layer characteristically declares no `fill-color` (Liberty's
+When `fill-pattern` is present, the spec does not use `fill-color` at all, and a layer whose pattern image
+cannot be resolved is **not painted**. A pattern layer characteristically declares no `fill-color` (Liberty's
 `road_area_pattern` and `landcover_wetland` are two), so falling back to the colour's spec default,
 `rgba(0,0,0,1)`, paints opaque black — wrong twice over.
+
+### The departure: `fill-color` tints a pattern
+
+This renderer departs from the spec on purpose. On a pattern layer the fragment computes the sprite's rgb times
+the layer colour (`_BaseColor` × the vertex colour, so a data-driven `fill-color` tints too), and keeps the
+sprite's alpha times `fill-opacity`. `PaintProperties.Parse` gives a pattern layer's absent `fill-color` the
+default **white** instead of black. So a style that sets no `fill-color` renders the sprite exactly as the spec
+does, and only a style that sets both is affected. A solid fill keeps the spec's black default.
+
+Because the absent value is white rather than "no binding", `fill-color` appearing or vanishing on a pattern
+layer does not change the layer's bindings. `SurvivingLayerGate` therefore lets it do so in place when both
+sides carry the same `fill-pattern`, and the tint eases from white.
 
 ### Where the sprite sheet comes from
 

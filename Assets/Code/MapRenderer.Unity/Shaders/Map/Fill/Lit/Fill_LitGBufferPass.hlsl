@@ -254,14 +254,15 @@ GBufferFragOutput LitGBufferPassFragment(Varyings input)
     surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 
-    // [MAP DELTA] fill-pattern — identical to Fill_LitForwardPass; kept in step so deferred and forward
-    // paint a pattern layer the same. See SampleFillPattern in Fill_LitInput.hlsl for the contract.
+    // [MAP DELTA] fill-pattern — identical to Fill_LitForwardPass, so deferred and forward paint a pattern
+    // layer the same: the sprite's rgb times the layer colour (white when fill-color is absent), the sprite's
+    // alpha times _Opacity. See SampleFillPattern in Fill_LitInput.hlsl for the sampling contract.
     bool  patternClipped;
     half4 patternTexel = SampleFillPattern(input.uv, patternClipped);
     clip(patternClipped ? -1.0 : 1.0);
     if (_FillPattern >= 0.5)
     {
-        surfaceData.albedo = patternTexel.rgb;
+        surfaceData.albedo = patternTexel.rgb * _BaseColor.rgb * input.vColor.rgb;
         surfaceData.alpha  = patternTexel.a * _Opacity;
     }
 

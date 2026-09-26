@@ -69,6 +69,7 @@ Shader "Map/Symbol/TextWorld"
             #pragma vertex   SymbolWorldPassVertex
             #pragma fragment SymbolWorldPassFragment
 
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Fog.hlsl"
             #include "SymbolText_Input.hlsl"
             #include "SymbolTextWorld_ForwardPass.hlsl"
             ENDHLSL

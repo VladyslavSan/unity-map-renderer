@@ -108,7 +108,7 @@ Parse: `Style/Fill/{PaintProperties,LayoutProperties,FillPattern}.cs`. Consume: 
 | fill-antialias | ✅ | fill silhouettes carry a one-device-pixel antialiasing band grown OUTWARD from the polygon boundary (`docs/fill-boundary-antialiasing-design.md`); `false` suppresses that band for the layer, in geometry, which is what keeps the property per-layer implementable where MSAA would not be. Consumed in C# at `StyledFillTileBuilder.BuildLayerInput` — the `_FillAntialias` uniform stays bound and read by no pass, deliberately. Resolved at the tile's **build zoom**, so a zoom-dependent value does not re-mesh as the user zooms |
 | fill-translate | 🟡 | real screen-pixel offset, measured px→world **per axis** in `Fill_VertexModify` (was inert: applied in object units, so it scaled with the tile transform). **Constant only** — parsed as a literal `[x, y]` array, so a zoom expression silently yields `[0, 0]` |
 | fill-translate-anchor | 🟡 | both paths implemented — `map` uses the mesh normal+tangent frame, `viewport` the camera basis. **Constant only** (parsed as a literal string) |
-| fill-pattern | ✅ | resolved against the style sprite sheet and sampled (`SAMPLE_TEXTURE2D_GRAD`, `frac` tiling); an unresolvable pattern **clips** rather than falling back to `fill-color`'s opaque-black default |
+| fill-pattern | ✅ | resolved against the style sprite sheet and sampled (`SAMPLE_TEXTURE2D_GRAD`, `frac` tiling); an unresolvable pattern **clips** rather than painting a plain colour. **Departure from the spec:** the spec ignores `fill-color` on a pattern layer; here an explicit `fill-color` multiplies the sprite's colour (it tints it), and an absent one means **white, not black**, so the sprite shows untinted (`docs/fill-parity-design.md` § "`fill-pattern`") |
 | fill-sort-key | 🟡 | parsed into `Fill/LayoutProperties`; features stably sorted ascending before meshing, so a higher key rasterizes later and lands on top. Evaluated at the tile's **build zoom**, so a zoom-dependent key does not re-sort as the user zooms (no re-mesh on zoom) |
 
 Remaining fill gap: `fill-outline-color` (it needs real boundary-line geometry rather than plumbing — see
@@ -219,7 +219,7 @@ beyond boolean/number/string.
 | glyphs | ✅ | PBF range fetch → SDF atlas (real text path) |
 | sprite | 🟠 | URL string parsed; **no loader** (blocks icons + patterns) |
 | projection (style key) | ❌ | root `projection` never read; globe exists but not style-selectable |
-| light / sky / terrain / fog / roll | ❌ | not parsed as typed fields |
+| light / sky / terrain / fog / roll | 🟡 | light (`position`/`color`/`intensity`; `anchor` ignored, always `map`) and sky (`sky-color`/`horizon-color`/`fog-color`; blend keys not modeled) are parsed and rendered; terrain/fog/roll still not parsed |
 | center / zoom / bearing / pitch | ❌ | initial camera comes from bootstrap config, not the style doc |
 | transition (root + per-property) | ❌ | no timed interpolation type anywhere |
 | **per-layer minzoom / maxzoom** | 🟠 | parsed but **never applied** in render (only source-level min/max gates tiles) |

@@ -4,9 +4,12 @@
 // Contents:
 //   LayerOrderSnapshotTests           — multi-layer painter's-algorithm "clean composite" snapshot test.
 //   FillExtrusionDrawGateTests        — Unity-only: render tests requiring a GPU context (SnapshotRenderer).
+//   SkyGradientRenderTests            — at tilt 60 the Map/Sky skybox fills the strip from the map edge (horizon-color) to the screen top (sky-color).
+//   DistanceHazeRenderTests           — at tilt 60 the far ground is fog-color and a far symbol fades; the screen bottom is un-hazed.
 //   RenderModeMaterialSelectionTests  — pins that the fill layer's material is cloned from whichever MapMaterialSet the config references, so an unlit set's Map/FillUnlit base reaches the rendered layer (the twin is wired end-to-end), and a lit set's Map/Fill base does under lit.
 
 using System.Collections.Generic;
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -24,6 +27,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 
@@ -368,6 +372,201 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // DistanceHazeRenderTests — the distance haze through a real fill layer, rendered and read back.
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders one dark fill that covers the view at the demo pose (tilt 60°, 60° vertical FOV) twice: haze off,
+    /// then haze on with the spec-default white fog. Near the far cut the hazed ground must be the fog colour by
+    /// the amount the fog range predicts; at the screen bottom it must equal the clear render.
+    /// </summary>
+    [TestFixture]
+    public class DistanceHazeRenderTests : BaseTestFixture
+    {
+        private const int    Size    = 512;
+        private const double TiltDeg = 60.0;
+        private const double FovDeg  = 60.0;
+
+        private static VisualScene NewScene() => VisualScene.New()
+            .Source("land", GeoJson.Polygon(-20.0, -10.0, 80.0, 84.0))
+            .Layer(VisualLayer.Fill("land").Source("land").Color("#203040"))
+            .Camera(new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 }, zoom: 6.0, tilt: TiltDeg);
+
+        [Test]
+        public void Tilt60_FarCutIsFogColor_ScreenBottomIsClear()
+            => AssertFarCutIsFogColorAndScreenBottomIsClear(RenderMode.Lit, "haze-tilt60");
+
+        // Pins the Unlit twin's per-fragment fog contract (view-space z carried to the fragment stage, not a
+        // per-vertex factor) with the same acceptance as the Lit twin.
+        [Test]
+        public void Tilt60_FarCutIsFogColor_ScreenBottomIsClear_Unlit()
+            => AssertFarCutIsFogColorAndScreenBottomIsClear(RenderMode.Unlit, "haze-tilt60-unlit");
+
+        private static void AssertFarCutIsFogColorAndScreenBottomIsClear(RenderMode mode, string snapshotPrefix)
+        {
+            Frame clear;
+            using (VisualScene scene = NewScene().RenderMode(mode))
+            {
+                clear = scene.Render(Size).Pixels.Clone();
+            }
+            SnapshotRenderer.WritePngFromRgba32(clear, $"{snapshotPrefix}-off.png");
+
+            Frame hazed;
+            DistanceHaze.HazeRange range;
+            double edgeDeg, height, near;
+            using (VisualScene scene = NewScene().RenderMode(mode).Haze())
+            {
+                VisualFrame frame = scene.Render(Size);
+                hazed = frame.Pixels.Clone();
+                MapCamera camera = frame.MapView.Camera;
+                near    = frame.Camera.nearClipPlane;
+                range   = DistanceHaze.Range(camera.CameraRelativePosition, camera.CurrentFarMetres, near, FovDeg);
+                edgeDeg = SkyGradient.MapEdgeElevation(
+                    camera.CameraRelativePosition, camera.CurrentFarMetres, camera.Projection).Degrees;
+                height  = camera.CameraRelativePosition.y;
+            }
+            SnapshotRenderer.WritePngFromRgba32(hazed, $"{snapshotPrefix}-on.png");
+
+            double pitchDeg = -(90.0 - TiltDeg);
+            double RowElevationDeg(int row)
+                => pitchDeg + math.degrees(math.atan(((row + 0.5) / Size * 2.0 - 1.0) * math.tan(math.radians(FovDeg * 0.5))));
+            double ExpectedFog(int row) // lit passes: linear fog over view depth from the near plane
+            {
+                double elevation = math.radians(RowElevationDeg(row));
+                double depth = height / math.sin(-elevation) * math.cos(elevation - math.radians(pitchDeg));
+                return math.saturate((depth - near - range.Start) / (range.End - range.Start));
+            }
+
+            int firstAbove = 0;
+            while (firstAbove < Size && RowElevationDeg(firstAbove) <= edgeDeg) firstAbove++;
+            Assert.That(firstAbove, Is.InRange(16, Size - 16), $"precondition: the far cut ({edgeDeg:F2}°) is on screen.");
+
+            int column = Size / 2;
+            int edgeRow = firstAbove - 3; // clear of the far cut's anti-aliased row
+            double expected = ExpectedFog(edgeRow);
+            Assert.That(expected, Is.GreaterThan(0.8), "precondition: the row near the far cut is deep in the haze.");
+            Assert.That(FogFraction(clear[column, edgeRow], hazed[column, edgeRow]), Is.EqualTo(expected).Within(0.1),
+                $"row {edgeRow} near the far cut: clear {clear[column, edgeRow]}, hazed {hazed[column, edgeRow]}.");
+
+            Color32 clearBottom = clear[column, 0], hazedBottom = hazed[column, 0];
+            Assert.That(math.abs(clearBottom.r - hazedBottom.r) <= 2 && math.abs(clearBottom.g - hazedBottom.g) <= 2
+                        && math.abs(clearBottom.b - hazedBottom.b) <= 2,
+                $"the screen bottom must be un-hazed: clear {clearBottom}, hazed {hazedBottom}.");
+        }
+
+        [Test]
+        public void Tilt60_SymbolFadesByTheHazeAtItsAnchor_NearSymbolIsUnchanged()
+        {
+            // A white ground under white fog keeps the ground colour fixed, so only the black glyph's alpha moves.
+            const double Zoom = 6.0;
+            var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
+            double altitude = CameraPoseMath.AltitudeForZoom(Zoom, Size, FovDeg);
+            double height = altitude * 0.5, reach = altitude * 0.8660254037844386; // tilt 60
+            double near = CameraPoseMath.NearClip(altitude), far = 4.0 * altitude;  // the far-plane cap binds
+            double farDepth = 3.25 * altitude, nearDepth = 0.7 * altitude;
+            GeoCoordinate farPoint  = PointAtDepth(lookAt, farDepth, height, reach, altitude);
+            GeoCoordinate nearPoint = PointAtDepth(lookAt, nearDepth, height, reach, altitude);
+
+            VisualScene NewSymbolScene() => VisualScene.New()
+                .Source("land", GeoJson.Polygon(-20.0, -10.0, 80.0, 84.0))
+                .Layer(VisualLayer.Fill("land").Source("land").Color("#ffffff"))
+                .Source("points", GeoJson.Points((farPoint.Longitude, farPoint.Latitude, "I"),
+                                                 (nearPoint.Longitude, nearPoint.Latitude, "I")))
+                .Layer(VisualLayer.SymbolText("labels").Source("points").TextField("name")
+                    .TextSize(48.0).TextFont(SymbolFont).TextColor("#000000"))
+                .Glyphs(SymbolFont, File.ReadAllBytes(Path.Combine(
+                    Application.dataPath, "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes")))
+                .Camera(new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 },
+                        zoom: Zoom, tilt: TiltDeg)
+                .Configure(config => config.SymbolTileCoverageCull = 0.0) // far tiles are thin on screen
+                .ExpectSymbolQuads(2);
+
+            double clearFar, clearNear, hazedFar, hazedNear;
+            using (VisualScene scene = NewSymbolScene())
+            {
+                VisualFrame frame = scene.Render(Size);
+                Assert.AreEqual(altitude, math.length(frame.MapView.Camera.CameraRelativePosition), altitude * 1e-6,
+                    "precondition: the scene camera sits at the altitude the anchors were placed for.");
+                clearFar  = InkAround(frame, lookAt, farPoint);
+                clearNear = InkAround(frame, lookAt, nearPoint);
+                Assert.That(clearNear, Is.GreaterThan(0.5), "precondition: the near glyph draws dark ink without haze.");
+                SnapshotRenderer.WritePngFromRgba32(frame.Pixels, "haze-symbols-tilt60-off.png");
+            }
+            using (VisualScene scene = NewSymbolScene().Haze())
+            {
+                VisualFrame frame = scene.Render(Size);
+                hazedFar  = InkAround(frame, lookAt, farPoint);
+                hazedNear = InkAround(frame, lookAt, nearPoint);
+                SnapshotRenderer.WritePngFromRgba32(frame.Pixels, "haze-symbols-tilt60-on.png");
+            }
+
+            DistanceHaze.HazeRange range = DistanceHaze.Range(
+                new double3(0.0, height, -reach), far, near, FovDeg);
+            double expectedVisibility = 1.0 - math.saturate((farDepth - near - range.Start) / (range.End - range.Start));
+            Assert.That(clearFar, Is.GreaterThan(0.5), "precondition: the far glyph draws dark ink without haze.");
+            Assert.That(expectedVisibility, Is.InRange(0.2, 0.6), "precondition: the far anchor is inside the haze band.");
+            Assert.That(hazedFar / clearFar, Is.EqualTo(expectedVisibility).Within(0.1),
+                $"far glyph ink: clear {clearFar:F3}, hazed {hazedFar:F3}; expected visibility {expectedVisibility:F3}.");
+            Assert.That(hazedNear / clearNear, Is.EqualTo(1.0).Within(0.03),
+                $"the glyph near the screen bottom is in clear air: clear {clearNear:F3}, hazed {hazedNear:F3}.");
+        }
+
+        private const string SymbolFont = "Fixture Haze Font";
+
+        // The point on the ground north of the look-at whose view depth is depth, for heading 0.
+        private static GeoCoordinate PointAtDepth(GeoCoordinate lookAt, double depth, double height, double reach,
+                                                  double altitude)
+        {
+            double north = (depth * altitude - height * height) / reach - reach;
+            var projection = new WebMercatorProjection();
+            double target = projection.Project(lookAt).z + north, south = -80.0, northLat = 84.0;
+            for (int i = 0; i < 60; i++)
+            {
+                double mid = 0.5 * (south + northLat);
+                if (projection.Project(new GeoCoordinate { Latitude = mid, Longitude = lookAt.Longitude }).z < target)
+                    south = mid;
+                else northLat = mid;
+            }
+            return new GeoCoordinate { Latitude = 0.5 * (south + northLat), Longitude = lookAt.Longitude };
+        }
+
+        // Ink of the glyph at a point: 1 − darkest / brightest linear luminance in a window round its anchor.
+        // The window stops below the far cut, so the dark clear colour above it never counts as ink.
+        private static double InkAround(VisualFrame frame, GeoCoordinate lookAt, GeoCoordinate point)
+        {
+            var projection = new WebMercatorProjection();
+            MapCamera camera = frame.MapView.Camera;
+            double2 px = GroundRuler.ProjectPx(frame.Camera, projection.Project(point) - projection.Project(lookAt));
+            double edgeRow = (0.5 + 0.5 * math.tan(math.radians(SkyGradient.MapEdgeElevation(
+                    camera.CameraRelativePosition, camera.CurrentFarMetres, camera.Projection).Degrees + 90.0 - TiltDeg))
+                / math.tan(math.radians(FovDeg * 0.5))) * frame.Height;
+            int cx = (int)math.round(px.x), cy = (int)math.round(px.y);
+            int yEnd = math.min(math.min(frame.Height, cy + 30), (int)edgeRow - 2);
+            Assert.That(yEnd - cy, Is.GreaterThan(8), "precondition: the glyph sits clear of the far cut.");
+            double darkest = double.MaxValue, brightest = 0.0;
+            for (int y = math.max(0, cy - 30); y < yEnd; y++)
+            for (int x = math.max(0, cx - 30); x < math.min(frame.Width, cx + 30); x++)
+            {
+                Color linear = ((Color)frame.Pixels[x, y]).linear;
+                double luminance = 0.2126 * linear.r + 0.7152 * linear.g + 0.0722 * linear.b;
+                darkest = math.min(darkest, luminance);
+                brightest = math.max(brightest, luminance);
+            }
+            return 1.0 - darkest / brightest;
+        }
+
+        // How far the hazed pixel moved from the clear one toward white, in linear colour, over the three channels.
+        private static double FogFraction(Color32 clear, Color32 hazed)
+        {
+            Color clearLinear = ((Color)clear).linear, hazedLinear = ((Color)hazed).linear;
+            double sum = 0.0;
+            for (int channel = 0; channel < 3; channel++)
+                sum += (hazedLinear[channel] - clearLinear[channel]) / (1.0 - clearLinear[channel]);
+            return sum / 3.0;
+        }
+    }
+
     // Unity EditMode only. The fill material carries the configured MapMaterialSet's shader (Map/Fill or
     // Map/FillUnlit). Awaiting the real SetStyle is safe: a tiles[]-only source makes no TileJSON fetch.
 
@@ -465,6 +664,69 @@ namespace MapRenderer.Tests.Visual
             var t = task.Preserve();
             t.WaitOffPlayerLoop(timeoutMs);
             t.GetAwaiter().GetResult();
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SkyGradientRenderTests — the Map/Sky skybox, rendered and read back.
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders only the sky through a demo-like committed camera (tilt 60°, 60° vertical FOV, square target)
+    /// and reads the centre column bottom-up. The blend fills the visible sky strip: horizon-color up to the
+    /// map edge, near horizon-color just above it, and sky-color at the top of the screen.
+    /// </summary>
+    [TestFixture]
+    public class SkyGradientRenderTests : BaseTestFixture
+    {
+        private const int    Size    = 65;  // odd: the centre column's rays have no horizontal component
+        private const double TiltDeg = 60.0;
+        private const double FovDeg  = 60.0;
+
+        [Test]
+        public void RenderedSky_AtTilt60_FillsTheStripFromMapEdgeToScreenTop()
+        {
+            var camera = Track(new GameObject("SkyRenderCamera")).AddComponent<Camera>();
+            camera.aspect = 1f;
+            var mapCamera = new MapCamera(camera, new MapRenderer.Core.Geo.CameraProperties(
+                new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 }, 15.0, 0.0, TiltDeg, FovDeg));
+            mapCamera.SyncToCamera();
+
+            using var sky  = new SkyGradient(camera);
+            using var snap = new SnapshotRenderer(Size, Size);
+            sky.ApplyStyle(StyleSky.Parse(null), zoom: 15.0);
+            sky.SetOverride(Color.red, Color.blue);
+            sky.UpdateMapEdge(mapCamera);
+            snap.Render(camera); // absorbs shader warm-up
+            snap.Render(camera);
+            Frame frame = snap.Pixels;
+            SnapshotRenderer.WritePngFromRgba32(frame, "sky-gradient-tilt60.png");
+
+            double edgeDeg = SkyGradient.MapEdgeElevation(
+                mapCamera.CameraRelativePosition, mapCamera.CurrentFarMetres, mapCamera.Projection).Degrees;
+            double RowElevationDeg(int row) // centre column: view pitch plus the row's angle off the axis
+                => -(90.0 - TiltDeg) + math.degrees(math.atan(((row + 0.5) / Size * 2.0 - 1.0)
+                                                              * math.tan(math.radians(FovDeg * 0.5))));
+            int firstAbove = 0;
+            while (firstAbove < Size && RowElevationDeg(firstAbove) <= edgeDeg) firstAbove++;
+            Assert.That(firstAbove, Is.InRange(1, Size - 4),
+                $"precondition: the map edge ({edgeDeg:F2}°) must be on screen with a strip of sky above it.");
+
+            int centre = Size / 2;
+            for (int row = 0; row < firstAbove; row++)
+            {
+                Color32 below = frame[centre, row];
+                Assert.That(below.r <= 1 && below.b >= 254,
+                    $"row {row} is at or below the map edge ({edgeDeg:F2}°) and must be horizon-color; got {below}.");
+            }
+
+            Color32 justAbove = frame[centre, firstAbove];
+            Assert.That(justAbove.r < justAbove.b,
+                $"row {firstAbove}, just above the map edge, must be nearer horizon-color than sky-color; got {justAbove}.");
+
+            Color32 top = frame[centre, Size - 1];
+            Assert.That(top.r >= 252 && top.b <= 3,
+                $"the top row must be sky-color: the blend fills the visible strip; got {top}.");
         }
     }
 }

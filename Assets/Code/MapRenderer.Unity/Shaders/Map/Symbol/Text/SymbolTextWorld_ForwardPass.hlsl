@@ -77,6 +77,9 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
 
     float4 clip = TransformObjectToHClip(input.anchorOS);    // stock URP MVP; floating origin in unity_ObjectToWorld
     float2 off  = input.offsetPx;                             // unrotated corner (both point/icon and curved)
+    // Haze at the anchor, taken before the branch and the near-pin move clip. MixFogColor of white over
+    // black is the fog visibility: 1 in clear air or with fog off, 0 in full haze.
+    half haze = MixFogColor(half3(1.0h, 1.0h, 1.0h), half3(0.0h, 0.0h, 0.0h), ComputeFogFactor(clip.z)).r;
 
     // bit2 set ⇒ map PITCH alignment. `off` is then WORLD METRES, and the whole clip position is rebuilt
     // by displacing the anchor in its own ground plane before projection — see SymbolWorldPitchAlign.hlsl.
@@ -136,7 +139,7 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
     // exactly zero, so the test below is exact rather than a threshold. Both uniforms' .a is unread:
     // text-opacity and the colour's own alpha already ride input.opacity.
     float3 tint  = input.sdfWidenPx.x > 0.0 ? _HaloColor.rgb : _TextColor.rgb;
-    output.color = float4(input.colorRGB * tint, input.opacity); // fragment's input.color.a still works unchanged
+    output.color = float4(input.colorRGB * tint, input.opacity * haze); // fragment's input.color.a still works unchanged
     output.sdfWidenPx = input.sdfWidenPx;
     return output;
 }

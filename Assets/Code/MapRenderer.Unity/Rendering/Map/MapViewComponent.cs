@@ -1,6 +1,7 @@
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 
 namespace MapRenderer.Unity.Rendering.Map
@@ -50,6 +51,54 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         public MapCamera Camera => View?.Camera;
+
+        // ── Sun light (App wiring + the debug-menu Lighting page) ────────────────────────────────
+        /// <summary>Points the sun light writer at the scene's directional light. Called once by
+        /// <c>MapHost</c> after it finds/creates that light, before the first <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        internal void SetSunLightTarget(Light light) => View?.SetSunLightTarget(light);
+
+        /// <summary>The live sun light state (read by the Lighting menu page to seed its sliders).</summary>
+        internal SunLight SunLight => View?.SunLight;
+
+        /// <summary>Overrides the sun's azimuth, polar angle, color and intensity on top of the style,
+        /// until <see cref="ResetSunToStyle"/> or the next style change.</summary>
+        internal void SetSunOverride(Angle azimuth, Angle polar, Color color, float intensity)
+            => View?.SunLight?.SetOverride(azimuth, polar, color, intensity);
+
+        /// <summary>Clears a runtime sun override and re-applies the current style's light.</summary>
+        internal void ResetSunToStyle() => View?.SunLight?.ResetToStyle();
+
+        // ── Sky (App wiring + the debug-menu Lighting page) ──────────────────────────────────────
+        /// <summary>Paints the style's sky behind <paramref name="camera"/>. Called once by <c>MapHost</c>,
+        /// before the first <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        internal void SetSkyTarget(UnityEngine.Camera camera) => View?.SetSkyTarget(camera);
+
+        /// <summary>The live sky state (read by the Lighting menu page to seed its controls).</summary>
+        internal SkyGradient SkyGradient => View?.SkyGradient;
+
+        /// <summary>Overrides the sky and horizon colours on top of the style, until
+        /// <see cref="ResetSkyToStyle"/> or the next style change.</summary>
+        internal void SetSkyOverride(Color skyColor, Color horizonColor)
+            => View?.SkyGradient?.SetOverride(skyColor, horizonColor);
+
+        /// <summary>Clears a runtime sky override and re-applies the current style's sky.</summary>
+        internal void ResetSkyToStyle() => View?.SkyGradient?.ResetToStyle();
+
+        // ── Haze (App wiring + the debug-menu Lighting page) ─────────────────────────────────────
+        /// <summary>Starts writing the style's distance haze. Called once by <c>MapHost</c>, before the first
+        /// <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        internal void EnableHaze() => View?.EnableHaze();
+
+        /// <summary>The live haze state (read by the Lighting menu page to seed its controls).</summary>
+        internal DistanceHaze DistanceHaze => View?.DistanceHaze;
+
+        /// <summary>Overrides the haze switch and fog colour on top of the style, until
+        /// <see cref="ResetHazeToStyle"/> or the next style change.</summary>
+        internal void SetHazeOverride(bool enabled, Color fogColor)
+            => View?.DistanceHaze?.SetOverride(enabled, fogColor);
+
+        /// <summary>Clears a runtime haze override and re-applies the current style's fog colour.</summary>
+        internal void ResetHazeToStyle() => View?.DistanceHaze?.ResetToStyle();
 
         // ── Frame / teardown lifecycle (also driven explicitly by tests) ─────────────────────────
 

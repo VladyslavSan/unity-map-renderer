@@ -111,6 +111,39 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(expected.a, actual.a, eps, message + " (A)");
         }
 
+        /// <summary>
+        /// A pattern layer that gains fill-color (liberty → liberty-night) restyles in place, and its tint eases
+        /// from white, the absent value, to the new colour. No frame passes through black.
+        /// </summary>
+        [Test]
+        public void PatternLayer_GainingFillColor_EasesFromWhite_NeverThroughBlack()
+        {
+            var oldStyle = FillStyle(@"""fill-pattern"": ""p""");
+            var newStyle = FillStyle(@"""fill-pattern"": ""p"", ""fill-color"": ""#4a5261""");
+            using var set = BuildFillSet(oldStyle);
+            AssertApprox(Color.white, set[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor),
+                "a pattern layer with no fill-color must bind white.");
+
+            Assert.IsTrue(set.TryRestyleInPlace(oldStyle, newStyle, new StyleTransition { DurationSeconds = 1.0 }, 0.0),
+                "a pattern layer gaining fill-color must take the in-place path.");
+            Color target = ZoomStyleApplier.ToUnityColor(new CoreColor(0x4a / 255.0, 0x52 / 255.0, 0x61 / 255.0, 1.0));
+
+            for (int step = 1; step < 10; step++)
+            {
+                set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, step / 10.0));
+                Color pushed = set[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
+                for (int c = 0; c < 3; c++)
+                {
+                    Assert.Greater(pushed[c], target[c], $"t={step / 10.0}: channel {c} must not have reached the target.");
+                    Assert.Less(pushed[c], 1f, $"t={step / 10.0}: channel {c} must have left white.");
+                }
+            }
+
+            set.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.0));
+            AssertApprox(target, set[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor),
+                "the ease must end on the new fill-color.");
+        }
+
         // ── 3. Endpoints are bit-exact ────────────────────────────────────────────────────────
 
         [Test]

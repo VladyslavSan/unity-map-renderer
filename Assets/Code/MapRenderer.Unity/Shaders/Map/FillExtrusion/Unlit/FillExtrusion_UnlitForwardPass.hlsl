@@ -96,7 +96,9 @@ Varyings UnlitPassVertex(Attributes input)
     VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 
     output.positionCS = vertexInput.positionCS;
-    output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
+    // View-space z, not a fog factor: the fragment computes fog per pixel, as the Lit twin does, so a
+    // tile-sized triangle does not clamp the factor at its vertices.
+    output.fogCoord = vertexInput.positionVS.z;
 
     // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
@@ -146,7 +148,8 @@ void UnlitPassFragment(
     InitializeInputData(input, inputData);
 
     half4 color = UniversalFragmentUnlit(inputData, albedo, alpha);
-    color.rgb = MixFog(color.rgb, input.fogCoord);
+    // Fog depth counts from the near plane, as InitializeInputDataFog does for the Lit twin.
+    color.rgb = MixFog(color.rgb, ComputeFogFactorZ0ToFar(max(-input.fogCoord - _ProjectionParams.y, 0.0)));
     color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
 
     outColor = color;

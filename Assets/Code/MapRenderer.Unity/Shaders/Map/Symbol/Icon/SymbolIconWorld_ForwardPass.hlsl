@@ -66,6 +66,9 @@ SymbolIconWorldVaryings SymbolIconWorldPassVertex(SymbolIconWorldAttributes inpu
 
     float4 clip = TransformObjectToHClip(input.anchorOS);    // stock URP MVP; floating origin in unity_ObjectToWorld
     float2 off  = input.offsetPx;                             // corner as staged (a point icon: no bearing rotation)
+    // Haze at the anchor, taken before the branch and the near-pin move clip. MixFogColor of white over
+    // black is the fog visibility: 1 in clear air or with fog off, 0 in full haze.
+    half haze = MixFogColor(half3(1.0h, 1.0h, 1.0h), half3(0.0h, 0.0h, 0.0h), ComputeFogFactor(clip.z)).r;
 
     // bit2 set ⇒ map PITCH alignment. `off` is then WORLD METRES, and the whole clip position is rebuilt
     // by displacing the anchor in its own ground plane before projection — see SymbolWorldPitchAlign.hlsl.
@@ -120,7 +123,7 @@ SymbolIconWorldVaryings SymbolIconWorldPassVertex(SymbolIconWorldAttributes inpu
 
     output.positionCS = clip;
     output.uv    = input.uv;
-    output.color = float4(input.colorRGB, input.opacity);
+    output.color = float4(input.colorRGB, input.opacity * haze);
     return output;
 }
 

@@ -60,6 +60,12 @@ namespace MapRenderer.Tests
         /// pumps toward. Required whenever the scene declares a <see cref="SymbolTextVisualLayer"/>.</summary>
         private int? _expectedSymbolQuads;
 
+        /// <summary>Set via <see cref="Haze"/>; the MapView then writes the style's distance haze.</summary>
+        private bool _haze;
+
+        /// <summary>Set via <see cref="Configure"/>; applied to the MapView config after the scene's own settings.</summary>
+        private Action<MapRenderer.Unity.Rendering.Map.MapViewConfig> _configure;
+
         private GameObject _mapGo;
         private MapViewComponent _mapView;
         private GameObject _cameraGo;
@@ -105,6 +111,21 @@ namespace MapRenderer.Tests
         {
             _cameraProperties = new CameraProperties(lookAt, zoom, heading, tilt);
             _cameraSet = true;
+            return this;
+        }
+
+        /// <summary>Turns on the MapView's distance haze, as <c>MapHost</c> does. Off by default, because the haze
+        /// writes the process-global fog.</summary>
+        public VisualScene Haze()
+        {
+            _haze = true;
+            return this;
+        }
+
+        /// <summary>Adjusts the MapView config after the scene's own settings, for a knob no other method covers.</summary>
+        public VisualScene Configure(Action<MapRenderer.Unity.Rendering.Map.MapViewConfig> configure)
+        {
+            _configure = configure;
             return this;
         }
 
@@ -229,6 +250,7 @@ namespace MapRenderer.Tests
             // Default Entities, the product default, so the suite validates the shipping path. Entities needs the
             // post-settle warm-up pump (WarmupFrames), or the frame renders blank.
             _mapView.Config.Backend = _backend;
+            _configure?.Invoke(_mapView.Config);
 
             // ── The one camera: seeded with the pose at construction, THEN wired, so it is correct before
             // SetStyle builds render layers at the current zoom. ──────────────────────────────────────────
@@ -242,6 +264,7 @@ namespace MapRenderer.Tests
 
             _mapCam = new MapCamera(_unityCamera, _cameraProperties);
             _mapView.SetCamera(_mapCam);
+            if (_haze) _mapView.EnableHaze();
 
             // Glyph seam: AFTER SetCamera builds View, BEFORE SetStyle consumes it. A fill-only scene leaves it
             // null and takes the production GlyphSourceFactory.Create path.
