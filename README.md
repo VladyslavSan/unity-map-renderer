@@ -26,9 +26,9 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) § "Architecture (DOTS)" for the curr
 (which assembly owns what, and why `MapRenderer.Core` is legacy).
 
 ## Supported rendering surface
-See `Assets/Code/MapRenderer.Unity/Rendering/Style/RenderLayerFactory.cs:19-23` for the current
-supported / not-yet-supported layer kinds — that class doc is the single source of truth, kept in sync
-with the render pipeline by construction.
+See [`docs/maplibre-style-spec-support-matrix.md`](docs/maplibre-style-spec-support-matrix.md): the one list of
+the MapLibre style spec surface (root properties, sources, every layer type and its properties, expressions
+and filters) with the status of each item in this renderer.
 
 ## Setup & test commands
 - `./Tools/run-tests.sh` — headless Unity tests, EditMode **and** PlayMode (the full gate).

@@ -36,9 +36,9 @@ namespace MapRenderer.Core.Style.Symbol
         public float2 Translate { get; init; }
 
         /// <summary>text-translate-anchor: the frame of reference for <see cref="Translate"/>. Default
-        /// <see cref="Text.TextTranslateAnchor.Map"/>. Parsed here; the map-vs-viewport divergence (a
-        /// bearing rotation) is consumed with the rotation-alignment work — until then both
-        /// resolve to the same screen-space delta (identical at bearing 0).</summary>
+        /// <see cref="Text.TextTranslateAnchor.Map"/>. Constant only. Under <c>Map</c> the offset rotates
+        /// with the map bearing; under <c>Viewport</c> it stays screen-aligned
+        /// (<see cref="Text.Placement.SymbolTranslate"/>).</summary>
         public TextTranslateAnchor TranslateAnchor { get; init; }
 
         /// <summary>icon-opacity: icon alpha multiplier [0,1]. Default 1.0. Zoom-capable.</summary>
