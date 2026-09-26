@@ -370,10 +370,11 @@ namespace MapRenderer.Unity.Rendering.Map
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
             CommitProbe?.Invoke(CommitPhase.LayersBuilt);
-            // Token = styleId + Root + built numbering + FillAntialiasing (bakes into vertices,
-            // not a uniform — a toggle changes neither Root's bytes nor the numbering) — set AFTER Build.
+            // See StyleToken's own doc for what the digest folds in and why; set AFTER Build, since it
+            // needs the built layer numbering.
             TileManager.CurrentStyle = new Tile.StyleToken(JsonCanonical.CacheKey(
-                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing));
+                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing
+                + "|src=" + ResolvedSourceIdentity(specs)));
             CommitProbe?.Invoke(CommitPhase.StyleTokenWritten);
             LogSkippedLayers(Layers.SkippedLayers); // once per style load, never per tile/frame
             // Non-obvious why: Build seeds px uniforms at ratio 1, and this async continuation can resume after this
@@ -514,12 +515,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 }
 
                 // Fetch + resolve the TileJSON ONCE when the source is url-only (inline tiles[] short-circuits).
+                TileJson resolvedTileJson = null;
                 if (SourceResolver.NeedsTileJson(def))
                 {
                     try
                     {
                         string tjText = await loader(def.Url, ct);
-                        SourceResolver.Resolve(def, TileJsonParser.Parse(tjText));
+                        resolvedTileJson = TileJsonParser.Parse(tjText);
+                        SourceResolver.Resolve(def, resolvedTileJson);
                     }
                     catch (System.OperationCanceledException)
                     {
@@ -540,17 +543,82 @@ namespace MapRenderer.Unity.Rendering.Map
                 }
 
                 string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
-                var    key      = Tile.TileManager.SourceKey.From(def);
-                // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource
-                // seam — TileManager never names the byte-level type.
+                bool   tms      = def.Scheme == "tms";
+                // Validated against whichever JSON actually supplied `bounds` (TileJSON's, if resolved
+                // through one, else the style source's own) — and BEFORE the key, which is built from it.
+                Tile.GeoBounds bounds = ValidateBounds(resolvedTileJson?.Raw ?? def.Raw, def.Bounds, sid);
+                var            key    = Tile.TileManager.SourceKey.From(def, bounds);
+
+                // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource seam.
+                // A `"tms"` scheme flips only the fetch address; everything downstream keeps XYZ addressing.
                 specs.Add(new Tile.TileManager.SourceSpec(
                     sid, key, def.MinZoom, def.MaxZoom,
-                    () => new Tile.Processing.MvtTileFeatureSource(factory(template), scheduler)));
+                    () =>
+                    {
+                        IDataSource byteSource = factory(template);
+                        if (tms) byteSource = new TmsYFlipDataSource(byteSource);
+                        return new Tile.Processing.MvtTileFeatureSource(byteSource, scheduler);
+                    },
+                    bounds));
             }
 
             return specs;
         }
 
+        /// <summary>
+        /// Validates a resolved <c>bounds</c> array against the JSON that actually supplied it, and converts
+        /// it to <see cref="Tile.GeoBounds"/> — the ONE site that turns Core's raw <c>double[]</c> into the
+        /// typed value carried from here on. Malformed (see `docs/tile-pipeline-design.md` for what counts
+        /// and why) warns once and returns <c>default</c> (no gate); an absent <c>bounds</c> key converts
+        /// <paramref name="parsedBounds"/> unchanged (the spec-default full-world array, which gates nothing).
+        /// </summary>
+        private static Tile.GeoBounds ValidateBounds(JsonValue rawHost, double[] parsedBounds, string sourceId)
+        {
+            bool malformed = false;
+            if (rawHost != null && rawHost.TryGet("bounds", out JsonValue rawBounds))
+            {
+                malformed = !rawBounds.IsArray || rawBounds.Items.Count != 4;
+                if (!malformed)
+                    foreach (JsonValue item in rawBounds.Items)
+                        if (item.Kind != JsonKind.Number) { malformed = true; break; }
+            }
+
+            double west = 0.0, south = 0.0, east = 0.0, north = 0.0;
+            if (!malformed)
+            {
+                if (parsedBounds == null || parsedBounds.Length != 4)
+                {
+                    malformed = true; // defensive — StyleParser always supplies exactly 4 once past the check above
+                }
+                else
+                {
+                    west = parsedBounds[0]; south = parsedBounds[1]; east = parsedBounds[2]; north = parsedBounds[3];
+                    if (south > north || west < -180.0 || west > 180.0 || east < -180.0 || east > 180.0)
+                        malformed = true;
+                }
+            }
+
+            if (malformed)
+            {
+                Debug.LogWarning($"[MapView.SetStyle] source '{sourceId}' has a malformed bounds (need " +
+                                  "[west, south, east, north] as 4 numbers, south <= north, longitudes in " +
+                                  "[-180, 180]) — ignored, no bounds gate.");
+                return default;
+            }
+
+            return new Tile.GeoBounds { West = west, South = south, East = east, North = north, HasBounds = true };
+        }
+
+        /// <summary>Joins every spec's <c>(SourceId, resolved SourceKey)</c> in order — the style-token
+        /// input <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s full-rebuild arm folds in,
+        /// so two loads that resolve a source differently never share a prepared-cache key.</summary>
+        private static string ResolvedSourceIdentity(List<Tile.TileManager.SourceSpec> specs)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < specs.Count; i++)
+                sb.Append(specs[i].SourceId).Append('=').Append(specs[i].Key).Append(';');
+            return sb.ToString();
+        }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@
 //   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>
 //                                     interface, EditMode async-Task unit teeth.
 //   UnityWebRequestDataSourceTests  — UnityWebRequestDataSource against a loopback HttpListener, including the 404 -> Absent mapping.
+//   TmsYFlipDataSourceTests         — the scheme:"tms" Y-flip decorator: fetch-address flip and Encoding/Dispose forwarding.
 //   DataSourceRenderPathTests       — FileDataSource through the render pipeline.
 //   DataSourceTests                 — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
 
@@ -264,6 +265,74 @@ namespace MapRenderer.Tests.DataSources
                 "HTTP 200 response Bytes must not be null.");
             Assert.AreEqual(expected.Length, response.Bytes.Length,
                 "Response byte count must match the served body.");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // TmsYFlipDataSourceTests — the scheme:"tms" Y-flip decorator
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="TmsYFlipDataSource"/> flips only the fetch address; <c>Encoding</c> and <c>Dispose</c>
+    /// forward to the inner source untouched.
+    /// </summary>
+    [TestFixture]
+    public class TmsYFlipDataSourceTests
+    {
+        [Test]
+        public async Task FetchAsync_FlipsY_ForANonZeroZoom()
+        {
+            TileId seen = default;
+            var inner = TestDataSource.FromFetch(id =>
+            {
+                seen = id;
+                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            });
+            using var source = new TmsYFlipDataSource(inner);
+
+            await source.FetchAsync(new TileId { Z = 3, X = 5, Y = 1 });
+
+            Assert.AreEqual(new TileId { Z = 3, X = 5, Y = 6 }, seen,
+                "z3 has 8 rows (0..7); TMS row 1 is XYZ row 6 — y' = (1<<z) - 1 - y. X and Z must pass through unchanged.");
+        }
+
+        /// <summary>Control: at z0 there is one row, so the correct flip is the identity. Without this arm, an
+        /// implementation that flips unconditionally by some OTHER formula could still satisfy the z3 case by
+        /// coincidence; z0 pins that the formula, not just "some flip", is <c>(1&lt;&lt;z) - 1 - y</c>.</summary>
+        [Test]
+        public async Task FetchAsync_ZoomZero_IsUnaffected()
+        {
+            TileId seen = default;
+            var inner = TestDataSource.FromFetch(id =>
+            {
+                seen = id;
+                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            });
+            using var source = new TmsYFlipDataSource(inner);
+
+            await source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
+
+            Assert.AreEqual(new TileId { Z = 0, X = 0, Y = 0 }, seen);
+        }
+
+        [Test]
+        public void Encoding_ForwardsToTheInnerSource()
+        {
+            using var inner  = TestDataSource.FromBytes(new byte[] { 1 }, TileEncoding.Mvt);
+            using var source = new TmsYFlipDataSource(inner);
+            Assert.AreEqual(TileEncoding.Mvt, source.Encoding);
+        }
+
+        [Test]
+        public void Dispose_ForwardsToTheInnerSource()
+        {
+            var inner  = TestDataSource.Absent();
+            var source = new TmsYFlipDataSource(inner);
+
+            source.Dispose();
+
+            Assert.IsTrue(inner.WasDisposed,
+                "Dispose must forward to the inner source, or its scheduler/cache/connection leaks.");
         }
     }
 

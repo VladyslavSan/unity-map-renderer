@@ -72,9 +72,11 @@ namespace MapRenderer.Tests
         /// unpredictable number of ticks. <c>InlineWorkScheduler</c> makes a fetched tile decode-ready that tick.</param>
         /// <param name="symbolsIntentionallyUnwired">This helper never wires <c>SymbolSubsystem</c>, so a symbol
         /// layer throws here unless this is <c>true</c>; then its source loads but never places.</param>
+        /// <param name="bounds">Every spec's declared bounds gate (default = no gate). A test measuring the
+        /// admission path needs a real value here, or <c>AdmitsTile</c>'s overlap branch never runs.</param>
         internal static void LoadTestStyle(this MapViewComponent view, IDataSource source,
             CameraProperties initialView, StyleDocument style = null, IWorkScheduler decodeScheduler = null,
-            bool symbolsIntentionallyUnwired = false)
+            bool symbolsIntentionallyUnwired = false, GeoBounds bounds = default)
         {
             IWorkScheduler decodeSched = decodeScheduler ?? TestWorkScheduler;
             MapView mv = view.View;
@@ -110,7 +112,7 @@ namespace MapRenderer.Tests
                 // MapView.BuildSourceSpecs' production wrap.
                 if (seen.Add(sid))
                     specs.Add(new TileManager.SourceSpec(
-                        sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source, decodeSched)));
+                        sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source, decodeSched), bounds));
             }
         }
 

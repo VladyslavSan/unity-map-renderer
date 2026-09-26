@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
@@ -21,6 +22,12 @@ namespace MapRenderer.Unity.Rendering.Tile
             public int                   MinZoom; // resolved source minzoom — admission clamp
             public int                   MaxZoom; // resolved source maxzoom
             public TileManager.SourceKey DefKey;  // resolved-definition identity — restyle "unchanged?" diff
+
+            // The declared `bounds`, converted to unit-square coordinates once (north maps to the SMALLER Y —
+            // unit-square Y grows southward). HasBounds false means no gate: every zoom-admitted tile passes.
+            public double2 BoundsMin;
+            public double2 BoundsMax;
+            public bool    HasBounds;
 
             /// <summary>True for the one synthetic pipeline serving a background layer — derived from
             /// <see cref="FeatureSource"/> so it can't desync.</summary>
@@ -66,11 +73,38 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True for the synthetic background slot, which has no feature source.</summary>
         public bool IsSourceless(int slot) => _pipelines[slot].IsSourceless;
 
-        /// <summary>True if a slot's source serves zoom <paramref name="z"/>.</summary>
-        public bool AdmitsZoom(int slot, int z)
+        /// <summary>True if a slot's source serves <paramref name="tile"/>: its zoom is in range AND, when the
+        /// source declares <c>bounds</c>, the tile's ground quad STRICTLY overlaps them (a tile that only
+        /// touches the boundary is rejected — see <see cref="ResolveBounds"/>).</summary>
+        public bool AdmitsTile(int slot, TileId tile)
         {
             var p = _pipelines[slot];
-            return z >= p.MinZoom && z <= p.MaxZoom;
+            if (tile.Z < p.MinZoom || tile.Z > p.MaxZoom) return false;
+            if (!p.HasBounds) return true;
+
+            double2 tileMin = WebMercatorTiling.UnitSquareTileMin(tile);
+            double2 tileMax = WebMercatorTiling.UnitSquareTileMax(tile);
+
+            // West > east means `bounds` crosses the antimeridian: two x-ranges, [BoundsMin.x, 1] and
+            // [0, BoundsMax.x] — a tile overlapping either makes the OR below true.
+            bool xOverlap = p.BoundsMin.x <= p.BoundsMax.x
+                ? tileMax.x > p.BoundsMin.x && tileMin.x < p.BoundsMax.x
+                : tileMax.x > p.BoundsMin.x || tileMin.x < p.BoundsMax.x;
+            bool yOverlap = tileMax.y > p.BoundsMin.y && tileMin.y < p.BoundsMax.y;
+
+            return xOverlap && yOverlap;
+        }
+
+        /// <summary>Converts a declared <see cref="GeoBounds"/> to unit-square min/max, or reports no gate
+        /// when <see cref="GeoBounds.HasBounds"/> is false.</summary>
+        private static (double2 min, double2 max, bool has) ResolveBounds(in GeoBounds bounds)
+        {
+            if (!bounds.HasBounds) return (default, default, false);
+            double2 min = WebMercatorTiling.UnitSquareFromLonLat(
+                new GeoCoordinate { Latitude = bounds.North, Longitude = bounds.West }); // north-west
+            double2 max = WebMercatorTiling.UnitSquareFromLonLat(
+                new GeoCoordinate { Latitude = bounds.South, Longitude = bounds.East }); // south-east
+            return (min, max, true);
         }
 
         /// <summary>The feature source at a slot, or null for the source-less slot.</summary>
@@ -80,11 +114,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         public void ReleaseTile(int slot, TileId id) => _pipelines[slot].FeatureSource?.Release(id);
 
         /// <summary>
-        /// True iff <see cref="Rebuild"/> with the same arguments would keep every pipeline and add none: same count,
-        /// same order, and equal <c>SourceId</c>/resolved <c>DefKey</c>/<c>MinZoom</c>/<c>MaxZoom</c> per real slot.
-        /// Keep it in step with <see cref="Rebuild"/>. It compares RESOLVED specs, not raw style JSON: a <c>url</c>
-        /// source resolves through a TileJSON fetch, so equal raw <c>sources</c> can resolve differently.
-        /// <see cref="MapRenderer.Unity.Rendering.Style.SurvivingLayerGate"/> checks raw JSON. Both fail closed.
+        /// True iff <see cref="Rebuild"/> with the same arguments would keep every pipeline and add none: same
+        /// count, same order, and equal <c>SourceId</c>/resolved <c>DefKey</c>/<c>MinZoom</c>/<c>MaxZoom</c>
+        /// per real slot — <c>DefKey</c> already carries the VALIDATED `bounds` gate (see
+        /// <see cref="TileManager.SourceKey.From"/>). Keep it in step with <see cref="Rebuild"/>. It compares
+        /// RESOLVED specs, not raw style JSON, since a <c>url</c> source resolves through a TileJSON fetch.
         /// </summary>
         internal bool Matches(IReadOnlyList<TileManager.SourceSpec> specs, bool hasBackground)
         {
@@ -125,10 +159,12 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 var            spec     = specs[i];
                 SourcePipeline existing = Find(spec.SourceId, spec.Key);
+                (double2 bMin, double2 bMax, bool bHas) = ResolveBounds(spec.Bounds);
                 if (existing != null)
                 {
-                    existing.MinZoom = spec.MinZoom; // zoom may be re-read from a re-resolved def; identity kept
-                    existing.MaxZoom = spec.MaxZoom;
+                    existing.MinZoom   = spec.MinZoom; // zoom may be re-read from a re-resolved def; identity kept
+                    existing.MaxZoom   = spec.MaxZoom;
+                    existing.BoundsMin = bMin; existing.BoundsMax = bMax; existing.HasBounds = bHas;
                     kept.Add(existing);
                     keptOld.Add(existing);
                 }
@@ -138,6 +174,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     {
                         SourceId = spec.SourceId, FeatureSource = spec.CreateSource(),
                         MinZoom  = spec.MinZoom, MaxZoom        = spec.MaxZoom, DefKey = spec.Key,
+                        BoundsMin = bMin, BoundsMax = bMax, HasBounds = bHas,
                     });
                 }
             }

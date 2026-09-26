@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 52 supported, 56 partial, 6 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 53 supported, 57 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -123,9 +123,9 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 |---|---|---|
 | `url` (TileJSON) | `supported` | Fetched once per style load. Inline `tiles` wins. |
 | `tiles` | `partial` | Only the first URL template is used. |
-| `minzoom` / `maxzoom` | `supported` | Gate tile requests; the camera overzooms past `maxzoom`. |
-| `bounds` | `parsed, inert` | Used only to tell two sources apart; tile requests are not limited to it. |
-| `scheme` | `parsed, inert` | Used only to tell two sources apart; `"tms"` rows are not flipped. |
+| `minzoom` / `maxzoom` | `partial` | A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom; there is no per-source overzoom, only past the host `TileSelection.MaxZoom` cap. |
+| `bounds` | `supported` | Gates tile requests: a cover tile whose ground quad does not strictly overlap `bounds` is never fetched. |
+| `scheme` | `supported` | `"tms"` flips only the fetch address (`TmsYFlipDataSource`); every other identity (loaded/cache keys) stays XYZ. |
 | `attribution` | `no rendering effect` | Not read. |
 | `promoteId` | `not supported` | Feature ids come from the tile. |
 | `volatile` | `not supported` | Tile caching does not read it. |

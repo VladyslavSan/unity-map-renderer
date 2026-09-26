@@ -11,7 +11,7 @@ namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
     /// Production HTTP tile data source over <see cref="UnityWebRequest"/> and UniTask (no <c>Task.Run</c>).
-    /// The URL template takes <c>{z}</c>, <c>{x}</c>, <c>{y}</c> in the XYZ convention; no TMS Y-flip.
+    /// The URL template takes <c>{z}</c>, <c>{x}</c>, <c>{y}</c> in the XYZ convention.
     /// HTTP 404/204 → <see cref="TileResponse.Absent"/>; 5xx and connection errors throw
     /// <see cref="UnityWebRequestException"/>. The <see cref="CancellationToken"/> aborts the fetch.
     /// </summary>

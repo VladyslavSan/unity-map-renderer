@@ -1010,7 +1010,7 @@ namespace MapRenderer.Tests.Style
         /// outside; an unbounded layer keeps its authored value at every zoom.
         ///
         /// <para>The <c>maxzoom</c> row is the discriminating one: <c>maxzoom</c> is EXCLUSIVE, so a fix
-        /// that copies <c>SourceRegistry.AdmitsZoom</c>'s inclusive upper bound — a different quantity — is
+        /// that copies <c>SourceRegistry.AdmitsTile</c>'s inclusive upper bound — a different quantity — is
         /// wrong by one zoom level and visible only there.</para>
         /// </summary>
         [Test]
@@ -1044,7 +1044,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0f, OpacityOf(set, both), 1e-6f,
                 $"maxzoom is EXCLUSIVE, so a layer with maxzoom {BoundedMax} must be gated out AT z{BoundedMax}. "
                 + "Reading its authored value here means the bound was implemented as inclusive — the shape "
-                + "SourceRegistry.AdmitsZoom uses for a DIFFERENT quantity (a source's data range).");
+                + "SourceRegistry.AdmitsTile uses for a DIFFERENT quantity (a source's data range).");
             Assert.AreEqual(AuthoredOpacity, OpacityOf(set, unbounded), 1e-6f,
                 "the unbounded layer is unaffected at every zoom asserted above.");
         }

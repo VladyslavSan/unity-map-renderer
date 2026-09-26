@@ -8,8 +8,8 @@ namespace MapRenderer.Core.Data
 {
     /// <summary>
     /// Fetches tile bytes from the local filesystem. Path template tokens: <c>{z}</c>, <c>{x}</c>, <c>{y}</c>
-    /// (default <c>{z}/{x}/{y}.mvt</c>, relative to <see cref="RootDirectory"/>). Y convention: XYZ, with no
-    /// TMS Y-flip. Missing file: <c>HasData=false</c>; I/O error: throws. Non-obvious why: FetchAsync
+    /// (default <c>{z}/{x}/{y}.mvt</c>, relative to <see cref="RootDirectory"/>). Y convention: XYZ.
+    /// Missing file: <c>HasData=false</c>; I/O error: throws. Non-obvious why: FetchAsync
     /// switches to the ThreadPool and never back, as a PlayerLoop continuation never runs under synchronous
     /// polling; <c>RunOnThreadPool(configureAwait: false)</c> is absent from the <c>dotnet test</c> build.
     /// On WebGL the read runs inline (docs/web-target.md).
