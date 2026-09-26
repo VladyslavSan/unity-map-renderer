@@ -17,6 +17,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
@@ -260,8 +261,13 @@ namespace MapRenderer.Tests.Lifetime
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
+                // Inline decode and prologue: this LateUpdate-only drive never Awaits, so a ThreadPool hop can
+                // outlast it.
+                view.TileManager.WorkScheduler = new InlineWorkScheduler();
+
                 // Load initial cover at lon=0, z=5.
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style,
+                    decodeScheduler: new InlineWorkScheduler());
 
                 // LateUpdate ONLY: an Await would Complete() the held graph. The prologue still runs and
                 // hands off to ScheduleMeasure, where the delay job's Gate blocks the measure jobs.
@@ -613,8 +619,12 @@ namespace MapRenderer.Tests.Lifetime
                     { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
+                // Inline decode and prologue: this LateUpdate-only drive never Awaits, so a ThreadPool hop can
+                // outlast it.
+                view.TileManager.WorkScheduler = new InlineWorkScheduler();
 
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style,
+                    decodeScheduler: new InlineWorkScheduler());
 
                 // Pump LateUpdate ONLY — no Await, which would Complete() the held graph and burn the whole
                 // spin bound (NIT 3).

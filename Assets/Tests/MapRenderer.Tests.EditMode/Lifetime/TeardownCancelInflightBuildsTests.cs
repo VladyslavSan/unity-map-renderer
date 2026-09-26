@@ -111,7 +111,9 @@ namespace MapRenderer.Tests.Lifetime
 
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
+                // Inline decode: this LateUpdate-only drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style,
+                    decodeScheduler: new InlineWorkScheduler());
                 view.TileManager.WorkScheduler = scheduler;
 
                 // Set the gate BEFORE any kick: every worker parks on it first, so the first kicked tile stays
