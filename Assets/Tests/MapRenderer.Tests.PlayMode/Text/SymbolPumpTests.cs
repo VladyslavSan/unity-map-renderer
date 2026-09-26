@@ -27,7 +27,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
 using Symbol = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 
 
 namespace MapRenderer.Tests.PlayMode.Text

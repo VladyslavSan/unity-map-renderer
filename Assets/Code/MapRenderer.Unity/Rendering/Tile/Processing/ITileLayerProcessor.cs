@@ -1,4 +1,4 @@
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {

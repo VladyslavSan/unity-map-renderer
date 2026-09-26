@@ -25,7 +25,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -50,10 +50,10 @@ using System;
 using MapRenderer.Unity.Text;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using Object = UnityEngine.Object;
 
 namespace MapRenderer.Tests.Tiles

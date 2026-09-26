@@ -5,17 +5,17 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Fill;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Projection;
+using MapRenderer.Unity.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Projection;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
     /// Schedules one fill-extrusion layer's roof (<see cref="FillMeshGraph.Schedule"/>, unchanged) and wall
     /// chain, one quad per edge of every clipped ring, cut edges included. Roof and walls read
     /// <c>input.Geometry</c> <c>[ReadOnly]</c> only, so both schedule on the caller's deps and may run
-    /// concurrently. It lives in Unity because the wall job writes the Mesh vertex layout; it calls no
-    /// <c>Complete()</c>. See docs/job-scheduling-design.md § "Invariants that constrain what is built next".
+    /// concurrently; neither calls <c>Complete()</c>. See docs/job-scheduling-design.md
+    /// § "Invariants that constrain what is built next".
     /// </summary>
     public static class FillExtrusionMeshGraph
     {

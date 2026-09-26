@@ -1,4 +1,4 @@
-// Style/StyleRestyleTests.cs — uses MapRenderer.Jobs.Mvt / Unity.Collections; not in core-tests.csproj.
+// Style/StyleRestyleTests.cs — uses MapRenderer.Unity.Jobs.Mvt / Unity.Collections; not in core-tests.csproj.
 // Bare `Color` here is MapRenderer.Core.Expressions.Color, so UnityEngine-side Style files stay separate.
 //
 // Contents:
@@ -16,11 +16,11 @@ using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using Background = MapRenderer.Core.Style.Background;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
@@ -1484,7 +1484,7 @@ namespace MapRenderer.Tests.Style
     /// <see cref="Fill.PaintProperties"/>: classification, pinned values, BakeNumbers
     /// distinct-alpha, and SourceLayerResolver seam routing.
     ///
-    /// Unity EditMode only (see file header) — it exercises the MapRenderer.Jobs.Tiles/.Mvt decode seam.
+    /// Unity EditMode only (see file header) — it exercises the MapRenderer.Unity.Jobs.Tiles/.Mvt decode seam.
     /// </summary>
     [TestFixture]
     public class FillPaintTests

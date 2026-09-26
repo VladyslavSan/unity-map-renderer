@@ -15,7 +15,7 @@ namespace MapRenderer.Tests
     /// </summary>
     public static class SubdivisionCoverageValidator
     {
-        // Exact mirror of GlobeFillSubdivideDispatch's defaults (Assets/Code/MapRenderer.Jobs/GlobeFillSubdivider.cs).
+        // Exact mirror of GlobeFillSubdivideDispatch's defaults (Assets/Code/MapRenderer.Unity/Jobs/Fill/GlobeFillSubdivider.cs).
         // DefaultMaxEdgeAngleRad is the LITERAL constant (0.05236), not a recomputed cos(3°) — π/60 ≠ 0.05236.
         public const double DefaultMaxEdgeAngleRad = 0.05236;
         public const int DefaultMaxDepth = 5;

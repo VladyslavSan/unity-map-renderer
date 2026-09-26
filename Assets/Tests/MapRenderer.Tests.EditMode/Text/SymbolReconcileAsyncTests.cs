@@ -37,12 +37,12 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Tests; // TestGlyphSource
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Json;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Style.Symbol;

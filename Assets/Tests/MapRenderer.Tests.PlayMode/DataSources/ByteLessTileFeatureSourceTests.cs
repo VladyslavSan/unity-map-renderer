@@ -17,7 +17,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Tests.PlayMode.DataSources
 {

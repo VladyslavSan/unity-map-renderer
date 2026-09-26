@@ -24,7 +24,7 @@ using UnityEditor;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Core.Geo;
 using System.Collections.Generic;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Rendering.Materials;
 
 namespace MapRenderer.Tests.Visual

@@ -13,7 +13,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;

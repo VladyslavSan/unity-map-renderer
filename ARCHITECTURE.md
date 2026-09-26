@@ -80,10 +80,10 @@ Camera/ViewState ─► TileManager  (Rendering/Tile/TileManager.cs) — cover �
                                      │
                      ┌──────── async + Burst jobs (off main thread) ────────┐
                      ▼                                                       │
-  BYO DataSource ─► fetch ─► MvtDecoder / MvtDecodeJob (MapRenderer.Jobs) ─► FillMeshGraph /
-  (HTTP/PMTiles/               (managed proto parse + Burst per-tile          LineMeshGraph
-   local/in-mem)                geometry decode)                             (MapRenderer.Jobs,
-                                                                               scheduled job graphs) ──┘
+  BYO DataSource ─► fetch ─► MvtDecoder / MvtDecodeJob (Unity/Jobs) ─► FillMeshGraph /
+  (HTTP/PMTiles/               (managed proto parse + Burst per-tile    LineMeshGraph
+   local/in-mem)                geometry decode)                       (Unity/Jobs,
+                                                                         scheduled job graphs) ──┘
                                                                   │
                                                                   ▼
                                                     consume  ── main-thread sync point: each
@@ -110,19 +110,27 @@ registration has moved the build cost back onto the frame it was taken off.
 
 ### Module boundaries — what belongs where
 
-**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`.** That is the production target, and its
-architecture, readability and performance are what matter.
+**The product is `MapRenderer.Unity`, plus `MapRenderer.App` as the composition root.** That is the
+production target, and its architecture, readability and performance are what matter. Renderer logic —
+including the native/decode code under `Unity/Jobs/` — lives in `Unity`; `App` wires the product together,
+it does not host it.
 
 **`MapRenderer.Core` is legacy: it is not a destination for new code.** It is large because much of this
 renderer was written engine-free first, and while that code lives there it still earns a fast `dotnet test`
 loop (`Tools/core-tests`, ~0.1s, no Editor lock, runs with the Editor open) — worth using, never worth
-designing for. Engine-free is no longer a property we target. New work goes to `Unity`/`Jobs`, and Core
-shrinks as subsystems nativize.
+designing for. Engine-free is no longer a property we target. New work goes to `Unity` (including its
+`Jobs/` folder), and Core shrinks as subsystems nativize.
+
+**`Jobs/` carries no dependency restriction of its own.** It is an ordinary folder inside `MapRenderer.Unity`,
+not a separate assembly — the former `MapRenderer.Jobs.asmdef` enforced a one-way dependency at compile time
+(Jobs code could not reference `Rendering`/`Text`/anything else in Unity); merging the assemblies (UMR-229)
+removed that enforcement, and no folder-level convention replaces it. Code under `Jobs/` may use the rest of
+`MapRenderer.Unity` exactly as freely as any other folder in it — the folder name is a placement/discoverability
+convention (native/decode code lives there), not an isolation boundary.
 
 | assembly | role | what belongs |
 |---|---|---|
-| `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination |
-| `MapRenderer.Jobs` | **the product** | the native/decode assembly: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
+| `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination, and — under `Jobs/` — the native/decode code: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
 | `MapRenderer.Core` | **legacy — no new code** | engine-free code that predates this rule: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
 | `MapRenderer.App` | **the product** | the composition root (`MapHost`, scene wiring) plus the dev-facing surfaces built on it — camera control, menus, diagnostics/telemetry panels |
 | `MapRenderer.Tests.EditMode` | test runner | headless EditMode tests (the bulk of the gate, `./Tools/run-tests.sh`) |
@@ -130,12 +138,12 @@ shrinks as subsystems nativize.
 | `MapRenderer.Tests.Shared` | shared test infra | fixtures/helpers referenced by both test runners |
 | `MapRenderer.Unity.Editor` | editor-only | the URP `ShaderGUI` for the map shaders (`Editor/ShaderGUI/`); Editor platform only, never in a player build |
 
-> **`Jobs` is not "only Burst-able code" — read the row literally.** Since IR C1 it also holds a hand-rolled
-> **managed** protobuf decoder (`Mvt/MvtDecoder.cs`), the managed selection seam (`Tiles/FeatureSelector.cs`)
-> and a string lookup (`Tiles/SourceLayerResolver.cs`) — none blittable, none Burst. They belong there because
-> they follow `ITileLayer`, and `ITileLayer.Geometry` carries a `NativeArray`-bearing struct; splitting the
-> decoder from the buffer it produces is exactly the misplaced boundary described below. "It isn't blittable"
-> is therefore **not** an argument for moving something out of `Jobs`.
+> **`Unity/Jobs` is not "only Burst-able code."** Since IR C1 it also holds a hand-rolled **managed**
+> protobuf decoder (`Jobs/Mvt/MvtDecoder.cs`), the managed selection seam (`Jobs/Tiles/FeatureSelector.cs`)
+> and a string lookup (`Jobs/Tiles/SourceLayerResolver.cs`) — none blittable, none Burst. They belong there
+> because they follow `ITileLayer`, and `ITileLayer.Geometry` carries a `NativeArray`-bearing struct;
+> splitting the decoder from the buffer it produces is exactly the misplaced boundary described below.
+> "It isn't blittable" is therefore **not** an argument for moving something out of `Jobs`.
 
 **Placement rule: put code where it belongs architecturally, then test it wherever it lands.** Testability is
 never a placement argument — the Unity EditMode runner tests everything; it is merely slower. The fast runner
@@ -146,7 +154,7 @@ code.
 > **Never contort a design to keep something in Core.** If keeping a type in Core forces geometry to travel as
 > `uint[]` because Core cannot express a blittable buffer, forces a sidecar object to carry what an existing
 > type should own, or forces an interface to exist for a single implementer — **the boundary is wrong. Move the
-> code to `Jobs`/`Unity`.** Do not invent a workaround that preserves the boundary.
+> code to `Unity`.** Do not invent a workaround that preserves the boundary.
 
 **Why this is written down (it went wrong, three times, from one cause).** The MVT decode seam sat in Core.
 Core cannot express a blittable buffer, so decoded geometry could only travel as a managed `uint[]`. That single

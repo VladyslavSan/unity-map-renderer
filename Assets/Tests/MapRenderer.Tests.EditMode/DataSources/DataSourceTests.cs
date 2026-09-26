@@ -15,7 +15,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -33,8 +33,8 @@ using Unity.Mathematics;
 using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Tests.TestSupport;
-using MapRenderer.Jobs.Projection;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Projection;
+using MapRenderer.Unity.Jobs.Mvt;
 
 
 namespace MapRenderer.Tests.DataSources

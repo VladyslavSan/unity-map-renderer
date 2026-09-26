@@ -16,7 +16,7 @@ using MapRenderer.Unity.Common;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
-using MapRenderer.Jobs.Symbols;
+using MapRenderer.Unity.Jobs.Symbols;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;

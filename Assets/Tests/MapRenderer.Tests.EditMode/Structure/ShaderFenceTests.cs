@@ -1768,27 +1768,27 @@ namespace MapRenderer.Tests.Structure
                         offenders.Add($"{file.Substring(coreRoot.Length)} ('{form}')");
             }
 
-            // Positive control: the SAME scan over MapRenderer.Jobs finds Unity.Collections in the asmdef and
-            // in at least one source file, so the matcher can see what it reports absent from Core.
-            string jobsAsmdefPath = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Jobs", "MapRenderer.Jobs.asmdef");
-            FileAssert.Exists(jobsAsmdefPath);
-            List<string> jobsReferences = ReferencesOf(File.ReadAllText(jobsAsmdefPath), jobsAsmdefPath);
-            CollectionAssert.Contains(jobsReferences, "Unity.Collections",
-                "positive control: MapRenderer.Jobs.asmdef MUST reference Unity.Collections — if this fails, " +
+            // Positive control: the SAME scan over MapRenderer.Unity finds Unity.Collections in the asmdef
+            // and in at least one source file, so the matcher can see what it reports absent from Core.
+            string unityAsmdefPath = Path.Combine(
+                Application.dataPath, "Code", "MapRenderer.Unity", "MapRenderer.Unity.asmdef");
+            FileAssert.Exists(unityAsmdefPath);
+            List<string> unityReferences = ReferencesOf(File.ReadAllText(unityAsmdefPath), unityAsmdefPath);
+            CollectionAssert.Contains(unityReferences, "Unity.Collections",
+                "positive control: MapRenderer.Unity.asmdef MUST reference Unity.Collections — if this fails, " +
                 "the asmdef parser is broken and Core's clean result above means nothing");
 
-            string jobsRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
-            int jobsSourceHits = 0;
-            foreach (string file in Directory.GetFiles(jobsRoot, "*.cs", SearchOption.AllDirectories))
+            string unityRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            int unitySourceHits = 0;
+            foreach (string file in Directory.GetFiles(unityRoot, "*.cs", SearchOption.AllDirectories))
             {
                 string code = StripComments(File.ReadAllText(file));
                 foreach (string form in CollectionsCodeForms)
-                    if (code.Contains(form, StringComparison.Ordinal)) { jobsSourceHits++; break; }
+                    if (code.Contains(form, StringComparison.Ordinal)) { unitySourceHits++; break; }
             }
-            Assert.Greater(jobsSourceHits, 0,
+            Assert.Greater(unitySourceHits, 0,
                 "positive control: the SAME comment-stripped source scan MUST find Unity.Collections code " +
-                "forms under MapRenderer.Jobs — otherwise the scan is blind and Core's zero is meaningless");
+                "forms under MapRenderer.Unity — otherwise the scan is blind and Core's zero is meaningless");
 
             Assert.IsEmpty(offenders,
                 "no .cs file under MapRenderer.Core may USE Unity.Collections (comment-stripped: Core " +

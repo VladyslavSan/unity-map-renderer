@@ -1,5 +1,5 @@
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing

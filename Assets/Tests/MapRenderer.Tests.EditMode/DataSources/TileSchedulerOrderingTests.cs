@@ -1,5 +1,5 @@
 // Engine-free: Tools/core-tests also compiles this file, so add no UnityEngine, NativeArray or
-// MapRenderer.Jobs.Mvt dependency.
+// MapRenderer.Unity.Jobs.Mvt dependency.
 // Non-local invariant: TileScheduler.Request reserves the _inFlight/_cts slot under its lock BEFORE a fetch
 // can complete, so a synchronously-completing source never sees an unassigned slot; no thread-pool hop is needed.
 

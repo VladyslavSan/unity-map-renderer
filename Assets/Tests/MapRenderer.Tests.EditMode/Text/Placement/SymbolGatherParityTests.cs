@@ -19,7 +19,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs.Symbols;
+using MapRenderer.Unity.Jobs.Symbols;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Text;
 using Unity.Collections;

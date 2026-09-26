@@ -674,7 +674,7 @@ cross-tile dedup — `docs/labels-async-reconcile-design.md`), `Placement/Symbol
 `CurvedTextLayout`, `Placement/SymbolStagingMath` (`StageCurved`, tangent), `Placement/PolylineArcMath`,
 `Placement/CrossTileSymbolKey`, `Placement/LineAnchor`, `Placement/SymbolTileCoverage`,
 `Placement/SymbolTileCoverageFilter` (the pre-build cull), `Placement/SymbolScreenProjection` (the
-projection seam), `Placement/BillboardMath`. `MapRenderer.Jobs/Symbols/`: `CullJob` (the per-record
+projection seam), `Placement/BillboardMath`. `MapRenderer.Unity/Jobs/Symbols/`: `CullJob` (the per-record
 `GatherTrigger` verdict, including the B-3 distance and S3 horizon culls), `CompactJob`, `SymbolProjectionJob`
 (`OutValid`), `StageJob`, `CollisionJob` — the billboard build itself is not a job: `WorldSymbolRenderer`
 calls `BillboardMath.BuildWorldQuad` directly at emit time. `MapRenderer.Core/Coordinates/`: `IProjection`

@@ -996,7 +996,7 @@ filtered-run red, not after.
   freeze. A generic job compiles per type argument, so a projection/comparer combination first reached at a
   new zoom can trigger a fresh blocking compile mid-session: an abrupt zoom change reveals several at once
   and stacks them, while a slow pan hides the same cost one job at a time. Confirm by clearing
-  `Library/BurstCache` (or touching a file in the jobs assembly) and re-entering play: the stall returns
+  `Library/BurstCache` (or touching a file under `MapRenderer.Unity/Jobs/`) and re-entering play: the stall returns
   once, then disappears for the rest of the session. Editor-only — a player build is AOT-compiled, so none
   of this ships.
 

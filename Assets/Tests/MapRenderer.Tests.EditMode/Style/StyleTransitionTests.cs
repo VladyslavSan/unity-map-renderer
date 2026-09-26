@@ -15,7 +15,7 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Tiles;      // IDecodedTile
+using MapRenderer.Unity.Jobs.Tiles;      // IDecodedTile
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;

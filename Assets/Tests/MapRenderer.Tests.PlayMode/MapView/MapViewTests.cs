@@ -27,8 +27,8 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using Unity.Mathematics;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 using System.IO;
 using MapRenderer.Unity.Rendering.Source;
@@ -728,7 +728,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 var fillLayer = style.Layers[0];
                 var paint     = ((Fill.StyleLayer)fillLayer).Paint;
                 var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-                var mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+                var mvtLayer  = MapRenderer.Unity.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
                 Assert.IsNotNull(mvtLayer);
 
                 Mesh syncMesh = TestTileMeshBuilder.BuildFillFromLayer(

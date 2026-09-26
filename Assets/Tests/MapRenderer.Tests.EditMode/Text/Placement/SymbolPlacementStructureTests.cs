@@ -21,7 +21,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using Unity.Collections;
 using Unity.Jobs;
-using MapRenderer.Jobs.Symbols;
+using MapRenderer.Unity.Jobs.Symbols;
 using MapRenderer.Unity.View;
 
 

@@ -22,10 +22,10 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
-using MapRenderer.Jobs.Expressions;
-using MapRenderer.Jobs.Mvt;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Expressions;
+using MapRenderer.Unity.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Tests;
 
 namespace MapRenderer.Tests.Filters
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Filters
     /// <remarks>
     /// Non-obvious why: the populated-bag tests use a <see cref="DictionaryFeature"/>, because
     /// <see cref="MvtFeature.Store"/> is internal and holds only a real
-    /// <see cref="MapRenderer.Jobs.Mvt.DensePropertyStore"/>, which this file cannot hand-roll.
+    /// <see cref="MapRenderer.Unity.Jobs.Mvt.DensePropertyStore"/>, which this file cannot hand-roll.
     /// </remarks>
     [TestFixture]
     public class MvtFeatureIFeatureContractTests

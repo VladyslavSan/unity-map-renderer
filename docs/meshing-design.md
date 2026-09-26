@@ -126,13 +126,13 @@ value-type struct disposed deterministically at the apply boundary (at the write
 
 | Type | Assembly | Role |
 |------|----------|------|
-| `FillMeshGraph` | `MapRenderer.Jobs` | Fill: schedules the Clip→Assemble→Triangulate→Project job graph over one `FillMeshPipeline.LayerInput`. Produces an uncompleted `FillGraphOutput`. (`FillMeshPipeline` is only the home of `LayerInput`, `HoleRingComparer` and two sizing helpers; it schedules nothing.) |
-| `LineMeshGraph` | `MapRenderer.Jobs` | Line: schedules the gather→Subdivide→Project→ribbon job graph over one line `LayerInput`. Produces an uncompleted `LineGraphOutput`. |
-| `RingClipJob` | `MapRenderer.Jobs` | Fill Clip: Sutherland–Hodgman of each ring against the tile-buffer window, in tile space. Winding- and space-preserving. |
+| `FillMeshGraph` | `MapRenderer.Unity` (Jobs/) | Fill: schedules the Clip→Assemble→Triangulate→Project job graph over one `FillMeshPipeline.LayerInput`. Produces an uncompleted `FillGraphOutput`. (`FillMeshPipeline` is only the home of `LayerInput`, `HoleRingComparer` and two sizing helpers; it schedules nothing.) |
+| `LineMeshGraph` | `MapRenderer.Unity` (Jobs/) | Line: schedules the gather→Subdivide→Project→ribbon job graph over one line `LayerInput`. Produces an uncompleted `LineGraphOutput`. |
+| `RingClipJob` | `MapRenderer.Unity` (Jobs/) | Fill Clip: Sutherland–Hodgman of each ring against the tile-buffer window, in tile space. Winding- and space-preserving. |
 | `TileBufferClip` | `MapRenderer.Core` | The knob: how much buffer to keep, in tile units at extent 4096, converted to the layer's own extent in one place. `default` ⇒ disabled. |
 | `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on the fill mesher. |
-| `TileToGeoJob` | `MapRenderer.Jobs` | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
-| `RibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
+| `TileToGeoJob` | `MapRenderer.Unity` (Jobs/) | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
+| `RibbonJob` | `MapRenderer.Unity` (Jobs/) | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
 | `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `FillMeshGraph` → write mesh (globe subdivide is a graph node on the curved arm, not a separate step). |
 | `StyledLineTileBuilder` | `MapRenderer.Unity` | Line prologue: builds the line graph's `LayerInput` (`BuildLayerInput`) from the selected features and paint. |
 | `MeshDataPayload` | `MapRenderer.Unity` | The per-`(tile, layer)` mesh handle the consume loop uploads + disposes. |

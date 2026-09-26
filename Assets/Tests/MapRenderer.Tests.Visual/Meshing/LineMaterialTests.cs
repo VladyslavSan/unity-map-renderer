@@ -19,8 +19,8 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.View;
 using Line = MapRenderer.Core.Style.Line;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Visual
 {

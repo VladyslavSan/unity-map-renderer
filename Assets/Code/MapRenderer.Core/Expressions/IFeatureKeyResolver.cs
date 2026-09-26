@@ -3,7 +3,7 @@ namespace MapRenderer.Core.Expressions
     /// <summary>
     /// The per-layer key→index resolve step the string→id key hoist runs once, instead of per feature.
     /// Format-neutral by design (no MVT/GeoJSON type named here) — implemented by
-    /// <c>MvtLayerPropertyResolver</c> (<c>MapRenderer.Jobs.Mvt</c>), the only format with a key table to
+    /// <c>MvtLayerPropertyResolver</c> (<c>MapRenderer.Unity.Jobs.Mvt</c>), the only format with a key table to
     /// resolve against.
     /// </summary>
     public interface IFeatureKeyResolver

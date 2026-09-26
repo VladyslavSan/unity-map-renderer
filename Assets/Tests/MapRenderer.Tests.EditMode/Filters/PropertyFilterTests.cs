@@ -1,4 +1,4 @@
-// Unity EditMode only. It exercises MapRenderer.Jobs.Tiles/.Mvt (the tile-decode seam, moved out of
+// Unity EditMode only. It exercises MapRenderer.Unity.Jobs.Tiles/.Mvt (the tile-decode seam, moved out of
 // Core), which Tools/core-tests does not compile — this file is not registered there.
 
 using System;
@@ -7,9 +7,9 @@ using NUnit.Framework;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Filters
 {

@@ -20,7 +20,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -36,12 +36,12 @@ using MapRenderer.Unity.View;
 using SelectorInputs = MapRenderer.Unity.Rendering.Map.MapView.SelectorInputs;
 using Unity.Collections;
 using Unity.Jobs;
-using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using System.Linq;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Geometry;
+using MapRenderer.Unity.Jobs.Geometry;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
 using Object = UnityEngine.Object;
 

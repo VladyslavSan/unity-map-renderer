@@ -109,10 +109,10 @@ charging some of them measures nothing physical.
 
 ## 4. The job graph — the chains
 
-Each geometry kind has one graph builder, in the assembly its jobs live in. Every node takes `deps` and
+Each geometry kind has one graph builder, beside its jobs. Every node takes `deps` and
 returns a handle; `ScheduleDispose` nodes free scratch behind the last reader.
 
-**Fill** — `MapRenderer.Jobs/Fill/FillMeshGraph.Schedule`:
+**Fill** — `MapRenderer.Unity/Jobs/Fill/FillMeshGraph.Schedule`:
 
 ```
 RingSelectJob | RingClipJob  →  RingAssemblyJob  →  SizingJob  →  FillGatherJob<HoleRingComparer>
@@ -127,7 +127,7 @@ reads only tile vertices, indices and feature indices and projects internally �
 disposed behind the band node rather than fed forward. `GlobeFillScatterJob` is the curved arm's bridge from
 `GlobeFillVertex` records into the same output columns the flat arm writes.
 
-**Line** — `MapRenderer.Jobs/Lines/LineMeshGraph.Schedule`:
+**Line** — `MapRenderer.Unity/Jobs/Lines/LineMeshGraph.Schedule`:
 
 ```
 RingGatherJob  →  TileToGeoJob → ProjectionDispatch   (the ORIGINAL centerline's per-point surface up —
@@ -360,10 +360,11 @@ job's early return does not touch. Nodes past the aggregate bound by columns the
 inherit emptiness through it. A borrowed bound turns a sizing capacity early-return into a silent
 out-of-bounds write in a release build, where the container bounds check is compiled out.
 
-Two structure tests fence this, over `MapRenderer.Jobs/` and `MapRenderer.Unity/Rendering/Meshing/` — both
-directories graph nodes live in, so scoping to one assembly would leave the stream-write jobs unfenced. Each
-enumerates its directories rather than a hand-listed file set, and asserts it found files to scan so a moved
-directory cannot pass it vacuously.
+Two structure tests fence this, over the whole `MapRenderer.Unity` tree — strictly stronger than naming just
+`Jobs/` and `Rendering/Meshing/`, the two directories graph nodes live in today, and no dilution cost: nothing
+elsewhere in the assembly carries either forbidden token, so the wider scan catches a future violation
+anywhere in `MapRenderer.Unity` at no cost to today's result. Each enumerates its root rather than a
+hand-listed file set, and asserts it found files to scan so a moved directory cannot pass it vacuously.
 
 - The **attribute fence** pins each sanctioned *(file, token, count)* triple. A bare filename would exempt
   that file from every forbidden token at any count — including the one that is never sanctioned.
@@ -551,15 +552,15 @@ chunking was meant to close is **not** addressed and is not claimed to be.
 
 ## 16. Grounding (file:symbol touch points)
 
-`MapRenderer.Jobs/Fill/`: `FillMeshGraph.Schedule` (the fill chain, both arms, the batch constants),
+`MapRenderer.Unity/Jobs/Fill/`: `FillMeshGraph.Schedule` (the fill chain, both arms, the batch constants),
 `SizingJob`, `FillGatherJob`, `EarcutBatchJob`, `AggregateJob`, `FillBandJob`, `GlobeFillSubdivider` /
 `GlobeFillScatterJob` (the curved arm), `FillGraphOutput` (the one column set + terminal handle),
 `RingAssemblyJob` (the surviving count selector), `TriangulationBuffers`. `FillMeshPipeline` survives only as
 the home of `LayerInput`, `HoleRingComparer` and the decode-sizing pair.
-`MapRenderer.Jobs/Lines/`: `LineMeshGraph.Schedule` (the line chain, no arm split), `RingGatherJob` (the ring
+`MapRenderer.Unity/Jobs/Lines/`: `LineMeshGraph.Schedule` (the line chain, no arm split), `RingGatherJob` (the ring
 gate and line's own length filter), `SubdivideJob`, `RibbonSizingJob`, `RibbonBatchJob`,
 `RibbonAggregateJob`, `RibbonBuffers`, `LineGraphOutput`.
-`MapRenderer.Jobs/Projection/ProjectionDispatch` — `Schedule` (the closed switch) and `ScheduleTyped<TProj>`.
+`MapRenderer.Unity/Jobs/Projection/ProjectionDispatch` — `Schedule` (the closed switch) and `ScheduleTyped<TProj>`.
 `MapRenderer.Unity/Rendering/Meshing/`: `FillExtrusionMeshGraph.Schedule` (roof + wall chains,
 `ProjectionColumnSizingJob`, `WallQuadJob`), `ILayerMeshBuild` and its three implementations, the per-kind
 stream-write jobs, `MeshWriteOutput`.

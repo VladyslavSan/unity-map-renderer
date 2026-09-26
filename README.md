@@ -7,7 +7,7 @@ Not a Cesium-style photorealistic 3D-tiles renderer — this is closer to Mapbox
 + style-driven layered rendering, implemented clean-room from the open specs.
 
 ## Status
-Past the pre-spike stage: MVT decode and the fill/line job graphs live in `MapRenderer.Jobs`
+Past the pre-spike stage: MVT decode and the fill/line job graphs live under `MapRenderer.Unity/Jobs`
 (Burst + Jobs, scheduled — see `ARCHITECTURE.md`'s module table), tiles render through three
 interchangeable backends (Entities, BatchRendererGroup, GameObjects), and a per-frame symbol/text
 placement system runs alongside the tile-mesh path. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the

@@ -18,8 +18,8 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
-using MapRenderer.Jobs.Tiles;
-using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Style
@@ -639,7 +639,7 @@ namespace MapRenderer.Tests.Style
         }
 
         private static int FeatureSelectorCount(StyleLayer layer)
-            => MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 10.0).Count;
+            => MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 10.0).Count;
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
@@ -798,7 +798,7 @@ namespace MapRenderer.Tests.Style
             var projection = new WebMercatorProjection();
 
             var selected = new List<SelectedTileFeature>();
-            MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(
+            MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(
                 handBuilt, BerlinFixtureTile().GetLayer(handBuilt.SourceLayer), 13.0, selected);
             Assert.Greater(selected.Count, 0, "precondition: the hand-built filter must select > 0 features");
 
@@ -849,7 +849,7 @@ namespace MapRenderer.Tests.Style
             SymbolStyle.StyleLayer highwayNameMajor = FindShieldLayer("highway-name-major");
             Assert.IsNotNull(highwayNameMajor, "precondition: highway-name-major must parse");
             IReadOnlyList<IFeature> majorSelected =
-                MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(highwayNameMajor, BerlinFixtureTile(), 13.0);
+                MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(highwayNameMajor, BerlinFixtureTile(), 13.0);
             if (majorSelected.Count == 0)
             {
                 Assert.Pass("known coverage gap: highway-name-major selects nothing from the Berlin fixture at z13");
@@ -883,7 +883,7 @@ namespace MapRenderer.Tests.Style
         {
             int eligible = 0;
             var selected = new List<SelectedTileFeature>();
-            MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(
+            MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(
                 layer, BerlinFixtureTile().GetLayer(layer.SourceLayer), 13.0, selected);
             MvtFixtureStreams.Layer fixtureStreams =
                 MvtFixtureStreams.ReadLayer(LoadBerlinFixtureBytes(), layer.SourceLayer);
@@ -903,7 +903,7 @@ namespace MapRenderer.Tests.Style
             // No rotation-alignment declared -> auto -> resolves MAP under line placement.
             SymbolStyle.StyleLayer mapAligned = MapAlignedIconProbeLayer();
             IReadOnlyList<IFeature> selected =
-                MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(mapAligned, BerlinFixtureTile(), 13.0);
+                MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(mapAligned, BerlinFixtureTile(), 13.0);
             Assert.Greater(selected.Count, 0, "precondition: > 0 features selected");
 
             // Precondition: the SAME layer with viewport alignment emits POINT icons, so a zero-icon map arm
@@ -1470,8 +1470,8 @@ namespace MapRenderer.Tests.Style
             SymbolStyle.StyleLayer usShield = FindShieldLayer("road_shield_us");
             Assert.IsNotNull(interstate); Assert.IsNotNull(usShield);
 
-            int interstateCount = MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(interstate, BerlinFixtureTile(), 13.0).Count;
-            int usShieldCount = MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(usShield, BerlinFixtureTile(), 13.0).Count;
+            int interstateCount = MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(interstate, BerlinFixtureTile(), 13.0).Count;
+            int usShieldCount = MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(usShield, BerlinFixtureTile(), 13.0).Count;
 
             Assert.AreEqual(0, interstateCount, "highway-shield-us-interstate must select 0 features from the Berlin fixture");
             Assert.AreEqual(0, usShieldCount, "road_shield_us must select 0 features from the Berlin fixture");

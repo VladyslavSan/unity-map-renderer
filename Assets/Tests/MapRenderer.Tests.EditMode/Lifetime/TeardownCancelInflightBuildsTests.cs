@@ -17,7 +17,7 @@ using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Tests.Lifetime
 {

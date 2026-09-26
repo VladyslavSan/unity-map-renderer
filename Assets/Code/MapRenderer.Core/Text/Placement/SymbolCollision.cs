@@ -3,9 +3,9 @@
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The two collision primitives <see cref="MapRenderer.Jobs.Symbols.CollisionJob"/> sorts and tests by:
+    /// The two collision primitives <see cref="MapRenderer.Unity.Jobs.Symbols.CollisionJob"/> sorts and tests by:
     /// the greedy placement order and the AABB overlap test. The greedy survivor selection itself
-    /// (sort, then test-all-then-insert over a spatial grid) is <see cref="MapRenderer.Jobs.Symbols.CollisionJob"/> —
+    /// (sort, then test-all-then-insert over a spatial grid) is <see cref="MapRenderer.Unity.Jobs.Symbols.CollisionJob"/> —
     /// the Burst-compiled per-frame path; this class holds only the shared math both a job and a test can
     /// call directly.
     /// </summary>

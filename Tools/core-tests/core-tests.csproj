@@ -37,12 +37,9 @@
     <Compile Include="SymbolExpressionResolverMemoAllocationTests.cs" />
 
     <!-- Real production sources (single source of truth). Mostly MapRenderer.Core; the tile-decode seam
-         moved to MapRenderer.Jobs in IR C1 and is still engine-free managed C#, so it compiles here
-         unchanged — same precedent as the engine-free MapRenderer.Unity/Text files listed further down.
-         What ends this is P3 (the decoded tile owning Allocator.Persistent buffers), NOT the assembly move,
-         and no Unity.Collections shim may be written to postpone it: a shim cannot reproduce the silent-no-op
-         AsArray() dispose, so every ownership tooth under it would be vacuously green. -->
-    <!-- Epic A / A6: the neutral tile-decode surface (referenced by MvtModels.cs's interface impls below). -->
+         lives in MapRenderer.Unity/Jobs and is not compiled here — same precedent as the engine-free
+         MapRenderer.Unity/Text files listed further down. -->
+    <!-- Epic A / A6: the neutral tile-decode surface. -->
     <!-- Epic A / A6.1: the geometry-type enum, which STAYS in Core.Tiles — the evaluation surface needs
          only the enum. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/TileGeometryType.cs" />
@@ -113,8 +110,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.App/View/TouchGestureRecognizer.cs" />
 
     <!-- S45: Camera system. Angle/ConstrainedAngle/CameraProperties/CameraPoseMath are pinned to Core
-         (MapRenderer.Jobs consumes IProjection, whose signatures take `in CameraProperties`); the rest
-         moved out with the rest of the View tree (UMR-173). -->
+         (MapRenderer.Unity/Jobs consumes IProjection, whose signatures take `in CameraProperties`); the
+         rest moved out with the rest of the View tree (UMR-173). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/Angle.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/ConstrainedAngle.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/CameraProperties.cs" />
@@ -209,7 +206,7 @@
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/CameraStateTests.cs" />
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Meshing/PolygonAssemblerTests.cs" />
     <!-- A0 (Core oracle cleanup): EarcutTests / EarcutDegenerateTriangleTests / EarcutEarTestScanBoundTests
-         moved off this project — they now drive MapRenderer.Jobs.Fill.EarcutJob (NativeArray/Burst),
+         moved off this project — they now drive MapRenderer.Unity.Jobs.Fill.EarcutJob (NativeArray/Burst),
          which this project cannot compile. A permanent loss to the fast loop; see
          docs/mesh-triangulation-robustness-design.md. MvtFixtureStreams/MvtGeometry were those three
          tests' only registered consumers here (verified: no other registered file has a symbol use,

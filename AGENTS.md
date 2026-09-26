@@ -34,19 +34,19 @@ reviews (e.g. *"violates SPEC-DPR R-9"*). See `specs/README.md` for the doc type
 
 ## Project layout
 
-**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`, plus `MapRenderer.App` as the composition root
-(`MapHost`, scene wiring, and the dev-facing surfaces built on it — camera control, menus, diagnostics);
-`MapRenderer.Core` is legacy — not a destination for new code, and never a placement argument.** Renderer
-logic still goes to `Unity`/`Jobs` only — `App` wires the product together, it does not host it. Put code
-where it belongs architecturally, then test it wherever it lands. **New features are designed data-oriented
-and native-first from the start** — the data
+**The product is `MapRenderer.Unity` (its `Jobs/` folder holds the Burst jobs), plus `MapRenderer.App` as the
+composition root (`MapHost`, scene wiring, and the dev-facing surfaces built on it — camera control, menus,
+diagnostics); `MapRenderer.Core` is legacy — not a destination for new code, and never a placement
+argument.** Renderer logic still goes to `Unity` only — `App` wires the product together, it does not host
+it. Put code where it belongs architecturally, then test it wherever it lands. **New features are designed
+data-oriented and native-first from the start** — the data
 plane (anything per tile / feature / vertex / glyph / frame, or read inside a job) is born native; nativizing
 later is not the plan. **Read `ARCHITECTURE.md` § "Module boundaries" before moving code between assemblies
 or adding a type to Core** — it carries both rules, the rationale, and the three-workaround failure that
 produced the first one.
 
-- `Assets/Code/MapRenderer.Unity/` — **the product**: MonoBehaviours, mesh building, rendering glue.
-- `Assets/Code/MapRenderer.Jobs/` — **the product**: Burst + Collections jobs; anything naturally blittable.
+- `Assets/Code/MapRenderer.Unity/` — **the product**: MonoBehaviours, mesh building, rendering glue; `Jobs/` holds
+  the Burst + Collections jobs and anything naturally blittable.
 - `Assets/Code/MapRenderer.Core/` — **legacy, no new code**: engine-free tile math, geometry, earcut,
   style/expression evaluation, text shaping that predates the rule.
 - `Assets/Code/MapRenderer.App/` — **the product (composition root)**: `MapHost` + scene wiring, plus
