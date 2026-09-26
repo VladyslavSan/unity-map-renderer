@@ -18,7 +18,8 @@ namespace MapRenderer.Core.Style.Symbol
         /// Resolve <paramref name="iconImage"/> (a layer's raw <c>icon-image</c> JSON) for
         /// <paramref name="feature"/>. Returns the sprite name, or <c>null</c> to skip the icon.
         /// </summary>
-        public static string Resolve(JsonValue iconImage, IFeature feature)
+        /// <param name="zoom">The caller's build zoom (see the matrix's † note).</param>
+        public static string Resolve(JsonValue iconImage, IFeature feature, double zoom)
         {
             if (iconImage == null || feature == null) return null;
 
@@ -29,7 +30,7 @@ namespace MapRenderer.Core.Style.Symbol
             }
             else if (iconImage.IsArray)
             {
-                resolved = EvaluateExpression(iconImage, feature);
+                resolved = EvaluateExpression(iconImage, feature, zoom);
             }
             else
             {
@@ -77,12 +78,12 @@ namespace MapRenderer.Core.Style.Symbol
         }
 
         // Parse + evaluate an expression-form icon-image. Any parse/eval failure → null (skip).
-        private static string EvaluateExpression(JsonValue expressionJson, IFeature feature)
+        private static string EvaluateExpression(JsonValue expressionJson, IFeature feature, double zoom)
         {
             try
             {
                 Expression expr = ParsedExpressions.GetValue(expressionJson, ParseCallback);
-                Value result = expr.Evaluate(new EvaluationContext(0.0, feature));
+                Value result = expr.Evaluate(new EvaluationContext(zoom, feature));
                 return result.IsNull ? null : result.ToDisplayString();
             }
             catch

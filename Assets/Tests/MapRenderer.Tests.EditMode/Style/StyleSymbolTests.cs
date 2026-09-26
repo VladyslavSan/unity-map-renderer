@@ -292,6 +292,27 @@ namespace MapRenderer.Tests.Style
             Assert.That(newRgba.w, Is.EqualTo(oldRgba.w).Within(1e-6f),
                 "a Constant text-color CHANGE must not move the extracted vertex ALPHA either.");
         }
+
+        // ── text-field zoom step: must extract at the BUILD zoom, not zoom 0 ──────────────────────
+
+        /// <summary>A <c>text-field</c> zoom <c>step</c> must extract using <see cref="Zoom"/> (8.0, past the
+        /// step-5 threshold below), not a hardcoded zoom 0. RED-verify: hardcode <c>0.0</c> at the
+        /// <c>TextFieldResolver.Resolve</c> call site in <c>SymbolFeatureExtractor.Extract</c>.</summary>
+        [Test]
+        public void TextFieldZoomStep_Extracts_AtTheBuildZoom_NotZero()
+        {
+            var layer = new SymbolStyle.StyleLayer
+            {
+                Id          = "labels",
+                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "centroids",
+                Paint       = TestStyle.SymbolPaint(),
+                Layout      = TestStyle.SymbolLayout("{\"text-field\":[\"step\",[\"zoom\"],\"low\",5,\"high\"]}"),
+            };
+            var symbols = Extract(layer);
+            Assert.Greater(symbols.Count, 0, "the fixture must yield at least one symbol.");
+            Assert.AreEqual("high", symbols[0].Text, "zoom 8 is past the step-5 threshold");
+        }
     }
 
 

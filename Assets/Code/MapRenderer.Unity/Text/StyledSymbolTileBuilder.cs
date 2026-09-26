@@ -87,7 +87,10 @@ namespace MapRenderer.Unity.Text
                 SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, symbols, spriteAtlas);
                 if (symbols.Count == 0) continue;
                 int materialIndex = (materialIndices != null && l < materialIndices.Count) ? materialIndices[l] : 0;
-                result.Add(new ExtractedLayer(materialIndex, new FontStack { Names = layer.Layout.TextFont }, symbols));
+                // Zoom-capable, evaluated once per layer at build zoom (like symbol-placement); a
+                // data-driven expression has no per-feature site here, so it degrades to the default stack.
+                layer.Layout.TextFont.TryEvaluate(zoom, null, out string[] fontNames);
+                result.Add(new ExtractedLayer(materialIndex, new FontStack { Names = fontNames }, symbols));
             }
             return result;
         }

@@ -2501,6 +2501,110 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(new float2(4, 6), sym.Paint.Translate, "text-translate parses to [x,y] px (raw y-down)");
             Assert.AreEqual(TextTranslateAnchor.Viewport, sym.Paint.TranslateAnchor);
         }
+
+        [Test]
+        public void SymbolLayer_TextFont_PlainArrayAndExpressionForms()
+        {
+            var bare = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c' } ] }").Layers[0];
+            CollectionAssert.AreEqual(new[] { "Open Sans Regular", "Arial Unicode MS Regular" },
+                bare.Layout.TextFont.Evaluate(0.0), "text-font default is the spec stack");
+
+            // The common constant form: a bare array of font names (no ["literal", …] wrapper).
+            var plain = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-font':['Noto Sans Regular'] } } ] }").Layers[0];
+            CollectionAssert.AreEqual(new[] { "Noto Sans Regular" }, plain.Layout.TextFont.Evaluate(0.0));
+
+            // The expression form: ["literal", […]] must read the wrapped array, not its own operator token.
+            var literalExpr = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-font':['literal',['Noto Sans Regular']] } } ] }").Layers[0];
+            CollectionAssert.AreEqual(new[] { "Noto Sans Regular" }, literalExpr.Layout.TextFont.Evaluate(0.0),
+                "an expression-form text-font must evaluate, not read its array items as font names");
+
+            // Zoom-capable: a step on zoom between two literal stacks.
+            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-font':['step',['zoom'],['literal',['Low Font']],10,['literal',['High Font']]] } } ] }")
+                .Layers[0];
+            CollectionAssert.AreEqual(new[] { "Low Font" }, zoomed.Layout.TextFont.Evaluate(0.0));
+            CollectionAssert.AreEqual(new[] { "High Font" }, zoomed.Layout.TextFont.Evaluate(12.0));
+        }
+
+        [Test]
+        public void SymbolLayer_TextFont_DataDrivenExpression_DegradesToDefaultStack()
+        {
+            // ["get",…] has the same all-string shape as a plain name array. The font stack has no
+            // per-feature resolution site, so TryEvaluate(zoom, null) must fail and degrade to the default.
+            var dataDriven = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-font':['get','fontProp'] } } ] }").Layers[0];
+            bool ok = dataDriven.Layout.TextFont.TryEvaluate(12.0, null, out string[] degraded);
+            Assert.IsFalse(ok, "a data-driven text-font has no feature at the per-layer evaluation site");
+            CollectionAssert.AreEqual(new[] { "Open Sans Regular", "Arial Unicode MS Regular" }, degraded,
+                "TryEvaluate must degrade to the spec default stack, not the literal tokens [\"get\",\"fontProp\"]");
+        }
+
+        [Test]
+        public void SymbolLayer_IconPadding_ArrayForm_ParsesAndCollapsesToLargestSide()
+        {
+            // A bare number stays a plain scalar (unaffected by the array-form fix).
+            var scalar = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{ 'icon-padding':6 } } ] }")
+                .Layers[0];
+            Assert.AreEqual(6f, scalar.Layout.IconPadding.Evaluate(0.0), 1e-6);
+
+            // The spec's array form must parse (not fail the whole style) and collapse to the largest entry.
+            var oneEntry = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{ 'icon-padding':[3] } } ] }")
+                .Layers[0];
+            Assert.AreEqual(3f, oneEntry.Layout.IconPadding.Evaluate(0.0), 1e-6, "[n] means all sides n");
+
+            var fourEntry = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-padding':[2,4,6,8] } } ] }").Layers[0];
+            Assert.AreEqual(8f, fourEntry.Layout.IconPadding.Evaluate(0.0), 1e-6,
+                "[top,right,bottom,left] collapses to the largest entry");
+        }
+
+        [Test]
+        public void SymbolLayer_IconPadding_ZoomInterpolatedArray_MatchingLengthsEvaluate()
+        {
+            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-padding':['interpolate',['linear'],['zoom'],0,[2,4],10,[8,16]] } } ] }").Layers[0];
+            // z5 lerps each entry to [5,10] (halfway between [2,4] and [8,16]); the largest is 10.
+            Assert.AreEqual(10f, zoomed.Layout.IconPadding.Evaluate(5.0), 1e-4);
+        }
+
+        [Test]
+        public void SymbolLayer_IconPadding_ZoomInterpolatedArray_FourEntriesEvaluate()
+        {
+            // A 4-number array stop also looks like an rgb()/rgba() colour; Ramps.Lerp must take the
+            // element-wise array branch before colour coercion, so this lerps instead of throwing.
+            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-padding':['interpolate',['linear'],['zoom'],0,[2,4,6,8],10,[8,16,24,32]] } } ] }")
+                .Layers[0];
+            // z5 lerps each entry to [5,10,15,20] (halfway); the largest is 20.
+            Assert.AreEqual(20f, zoomed.Layout.IconPadding.Evaluate(5.0), 1e-4);
+        }
+
+        [Test]
+        public void SymbolLayer_IconPadding_ZoomInterpolatedArray_MismatchedLengths_FallsBackViaTryEvaluate()
+        {
+            // Evaluate still throws for genuinely mismatched stop lengths — TryEvaluate is the caller's
+            // job to survive it (SymbolFeatureExtractor uses TryEvaluate, so a tile build never dies here).
+            var mismatched = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-padding':['interpolate',['linear'],['zoom'],0,[2],10,[8,16]] } } ] }").Layers[0];
+            Assert.Throws<ExpressionEvaluationException>(() => mismatched.Layout.IconPadding.Evaluate(5.0));
+
+            bool ok = mismatched.Layout.IconPadding.TryEvaluate(5.0, null, out float fallback);
+            Assert.IsFalse(ok);
+            Assert.AreEqual(2f, fallback, 1e-6, "TryEvaluate must degrade to the spec default (2px)");
+        }
     }
 
 
@@ -2532,20 +2636,20 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Token_SingleProperty_Resolves()
         {
-            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME}'"), Aruba));
+            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME}'"), Aruba, 0.0));
         }
 
         [Test]
         public void Expression_Get_Resolves()
         {
-            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("['get','NAME']"), Aruba));
+            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("['get','NAME']"), Aruba, 0.0));
         }
 
         [Test]
         public void Token_MultiTokenWithLiterals_Resolves()
         {
             Assert.AreEqual("Afghanistan (Afg.)",
-                SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME} ({ABBREV})'"), Afghanistan));
+                SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME} ({ABBREV})'"), Afghanistan, 0.0));
         }
 
         [Test]
@@ -2553,33 +2657,45 @@ namespace MapRenderer.Tests.Style
         {
             // name:en absent → coalesce falls back to NAME.
             Assert.AreEqual("Aruba",
-                SymbolStyle.TextFieldResolver.Resolve(Field("['coalesce',['get','name:en'],['get','NAME']]"), Aruba));
+                SymbolStyle.TextFieldResolver.Resolve(Field("['coalesce',['get','name:en'],['get','NAME']]"), Aruba, 0.0));
         }
 
         [Test]
         public void MissingProperty_Token_SkipsWithNull()
         {
-            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("'{missing}'"), Aruba),
+            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("'{missing}'"), Aruba, 0.0),
                 "an unknown token resolving to empty text must SKIP the feature (null), not emit a blank label");
         }
 
         [Test]
         public void MissingProperty_Expression_SkipsWithNull()
         {
-            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("['get','missing']"), Aruba),
+            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("['get','missing']"), Aruba, 0.0),
                 "a get on a missing property must SKIP the feature (null), not emit a blank label");
         }
 
         [Test]
         public void LiteralNoTokens_PassesThrough()
         {
-            Assert.AreEqual("Airport", SymbolStyle.TextFieldResolver.Resolve(Field("'Airport'"), Aruba));
+            Assert.AreEqual("Airport", SymbolStyle.TextFieldResolver.Resolve(Field("'Airport'"), Aruba, 0.0));
         }
 
         [Test]
         public void NullField_Skips()
         {
-            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(null, Aruba));
+            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(null, Aruba, 0.0));
+        }
+
+        [Test]
+        public void Expression_ZoomStep_EvaluatesAtTheGivenZoom_NotZero()
+        {
+            JsonValue step = Field("['step',['zoom'],'low',10,'high']");
+            Assert.AreEqual("low", SymbolStyle.TextFieldResolver.Resolve(step, Aruba, 0.0),
+                "below the first stop, zoom 0 reads the default output");
+            Assert.AreEqual("low", SymbolStyle.TextFieldResolver.Resolve(step, Aruba, 5.0),
+                "below the first stop, zoom 5 reads the same default output as zoom 0");
+            Assert.AreEqual("high", SymbolStyle.TextFieldResolver.Resolve(step, Aruba, 12.0),
+                "a text-field zoom step must read the CALLER's zoom, not always zoom 0");
         }
     }
 
@@ -2878,6 +2994,18 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
+        public void ParseDashArray_ZoomInterpolate_LerpsElementwise_NotColorCoerced()
+        {
+            // A 4-entry dash pattern also looks like an rgb()/rgba() colour; Ramps.Lerp must take the
+            // array branch first, or this silently draws solid (a non-array TryEvaluatePattern result).
+            var expr = DashExpr("[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2,1,2,1],10,[4,2,4,2]]");
+            bool ok = Line.LineDash.TryEvaluatePattern(expr, 5.0, out float4 packed, out int count);
+            Assert.IsTrue(ok, "a matching-length zoom-interpolated dash array must evaluate, not fall back to solid");
+            Assert.AreEqual(4, count);
+            Assert.AreEqual(new float4(3f, 1.5f, 3f, 1.5f), packed);
+        }
+
+        [Test]
         public void ParseDashArray_Null_ReturnsNull_AndEvaluatesToSolid()
         {
             Assert.That(Line.LineDash.ParseDashArray(null), Is.Null);
@@ -3108,13 +3236,13 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Token_SingleProperty_Resolves()
         {
-            Assert.AreEqual("marker", SymbolStyle.IconImageResolver.Resolve(Field("'{icon}'"), Marker));
+            Assert.AreEqual("marker", SymbolStyle.IconImageResolver.Resolve(Field("'{icon}'"), Marker, 0.0));
         }
 
         [Test]
         public void Expression_Get_Resolves()
         {
-            Assert.AreEqual("marker", SymbolStyle.IconImageResolver.Resolve(Field("['get','icon']"), Marker));
+            Assert.AreEqual("marker", SymbolStyle.IconImageResolver.Resolve(Field("['get','icon']"), Marker, 0.0));
         }
 
         [Test]
@@ -3122,40 +3250,52 @@ namespace MapRenderer.Tests.Style
         {
             // icon:2x absent → coalesce falls back to icon.
             Assert.AreEqual("star",
-                SymbolStyle.IconImageResolver.Resolve(Field("['coalesce',['get','icon:2x'],['get','icon']]"), Star));
+                SymbolStyle.IconImageResolver.Resolve(Field("['coalesce',['get','icon:2x'],['get','icon']]"), Star, 0.0));
         }
 
         [Test]
         public void UnknownToken_SkipsWithNull()
         {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("'{missing}'"), Marker),
+            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("'{missing}'"), Marker, 0.0),
                 "an unknown token resolving to empty text must SKIP the icon (null), not emit an empty name");
         }
 
         [Test]
         public void MissingProperty_Expression_SkipsWithNull()
         {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("['get','missing']"), Marker),
+            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("['get','missing']"), Marker, 0.0),
                 "a get on a missing property must SKIP the icon (null), not emit an empty name");
         }
 
         [Test]
         public void LiteralNoTokens_PassesThrough()
         {
-            Assert.AreEqual("pin", SymbolStyle.IconImageResolver.Resolve(Field("'pin'"), Marker));
+            Assert.AreEqual("pin", SymbolStyle.IconImageResolver.Resolve(Field("'pin'"), Marker, 0.0));
         }
 
         [Test]
         public void AbsentField_Skips()
         {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(null, Marker));
+            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(null, Marker, 0.0));
         }
 
         [Test]
         public void EmptyLiteral_Skips()
         {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("''"), Marker),
+            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("''"), Marker, 0.0),
                 "an empty/whitespace resolution must skip, mirroring TextFieldResolver");
+        }
+
+        [Test]
+        public void Expression_ZoomStep_EvaluatesAtTheGivenZoom_NotZero()
+        {
+            JsonValue step = Field("['step',['zoom'],'low-icon',10,'high-icon']");
+            Assert.AreEqual("low-icon", SymbolStyle.IconImageResolver.Resolve(step, Marker, 0.0),
+                "below the first stop, zoom 0 reads the default output");
+            Assert.AreEqual("low-icon", SymbolStyle.IconImageResolver.Resolve(step, Marker, 5.0),
+                "below the first stop, zoom 5 reads the same default output as zoom 0");
+            Assert.AreEqual("high-icon", SymbolStyle.IconImageResolver.Resolve(step, Marker, 12.0),
+                "an icon-image zoom step must read the CALLER's zoom, not always zoom 0");
         }
     }
 

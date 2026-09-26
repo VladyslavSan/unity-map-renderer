@@ -44,13 +44,13 @@ namespace MapRenderer.Tests
         {
             JsonValue expr = Field("['coalesce',['get','name:en'],['get','NAME']]");
             IFeature aruba = Feature(("NAME", "Aruba"));
-            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(expr, aruba), "fixture sanity");
+            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(expr, aruba, 0.0), "fixture sanity");
 
             JsonValue token = Field("'{NAME}'");
-            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(token, aruba), "fixture sanity");
+            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(token, aruba, 0.0), "fixture sanity");
 
-            double perCallToken = MeanAllocatedBytes(() => SymbolStyle.TextFieldResolver.Resolve(token, aruba));
-            double perCallExpression = MeanAllocatedBytes(() => SymbolStyle.TextFieldResolver.Resolve(expr, aruba));
+            double perCallToken = MeanAllocatedBytes(() => SymbolStyle.TextFieldResolver.Resolve(token, aruba, 0.0));
+            double perCallExpression = MeanAllocatedBytes(() => SymbolStyle.TextFieldResolver.Resolve(expr, aruba, 0.0));
 
             Assert.Less(perCallExpression, perCallToken + 96,
                 $"a memoized expression-form text-field must cost about the same per additional feature as " +
@@ -63,13 +63,13 @@ namespace MapRenderer.Tests
         {
             JsonValue expr = Field("['coalesce',['get','icon:2'],['get','icon']]");
             IFeature feature = Feature(("icon", "airport"));
-            Assert.AreEqual("airport", SymbolStyle.IconImageResolver.Resolve(expr, feature), "fixture sanity");
+            Assert.AreEqual("airport", SymbolStyle.IconImageResolver.Resolve(expr, feature, 0.0), "fixture sanity");
 
             JsonValue token = Field("'{icon}'");
-            Assert.AreEqual("airport", SymbolStyle.IconImageResolver.Resolve(token, feature), "fixture sanity");
+            Assert.AreEqual("airport", SymbolStyle.IconImageResolver.Resolve(token, feature, 0.0), "fixture sanity");
 
-            double perCallToken = MeanAllocatedBytes(() => SymbolStyle.IconImageResolver.Resolve(token, feature));
-            double perCallExpression = MeanAllocatedBytes(() => SymbolStyle.IconImageResolver.Resolve(expr, feature));
+            double perCallToken = MeanAllocatedBytes(() => SymbolStyle.IconImageResolver.Resolve(token, feature, 0.0));
+            double perCallExpression = MeanAllocatedBytes(() => SymbolStyle.IconImageResolver.Resolve(expr, feature, 0.0));
 
             Assert.Less(perCallExpression, perCallToken + 96,
                 $"a memoized expression-form icon-image must cost about the same per additional feature as " +

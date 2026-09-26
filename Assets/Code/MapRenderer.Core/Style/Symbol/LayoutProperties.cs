@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
@@ -18,8 +19,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// absent. Resolved per feature by <see cref="TextFieldResolver.Resolve"/> — NOT a scalar here.</summary>
         public JsonValue TextField { get; init; }
 
-        /// <summary>text-font: the font stack. Default <c>["Open Sans Regular", "Arial Unicode MS Regular"]</c> (spec).</summary>
-        public string[] TextFont { get; init; }
+        /// <summary>text-font: the font stack. Default <c>["Open Sans Regular", "Arial Unicode MS Regular"]</c>
+        /// (spec). Zoom-capable (constant or zoom expression); a data-driven expression degrades to the
+        /// default, since the font stack is resolved once per layer, not per feature.</summary>
+        public StyleProperty<string[]> TextFont { get; init; }
 
         /// <summary>text-size: glyph size in pixels. Default 16. Zoom-capable.</summary>
         public StyleProperty<float> TextSize { get; init; }
@@ -148,7 +151,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// ignored on a lone text symbol.</summary>
         public bool TextOptional { get; init; }
 
-        /// <summary>icon-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>
+        /// <summary>icon-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable. The spec's
+        /// "padding" type also allows a <c>[top,right,bottom,left]</c> array (1-4 entries); collision grows
+        /// the box by one isotropic value (<c>SymbolStagingMath</c>), so an array collapses to its largest
+        /// entry. True per-side collision needs a wider change.</summary>
         public StyleProperty<float> IconPadding { get; init; }
 
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
@@ -254,7 +260,8 @@ namespace MapRenderer.Core.Style.Symbol
                 TextOptional = layout?.Get(PropertyNames.TextOptional)?.AsBool(false) ?? false,
 
                 IconPadding = iconPaddingJson != null
-                    ? new StyleProperty<float>(iconPaddingJson, 2f, v => (float)v.AsNumber())
+                    ? new StyleProperty<float>(
+                        ExpressionParser.WrapBareArrayLiterals(iconPaddingJson), 2f, ProjectIconPadding)
                     : new StyleProperty<float>(2f),
             };
         }
@@ -262,13 +269,62 @@ namespace MapRenderer.Core.Style.Symbol
         // Spec default font stack when text-font is absent or malformed.
         private static readonly string[] DefaultFontStack = { "Open Sans Regular", "Arial Unicode MS Regular" };
 
-        private static string[] ParseFontStack(JsonValue json)
+        // A non-string item (["literal",[…]], a ["step",…] stop) is unambiguously an expression; an
+        // all-string array is ambiguous with a plain font-name list — see the fallback below.
+        private static StyleProperty<string[]> ParseFontStack(JsonValue json)
         {
-            if (json == null || !json.IsArray || json.Items.Count == 0) return DefaultFontStack;
+            if (json == null || !json.IsArray || json.Items.Count == 0)
+                return new StyleProperty<string[]>(DefaultFontStack);
+
+            bool isPlainNameArray = true;
+            for (int i = 0; i < json.Items.Count; i++)
+                if (json.Items[i].Kind != JsonKind.String) { isPlainNameArray = false; break; }
+
+            if (!isPlainNameArray)
+                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack);
+
+            // All-string items are ambiguous with a data-driven ["get","fontProp"]; try it as an expression
+            // first — a real font name is never a recognized operator, so a genuine array falls back below.
+            try
+            {
+                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack);
+            }
+            catch (ExpressionParseException)
+            {
+                return new StyleProperty<string[]>(ReadFontNames(json));
+            }
+        }
+
+        private static string[] ReadFontNames(JsonValue json)
+        {
             var result = new string[json.Items.Count];
             for (int i = 0; i < json.Items.Count; i++)
                 result[i] = json.Items[i].AsString(null);
             return result;
+        }
+
+        private static string[] ProjectFontStack(Value v)
+        {
+            IReadOnlyList<Value> items = v.AsArray();
+            var result = new string[items.Count];
+            for (int i = 0; i < items.Count; i++) result[i] = items[i].AsString();
+            return result;
+        }
+
+        // A number, or the spec's [top,right,bottom,left] array (1-4 entries); collapses to the largest of
+        // the first 4 entries — see IconPadding's doc for why collision wants one isotropic value.
+        private static float ProjectIconPadding(Value v)
+        {
+            if (v.Type != ValueType.Array) return (float)v.AsNumber();
+
+            IReadOnlyList<Value> items = v.AsArray();
+            if (items.Count == 0) return 2f;
+
+            float max = (float)items[0].AsNumber();
+            int count = math.min(items.Count, 4);
+            for (int i = 1; i < count; i++)
+                max = math.max(max, (float)items[i].AsNumber());
+            return max;
         }
 
         private static float2 ParseOffset(JsonValue json)

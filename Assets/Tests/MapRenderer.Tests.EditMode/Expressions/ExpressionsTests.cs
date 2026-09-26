@@ -551,6 +551,24 @@ namespace MapRenderer.Tests.Expressions
             Assert.Greater(v, 0.0);
         }
 
+        // ---- interpolate: number arrays -------------------------------------------------------------
+
+        [Test]
+        public void Interpolate_ThreeEntryNumberArray_LerpsElementwise_NotColorCoerced()
+        {
+            // A 3-number array ALSO looks like an rgb() triple; the array branch must win so this lerps
+            // element-wise instead of being coerced to a Color.
+            string e = "[\"interpolate\", [\"linear\"], 5, " +
+                       "0, [\"literal\", [0, 10, 20]], 10, [\"literal\", [10, 30, 40]]]";
+            Value v = Expr.Eval(e);
+            Assert.AreEqual(ExprValueType.Array, v.Type, "a number-array stop must stay an array");
+            var items = v.AsArray();
+            Assert.AreEqual(3, items.Count);
+            Assert.AreEqual(5.0, items[0].AsNumber(), 1e-9);
+            Assert.AreEqual(20.0, items[1].AsNumber(), 1e-9);
+            Assert.AreEqual(30.0, items[2].AsNumber(), 1e-9);
+        }
+
         // ---- interpolate: colors (default = premultiplied-alpha sRGB) ----------------------------
 
         [Test]
