@@ -1684,7 +1684,9 @@ namespace MapRenderer.Tests.Tiles
                 // held in flight from the moment it is kicked.
                 view.TileManager.MeshBuildGateForTest = meshGate;
 
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle());
+                // Inline decode: the kick drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 int kickTick = -1, tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
@@ -1794,7 +1796,9 @@ namespace MapRenderer.Tests.Tiles
                 var spy    = new RecordingWorkScheduler(new InlineWorkScheduler());
                 view.TileManager.WorkScheduler = spy;
 
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle());
+                // Inline decode: the kick drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 int kickTick = -1, tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
@@ -1871,7 +1875,11 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void ReleasedMidFlight_Prologue_StashesInThePen_ThenDrainsOnceTheWorkerCompletes()
         {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            byte[] bytes  = SampleTileFixture.Bytes();
+            bool   panned = false;
+            var src = TestDataSource.FromFetch(_ => UniTask.FromResult(Volatile.Read(ref panned)
+                ? TileResponse.Absent(TileEncoding.Mvt)
+                : new TileResponse(bytes, TileEncoding.Mvt)));
             var go = Track(new GameObject("SourceTileGraphBuild_D_Prologue"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
@@ -1894,7 +1902,9 @@ namespace MapRenderer.Tests.Tiles
 
                 view.TileManager.MeshBuildGateForTest = meshGate; // armed BEFORE any kick
 
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
+                // Inline decode: this LateUpdate-only drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 for (int f = 0; f < 3000 && view.CaptureTelemetry().PrologueInFlight < 1; f++)
                     view.LateUpdate();
@@ -1903,6 +1913,9 @@ namespace MapRenderer.Tests.Tiles
 
                 // Evict while the prologue is gated shut. Bounded pump, not one tick: eviction can miss the
                 // first LateUpdate() after the pan, and the gate stays held throughout.
+                // The post-pan cover is served absent, so only the released tiles build and the drain below
+                // cannot exit on, or wait for, a post-pan tile.
+                Volatile.Write(ref panned, true);
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 for (int f = 0; f < 3000 && view.ReleasedMidFlightCount() == 0; f++)
                     view.LateUpdate();
@@ -1971,7 +1984,11 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void ReleasedMidFlight_Measure_StashesInThePen_ThenDrainsOnceTheDelayJobCompletes()
         {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            byte[] bytes  = SampleTileFixture.Bytes();
+            bool   panned = false;
+            var src = TestDataSource.FromFetch(_ => UniTask.FromResult(Volatile.Read(ref panned)
+                ? TileResponse.Absent(TileEncoding.Mvt)
+                : new TileResponse(bytes, TileEncoding.Mvt)));
             var go = Track(new GameObject("SourceTileGraphBuild_D_Measure"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
@@ -1998,7 +2015,9 @@ namespace MapRenderer.Tests.Tiles
                 view.TileManager.GraphDepsForTest = delayHandle;
                 view.TileManager.WorkScheduler     = new InlineWorkScheduler();
 
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
+                // Inline decode: this LateUpdate-only drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
                     view.LateUpdate();
@@ -2007,6 +2026,9 @@ namespace MapRenderer.Tests.Tiles
 
                 // Bounded pump, not a single tick — see the Prologue case's own comment on why (observed
                 // flaky at one tick). The gate stays held throughout: nothing here lets the measure job proceed.
+                // The post-pan cover is served absent, so only the released tiles build and the drain below
+                // cannot exit on, or wait for, a post-pan tile.
+                Volatile.Write(ref panned, true);
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 for (int f = 0; f < 3000 && view.ReleasedMidFlightCount() == 0; f++)
                     view.LateUpdate();
@@ -2045,6 +2067,14 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
+        /// <summary>True when at least one tile is pending and every pending tile's write step is complete
+        /// but unconsumed. Then nothing a release parks in the pen is still in flight.</summary>
+        private static bool EveryPendingTileParkedAtWrite(MapView view)
+        {
+            var telemetry = view.CaptureTelemetry();
+            return telemetry.ConsumeBacklog >= 1 && telemetry.ConsumeBacklog == telemetry.PendingTileCount;
+        }
+
         /// <summary>
         /// Case 3 (Write): a tile released once its WRITE step is COMPLETE but UNCONSUMED
         /// (<c>MaxConsumesPerTick = 0</c>), which <c>RenderTeardownRecord</c> also pens. The handle is complete
@@ -2079,20 +2109,22 @@ namespace MapRenderer.Tests.Tiles
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
 
-                // Pump until the write step is complete but unconsumed — ConsumeBacklog sees it.
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().ConsumeBacklog < 1; f++)
+                // Pump until EVERY pending tile is write-complete: a tile released mid-step parks an incomplete
+                // graph, and the tick-bounded drain below cannot wait for its job.
+                for (int f = 0; f < 3000 && !EveryPendingTileParkedAtWrite(view); f++)
                 {
                     view.AwaitInFlightMeshBuilds();
                     view.LateUpdate();
                 }
-                Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, 1,
-                    "drive precondition: the tile's write step must be complete but unconsumed before the pan.");
+                Assert.IsTrue(EveryPendingTileParkedAtWrite(view),
+                    "drive precondition: every pending tile's write step must be complete but unconsumed before the pan.");
                 Assert.Greater(MeshDataPayload.DebugLiveAllocCount, payloadBaseline,
                     "non-vacuous precondition: the completed write must hold a real allocated payload.");
 
                 Volatile.Write(ref panned, true);
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.LateUpdate();
+                Assert.AreEqual(0, view.ReleasedMidFlightCount(), "every penned graph must be complete at release");
 
                 // Alone this holds even without eviction. Paired with the AreEqual below it is sound: with
                 // consume blocked, an un-evicted graph has no path to disposal and fails there.
@@ -2149,19 +2181,20 @@ namespace MapRenderer.Tests.Tiles
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
 
-                // Pump until the write step is complete but unconsumed — same precondition as the Write case.
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().ConsumeBacklog < 1; f++)
+                // Pump until EVERY pending tile is write-complete — same precondition as the Write case.
+                for (int f = 0; f < 3000 && !EveryPendingTileParkedAtWrite(view); f++)
                 {
                     view.AwaitInFlightMeshBuilds();
                     view.LateUpdate();
                 }
-                Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, 1,
-                    "drive precondition: the tile's write step must be complete but unconsumed " +
+                Assert.IsTrue(EveryPendingTileParkedAtWrite(view),
+                    "drive precondition: every pending tile's write step must be complete but unconsumed " +
                     "before eviction.");
 
                 // Evict via the RenderTeardownRecord funnel with ZERO replacement sources, so nothing is
                 // scheduled again for the rest of this test.
                 view.TileManager.SetSources(Array.Empty<TileManager.SourceSpec>(), view.Config.Backend);
+                Assert.AreEqual(0, view.ReleasedMidFlightCount(), "every penned graph must be complete at release");
 
                 Assert.Greater(TileBuildGraph.DebugLiveCount, graphBaseline,
                     "positive control: the evicted graph must still be LIVE right after eviction — the pen " +
@@ -2217,7 +2250,9 @@ namespace MapRenderer.Tests.Tiles
                 view.TileManager.GraphDepsForTest = delayHandle;
                 view.TileManager.WorkScheduler     = new InlineWorkScheduler();
 
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle());
+                // Inline decode: this LateUpdate-only drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
                     view.LateUpdate();
@@ -2494,7 +2529,9 @@ namespace MapRenderer.Tests.Tiles
                 // prologue gets no wall-clock and the bounded loop can exhaust before three land.
                 view.TileManager.WorkScheduler = new InlineWorkScheduler();
 
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
+                // Inline decode, for the same reason: a ThreadPool decode can land after the loop exhausts.
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 // Gate shut — held tiles pile up in MEASURE instead of racing through it. No Await/Drain
                 // while the gate holds a graph step; a plain bounded LateUpdate()-only pump.
@@ -2603,7 +2640,9 @@ namespace MapRenderer.Tests.Tiles
                 long payloadBaseline = MeshDataPayload.DebugLiveAllocCount;
                 long wallsBaseline   = StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated;
 
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: MixedStyle());
+                // Inline decode: the kick drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: MixedStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 int kickTick = -1, tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)

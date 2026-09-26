@@ -1536,7 +1536,9 @@ namespace MapRenderer.Tests.Tiles
                 var spy = new RecordingWorkScheduler(new InlineWorkScheduler());
                 view.TileManager.WorkScheduler = spy;
 
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle());
+                // Inline decode: this LateUpdate-only drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 int kickTick = -1, tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
@@ -1600,7 +1602,9 @@ namespace MapRenderer.Tests.Tiles
             {
                 long payloadBaseline = MeshDataPayload.DebugLiveAllocCount;
 
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle());
+                // Inline decode: the kick drive never Awaits, so a ThreadPool decode can outlast it.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 int kickTick = -1, tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
