@@ -24,10 +24,10 @@
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Tests.Style; // SymbolTestFixtures lives in the Style test folder
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using System;
 using System.Collections.Generic;
 using System.IO;

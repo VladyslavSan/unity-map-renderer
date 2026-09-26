@@ -15,9 +15,9 @@ using MapRenderer.Unity.Jobs.Lines;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile.Processing;
-using Fill = MapRenderer.Core.Style.Fill;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
-using Line = MapRenderer.Core.Style.Line;
+using Fill = MapRenderer.Unity.Style.Fill;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
+using Line = MapRenderer.Unity.Style.Line;
 
 namespace MapRenderer.Tests
 {

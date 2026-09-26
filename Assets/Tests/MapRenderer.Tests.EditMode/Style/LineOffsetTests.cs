@@ -1,6 +1,6 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
-// Non-obvious why: this is its own file because `using MapRenderer.Core.Style.Line;` brings a second
+// Non-obvious why: this is its own file because `using MapRenderer.Unity.Style.Line;` brings a second
 // `StyleLayer` into scope, which collides with the bare one in StyleTests.cs (CS0104).
 
 using System;
@@ -9,8 +9,8 @@ using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Style;
-using MapRenderer.Core.Style.Line;
+using MapRenderer.Unity.Style;
+using MapRenderer.Unity.Style.Line;
 
 namespace MapRenderer.Tests.Style
 {

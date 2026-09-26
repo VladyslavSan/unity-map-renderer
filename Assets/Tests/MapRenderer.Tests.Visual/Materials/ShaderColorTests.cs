@@ -11,12 +11,12 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using Unity.Mathematics;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using Color = UnityEngine.Color;
-using Line = MapRenderer.Core.Style.Line;
-using Fill = MapRenderer.Core.Style.Fill;
+using Line = MapRenderer.Unity.Style.Line;
+using Fill = MapRenderer.Unity.Style.Fill;
 
 namespace MapRenderer.Tests.Visual
 {

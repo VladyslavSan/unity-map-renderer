@@ -10,7 +10,7 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Jobs.Mvt;
@@ -18,7 +18,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests; // TestGlyphSource
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests.Text.Placement
 {

@@ -27,7 +27,7 @@ using MapRenderer.Core.Expressions;
 using ExprValueType = MapRenderer.Core.Expressions.ValueType;
 using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests.Expressions

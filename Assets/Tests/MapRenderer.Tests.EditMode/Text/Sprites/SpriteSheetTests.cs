@@ -12,10 +12,10 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using System;
 using System.IO;
 using Unity.Mathematics;
@@ -87,7 +87,7 @@ namespace MapRenderer.Tests.Text.Sprites
                     "the fetched sheet must reach SpriteAtlas — that is what RenderLayerSet.SetSprites pushes " +
                     "to the fill layers.");
                 Assert.IsTrue(
-                    MapRenderer.Core.Style.Fill.FillPattern.TryResolve("marker", subsystem.SpriteAtlas, out _),
+                    MapRenderer.Unity.Style.Fill.FillPattern.TryResolve("marker", subsystem.SpriteAtlas, out _),
                     "the fixture sheet's 'marker' sprite must resolve through the delivered atlas");
             }
         }

@@ -576,7 +576,7 @@ snapshot per tile build, on the load path.
 `Processing/ISymbolTileWorkerPass` (`RunWorkerAndHandoff`).
 `MapRenderer.Unity/Rendering/Map/`: `MapView` (`SetStyle`'s two arms, `LayerNumbering`, `CommitProbe`,
 `_symbolRenderLayers`), `MapViewConfig` (the caps, `FillTileBufferClip`, `MaterialSet`).
-`MapRenderer.Unity/Rendering/Style/`: `RenderLayerSet` (`Build`, `TryRestyleInPlace`, `ApplyZoom`,
+`MapRenderer.Unity/Rendering/Layers/`: `RenderLayerSet` (`Build`, `TryRestyleInPlace`, `ApplyZoom`,
 `AdvanceFade`), `TombstoneRenderLayer`, `SurvivingLayerGate`, `RenderLayerFactory` (`Create`,
 `TryGetFetchSource`), `LayerSkipReason`, `ZoomStyleApplier` (`BindOpacity`, `EffectiveOpacityIsZero`,
 `VisibleOpacityEpsilon`), `LayerDrawOrder.QueueFor`, `IFadeableRenderLayer`,

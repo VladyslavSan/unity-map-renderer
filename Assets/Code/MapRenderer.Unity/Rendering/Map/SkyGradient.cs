@@ -2,9 +2,9 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Common;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using SkyPropertyId = MapRenderer.Unity.Rendering.ShaderProperties.Sky.PropertyId;
 
 namespace MapRenderer.Unity.Rendering.Map

@@ -13,7 +13,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using CameraProperties = MapRenderer.Core.Geo.CameraProperties;
@@ -24,11 +24,11 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Common;
 using Unity.Collections;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using Color = UnityEngine.Color;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.View;
 
 namespace MapRenderer.Tests.Text.Placement

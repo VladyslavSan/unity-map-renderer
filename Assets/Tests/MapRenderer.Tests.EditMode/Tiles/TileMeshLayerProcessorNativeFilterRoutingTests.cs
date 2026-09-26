@@ -11,14 +11,14 @@ using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Expressions;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Tests;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Tests.Tiles

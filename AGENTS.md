@@ -48,7 +48,7 @@ produced the first one.
 - `Assets/Code/MapRenderer.Unity/` — **the product**: MonoBehaviours, mesh building, rendering glue; `Jobs/` holds
   the Burst + Collections jobs and anything naturally blittable.
 - `Assets/Code/MapRenderer.Core/` — **legacy, no new code**: engine-free tile math, geometry, earcut,
-  style/expression evaluation, text shaping that predates the rule.
+  expression evaluation, text shaping that predates the rule.
 - `Assets/Code/MapRenderer.App/` — **the product (composition root)**: `MapHost` + scene wiring, plus
   the dev-facing surfaces built on it (camera control, menus, diagnostics/telemetry) — not a place for
   renderer/mesh-building logic.

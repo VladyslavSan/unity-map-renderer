@@ -174,7 +174,7 @@ Deliberate, recorded deviations in the live tree. Each is intentional; none is a
 | site | deviation | why it stands |
 |---|---|---|
 | `MapTelemetryTests.cs` (PlayMode assembly) | a hand-written `ViewportPx / DevicePixelRatio`, bypassing R-7's single conversion (the EditMode file of the same name does not) | it is the **independent recompute a tooth exists to check**; routing it through the production conversion would make the test verify itself (design § "Rejected alternatives"). Test code, not a production path. |
-| `Core/Style/Line/LineOffset.cs` | a CPU mirror of the offset formula, un-converted | **zero production callers** (test-only); belongs to the separate test-only-production-code cleanup, not the DPR seam (design § "Rejected alternatives"). |
+| `Unity/Style/Line/LineOffset.cs` | a CPU mirror of the offset formula, un-converted | **zero production callers** (test-only); belongs to the separate test-only-production-code cleanup, not the DPR seam (design § "Rejected alternatives"). |
 | R-3, R-9 invariants held by argument | some are pinned by reasoning, not a tooth (design § "Invariants") | recorded so the gap is visible; each is safe by construction and its argument is stated in the design doc. |
 
 ---

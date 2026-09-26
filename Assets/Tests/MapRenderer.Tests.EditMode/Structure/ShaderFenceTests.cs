@@ -8,6 +8,7 @@
 //   ShaderStructureTests                   — fill/line shader pass attribute/keyword/render-state structure.
 //   FillBandAttributeTests                 — fill-band forward/depth pass vertex-attribute parity.
 //   CoreAssemblyBoundaryTests               — MapRenderer.Core stays engine-free; no UnityEngine/Unity.* crosses in.
+//   StyleModelAssemblyBoundaryTests         — the style model lives in MapRenderer.Unity, not Core.
 //   MdCitationFenceTests                   — every *.md citation in source resolves to a tracked file.
 //   PreparedKeyShapeStructureTests         — PreparedKey's recorded field-count shape.
 //   RenderLayerRegistryStructureTests      — RenderLayerFactory is the sole StyleLayer-subtype dispatch point.
@@ -647,10 +648,12 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void NoRawStringMaterialApiCalls_InUnityAssembly()
         {
-            // Flag any Set/Get(Float|Color|Vector|Int|Texture)(" or HasProperty(" call, including the
-            // Shader.*Global* forms (a typo'd global reads back 0 in silence). No file is excluded.
+            // Get/GetGlobal/HasProperty flag only a call with EXACTLY one string-literal argument (Unity's
+            // shape); Set/SetGlobal always takes two, so any string-opened Set call flags — arity is the tell.
             var badPattern = new Regex(
-                @"\.(Set|Get)(Global)?(Float|Color|Vector|Int|Texture)\s*\(\s*""|\.HasProperty\s*\(\s*""");
+                @"\.Get(Global)?(Float|Color|Vector|Int|Texture)\s*\(\s*""[^""]*""\s*\)" +
+                @"|\.Set(Global)?(Float|Color|Vector|Int|Texture)\s*\(\s*""" +
+                @"|\.HasProperty\s*\(\s*""[^""]*""\s*\)");
 
             var offenders = new List<string>();
             foreach (string file in Directory.GetFiles(UnityDir, "*.cs", SearchOption.AllDirectories))
@@ -1825,6 +1828,50 @@ namespace MapRenderer.Tests.Structure
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
+    // StyleModelAssemblyBoundaryTests — the style model lives in MapRenderer.Unity, not Core
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The style model and parser live in <c>MapRenderer.Unity</c> (namespace <c>MapRenderer.Unity.Style</c>),
+    /// not <c>MapRenderer.Core</c>. This pins both halves: the model is declared where the namespace says it
+    /// is, and no type reflected out of the Core assembly has a namespace with a <c>Style</c> segment.
+    /// </summary>
+    [TestFixture]
+    public class StyleModelAssemblyBoundaryTests
+    {
+        [Test]
+        public void StyleParser_IsDeclaredInMapRendererUnity_UnderTheStyleNamespace()
+        {
+            Type styleParser = typeof(MapRenderer.Unity.Style.StyleParser);
+            Assert.AreEqual("MapRenderer.Unity.Style", styleParser.Namespace,
+                "StyleParser must be declared in the MapRenderer.Unity.Style namespace.");
+            Assert.AreEqual(
+                typeof(MapRenderer.Unity.Rendering.Tile.Processing.ITileFeatureSource).Assembly,
+                styleParser.Assembly,
+                "StyleParser must live in the MapRenderer.Unity assembly, alongside the rest of the product.");
+        }
+
+        [Test]
+        public void NoTypeInMapRendererCore_HasANamespaceWithAStyleSegment()
+        {
+            Assembly coreAssembly = typeof(MapRenderer.Core.Geo.GeoCoordinate).Assembly;
+            Type[] coreTypes = coreAssembly.GetTypes();
+            Assert.Greater(coreTypes.Length, 100,
+                "precondition: the Core assembly must reflect a real corpus (>100 types); an empty or wrong " +
+                "assembly would report 'no offenders' just as loudly");
+
+            List<string> offenders = coreTypes
+                .Where(t => t.Namespace != null && t.Namespace.Split('.').Contains("Style"))
+                .Select(t => t.FullName)
+                .ToList();
+
+            Assert.IsEmpty(offenders,
+                "no type under MapRenderer.Core may have a namespace with a 'Style' segment — the style " +
+                $"model lives in MapRenderer.Unity. Offenders: {string.Join(", ", offenders)}");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
     // MdCitationFenceTests — every *.md citation in source resolves to a tracked file
     // ───────────────────────────────────────────────────────────────────────────────────
 
@@ -2012,7 +2059,7 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <c>RenderLayerFactory</c> is the ONE registry mapping a <see cref="MapRenderer.Core.Style.StyleLayer"/>
+    /// <c>RenderLayerFactory</c> is the ONE registry mapping a <see cref="MapRenderer.Unity.Style.StyleLayer"/>
     /// subtype to its render layer. A grep guard: neither <c>MapView</c> nor <c>SymbolSubsystem</c> may
     /// re-dispatch on a <c>StyleLayer</c> subtype; they read the built <c>RenderLayerSet</c> instead.
     /// </summary>
@@ -2059,7 +2106,7 @@ namespace MapRenderer.Tests.Structure
         public void BackgroundRenderLayer_HasNoMercatorVisibilityGate()
         {
             string file = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Style", "BackgroundRenderLayer.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Layers", "BackgroundRenderLayer.cs");
             FileAssert.Exists(file);
             string text = File.ReadAllText(file);
             Assert.IsFalse(text.Contains("SetVisible("),

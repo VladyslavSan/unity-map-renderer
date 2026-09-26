@@ -4,7 +4,6 @@
 using System.Collections.Generic;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Core.Text.Placement
 {

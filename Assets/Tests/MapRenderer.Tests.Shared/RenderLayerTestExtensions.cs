@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Tests
 {

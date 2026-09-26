@@ -130,8 +130,8 @@ convention (native/decode code lives there), not an isolation boundary.
 
 | assembly | role | what belongs |
 |---|---|---|
-| `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination, and — under `Jobs/` — the native/decode code: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
-| `MapRenderer.Core` | **legacy — no new code** | engine-free code that predates this rule: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
+| `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination, the style model and parser (`Style/`), and — under `Jobs/` — the native/decode code: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
+| `MapRenderer.Core` | **legacy — no new code** | engine-free code that predates this rule: tile/Web-Mercator math, geometry, earcut, expression evaluation, text shaping |
 | `MapRenderer.App` | **the product** | the composition root (`MapHost`, scene wiring) plus the dev-facing surfaces built on it — camera control, menus, diagnostics/telemetry panels |
 | `MapRenderer.Tests.EditMode` | test runner | headless EditMode tests (the bulk of the gate, `./Tools/run-tests.sh`) |
 | `MapRenderer.Tests.PlayMode` | test runner | PlayMode tests (multi-frame/async behaviour EditMode can't exercise); the same gate runs them |

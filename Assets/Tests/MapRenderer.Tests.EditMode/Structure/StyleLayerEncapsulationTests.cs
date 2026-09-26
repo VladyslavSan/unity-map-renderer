@@ -3,7 +3,7 @@
 
 using System.Reflection;
 using NUnit.Framework;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 
 namespace MapRenderer.Tests.Style
 {

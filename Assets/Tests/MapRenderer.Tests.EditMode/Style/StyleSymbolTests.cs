@@ -15,16 +15,16 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Text;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 using MapRenderer.Core.Rendering;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
@@ -71,17 +71,17 @@ namespace MapRenderer.Tests.Style
             => new SymbolStyle.StyleLayer
             {
                 Id          = "labels",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
                 Paint       = TestStyle.SymbolPaint(paintJson),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"" + textField + "\"}"),
             };
 
-        private static List<SymbolStyle.SymbolFeature> Extract(SymbolStyle.StyleLayer layer)
+        private static List<SymbolFeature> Extract(SymbolStyle.StyleLayer layer)
         {
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, Zoom, projection, symbols);
             return symbols;
         }
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests.Style
             var layer = new SymbolStyle.StyleLayer
             {
                 Id          = "labels",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
                 Paint       = TestStyle.SymbolPaint(),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":[\"step\",[\"zoom\"],\"low\",5,\"high\"]}"),

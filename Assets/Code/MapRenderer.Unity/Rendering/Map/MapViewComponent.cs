@@ -2,7 +2,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -122,8 +122,8 @@ namespace MapRenderer.Unity.Rendering.Map
         private void OnDestroy() => Teardown();
 
         // ── Internal test reads (forwarded so MapViewTestExtensions stays unchanged) ─────────────
-        internal Tile.TileManager     TileManager => View?.TileManager;
-        internal Style.RenderLayerSet Layers      => View?.Layers;
-        internal string               StyleId     => View?.StyleId;
+        internal Tile.TileManager                TileManager => View?.TileManager;
+        internal Rendering.Layers.RenderLayerSet Layers      => View?.Layers;
+        internal string                          StyleId     => View?.StyleId;
     }
 }

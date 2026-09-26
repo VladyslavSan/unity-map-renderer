@@ -7,14 +7,14 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Lines;
 using MapRenderer.Unity.Jobs.Tiles;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile.Processing;
-using Line = MapRenderer.Core.Style.Line;
+using Line = MapRenderer.Unity.Style.Line;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
                                                         // 'Color' ambiguous with UnityEngine's

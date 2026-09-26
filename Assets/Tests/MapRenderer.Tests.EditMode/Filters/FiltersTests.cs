@@ -20,7 +20,7 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Expressions;

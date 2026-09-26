@@ -6,7 +6,7 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {

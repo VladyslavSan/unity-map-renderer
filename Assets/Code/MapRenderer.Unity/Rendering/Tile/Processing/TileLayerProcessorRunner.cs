@@ -1,6 +1,6 @@
 using System.Threading;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Jobs.Tiles;
 

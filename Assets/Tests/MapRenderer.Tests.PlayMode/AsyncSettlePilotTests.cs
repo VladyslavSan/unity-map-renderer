@@ -3,7 +3,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.Async

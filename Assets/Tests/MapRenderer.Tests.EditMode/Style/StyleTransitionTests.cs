@@ -14,10 +14,10 @@ using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Tiles;      // IDecodedTile
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 using System.Collections.Generic;
@@ -638,8 +638,8 @@ namespace MapRenderer.Tests.Style
         {
             using var set = BuildTwoLayerSet();
             Assert.AreEqual(2, set.Count, "Expected two render layers (one fill, one line).");
-            Assert.IsInstanceOf<MapRenderer.Core.Style.Fill.StyleLayer>(set[0].StyleLayer, "Layer 0 is the fill.");
-            Assert.IsInstanceOf<MapRenderer.Core.Style.Line.StyleLayer>(set[1].StyleLayer, "Layer 1 is the line.");
+            Assert.IsInstanceOf<MapRenderer.Unity.Style.Fill.StyleLayer>(set[0].StyleLayer, "Layer 0 is the fill.");
+            Assert.IsInstanceOf<MapRenderer.Unity.Style.Line.StyleLayer>(set[1].StyleLayer, "Layer 1 is the line.");
 
             Material m0 = set[0].Material;
             Material m1 = set[1].Material;

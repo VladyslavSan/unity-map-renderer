@@ -2,7 +2,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
     /// A style source's declared `bounds` (Style Spec [west, south, east, north], degrees) — converted once
-    /// from Core's raw <c>double[]</c> at the <c>MapView.BuildSourceSpecs</c> wiring boundary and carried as
+    /// from the style parser's raw <c>double[]</c> at the <c>MapView.BuildSourceSpecs</c> wiring boundary and carried as
     /// a value type from there on. <see cref="HasBounds"/> false (the struct default) means no gate: every
     /// zoom-admitted tile passes.
     /// </summary>

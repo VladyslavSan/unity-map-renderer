@@ -10,7 +10,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Camera;
 using MapRenderer.Core.Text.Placement;
@@ -19,7 +19,7 @@ using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 // Aliased rather than imported wholesale: this file names the GeoJSON parse entry at exactly one site (the
 // geojson branch of BuildSourceSpecs) and nothing else here should reach for the rest of that namespace.
 using GeoJson = MapRenderer.Core.GeoJson;
@@ -148,12 +148,12 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>How long a restyled uniform binding eases from its old value to its new one. The ONLY
         /// source of the duration/delay: no style key is read.</summary>
-        public Style.StyleTransition StyleTransition { get; set; } = Style.StyleTransition.Default;
+        public Rendering.Layers.StyleTransition StyleTransition { get; set; } = Rendering.Layers.StyleTransition.Default;
 
         // Per-style-layer render bundles (fills + lines), built at SetStyle. Owns the materials.
         /// <summary>The per-style-layer render bundles owned by this view. <c>internal</c>: tests read counts
         /// via <c>MapViewTestExtensions</c> (InternalsVisibleTo).</summary>
-        internal Style.RenderLayerSet Layers { get; } = new Style.RenderLayerSet();
+        internal Rendering.Layers.RenderLayerSet Layers { get; } = new Rendering.Layers.RenderLayerSet();
 
         // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only Layers).
         internal readonly Tile.TileManager TileManager;
@@ -232,7 +232,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // The SymbolRenderLayer objects themselves (same walk as _symbolStyleLayers, same order) —
         // handed to SymbolPlacementSystem.Tick each frame so each layer's survivors draw with its own material/presenter.
-        private readonly List<Style.SymbolRenderLayer> _symbolRenderLayers = new List<Style.SymbolRenderLayer>();
+        private readonly List<Rendering.Layers.SymbolRenderLayer> _symbolRenderLayers = new List<Rendering.Layers.SymbolRenderLayer>();
 
         // Reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
         private readonly List<Tile.LoadedTileKey> _loadedTileKeys = new List<Tile.LoadedTileKey>();
@@ -261,7 +261,7 @@ namespace MapRenderer.Unity.Rendering.Map
             /// <summary>After the <see cref="_committedFillAntialiasing"/>/<see cref="_committedMaterials"/> memo
             /// write — the in-place gate's own memo must not outrun the build.</summary>
             MaterialMemoWritten,
-            /// <summary>After <see cref="Style.RenderLayerSet.Build"/> — leak baseline from here on.</summary>
+            /// <summary>After <see cref="Rendering.Layers.RenderLayerSet.Build"/> — leak baseline from here on.</summary>
             LayersBuilt,
             /// <summary>After the <see cref="Tile.TileManager.CurrentStyle"/> token write.</summary>
             StyleTokenWritten,
@@ -329,7 +329,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // See docs/tile-pipeline-design.md § "Partial-survival restyle".
             StyleDocument   previous   = _committedStyle; // null on the first load — inPlace is false, as it must be
             _committedStyle            = null;
-            Style.StyleTransition transition = StyleTransition;
+            Rendering.Layers.StyleTransition transition = StyleTransition;
             double          now        = NowSeconds;
             bool inPlace = previous != null
                         && _config.FillAntialiasing == _committedFillAntialiasing
@@ -357,7 +357,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
                 // The in-place arm skips Layers.Build, the style token, SymbolSubsystem.SetStyle and the symbol
                 // lists; see the same section.
-                Layers.ApplyZoom(new Style.StyleFrameInputs(
+                Layers.ApplyZoom(new Rendering.Layers.StyleFrameInputs(
                     Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
                 TileManager.PushLayerDrawGates(); // the restyle may have moved a layer's zoom range
                 _committedStyle = style; // the in-place patch completed — the gate may trust it again
@@ -379,14 +379,14 @@ namespace MapRenderer.Unity.Rendering.Map
             LogSkippedLayers(Layers.SkippedLayers); // once per style load, never per tile/frame
             // Non-obvious why: Build seeds px uniforms at ratio 1, and this async continuation can resume after this
             // frame's LateUpdate, so restyled layers would draw loaded tiles once at the wrong device-pixel ratio.
-            Layers.ApplyZoom(new Style.StyleFrameInputs(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
+            Layers.ApplyZoom(new Rendering.Layers.StyleFrameInputs(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
             TileManager.PushLayerDrawGates(); // fade advanced above; the gate must not lag it by a frame
             // Derive the symbol layers from the just-built set in one walk, filling two lists in the same order
             // so the subsystem's layer ordinal maps 1:1 to the SymbolRenderLayer that draws it.
             _symbolStyleLayers.Clear();
             _symbolRenderLayers.Clear();
             foreach (var layer in Layers.Layers)
-                if (layer is Style.SymbolRenderLayer s)
+                if (layer is Rendering.Layers.SymbolRenderLayer s)
                 {
                     _symbolStyleLayers.Add(s.SymbolLayer);
                     _symbolRenderLayers.Add(s);
@@ -407,21 +407,21 @@ namespace MapRenderer.Unity.Rendering.Map
         private Action RecordProbeOrNull()
             => CommitProbe != null ? () => CommitProbe(CommitPhase.SourcesTeardownRecord) : null;
 
-        /// <summary>Warns once, naming every layer <see cref="Style.RenderLayerSet.Build"/> skipped
+        /// <summary>Warns once, naming every layer <see cref="Rendering.Layers.RenderLayerSet.Build"/> skipped
         /// for a compatibility reason (unsupported kind / unconfigured material / unsupported filter). By-design
         /// skips stay silent:
-        /// <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/>, <see cref="Style.LayerSkipReason.Hidden"/>
-        /// and <see cref="Style.LayerSkipReason.FullyTransparent"/>. Internal so a test can exercise the
+        /// <see cref="Rendering.Layers.LayerSkipReason.GenuinelyUnpainted"/>, <see cref="Rendering.Layers.LayerSkipReason.Hidden"/>
+        /// and <see cref="Rendering.Layers.LayerSkipReason.FullyTransparent"/>. Internal so a test can exercise the
         /// suppression directly.</summary>
-        internal static void LogSkippedLayers(IReadOnlyList<Style.SkippedLayer> skipped)
+        internal static void LogSkippedLayers(IReadOnlyList<Rendering.Layers.SkippedLayer> skipped)
         {
             var problems = new List<string>();
             for (int i = 0; i < skipped.Count; i++)
             {
-                Style.SkippedLayer s = skipped[i];
-                if (s.Reason is Style.LayerSkipReason.GenuinelyUnpainted
-                             or Style.LayerSkipReason.Hidden
-                             or Style.LayerSkipReason.FullyTransparent) continue;
+                Rendering.Layers.SkippedLayer s = skipped[i];
+                if (s.Reason is Rendering.Layers.LayerSkipReason.GenuinelyUnpainted
+                             or Rendering.Layers.LayerSkipReason.Hidden
+                             or Rendering.Layers.LayerSkipReason.FullyTransparent) continue;
                 string detail = s.Detail != null ? $" — {s.Detail}" : "";
                 problems.Add($"'{s.Id}' ({s.RawType}): {s.Reason}{detail}");
             }
@@ -434,8 +434,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// folded into the cache token so a numbering shift (a skipped/added layer, from EITHER the style or a
         /// slot-dropping <c>MapMaterialSet</c> field) changes the token even under unchanged style content.
         /// <c>RenderLayerCompatibilitySummaryTests</c> pins that it folds the (index, id) PAIRS, not just
-        /// <see cref="Style.RenderLayerSet.Count"/> — why per-index not count is in <c>docs/tile-pipeline-design.md</c>.</summary>
-        internal static string LayerNumbering(Style.RenderLayerSet layers)
+        /// <see cref="Rendering.Layers.RenderLayerSet.Count"/> — why per-index not count is in <c>docs/tile-pipeline-design.md</c>.</summary>
+        internal static string LayerNumbering(Rendering.Layers.RenderLayerSet layers)
         {
             var sb = new StringBuilder();
             for (int li = 0; li < layers.Count; li++)
@@ -447,8 +447,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// Resolves each rendered source-id of <paramref name="style"/> into a
         /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
         /// fetch); a <c>url</c>-only source fetches its TileJSON once. A failed TileJSON skips that source only.
-        /// It runs before <see cref="Style.RenderLayerSet.Build"/>, so it walks the raw style layers through
-        /// <see cref="Style.RenderLayerFactory.TryGetFetchSource"/>, the one registry of fetching layers.
+        /// It runs before <see cref="Rendering.Layers.RenderLayerSet.Build"/>, so it walks the raw style layers through
+        /// <see cref="Rendering.Layers.RenderLayerFactory.TryGetFetchSource"/>, the one registry of fetching layers.
         /// </summary>
         internal async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
             StyleDocument style, CancellationToken ct)
@@ -462,7 +462,7 @@ namespace MapRenderer.Unity.Rendering.Map
             var ordered = new List<string>();
             foreach (var sl in style.Layers)
             {
-                if (!Style.RenderLayerFactory.TryGetFetchSource(sl, out string sid)) continue;
+                if (!Rendering.Layers.RenderLayerFactory.TryGetFetchSource(sl, out string sid)) continue;
                 if (seen.Add(sid)) ordered.Add(sid);
             }
 
@@ -544,9 +544,9 @@ namespace MapRenderer.Unity.Rendering.Map
 
                 string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
                 bool   tms      = def.Scheme == "tms";
-                // Validated against whichever JSON actually supplied `bounds` (TileJSON's, if resolved
-                // through one, else the style source's own) — and BEFORE the key, which is built from it.
-                Tile.GeoBounds bounds = ValidateBounds(resolvedTileJson?.Raw ?? def.Raw, def.Bounds, sid);
+                // def.Bounds/BoundsMalformed reflect whichever JSON supplied `bounds` (TileJSON or the
+                // source's own — SourceResolver.Resolve carries both), validated below before the key.
+                Tile.GeoBounds bounds = ValidateBounds(def.Bounds, def.BoundsMalformed, sid);
                 var            key    = Tile.TileManager.SourceKey.From(def, bounds);
 
                 // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource seam.
@@ -565,39 +565,12 @@ namespace MapRenderer.Unity.Rendering.Map
             return specs;
         }
 
-        /// <summary>
-        /// Validates a resolved <c>bounds</c> array against the JSON that actually supplied it, and converts
-        /// it to <see cref="Tile.GeoBounds"/> — the ONE site that turns Core's raw <c>double[]</c> into the
-        /// typed value carried from here on. Malformed (see `docs/tile-pipeline-design.md` for what counts
-        /// and why) warns once and returns <c>default</c> (no gate); an absent <c>bounds</c> key converts
-        /// <paramref name="parsedBounds"/> unchanged (the spec-default full-world array, which gates nothing).
-        /// </summary>
-        private static Tile.GeoBounds ValidateBounds(JsonValue rawHost, double[] parsedBounds, string sourceId)
+        /// <summary>Converts a resolved, already-validated <c>bounds</c> array to <see cref="Tile.GeoBounds"/>.
+        /// <paramref name="malformed"/> (<see cref="Style.SourceDefinition.BoundsMalformed"/>) is the
+        /// parser's verdict, read here rather than re-inspecting raw JSON. Malformed warns once and returns
+        /// <c>default</c> (no gate); otherwise <paramref name="parsedBounds"/> converts unchanged.</summary>
+        private static Tile.GeoBounds ValidateBounds(double[] parsedBounds, bool malformed, string sourceId)
         {
-            bool malformed = false;
-            if (rawHost != null && rawHost.TryGet("bounds", out JsonValue rawBounds))
-            {
-                malformed = !rawBounds.IsArray || rawBounds.Items.Count != 4;
-                if (!malformed)
-                    foreach (JsonValue item in rawBounds.Items)
-                        if (item.Kind != JsonKind.Number) { malformed = true; break; }
-            }
-
-            double west = 0.0, south = 0.0, east = 0.0, north = 0.0;
-            if (!malformed)
-            {
-                if (parsedBounds == null || parsedBounds.Length != 4)
-                {
-                    malformed = true; // defensive — StyleParser always supplies exactly 4 once past the check above
-                }
-                else
-                {
-                    west = parsedBounds[0]; south = parsedBounds[1]; east = parsedBounds[2]; north = parsedBounds[3];
-                    if (south > north || west < -180.0 || west > 180.0 || east < -180.0 || east > 180.0)
-                        malformed = true;
-                }
-            }
-
             if (malformed)
             {
                 Debug.LogWarning($"[MapView.SetStyle] source '{sourceId}' has a malformed bounds (need " +
@@ -606,7 +579,12 @@ namespace MapRenderer.Unity.Rendering.Map
                 return default;
             }
 
-            return new Tile.GeoBounds { West = west, South = south, East = east, North = north, HasBounds = true };
+            return new Tile.GeoBounds
+            {
+                West = parsedBounds[0], South = parsedBounds[1],
+                East = parsedBounds[2], North = parsedBounds[3],
+                HasBounds = true,
+            };
         }
 
         /// <summary>Joins every spec's <c>(SourceId, resolved SourceKey)</c> in order — the style-token
@@ -654,7 +632,7 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmApplyZoom.Auto())
             {
                 // StyleTransition is re-read every frame, so a live change takes effect without a restyle.
-                Layers.ApplyZoom(new Style.StyleFrameInputs(
+                Layers.ApplyZoom(new Rendering.Layers.StyleFrameInputs(
                     cameraProperties.Zoom, _config.DevicePixelRatio, NowSeconds, StyleTransition));
                 TileManager.PushLayerDrawGates();
             }

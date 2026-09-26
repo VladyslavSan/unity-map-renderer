@@ -20,17 +20,17 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
-using Line = MapRenderer.Core.Style.Line;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Line = MapRenderer.Unity.Style.Line;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests.Visual
 {

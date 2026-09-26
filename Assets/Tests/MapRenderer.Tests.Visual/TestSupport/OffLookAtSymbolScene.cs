@@ -26,7 +26,7 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Tests.Text.Placement;

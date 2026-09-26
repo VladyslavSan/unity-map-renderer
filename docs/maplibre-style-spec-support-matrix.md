@@ -8,7 +8,7 @@ renderer. Other docs point here. They do not keep their own copy.
 **How this was traced.** The spec surface comes from the public MapLibre style spec pages
 (maplibre.org/maplibre-style-spec: root, sources, layers, light, sky, projection, terrain, expressions).
 Each row was traced through the code, not read off the spec: where the key is parsed
-(`Assets/Code/MapRenderer.Core/Style/`), which code reads the parsed value, and whether that value reaches
+(`Assets/Code/MapRenderer.Unity/Style/`), which code reads the parsed value, and whether that value reaches
 rendered output. A key that survives only in the raw JSON (`StyleDocument.Root`, `StyleLayer.Raw`,
 `SourceDefinition.Raw`) is not support. When the code and a row disagree, the code is correct: trace the
 row again.

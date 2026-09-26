@@ -24,7 +24,7 @@ using UnityEngine;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
@@ -43,7 +43,7 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.App;
 using Unity.Collections;
 using Unity.Jobs;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
 using MapRenderer.Unity.View;
 using System;
@@ -52,7 +52,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
-using Fill = MapRenderer.Core.Style.Fill;
+using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Jobs.Mvt;
 using Object = UnityEngine.Object;
 
@@ -735,7 +735,7 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void Tooth_h_PartialTileEviction_NoLeak()
         {
-            long Live() => MapRenderer.Unity.Rendering.Style.MeshDataPayload.DebugLiveAllocCount;
+            long Live() => MapRenderer.Unity.Rendering.Layers.MeshDataPayload.DebugLiveAllocCount;
 
             long baseline = Live();
 

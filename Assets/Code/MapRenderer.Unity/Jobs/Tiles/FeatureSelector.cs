@@ -4,7 +4,7 @@ using Unity.Collections;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Expressions;
 
 namespace MapRenderer.Unity.Jobs.Tiles

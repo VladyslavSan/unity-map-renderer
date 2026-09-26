@@ -13,7 +13,7 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
@@ -26,7 +26,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests;
 using MapRenderer.Tests.Text.Placement; // BlockColumnHash
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests.Text
 {

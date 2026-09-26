@@ -15,22 +15,22 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
-using Background = MapRenderer.Core.Style.Background;
+using Background = MapRenderer.Unity.Style.Background;
 using MapRenderer.Unity.Jobs.Tiles;
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Tests.TestSupport;
-using Fill = MapRenderer.Core.Style.Fill;
-using MapRenderer.Unity.Rendering.Style;
+using Fill = MapRenderer.Unity.Style.Fill;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Tests.Style
 {
@@ -755,7 +755,7 @@ namespace MapRenderer.Tests.Style
     /// <summary>
     /// <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
     /// <see cref="SpriteAtlasView"/> resolves <c>icon-image</c> per feature and lays out an
-    /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolFeature"/> (<c>Kind == Icon</c>)
+    /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolFeature"/> (<c>Kind == Icon</c>)
     /// independently of the text path. Unity EditMode only: it drives a <c>TileGeometryBuffers</c> extraction.
     /// </summary>
     [TestFixture]
@@ -814,7 +814,7 @@ namespace MapRenderer.Tests.Style
             => new SymbolStyle.StyleLayer
             {
                 Id = "points",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout(layoutJson),
@@ -835,11 +835,11 @@ namespace MapRenderer.Tests.Style
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"icon-image\":\"star\"}");
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
             Assert.AreEqual(1, symbols.Count, "an icon-only feature must yield exactly one (icon) symbol");
-            SymbolStyle.SymbolFeature symbol = symbols[0];
+            SymbolFeature symbol = symbols[0];
             Assert.AreEqual(SymbolKind.Icon, symbol.Kind);
             Assert.IsNull(symbol.Text, "an icon symbol carries no text");
 
@@ -854,7 +854,7 @@ namespace MapRenderer.Tests.Style
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"does-not-exist\"}");
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             Assert.DoesNotThrow(() =>
                 SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas));
 
@@ -873,7 +873,7 @@ namespace MapRenderer.Tests.Style
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
             Assert.AreEqual(2, symbols.Count, "a feature with both text-field and icon-image yields two symbols");
@@ -904,7 +904,7 @@ namespace MapRenderer.Tests.Style
             var layer = PointLayer(
                 "{\"icon-image\":\"marker\",\"icon-size\":2,\"icon-offset\":[2,0],\"icon-anchor\":\"top-left\"}");
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
             Assert.AreEqual(1, symbols.Count);
@@ -919,10 +919,10 @@ namespace MapRenderer.Tests.Style
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
 
             // 5-arg call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
-            var preI3Style = new List<SymbolStyle.SymbolFeature>();
+            var preI3Style = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
 
-            var explicitNull = new List<SymbolStyle.SymbolFeature>();
+            var explicitNull = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), explicitNull, null);
 
             Assert.AreEqual(1, preI3Style.Count, "a null atlas never emits an icon symbol, even with icon-image set");
@@ -940,7 +940,7 @@ namespace MapRenderer.Tests.Style
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\"}"); // no icon-image at all
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
             Assert.AreEqual(1, symbols.Count, "an atlas being present doesn't manufacture icons the layer never asked for");
@@ -957,13 +957,13 @@ namespace MapRenderer.Tests.Style
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"icon-image\":[\"step\",[\"zoom\"],\"marker\",5,\"star\"]}");
 
-            var low = new List<SymbolStyle.SymbolFeature>();
+            var low = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), low, atlas);
             Assert.AreEqual(1, low.Count);
             AssertQuadEqual(IconQuadLayout.Layout(MarkerEntry, SheetSize, 1f, TextAnchor.Center, float2.zero),
                 low[0].IconQuad);
 
-            var high = new List<SymbolStyle.SymbolFeature>();
+            var high = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 8.0, new WebMercatorProjection(), high, atlas);
             Assert.AreEqual(1, high.Count);
             AssertQuadEqual(IconQuadLayout.Layout(StarEntry, SheetSize, 1f, TextAnchor.Center, float2.zero),
@@ -978,7 +978,7 @@ namespace MapRenderer.Tests.Style
             var layer = PointLayer(
                 "{\"icon-image\":\"marker\",\"icon-padding\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2],10,[8,16]]}");
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             Assert.DoesNotThrow(() =>
                 SymbolFeatureExtractor.Extract(layer, tile, TileId0, 5.0, new WebMercatorProjection(), symbols, atlas),
                 "a malformed zoom-interpolated icon-padding must not take out this tile's whole extraction");
@@ -1044,7 +1044,7 @@ namespace MapRenderer.Tests.Style
             => new SymbolStyle.StyleLayer
             {
                 Id = "labels",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"" + textField + "\"}"),
@@ -1057,7 +1057,7 @@ namespace MapRenderer.Tests.Style
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, symbols);
 
             // 250 centroids features, two with an empty NAME that "{NAME}" skips, so 248 symbols. The
@@ -1103,8 +1103,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void StyleLayer_IsVisibleAtZoom_MinInclusive_MaxExclusive_NullUnbounded()
         {
-            MapRenderer.Core.Style.StyleLayer L(double? min, double? max) =>
-                new SymbolStyle.StyleLayer { Id = "x", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, MinZoom = min, MaxZoom = max };
+            MapRenderer.Unity.Style.StyleLayer L(double? min, double? max) =>
+                new SymbolStyle.StyleLayer { Id = "x", LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol, MinZoom = min, MaxZoom = max };
 
             Assert.IsFalse(L(15.0, null).IsVisibleAtZoom(14.0), "below minzoom → hidden");
             Assert.IsTrue (L(15.0, null).IsVisibleAtZoom(15.0), "at minzoom → visible (inclusive)");
@@ -1125,11 +1125,11 @@ namespace MapRenderer.Tests.Style
             var projection = new WebMercatorProjection();
             var layer = new SymbolStyle.StyleLayer
             {
-                Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "centroids",
+                Id = "labels", LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol, SourceLayer = "centroids",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"), MinZoom = 15.0, // MapLibre-hidden at z14
             };
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, symbols);
             Assert.AreEqual(248, symbols.Count,
                 "a minzoom-15 layer must still EXTRACT at z14 (its symbols live in the store); display-time " +
@@ -1145,23 +1145,23 @@ namespace MapRenderer.Tests.Style
             SymbolStyle.StyleLayer Layer(string transform) => new SymbolStyle.StyleLayer
             {
                 Id = "labels",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-transform\":\"" + transform + "\"}"),
             };
 
-            var upper = new List<SymbolStyle.SymbolFeature>();
+            var upper = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(Layer("uppercase"), tile, FixtureTile, 0.0, projection, upper);
             Assert.AreEqual("ARUBA", upper[0].Text, "text-transform:uppercase must uppercase the resolved symbol");
 
-            var lower = new List<SymbolStyle.SymbolFeature>();
+            var lower = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(Layer("lowercase"), tile, FixtureTile, 0.0, projection, lower);
             Assert.AreEqual("aruba", lower[0].Text, "text-transform:lowercase must lowercase the resolved symbol");
 
             // Teeth: default (no transform) leaves the mixed-case source untouched — so the two above are
             // genuine transforms, not a fixture that happens to be already-cased.
-            var none = new List<SymbolStyle.SymbolFeature>();
+            var none = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, none);
             Assert.AreEqual("Aruba", none[0].Text, "no text-transform leaves the source casing as-is");
         }
@@ -1175,18 +1175,18 @@ namespace MapRenderer.Tests.Style
             SymbolStyle.StyleLayer LineLayer(string placement) => new SymbolStyle.StyleLayer
             {
                 Id = "lines",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
                 Paint = TestStyle.SymbolPaint(),
                 // Literal text-field so every line feature resolves a symbol regardless of its properties.
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"" + placement + "\"}"),
             };
 
-            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            var lineSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(LineLayer("line-center"), tile, FixtureTile, 0.0, projection, lineSymbols);
 
             Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
-            SymbolStyle.SymbolFeature first = lineSymbols[0];
+            SymbolFeature first = lineSymbols[0];
             Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.LineCenter, first.Placement);
             Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default (250) carried onto the line symbol");
             Assert.IsNotNull(first.PathRender, "a line symbol carries the projected path");
@@ -1206,10 +1206,10 @@ namespace MapRenderer.Tests.Style
 
             // A POINT-placement layer over the SAME line layer anchors each path at its mid arc-length (one
             // symbol per path) instead of skipping it outright.
-            var pointOverLines = new List<SymbolStyle.SymbolFeature>();
+            var pointOverLines = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
             Assert.Greater(pointOverLines.Count, 0, "Point placement anchors a LineString path at its mid arc-length");
-            foreach (SymbolStyle.SymbolFeature l in pointOverLines)
+            foreach (SymbolFeature l in pointOverLines)
             {
                 Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.Point, l.Placement, "a mid-arc anchor is Point-placed");
                 Assert.IsNull(l.PathRender, "a point-placed (mid-arc) symbol carries no curved path");
@@ -1219,7 +1219,7 @@ namespace MapRenderer.Tests.Style
         // ── text-letter-spacing on curved (along-line) text — UMR-227 part C ────────────────────────
 
         /// <summary>The extractor must evaluate <c>text-letter-spacing</c> at the BUILD zoom and stamp it
-        /// onto a CURVED line symbol's <see cref="SymbolStyle.SymbolFeature.LetterSpacingEm"/>. The builder
+        /// onto a CURVED line symbol's <see cref="SymbolFeature.LetterSpacingEm"/>. The builder
         /// wire that feeds this value into <c>CurvedTextLayout</c> is pinned separately by
         /// <c>StyledSymbolTileBuilderTests.Build_CurvedLineText_LetterSpacing_WidensConsecutiveArcCentersBy12PxPerGap</c>.
         /// RED against an extractor that never reads <c>text-letter-spacing</c> for the curved branch.</summary>
@@ -1232,18 +1232,18 @@ namespace MapRenderer.Tests.Style
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "lines",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout(
                     "{\"text-field\":\"AB\",\"symbol-placement\":\"line-center\",\"text-letter-spacing\":0.2}"),
             };
 
-            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            var lineSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, lineSymbols);
 
             Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
-            SymbolStyle.SymbolFeature first = lineSymbols[0];
+            SymbolFeature first = lineSymbols[0];
             Assert.AreEqual("AB", first.Text);
             Assert.AreEqual(0.2f, first.LetterSpacingEm, 1e-6f,
                 "the extractor must evaluate text-letter-spacing at the build zoom and stamp it onto the curved symbol");
@@ -1261,7 +1261,7 @@ namespace MapRenderer.Tests.Style
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "lines",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout(
@@ -1269,7 +1269,7 @@ namespace MapRenderer.Tests.Style
                     "\"text-letter-spacing\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,0,10,1]}"),
             };
 
-            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            var lineSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 5.0, projection, lineSymbols);
 
             Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
@@ -1289,13 +1289,13 @@ namespace MapRenderer.Tests.Style
             var lineLayer = new SymbolStyle.StyleLayer
             {
                 Id = "lines",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
             };
 
-            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            var lineSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(lineLayer, tile, FixtureTile, 0.0, projection, lineSymbols);
             Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
 
@@ -1340,17 +1340,17 @@ namespace MapRenderer.Tests.Style
             var lineLayer = new SymbolStyle.StyleLayer
             {
                 Id = "lines",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "lines",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
             };
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(lineLayer, tile, tileId, 0.0, projection, symbols);
 
             Assert.AreEqual(1, symbols.Count, "one line symbol for the single synthetic feature");
-            SymbolStyle.SymbolFeature symbol = symbols[0];
+            SymbolFeature symbol = symbols[0];
 
             // (a) Subdivision fired, off the chord.
             Assert.Greater(symbol.PathRender.Length, 2, "the globe must subdivide the 2-vertex line");
@@ -1432,14 +1432,14 @@ namespace MapRenderer.Tests.Style
             var pointLayer = new SymbolStyle.StyleLayer
             {
                 Id = "points",
-                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
                 Paint = TestStyle.SymbolPaint(),
                 // Literal text-field (no {} interpolation), because this feature carries no properties.
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\"}"),
             };
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, symbols);
 
             Assert.AreEqual(4, symbols.Count,
@@ -1465,7 +1465,7 @@ namespace MapRenderer.Tests.Style
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 CentroidsLayer(filterJson: "[\"==\",[\"get\",\"ABBREV\"],\"Afg.\"]"),
                 tile, FixtureTile, 0.0, projection, symbols);

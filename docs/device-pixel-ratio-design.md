@@ -287,7 +287,7 @@ row per property. A new px-valued property is added to the table, and the table 
   to check; sharing the production expression would make it verify itself. The single-home rule is therefore
   scoped to **production** sources, and the hand-written copies in test code stay.
 
-- **Converting `Core/Style/Line/LineOffset`.** It is a CPU mirror of the shader's offset formula with zero
+- **Converting `Unity/Style/Line/LineOffset`.** It is a CPU mirror of the shader's offset formula with zero
   production callers. Converting it would give a test-only path a production basis and imply a caller that
   does not exist; it belongs to the test-only-production-code cleanup, not to this seam.
 
@@ -392,7 +392,7 @@ single fallback), `FrustumTileSelector` (the selection zoom offset the `TilePixe
 `MapCamera.CurrentAltitudeMetres` (where the ratio enters the framing, once),
 `MapView.BuildTileSelectionConfig` (the cover framing), `MapView.SetStyle` (the post-build re-apply),
 `MapViewConfig.DevicePixelRatio` (the serialized ratio, unclamped at the field).
-`MapRenderer.Unity/Rendering/Style/`: `ZoomStyleApplier.BindDevicePixelFloat` / `BindDevicePixelVector` (the
+`MapRenderer.Unity/Rendering/Layers/`: `ZoomStyleApplier.BindDevicePixelFloat` / `BindDevicePixelVector` (the
 material-bound seam), `SymbolRenderLayer` (colour tints only — the halo is not bound here).
 `MapRenderer.Unity/Rendering/Materials/MaterialFactory` — the device-px binding call sites.
 `MapRenderer.Unity/Text/Placement/`: `SymbolPlacementSystem` (the per-Tick halo ratio read),
@@ -403,9 +403,9 @@ straddle pad, the hairline floor, `_Blur`), `Fill/Fill_VertexModify.hlsl` and `P
 (`MapPixelsToWorld`), `Symbol/Text/SymbolTextWorld_ForwardPass.hlsl` (the SDF coverage ramp and halo widen),
 `Symbol/Text/SymbolText_Input.hlsl` (`_ScreenParamsLogical` versus `_SdfAaDevicePx`).
 `MapRenderer.Unity/Jobs/Symbols/SymbolProjectionJob` — the logical-px placement input.
+`MapRenderer.Unity/Style/Fill/FillPattern.LogicalSizePixels`.
 `MapRenderer.Core/`: `Coordinates/WebMercator.TilePixelSize` / `GroundResolution` (the logical-pixel
 definition), `Coordinates/WebMercatorProjection` (the pixel↔ground service),
-`Text/Placement/SymbolStagingMath` / `SymbolBox` / `SymbolViewTransform` (the collision space),
-`Style/Fill/FillPattern.LogicalSizePixels`.
+`Text/Placement/SymbolStagingMath` / `SymbolBox` / `SymbolViewTransform` (the collision space).
 `MapRenderer.App/`: `MapHost.Start` (the open derivation, § "Open — where the ratio comes from"),
 `Controller` / `TouchController` (the interaction seams).

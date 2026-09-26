@@ -568,7 +568,7 @@ stream-write jobs, `MeshWriteOutput`.
 `BuildStep`, `TileManager.PumpPending` / `KickMeshBuild` / `KickSourcelessBackground` / `ReleaseTile`,
 `PendingDisposalQueue` (the pens), `Processing/TilePrologueOutput`, `Processing/TileDecodeDispatch`.
 `MapRenderer.Unity/Concurrency/`: `IWorkScheduler`, `WorkHandle`, `WorkSchedulerFactory`.
-`MapRenderer.Unity/Rendering/Style/MeshDataPayload` — the main-thread allocation boundary.
+`MapRenderer.Unity/Rendering/Layers/MeshDataPayload` — the main-thread allocation boundary.
 `MapRenderer.Unity/Text/Placement/SymbolPlacementSystem` — `ScheduleCollision`/`HarvestCollision`, the
 cross-frame exemplar.
 Teeth: `Tests.EditMode/Jobs/GraphDeterminismTests` (rule 3), `Tests.EditMode/Structure/StructureTests`'s

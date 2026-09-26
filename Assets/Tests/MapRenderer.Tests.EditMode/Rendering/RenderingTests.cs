@@ -26,14 +26,14 @@ using UnityEngine.Rendering;
 using UnityEngine.TestTools;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Backend;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Rendering.Materials;
@@ -42,10 +42,10 @@ using MapRenderer.Unity.Rendering.Map;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
-using Fill = MapRenderer.Core.Style.Fill;
-using Line = MapRenderer.Core.Style.Line;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
+using Fill = MapRenderer.Unity.Style.Fill;
+using Line = MapRenderer.Unity.Style.Line;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests.Rendering
 {

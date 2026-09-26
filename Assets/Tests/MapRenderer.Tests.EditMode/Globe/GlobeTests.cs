@@ -24,13 +24,13 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Unity.Jobs.Fill;
 using System.IO;
-using MapRenderer.Core.Style;
-using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Unity.Style;
+using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geometry;
-using LineStyleLayer = MapRenderer.Core.Style.Line.StyleLayer;
+using LineStyleLayer = MapRenderer.Unity.Style.Line.StyleLayer;
 using MapRenderer.Unity.View;
 
 

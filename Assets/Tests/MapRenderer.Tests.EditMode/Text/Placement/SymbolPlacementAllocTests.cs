@@ -18,16 +18,16 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Collections;
@@ -39,7 +39,7 @@ using System.Threading.Tasks;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Tests; // TestGlyphSource
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 using Unity.Collections.LowLevel.Unsafe;
@@ -1533,7 +1533,7 @@ namespace MapRenderer.Tests.Text.Placement
             var point = new double2(2000, 2000);
             var layer = new SymbolStyle.StyleLayer
             {
-                Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "points",
+                Id = "labels", LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol, SourceLayer = "points",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"]}"),
             };
@@ -1556,7 +1556,7 @@ namespace MapRenderer.Tests.Text.Placement
             var point = new double2(2000, 2000);
             var layer = new SymbolStyle.StyleLayer
             {
-                Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "points",
+                Id = "labels", LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol, SourceLayer = "points",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"],\"icon-image\":\"marker\"}"),
             };
@@ -1584,7 +1584,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var layer = new SymbolStyle.StyleLayer
             {
-                Id = "lines", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "roads",
+                Id = "lines", LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol, SourceLayer = "roads",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"],\"symbol-placement\":\"line-center\"}"),
             };
@@ -1614,7 +1614,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var layer = new SymbolStyle.StyleLayer
             {
-                Id = "lines", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "roads",
+                Id = "lines", LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol, SourceLayer = "roads",
                 Paint = TestStyle.SymbolPaint(),
                 // icon-rotation-alignment unset -> resolves auto -> map for line placement -> the P-B
                 // one-glyph curved-icon emit shape (mirrors IconSkirtCarrierChainTests.AlongLineIconLayer).

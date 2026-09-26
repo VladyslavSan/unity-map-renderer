@@ -4,7 +4,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
 using Unity.Mathematics;
 using GraphicsDeviceType = UnityEngine.Rendering.GraphicsDeviceType;
@@ -22,7 +22,7 @@ namespace MapRenderer.App
     /// input, and the Map reference of each dev surface in the scene; it never adds or gates a dev surface.
     /// <see cref="Start"/> is the runtime entry and finds the Main Camera via <c>Camera.main</c>.
     /// <see cref="Wire(GameObject, Camera)"/> is the static entry that EditMode tests drive (no file or HTTP
-    /// access). Supported layer types: <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerFactory"/>.
+    /// access). Supported layer types: <see cref="MapRenderer.Unity.Rendering.Layers.RenderLayerFactory"/>.
     /// </summary>
     [RequireComponent(typeof(MapViewComponent))]
     public sealed class MapHost : MonoBehaviour

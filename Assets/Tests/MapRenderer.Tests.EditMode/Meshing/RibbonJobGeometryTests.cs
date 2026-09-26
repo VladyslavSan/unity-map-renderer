@@ -20,8 +20,8 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Core.Style;
-using Line = MapRenderer.Core.Style.Line;
+using MapRenderer.Unity.Style;
+using Line = MapRenderer.Unity.Style.Line;
 using Unity.Mathematics;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Jobs.Geometry;
@@ -39,14 +39,14 @@ using MapRenderer.Unity.Rendering.Tile;
 using System.Threading;
 using Unity.Collections;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Core.Text;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests.Tiles;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Fill;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using Object = UnityEngine.Object;
 
 
@@ -2042,7 +2042,7 @@ namespace MapRenderer.Tests.Meshing
             public void CompleteOnMain(CancellationToken ct) { }
         }
 
-        private static MapRenderer.Core.Style.Fill.StyleLayer Fill(string id, string sourceLayer) => new MapRenderer.Core.Style.Fill.StyleLayer
+        private static MapRenderer.Unity.Style.Fill.StyleLayer Fill(string id, string sourceLayer) => new MapRenderer.Unity.Style.Fill.StyleLayer
         {
             Id = id, LayerType = StyleLayerType.Fill, Source = "s", SourceLayer = sourceLayer,
             Paint = TestStyle.FillPaint("{\"fill-color\":\"#ffffff\"}"),

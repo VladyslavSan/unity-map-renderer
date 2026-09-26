@@ -93,13 +93,14 @@ specific number; the file/folder/lane RULES are what does not drift.
 Three lanes. Take the **first** one whose entry condition holds.
 
 - **Fast lane — `Tools/core-tests`.** Entry condition: every type the file names comes from
-  `MapRenderer.Core`, the BCL, `NUnit`, or `Unity.Mathematics`.
+  `MapRenderer.Core`, `MapRenderer.Unity.Style` (the style model — it lives in `MapRenderer.Unity` but
+  stays engine-free, so the fast loop compiles it from there), the BCL, `NUnit`, or `Unity.Mathematics`.
   - Runs in about 0.1 s through `dotnet test`, with no Editor and no project lock. 104 files are in it.
   - It compiles the real `MapRenderer.Core` sources plus the EditMode test file **verbatim** — one source,
     two runners. `Unity.Mathematics` is a shim under `Tools/core-tests/Shim/`.
-  - `MapRenderer.Unity` (including its `Jobs` namespace), `Unity.Collections` and `UnityEngine` all
-    disqualify. `Unity.Collections` is the one people miss: `Filters/FeatureSelectorNativeFilterTests.cs`
-    names no `UnityEngine` type and is still engine-bound.
+  - `MapRenderer.Unity` outside its `Style` namespace (including `Jobs`), `Unity.Collections` and
+    `UnityEngine` all disqualify. `Unity.Collections` is the one people miss:
+    `Filters/FeatureSelectorNativeFilterTests.cs` names no `UnityEngine` type and is still engine-bound.
   - **The `<Compile Include>` entry in `Tools/core-tests/core-tests.csproj` moves in the SAME commit as
     the file.** Nothing tells you otherwise: the file compiles and passes in EditMode either way.
     `Expressions/EvalArgBuffersReclamationTests.cs` is engine-free, its `Core` dependency is already in the

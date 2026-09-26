@@ -7,7 +7,7 @@
 using System.Collections.Generic;
 using System.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using Unity.Mathematics;
 using UnityEngine;
 

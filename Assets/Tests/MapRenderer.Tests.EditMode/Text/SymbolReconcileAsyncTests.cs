@@ -36,7 +36,7 @@ using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Tile.Processing;
-using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Tests; // TestGlyphSource
 using MapRenderer.Core.Expressions;
@@ -45,24 +45,24 @@ using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Core.Json;
 using MapRenderer.Tests.TestSupport;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests.Text.Placement; // TestSymbolTileBuffer
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using System.Collections;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
-using Symbol = MapRenderer.Core.Style.Symbol;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 using System.Threading;
 using Unity.Collections;
 using MapRenderer.Tests.Jobs;
 using MapRenderer.Core.Text.Sprites;
 using Object = UnityEngine.Object;
-using StyleLayer = MapRenderer.Core.Style.StyleLayer;
+using StyleLayer = MapRenderer.Unity.Style.StyleLayer;
 
 
 namespace MapRenderer.Tests.Text
@@ -363,13 +363,13 @@ namespace MapRenderer.Tests.Text
         private static SymbolStyle.StyleLayer CentroidsLayer(string id, string fontName) => new SymbolStyle.StyleLayer
         {
             Id = id,
-            LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+            LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
             SourceLayer = "centroids",
             Paint = TestStyle.SymbolPaint(),
             Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + fontName + "\"]}"),
         };
 
-        private static SymbolStyle.SymbolFeature PointSymbol(string text) => new SymbolStyle.SymbolFeature
+        private static SymbolFeature PointSymbol(string text) => new SymbolFeature
         {
             Text = text,
             Placement = SymbolPlacement.Point,
@@ -436,10 +436,10 @@ namespace MapRenderer.Tests.Text
             // so code-unit-outer vs name-outer nesting produce genuinely different sequences (see doc above).
             var layer1 = new StyledSymbolTileBuilder.ExtractedLayer(
                 0, new FontStack { Names = new[] { "FontA", "FontB" } },
-                new List<SymbolStyle.SymbolFeature> { PointSymbol("Aب") });
+                new List<SymbolFeature> { PointSymbol("Aب") });
             var layer2 = new StyledSymbolTileBuilder.ExtractedLayer(
                 0, new FontStack { Names = new[] { "FontC" } },
-                new List<SymbolStyle.SymbolFeature> { PointSymbol("ب") });
+                new List<SymbolFeature> { PointSymbol("ب") });
             var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer1, layer2 };
 
             var ranges = new List<(string FontName, int RangeStart)>();
@@ -469,7 +469,7 @@ namespace MapRenderer.Tests.Text
             using var manager = new GlyphManager(source);
             var builder = new StyledSymbolTileBuilder(manager);
 
-            var symbols = new List<SymbolStyle.SymbolFeature> { PointSymbol("Aruba") };
+            var symbols = new List<SymbolFeature> { PointSymbol("Aruba") };
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(
                 0, new FontStack { Names = new[] { "LatinFont" } }, symbols);
             var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer };
@@ -554,16 +554,16 @@ namespace MapRenderer.Tests.Text
         private static SymbolStyle.StyleLayer CentroidsLayer() => new SymbolStyle.StyleLayer
         {
             Id          = "labels",
-            LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+            LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
             SourceLayer = "centroids",
             Paint       = TestStyle.SymbolPaint(),
             Layout      = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"),
         };
 
-        private static List<SymbolStyle.SymbolFeature> Extract(
+        private static List<SymbolFeature> Extract(
             SymbolStyle.StyleLayer layer, IDecodedTile tile, TileId callerSuppliedId)
         {
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, callerSuppliedId, 0.0, new WebMercatorProjection(), symbols);
             return symbols;
         }
@@ -582,8 +582,8 @@ namespace MapRenderer.Tests.Text
             MvtTile decodedHere  = TestDecodedTiles.Track(MvtDecoder.Decode(DecodedAt, bytes));
             MvtTile decodedThere = TestDecodedTiles.Track(MvtDecoder.Decode(WrongTile, bytes));
 
-            List<SymbolStyle.SymbolFeature> fromHere  = Extract(CentroidsLayer(), decodedHere,  DecodedAt);
-            List<SymbolStyle.SymbolFeature> fromThere = Extract(CentroidsLayer(), decodedThere, WrongTile);
+            List<SymbolFeature> fromHere  = Extract(CentroidsLayer(), decodedHere,  DecodedAt);
+            List<SymbolFeature> fromThere = Extract(CentroidsLayer(), decodedThere, WrongTile);
 
             // Anti-vacuity: the address must move BOTH the projected anchor and the packed TileKey, asserted
             // separately so one that stops depending on the address cannot hide behind the other.
@@ -595,7 +595,7 @@ namespace MapRenderer.Tests.Text
                 "precondition: the tile address must genuinely move the packed TileKey");
 
             // The tooth: same decoded tile (buffer stamped DecodedAt), a CORRUPTED caller-supplied address.
-            List<SymbolStyle.SymbolFeature> corruptedCaller = Extract(CentroidsLayer(), decodedHere, WrongTile);
+            List<SymbolFeature> corruptedCaller = Extract(CentroidsLayer(), decodedHere, WrongTile);
 
             Assert.AreEqual(fromHere.Count, corruptedCaller.Count);
             for (int i = 0; i < fromHere.Count; i++)
@@ -663,17 +663,17 @@ namespace MapRenderer.Tests.Text
             var layer = new SymbolStyle.StyleLayer
             {
                 Id          = "labels",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "pts",
                 Paint       = TestStyle.SymbolPaint(),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"X\"}"),
             };
 
-            List<SymbolStyle.SymbolFeature> honestSymbols = Extract(layer, real, DecodedAt);
+            List<SymbolFeature> honestSymbols = Extract(layer, real, DecodedAt);
             Assert.AreEqual(1, honestSymbols.Count, "precondition: the honest layer yields exactly one label");
 
             var lying = new SingleLayerTile(new ExtentMisreportingLayer(honest, misreportedExtent));
-            List<SymbolStyle.SymbolFeature> symbols = Extract(layer, lying, DecodedAt);
+            List<SymbolFeature> symbols = Extract(layer, lying, DecodedAt);
 
             Assert.AreEqual(1, symbols.Count,
                 "the extent must come from the BUFFER (4096), where the point is mid-tile. Read from the " +
@@ -734,7 +734,7 @@ namespace MapRenderer.Tests.Text
             var layer = new SymbolStyle.StyleLayer
             {
                 Id          = "labels",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "pts",
                 Paint       = TestStyle.SymbolPaint(),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"X\"}"),
@@ -742,7 +742,7 @@ namespace MapRenderer.Tests.Text
 
             // The defect shows as an out-of-range index; DoesNotThrow makes the failure name the property
             // instead of a bare stack trace.
-            List<SymbolStyle.SymbolFeature> symbols = null;
+            List<SymbolFeature> symbols = null;
             Assert.DoesNotThrow(() => symbols = Extract(layer, truncated, DecodedAt),
                 "the counting sort must be sized from geometry.FeatureCount — RingFeatureIdx's values index " +
                 "the buffer's OWN feature column, so sizing from Features.Count indexes ringStart out of " +
@@ -961,7 +961,7 @@ namespace MapRenderer.Tests.Text
                 geometry.Dispose();
             }
 
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(feature), SyntheticTileId, 0.0, new WebMercatorProjection(), symbols);
 
@@ -1020,7 +1020,7 @@ namespace MapRenderer.Tests.Text
                 geometry.Dispose();
             }
 
-            var oneSymbol = new List<SymbolStyle.SymbolFeature>();
+            var oneSymbol = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(single), SyntheticTileId, 0.0, new WebMercatorProjection(), oneSymbol);
             Assert.AreEqual(1, oneSymbol.Count,
@@ -1037,7 +1037,7 @@ namespace MapRenderer.Tests.Text
 
             // Control: a MultiPoint MoveTo of 3 emits 3 — "one symbol" above is the boundary value, not a
             // collapse.
-            var threeSymbols = new List<SymbolStyle.SymbolFeature>();
+            var threeSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(triple), SyntheticTileId, 0.0, new WebMercatorProjection(), threeSymbols);
             Assert.AreEqual(3, threeSymbols.Count,
@@ -1062,7 +1062,7 @@ namespace MapRenderer.Tests.Text
             AssertSingleRingSpan(twoPoint, 2);
             AssertSingleRingSpan(onePoint, 1);
 
-            var twoPointSymbols = new List<SymbolStyle.SymbolFeature>();
+            var twoPointSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 LineSymbolLayer(), TileOf(twoPoint), SyntheticTileId, 0.0, new WebMercatorProjection(),
                 twoPointSymbols);
@@ -1070,7 +1070,7 @@ namespace MapRenderer.Tests.Text
                 "a 2-point polyline has exactly one segment to place along — symbol's line filter is < 2, " +
                 "not fill's < 3, and moving it to < 3 would silently delete these symbols");
 
-            var onePointSymbols = new List<SymbolStyle.SymbolFeature>();
+            var onePointSymbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 LineSymbolLayer(), TileOf(onePoint), SyntheticTileId, 0.0, new WebMercatorProjection(),
                 onePointSymbols);
@@ -1097,7 +1097,7 @@ namespace MapRenderer.Tests.Text
                 "a zero-feature selection must return default(TileGeometryBuffers) — Dispose on it is a no-op");
             Assert.DoesNotThrow(() => empty.Dispose(), "Dispose on a default buffer early-returns");
 
-            var noneSelected = new List<SymbolStyle.SymbolFeature>();
+            var noneSelected = new List<SymbolFeature>();
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
                 PointSymbolLayer("[\"==\",\"nope\",\"nope\"]"), TileOf(anyPoint), SyntheticTileId, 0.0,
                 new WebMercatorProjection(), noneSelected));
@@ -1124,7 +1124,7 @@ namespace MapRenderer.Tests.Text
                 polyBuffer.Dispose();
             }
 
-            var polygonSymbols = new List<SymbolStyle.SymbolFeature>();
+            var polygonSymbols = new List<SymbolFeature>();
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(polygon), SyntheticTileId, 0.0, new WebMercatorProjection(),
                 polygonSymbols));
@@ -1149,7 +1149,7 @@ namespace MapRenderer.Tests.Text
                 nullBuffer.Dispose();
             }
 
-            var nullSymbols = new List<SymbolStyle.SymbolFeature>();
+            var nullSymbols = new List<SymbolFeature>();
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(nullGeometry), SyntheticTileId, 0.0, new WebMercatorProjection(),
                 nullSymbols));
@@ -1215,7 +1215,7 @@ namespace MapRenderer.Tests.Text
             => new SymbolStyle.StyleLayer
             {
                 Id          = "b4-point",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = sourceLayer,
                 Paint       = TestStyle.SymbolPaint(),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"),
@@ -1226,7 +1226,7 @@ namespace MapRenderer.Tests.Text
             => new SymbolStyle.StyleLayer
             {
                 Id          = "b4-line",
-                LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
                 SourceLayer = "probe",
                 Paint       = TestStyle.SymbolPaint(),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"symbol-placement\":\"line\",\"symbol-spacing\":1}"),
@@ -3086,8 +3086,8 @@ namespace MapRenderer.Tests.Text
                 "precondition: a Polygon must be SELECTED and interleaved, so the kind gate stays " +
                 "independently load-bearing");
 
-            List<SymbolStyle.SymbolFeature> shared  = Extract(layerFeatures, FilterJson);
-            List<SymbolStyle.SymbolFeature> control = Extract(SelectedOnlyLayer(layerFeatures), null);
+            List<SymbolFeature> shared  = Extract(layerFeatures, FilterJson);
+            List<SymbolFeature> control = Extract(SelectedOnlyLayer(layerFeatures), null);
 
             // ── Non-vacuity #3: the control is a real, multi-feature, multi-path extraction. A one-symbol or
             //    single-text control could not tell a permuted attribution from a correct one.
@@ -3104,8 +3104,8 @@ namespace MapRenderer.Tests.Text
 
             for (int i = 0; i < control.Count; i++)
             {
-                SymbolStyle.SymbolFeature e = control[i];
-                SymbolStyle.SymbolFeature a = shared[i];
+                SymbolFeature e = control[i];
+                SymbolFeature a = shared[i];
                 Assert.AreEqual(e.Text, a.Text,
                     $"label {i} TEXT — a mismatch is a path bucketed onto the wrong feature");
                 Assert.AreEqual(e.FeatureIndex, a.FeatureIndex,
@@ -3121,7 +3121,7 @@ namespace MapRenderer.Tests.Text
             // The FeatureIndex sequence is pinned absolutely as well as differentially: a control that had
             // itself drifted would make the comparison above agree on a wrong answer.
             var indices = new List<int>();
-            foreach (SymbolStyle.SymbolFeature symbol in shared) indices.Add(symbol.FeatureIndex);
+            foreach (SymbolFeature symbol in shared) indices.Add(symbol.FeatureIndex);
             CollectionAssert.AreEqual(new[] { 0, 1, 2, 3, 4 }, indices,
                 "FeatureIndex counts emitted labels 0..n-1 in emission order, per tile — never the source " +
                 "layer's feature ordinal, and never restarted per feature");
@@ -3151,10 +3151,10 @@ namespace MapRenderer.Tests.Text
         private static IReadOnlyList<IFeature> SelectedOnlyLayer(IReadOnlyList<IFeature> layerFeatures)
             => new List<IFeature> { layerFeatures[0], layerFeatures[2], layerFeatures[3], layerFeatures[5] };
 
-        private static List<SymbolStyle.SymbolFeature> Extract(IReadOnlyList<IFeature> features, string filterJson)
+        private static List<SymbolFeature> Extract(IReadOnlyList<IFeature> features, string filterJson)
         {
             var tile = TestDecodedTiles.Of("probe", Tile, features, Extent);
-            var symbols = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 StyleLayer(filterJson), tile, Tile, Zoom, new WebMercatorProjection(), symbols);
             return symbols;
@@ -3173,7 +3173,7 @@ namespace MapRenderer.Tests.Text
         private static SymbolStyle.StyleLayer StyleLayer(string filterJson) => new SymbolStyle.StyleLayer
         {
             Id          = "p2-symbol",
-            LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
+            LayerType   = MapRenderer.Unity.Style.StyleLayerType.Symbol,
             SourceLayer = "probe",
             Paint       = TestStyle.SymbolPaint(),
             Layout      = TestStyle.SymbolLayout(@"{""text-field"":""{cls}""}"),
@@ -3193,10 +3193,10 @@ namespace MapRenderer.Tests.Text
             return ordinals;
         }
 
-        private static int DistinctTexts(IReadOnlyList<SymbolStyle.SymbolFeature> symbols)
+        private static int DistinctTexts(IReadOnlyList<SymbolFeature> symbols)
         {
             var seen = new HashSet<string>();
-            foreach (SymbolStyle.SymbolFeature symbol in symbols) seen.Add(symbol.Text);
+            foreach (SymbolFeature symbol in symbols) seen.Add(symbol.Text);
             return seen.Count;
         }
     }

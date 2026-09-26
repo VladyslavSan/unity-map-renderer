@@ -5,7 +5,7 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Meshing
 {
@@ -31,7 +31,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
         /// <summary>Rents a pooled instance and resets it to this build's own inputs — the only construction
         /// path: a pooled class has no object-initializer bypass, so <see cref="LayerMeshBuildCounters.RecordRented"/>
-        /// is unconditional here — the caller (<see cref="Style.FillRenderLayer.BuildGraphRequest"/>) only
+        /// is unconditional here — the caller (<see cref="FillRenderLayer.BuildGraphRequest"/>) only
         /// reaches this once its own emptiness gate (<c>input.RingVisitOrder.IsCreated</c>) has already
         /// passed.</summary>
         internal static FillLayerBuild Rent(

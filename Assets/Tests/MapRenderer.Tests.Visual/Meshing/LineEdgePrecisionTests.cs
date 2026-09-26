@@ -15,16 +15,16 @@ using UnityEngine.Rendering;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Jobs.Tiles;
-using Fill = MapRenderer.Core.Style.Fill;
+using Fill = MapRenderer.Unity.Style.Fill;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
 
 namespace MapRenderer.Tests.Visual

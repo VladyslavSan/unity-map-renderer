@@ -23,7 +23,7 @@ using UnityEngine.TestTools;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
@@ -42,7 +42,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using System.Linq;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Geometry;
@@ -3561,30 +3561,34 @@ namespace MapRenderer.Tests.Tiles
 
         // ── SourceKey: malformed vs legitimate bounds ─────────────────────────────────────────────────
 
-        /// <summary>A source JSON with `bounds: [0,0,180,"x"]` (malformed, no gate) and one with
-        /// `bounds: [0,0,180,0]` (legitimate, gated) must produce DIFFERENT <c>SourceKey</c>s.
-        /// <c>SourceKey.From</c> keys on the VALIDATED <see cref="GeoBounds"/>, not Core's raw array, where
-        /// the two would otherwise collide — <c>StyleParser.ParseDoubleArray</c> silently zeroes a
-        /// non-number element rather than rejecting the array.</summary>
+        /// <summary>A source JSON with `bounds: [0,0,180,"x"]` (malformed, no gate) and one with no `bounds`
+        /// key at all (absent, also no gate) resolve to the SAME <see cref="SourceDefinition.Bounds"/> raw
+        /// array (both fall back to the spec default) but must still produce DIFFERENT <c>SourceKey</c>s.
+        /// <c>SourceKey.From</c> keys on the VALIDATED <see cref="GeoBounds"/>, not on the raw array, so the
+        /// two tell apart on <see cref="GeoBounds.HasBounds"/> (malformed: false; absent: true).</summary>
         [Test]
-        public void SourceKeyFrom_MalformedAndLegitimateBounds_ProduceDifferentKeys()
+        public void SourceKeyFrom_MalformedAndAbsentBounds_ProduceDifferentKeys()
         {
-            SourceDefinition malformedDef  = VectorStyle(@", ""bounds"": [0, 0, 180, ""x""]").GetSource("v");
-            SourceDefinition legitimateDef = VectorStyle(@", ""bounds"": [0, 0, 180, 0]").GetSource("v");
+            SourceDefinition malformedDef = VectorStyle(@", ""bounds"": [0, 0, 180, ""x""]").GetSource("v");
+            SourceDefinition absentDef    = VectorStyle().GetSource("v");
 
-            // Mirrors BuildSourceSpecs' own resolution: a malformed array resolves to no gate.
+            Assert.AreEqual(absentDef.Bounds, malformedDef.Bounds,
+                "the test only proves something if both raw arrays are the SAME spec-default shape.");
+
+            // Mirrors BuildSourceSpecs' own resolution (MapView.ValidateBounds): malformed resolves to no
+            // gate; absent resolves to the default array, still a real (if world-spanning) gate.
             GeoBounds malformedBounds = default;
-            double[]  lb              = legitimateDef.Bounds;
-            var legitimateBounds = new GeoBounds { West = lb[0], South = lb[1], East = lb[2], North = lb[3], HasBounds = true };
+            double[]  ab              = absentDef.Bounds;
+            var absentBounds = new GeoBounds { West = ab[0], South = ab[1], East = ab[2], North = ab[3], HasBounds = true };
 
-            TileManager.SourceKey malformedKey  = TileManager.SourceKey.From(malformedDef, malformedBounds);
-            TileManager.SourceKey legitimateKey = TileManager.SourceKey.From(legitimateDef, legitimateBounds);
+            TileManager.SourceKey malformedKey = TileManager.SourceKey.From(malformedDef, malformedBounds);
+            TileManager.SourceKey absentKey    = TileManager.SourceKey.From(absentDef, absentBounds);
 
-            Assert.AreNotEqual(legitimateKey, malformedKey,
-                "keying on the VALIDATED gate must distinguish a malformed (no-gate) bounds from a " +
-                "legitimate one sharing the same raw JSON shape after zeroing — keying on Core's raw array " +
-                "instead collided them, letting a restyle between the two take the cheap in-place path and " +
-                "never re-evaluate admission under the new gate.");
+            Assert.AreNotEqual(absentKey, malformedKey,
+                "keying on the VALIDATED gate must distinguish a malformed (no-gate) bounds from an absent " +
+                "one sharing the same raw array — keying on the raw array instead collides them, letting a " +
+                "restyle between the two take the cheap in-place path and never re-evaluate admission under " +
+                "the new gate.");
         }
 
         /// <summary><c>SourceKey.From</c> must format `bounds` doubles culture-invariant. Under a

@@ -3,7 +3,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Unity.Jobs.Lines;
 using MapRenderer.Unity.Jobs.Tiles;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Meshing
 {

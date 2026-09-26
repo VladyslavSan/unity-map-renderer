@@ -25,13 +25,13 @@ using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using System.IO;
 using System.Text.RegularExpressions;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 using System.Threading;
@@ -40,7 +40,7 @@ using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Rendering.Tile;
-using Fill = MapRenderer.Core.Style.Fill;
+using Fill = MapRenderer.Unity.Style.Fill;
 using Object = UnityEngine.Object;
 
 

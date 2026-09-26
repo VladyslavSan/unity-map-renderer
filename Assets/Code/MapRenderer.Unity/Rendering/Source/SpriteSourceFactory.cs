@@ -1,5 +1,5 @@
 using UnityEngine;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text.Sprites;
 
 namespace MapRenderer.Unity.Rendering.Source

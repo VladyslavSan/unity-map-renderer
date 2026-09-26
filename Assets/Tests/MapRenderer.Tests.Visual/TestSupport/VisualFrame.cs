@@ -4,7 +4,7 @@
 #if UNITY_EDITOR
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests

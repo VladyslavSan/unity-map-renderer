@@ -7,15 +7,15 @@ using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Style;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Style;
+using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Jobs.Tiles;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Text
 {
@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Text
         /// <param name="spriteAtlas">The sheet <c>icon-image</c> resolves against, at every placement. <c>null</c>
         /// (the default) yields no icon symbols.</param>
         public static void Extract(
-            MapRenderer.Core.Style.StyleLayer layer,
+            MapRenderer.Unity.Style.StyleLayer layer,
             IDecodedTile                      tile,
             TileId                            tileId,
             double                            zoom,
@@ -55,13 +55,13 @@ namespace MapRenderer.Unity.Text
             List<SymbolFeature>                 output,
             SpriteAtlasView                   spriteAtlas = null)
         {
-            if (!(layer is MapRenderer.Core.Style.Symbol.StyleLayer symbolLayer) || tile == null || projection == null || output == null)
+            if (!(layer is MapRenderer.Unity.Style.Symbol.StyleLayer symbolLayer) || tile == null || projection == null || output == null)
                 return;
 
             // Layer minzoom/maxzoom is not gated here: overzoomed tiles are reused, not rebuilt, so the gate
             // runs at display time on the live camera zoom.
 
-            // Fully qualified: a `using MapRenderer.Core.Style;` would make StyleLayer ambiguous.
+            // Fully qualified: a `using MapRenderer.Unity.Style;` would make StyleLayer ambiguous.
             ITileLayer tileLayer = MapRenderer.Unity.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(layer, tile);
             if (tileLayer == null) return;
 

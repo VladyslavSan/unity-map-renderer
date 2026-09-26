@@ -16,9 +16,9 @@ using UnityEditor;
 using MapRenderer.Unity.Rendering.Meshing;
 using System.IO;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
-using Line = MapRenderer.Core.Style.Line;
+using Line = MapRenderer.Unity.Style.Line;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
 

@@ -13,7 +13,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEditor;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 

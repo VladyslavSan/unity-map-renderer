@@ -10,7 +10,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.View;
 using MapRenderer.Unity.Common;
@@ -22,6 +22,7 @@ using BRGBackend = MapRenderer.Unity.Rendering.Backend.BRG;
 using EntBackend = MapRenderer.Unity.Rendering.Backend.Entities;
 using GOBackend = MapRenderer.Unity.Rendering.Backend.GameObjects;
 using MapRenderer.Unity.Rendering.Tile.Processing;
+using MapRenderer.Unity.Rendering.Layers;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {
@@ -189,8 +190,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             /// <summary>Builds the key from a resolved <see cref="SourceDefinition"/> and its VALIDATED
             /// <paramref name="bounds"/> gate — not <c>def.Bounds</c>'s raw array — so a malformed bounds
-            /// (no gate) and a legitimate one that happens to share the same raw shape after zeroing can
-            /// never collide onto one key.</summary>
+            /// (no gate) and one that resolves to the same spec-default array (e.g. absent bounds) never
+            /// collide onto one key.</summary>
             public static SourceKey From(SourceDefinition def, in GeoBounds bounds = default)
             {
                 string tiles      = def.Tiles != null ? string.Join("\n", def.Tiles) : null;
@@ -266,7 +267,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         // ── Injected collaborators (stable for life) ─────────────────────────────────────────
-        private readonly Style.RenderLayerSet _layers; // owned by MapView; this reads the ordered render layers
+        private readonly RenderLayerSet _layers; // owned by MapView; this reads the ordered render layers
 
         // Per-source pipeline registry — the per-tile lifecycle is per-(tile, source); see LoadedKey.
         private readonly SourceRegistry _sources = new();
@@ -280,16 +281,16 @@ namespace MapRenderer.Unity.Rendering.Tile
             into.Clear();
             // Reads the live _layers, not SnapshotLayers() — that would heap-allocate on every probe/release.
             for (int li = 0; li < _layers.Count; li++)
-                if (_layers[li] is Style.ITileMeshRenderLayer && SourceIdOf(_layers[li].StyleLayer) == sourceId)
+                if (_layers[li] is ITileMeshRenderLayer && SourceIdOf(_layers[li].StyleLayer) == sourceId)
                     into.Add(li);
         }
 
-        /// <summary>Dense global material indices of every <see cref="Style.BackgroundRenderLayer"/> with a live material (a null must never reach AddTileLayer).</summary>
+        /// <summary>Dense global material indices of every <see cref="BackgroundRenderLayer"/> with a live material (a null must never reach AddTileLayer).</summary>
         private void ComputeSourcelessLayerIds(List<int> into)
         {
             into.Clear();
             for (int li = 0; li < _layers.Count; li++)
-                if (_layers[li] is Style.BackgroundRenderLayer bg && bg.Material != null)
+                if (_layers[li] is BackgroundRenderLayer bg && bg.Material != null)
                     into.Add(li);
         }
 
@@ -421,7 +422,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary><paramref name="cacheConfig"/> supplies the <see cref="PreparedTileCache"/>'s toggle and
         /// byte/count budget — placeholder defaults pending VRAM profiling; tunable, not correctness-critical.</summary>
-        public TileManager(Style.RenderLayerSet layers, Map.PreparedTileCacheConfig cacheConfig)
+        public TileManager(RenderLayerSet layers, Map.PreparedTileCacheConfig cacheConfig)
         {
             _layers       = layers;
             _cacheEnabled = cacheConfig.Enabled;
@@ -467,7 +468,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>The <see cref="Map.View.SetStyle"/> PARTIAL-SURVIVAL entry point — called only
-        /// after <see cref="Style.RenderLayerSet.TryRestyleInPlace"/> has patched <c>_layers</c> in place.
+        /// after <see cref="RenderLayerSet.TryRestyleInPlace"/> has patched <c>_layers</c> in place.
         /// Keeps (re-keys) a record whose source pipeline survived instead of tearing it down; see
         /// `docs/tile-pipeline-design.md` for why that is sound and what happens to a removed slot.</summary>
         internal void RestyleSourcesInPlace(IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend)
@@ -544,12 +545,12 @@ namespace MapRenderer.Unity.Rendering.Tile
             PushLayerDrawGates(); // a fresh backend starts all-visible; seed it before the first item lands
         }
 
-        /// <summary>True iff the current render layers include a <see cref="Style.BackgroundRenderLayer"/> —
+        /// <summary>True iff the current render layers include a <see cref="BackgroundRenderLayer"/> —
         /// the synthetic source-less pipeline slot's admission test.</summary>
         private bool HasBackgroundLayer()
         {
             for (int li = 0; li < _layers.Count; li++)
-                if (_layers[li] is Style.BackgroundRenderLayer)
+                if (_layers[li] is BackgroundRenderLayer)
                     return true;
             return false;
         }
@@ -565,7 +566,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Per-layer materials in SLOT order — the one full-width list every backend indexes by
         /// <c>materialIndex</c>. A null entry is possible (unassigned base material); backends must tolerate it.</summary>
-        private static List<Material> LayerMaterials(Style.RenderLayerSet layers)
+        private static List<Material> LayerMaterials(RenderLayerSet layers)
         {
             var mats = new List<Material>(layers.Count);
             for (int i = 0; i < layers.Count; i++) mats.Add(layers[i].Material);
@@ -573,7 +574,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Per-layer style ids in <see cref="LayerMaterials"/>'s order, so backends can name each entity by style layer.</summary>
-        private static List<string> LayerNames(Style.RenderLayerSet layers)
+        private static List<string> LayerNames(RenderLayerSet layers)
         {
             var names = new List<string>(layers.Count);
             for (int i = 0; i < layers.Count; i++) names.Add(layers[i].StyleLayer?.Id);
@@ -581,7 +582,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Per-layer shadow-cast flags in <see cref="LayerMaterials"/>'s order, so backends share one list.</summary>
-        internal static List<UnityEngine.Rendering.ShadowCastingMode> LayerShadowModes(Style.RenderLayerSet layers)
+        internal static List<UnityEngine.Rendering.ShadowCastingMode> LayerShadowModes(RenderLayerSet layers)
         {
             var modes = new List<UnityEngine.Rendering.ShadowCastingMode>(layers.Count);
             for (int i = 0; i < layers.Count; i++) modes.Add(layers[i].CastShadows);
@@ -746,7 +747,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>
         /// Pushes each layer's visibility to the backend as a per-slot draw gate, so a layer that paints
         /// nothing the framebuffer can show submits no draw item at all. Called beside every
-        /// <see cref="Style.RenderLayerSet.ApplyZoom"/> — that is what refreshes the values read here, and
+        /// <see cref="RenderLayerSet.ApplyZoom"/> — that is what refreshes the values read here, and
         /// a frame must never render between the two. Kinds with no opacity of their own always draw.
         /// </summary>
         public void PushLayerDrawGates()
@@ -754,7 +755,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (_instanced == null) return;
             for (int li = 0; li < _layers.Count; li++)
                 _instanced.SetLayerVisible(
-                    li, !(_layers[li] is Style.IFadeableRenderLayer fadeable) || fadeable.PaintsSomething);
+                    li, !(_layers[li] is IFadeableRenderLayer fadeable) || fadeable.PaintsSomething);
         }
 
         /// <summary>Test-only: true ⟺ the tile has ≥1 source-record, ALL its records are <c>Built</c>, and
@@ -1050,7 +1051,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         lt.Step = BuildStep.Write;
                     }
                     // CompleteWriteAndTakePayloads is idempotent — a partially-consumed tile gets the same array back with nulled slots.
-                    Style.MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
+                    MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
                     // lt.Graph is NOT disposed here, FinishConsume is the single disposal site — drain ignores per-frame caps.
                     ConsumeMeshBuild(id, ref lt, payloads, int.MaxValue, int.MaxValue, out _, out _);
                 }
@@ -1184,7 +1185,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     }
 
                     // CompleteWriteAndTakePayloads is idempotent — a resumed tile gets the same array back; lt.Graph is disposed only by FinishConsume.
-                    Style.MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
+                    MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
 
                     bool complete = ConsumeMeshBuild(
                         id, ref lt, payloads, meshBudgetLeft, vertBudgetLeft,
@@ -1341,7 +1342,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 int li = _denseLayerIds[d];
                 // ComputeDenseLayerIds already filtered to ITileMeshRenderLayer slots — safe cast.
-                var layer = (Style.ITileMeshRenderLayer)layersSnapshot[li];
+                var layer = (ITileMeshRenderLayer)layersSnapshot[li];
                 processors[d] = Processing.TileMeshLayerProcessor.AllocateForKick(layer, li);
             }
 
@@ -1426,7 +1427,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int d = 0; d < dense; d++)
             {
                 int li    = _denseLayerIds[d];
-                var layer = (Style.BackgroundRenderLayer)layersSnapshot[li];
+                var layer = (BackgroundRenderLayer)layersSnapshot[li];
                 string payloadName = layer?.StyleLayer?.Id ?? "background";
 
                 FillMeshPipeline.LayerInput input = Processing.BackgroundQuad.BuildLayerInput(
@@ -1443,7 +1444,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Resumable per-mesh consume: uploads and registers layers from <see cref="LoadedTile.ConsumeCursor"/>
         /// until a budget binds or the tile finishes. Returns true when fully consumed, false to resume next Tick.</summary>
         private bool ConsumeMeshBuild(
-            TileId id, ref LoadedTile lt, Style.MeshDataPayload[] payloads, int meshBudget, int vertBudget,
+            TileId id, ref LoadedTile lt, MeshDataPayload[] payloads, int meshBudget, int vertBudget,
             out int meshesConsumed, out int vertsConsumed)
         {
             meshesConsumed = 0;
@@ -1463,7 +1464,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // A payload whose slot is gone — out of range, or RETIRED to a tombstone by a mid-flight
                 // restyle — is freed, never registered: width never shrinks, so a count check cannot see it.
                 int slot = cursor;
-                Style.MeshDataPayload payload = payloads[slot];
+                MeshDataPayload payload = payloads[slot];
                 cursor++;
 
                 int materialIndex = payload?.MaterialIndex ?? -1;
@@ -1471,7 +1472,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 if (payload == null
                  || (uint)materialIndex >= (uint)currentLayerCount
-                 || _layers[materialIndex] is Style.TombstoneRenderLayer)
+                 || _layers[materialIndex] is TombstoneRenderLayer)
                 {
                     payload?.Dispose();
                     // Null the slot the instant Dispose() has run — load-bearing, not cosmetic (see below).
@@ -1554,7 +1555,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Disposes every payload in a dense per-source array (null-slot-safe) — not idempotent
         /// against re-disposing the same reference, since a pooled payload's identity isn't stable after
         /// Dispose() returns. A prologue output's own array is disposed by <see cref="Processing.TilePrologueOutput.Dispose"/> instead.</summary>
-        private static void DisposeWholePayloads(Style.MeshDataPayload[] payloads)
+        private static void DisposeWholePayloads(MeshDataPayload[] payloads)
         {
             if (payloads == null) return;
             for (int li = 0; li < payloads.Length; li++)

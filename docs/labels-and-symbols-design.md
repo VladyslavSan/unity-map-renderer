@@ -971,17 +971,17 @@ carries a `sprite` URL, so that eyeball needs no extra setup.
 
 ## 5.6 Grounding (touch points)
 
-Core: `Style/Symbol/PropertyNames`, `Style/Symbol/{StyleLayer,LayoutProperties,PaintProperties}`,
-`Style/Symbol/SymbolFeature` (icon fields), `Text/SymbolQuad` (the reused sprite/glyph-agnostic quad),
+Core: `Text/Placement/SymbolFeature` (icon fields), `Text/SymbolQuad` (the reused sprite/glyph-agnostic quad),
 `Text/TextQuadLayout` (prior art for `IconQuadLayout`), `Text/Sprites/SpriteIndex`+`SpriteEntry`.
 The padded repack ("Sampling the sheet") uses
 `Text/Sprites/{SpriteBlit,SpritePadPlan,ShelfRectPacker,SpriteSheetPadder,SpriteSheetComposer}` — rect
 planning and RGBA32 pixel composition, both engine-free, so the load-bearing border rule is checked
-byte-for-byte on the fast `dotnet test` loop rather than behind a GPU readback. Unity: `SymbolFeatureExtractor`
+byte-for-byte on the fast `dotnet test` loop rather than behind a GPU readback. Unity: `Style/Symbol/PropertyNames`,
+`Style/Symbol/{StyleLayer,LayoutProperties,PaintProperties}`, `SymbolFeatureExtractor`
 (the `isLine`/point branches — icons ride point), `Text/GlyphManager`/
 `GlyphAtlasTexture` (prior art for the sprite `Texture2D`), `Rendering/Source/GlyphSourceFactory`+
 `UnityWebRequestGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolGatherPlan`,
-`Text/Placement/SymbolPlacementSystem`, `Rendering/Style/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
+`Text/Placement/SymbolPlacementSystem`, `Rendering/Layers/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
 (template for `Shaders/Map/Symbol/Icon/*`). Jobs: `SymbolProjectionJob`, `StageJob`, `CollisionJob`
 (texture-blind). Style: top-level `"sprite"` in `StyleDocument`/`StyleParser` and in `liberty.json`.
 
@@ -1140,11 +1140,11 @@ this by copying `TextKeepUpright`'s default.**
 
 ## 6.4 Grounding (touch points)
 
-Core: `Style/Symbol/PropertyNames` (`icon-rotate`), `Style/Symbol/LayoutProperties` (`IconRotate`),
-`Style/Symbol/SymbolFeature` (`IconRotateRadians`), `Text/CurvedGlyph` (two producers, two vertical
+Core: `Text/Placement/SymbolFeature` (`IconRotateRadians`), `Text/CurvedGlyph` (two producers, two vertical
 conventions), `Text/Placement/SymbolStageInputs` (`CurvedStageInput.AtlasKind`, both `IconRotateRadians`),
 `Text/Placement/CandidateEmit` (`ExtraRotationRadians`), `Text/Placement/SymbolStagingMath`
 (`AppendPointHalf`'s one addition; `StageCurvedAnchor`'s emit), `Text/Placement/ShapedSymbol`. Unity:
+`Style/Symbol/PropertyNames` (`icon-rotate`), `Style/Symbol/LayoutProperties` (`IconRotate`),
 `Text/SymbolFeatureExtractor` (`iconAlongLine`, `AlongLineIconContext`, `EmitAlongLineIcon`,
 `KeepAnchorsInsideTile`/`IsAnchorInsideTile` — the KL-A1 along-line anchor clip),
 `Text/StyledSymbolTileBuilder` (the point/curved icon split), `Text/Placement/SymbolTileBlockBaker`

@@ -12,14 +12,14 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Backend;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
-using Line = MapRenderer.Core.Style.Line;
-using Fill = MapRenderer.Core.Style.Fill;
+using Line = MapRenderer.Unity.Style.Line;
+using Fill = MapRenderer.Unity.Style.Fill;
 
 namespace MapRenderer.Tests.Style
 {
