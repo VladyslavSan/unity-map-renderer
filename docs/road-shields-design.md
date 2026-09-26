@@ -52,8 +52,8 @@ outputs directly.
 and the result is frozen into the emitted labels for that tile's lifetime. Layer *visibility* is
 re-evaluated at display zoom against the live camera (`SymbolFeatureExtractor`), because tiles are
 overzoomed rather than rebuilt; placement is not. This matches every other build-zoom-evaluated
-property (`text-size`, `symbol-sort-key`; see `docs/maplibre-spec.md`), but shields straddle a step
-boundary, so this is the one property where the staleness is visible.
+property (`text-size`, `symbol-sort-key`; see `docs/maplibre-style-spec-support-matrix.md`), but shields
+straddle a step boundary, so this is the one property where the staleness is visible.
 
 **Accepted limitation.** While the camera crosses a step boundary — z11 for `highway-shield-non-us` and
 `road_shield_us`, z7 for `highway-shield-us-interstate` — the same style layer runs two placement modes at
@@ -213,7 +213,8 @@ icon path, the line and point branches), `Text/SymbolSubsystem` (`TryBeginBuild`
 arg — D6 defers its construction), `Text/StyledSymbolTileBuilder` (the point vs. curved branches),
 `Text/Placement/WorldSymbolRenderer`. Style: `Assets/StreamingAssets/Fixtures/liberty.json` (the 3 shield
 layers). Related: `docs/labels-and-symbols-design.md` § "Curved along-line text" and § "Icon support
-(sprite symbols)" (D4 lifts its point-only I3 fence), `docs/maplibre-spec.md` (symbol support matrix).
+(sprite symbols)" (D4 lifts its point-only I3 fence), `docs/maplibre-style-spec-support-matrix.md` (symbol
+support matrix).
 
 ---
 

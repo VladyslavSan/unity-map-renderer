@@ -53,8 +53,8 @@ namespace MapRenderer.Core.Style.Line
 
         /// <summary>
         /// line-translate: pixel-space [x, y] translation offset applied in
-        /// <c>TranslateAnchor</c>-space coordinates. Default [0, 0]. Constant/Zoom only.
-        /// Collapsed from the old TranslateX/Y/XKind/YKind quad into one <c>double2</c>.
+        /// <c>TranslateAnchor</c>-space coordinates. Default [0, 0]. Constant only: an expression
+        /// value reads as [0, 0].
         /// </summary>
         public StyleProperty<double2> Translate { get; init; }
 
