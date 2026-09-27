@@ -16,7 +16,7 @@ namespace MapRenderer.Tests.Style
     /// public (the restyle survivor gate lives outside <c>MapRenderer.Core</c> and must compare the whole
     /// raw layer object, including unknown/forward-compat keys the typed <c>Paint</c>/<c>Layout</c> views
     /// drop), and every <c>JsonValue</c> field/property anywhere in the style model must be named
-    /// <c>Raw</c> or <c>Root</c> (one temporary exception, tracked by UMR-240).
+    /// <c>Raw</c> or <c>Root</c>.
     /// </summary>
     [TestFixture]
     public class StyleLayerEncapsulationTests
@@ -35,8 +35,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// Every <c>JsonValue</c> field/property under <c>MapRenderer.Unity.Style</c> is named <c>Raw</c> or
-        /// <c>Root</c>, with one temporary exception, <see cref="SourceDefinition.Data"/> (tracked by
-        /// UMR-240). A member named anything else is a parse artifact escaping the parser under a name
+        /// <c>Root</c>. A member named anything else is a parse artifact escaping the parser under a name
         /// that hides what it really is — <c>StyleLayer.Filter</c> was exactly this, before it became a
         /// typed <see cref="LayerFilter"/>.
         /// </summary>
@@ -58,14 +57,14 @@ namespace MapRenderer.Tests.Style
                     if (f.FieldType != typeof(JsonValue)) continue;
                     if (f.IsDefined(typeof(CompilerGeneratedAttribute), inherit: false)) continue; // auto-prop backing field
                     jsonValueMembers++;
-                    if (!IsAllowedName(t, f.Name)) offenders.Add($"{t.FullName}.{f.Name}");
+                    if (!IsAllowedName(f.Name)) offenders.Add($"{t.FullName}.{f.Name}");
                 }
 
                 foreach (PropertyInfo p in t.GetProperties(AnyDeclared))
                 {
                     if (p.PropertyType != typeof(JsonValue)) continue;
                     jsonValueMembers++;
-                    if (!IsAllowedName(t, p.Name)) offenders.Add($"{t.FullName}.{p.Name}");
+                    if (!IsAllowedName(p.Name)) offenders.Add($"{t.FullName}.{p.Name}");
                 }
             }
 
@@ -74,12 +73,11 @@ namespace MapRenderer.Tests.Style
                 "means nothing");
 
             Assert.IsEmpty(offenders,
-                "every JsonValue field/property in the style model must be named Raw or Root " +
-                "(SourceDefinition.Data is a temporary exception tracked by UMR-240). " +
+                "every JsonValue field/property in the style model must be named Raw or Root. " +
                 $"Offenders: {string.Join(", ", offenders)}");
         }
 
-        private static bool IsAllowedName(Type t, string name)
-            => name == "Raw" || name == "Root" || (t == typeof(SourceDefinition) && name == "Data"); // UMR-240 types it
+        private static bool IsAllowedName(string name)
+            => name == "Raw" || name == "Root";
     }
 }

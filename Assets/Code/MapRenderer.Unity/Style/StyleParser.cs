@@ -103,8 +103,9 @@ namespace MapRenderer.Unity.Style
 
             src.Url = json.GetString("url");
             src.Tiles = ParseStringArray(json.Get("tiles"));
-            // geojson `data`: retained verbatim, because the spec allows an inline object OR a URL string.
-            src.Data = json.Get("data");
+            // geojson `data`: an inline object is parsed once here; a URL string is fetched later by
+            // MapView.BuildSourceSpecs.
+            src.Data = SourcePayload.Parse(json.Get("data"));
             // `buffer` (geojson only, per the spec) is an AUTHORED value only — a non-geojson source, an
             // absent key, or a non-number stays null, so MapView keeps GeoJsonSliceOptions.DefaultBufferAtReferenceExtent.
             double? rawBuffer = src.Type == SourceType.GeoJson ? json.GetNullableDouble("buffer") : null;

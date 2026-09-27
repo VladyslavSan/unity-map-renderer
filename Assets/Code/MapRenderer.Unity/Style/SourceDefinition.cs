@@ -62,12 +62,10 @@ namespace MapRenderer.Unity.Style
         public bool BoundsMalformed;
 
         /// <summary>
-        /// Style Spec <c>data</c> — <b>either</b> an inline GeoJSON object <b>or</b> a URL string, which is
-        /// why it is a <see cref="JsonValue"/> and not a typed model: the key carries two shapes and this
-        /// type sits outside every decoder folder, so a format-named type in its signature would be a fence
-        /// violation as well as a lie about half the values. Null when the key is absent.
+        /// Style Spec <c>data</c> (geojson): a URL to fetch, or an inline dataset parsed once at style
+        /// load. Null when the key is absent.
         /// </summary>
-        public JsonValue Data;
+        public SourcePayload Data;
 
         /// <summary>Style Spec <c>buffer</c> (geojson only), clamped to [0, 512] (512 = one tile width).
         /// Null for a non-geojson source, an absent key, or a non-number — an AUTHORED value only:

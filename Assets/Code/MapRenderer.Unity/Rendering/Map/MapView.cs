@@ -461,25 +461,18 @@ namespace MapRenderer.Unity.Rendering.Map
                 // through the same loader. A bad source is skipped, never a thrown SetStyle.
                 if (def.Type == SourceType.GeoJson)
                 {
-                    GeoJson.GeoJsonDataset parsed;
+                    // An inline object was already parsed at style load (SourcePayload.Parse); only a URL
+                    // `data` still has work to do here, since a fetch cannot happen synchronously at parse time.
+                    GeoJson.GeoJsonDataset parsed = def.Data?.Dataset;
+                    string error = def.Data?.Error;
                     try
                     {
-                        if (def.Data != null && def.Data.Kind == JsonKind.String)
+                        if (def.Data?.Url != null)
                         {
                             // A URL `data`: one document fetch through the same loader TileJSON uses, before
                             // anything is mutated — BuildSourceSpecs is already SetStyle's one pre-mutation await.
-                            string text = await loader(def.Data.AsString(), ct);
+                            string text = await loader(def.Data.Url, ct);
                             parsed = GeoJson.GeoJsonParser.Parse(text);
-                        }
-                        else if (def.Data != null && def.Data.IsObject)
-                        {
-                            parsed = GeoJson.GeoJsonParser.Parse(def.Data);
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an inline object " +
-                                             "or URL string `data` — skipped.");
-                            continue;
                         }
                     }
                     catch (System.OperationCanceledException)
@@ -491,8 +484,19 @@ namespace MapRenderer.Unity.Rendering.Map
                         // System.Exception, not only GeoJsonFormatException: any other parser or loader throw
                         // would fault SetStyle for the whole style over one bad source. Cancellation is
                         // rethrown above.
+                        error = ex.Message;
+                    }
+
+                    if (error != null)
+                    {
                         Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to load or parse: " +
-                                         $"{ex.Message}. Source skipped.");
+                                         $"{error}. Source skipped.");
+                        continue;
+                    }
+                    if (parsed == null)
+                    {
+                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an inline object " +
+                                         "or URL string `data` — skipped.");
                         continue;
                     }
 

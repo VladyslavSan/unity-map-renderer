@@ -44,7 +44,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// tile-layer in one dispatch. It is a post-order stack machine with short-circuit jumps for <c>all</c>,
     /// over a bounded operand stack, and it never throws (see <see cref="NativeFilterError"/>). It runs via
     /// <c>RunByRef</c> because its caller is an <c>IWorkScheduler</c> worker, where <c>Schedule</c> is illegal.
-    /// It lives in <c>Mvt</c> because it names <see cref="MvtValueNative"/> (see <c>NeutralGeometryPathTests</c>).
+    /// It lives in <c>Mvt</c> because its <c>Values</c> column names <see cref="MvtValueNative"/>.
     /// </summary>
     [BurstCompile]
     internal struct NativeFilterEvaluationJob : IJob

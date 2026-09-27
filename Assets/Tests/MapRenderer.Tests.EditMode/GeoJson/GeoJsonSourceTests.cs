@@ -174,8 +174,12 @@ namespace MapRenderer.Tests.GeoJsons
 
             try
             {
-                SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax))), "geojson"));
+                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
+                Assert.AreEqual(1, style.GetSource("geo").Data.Dataset.Features.Count,
+                    "the inline `data` must already carry its parsed dataset before SetStyle runs — " +
+                    "StyleParser.Parse, not BuildSourceSpecs, does the one-time parse");
+
+                SpinToCompleted(view.SetStyle(style, "geojson"));
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(0, docFetches,  "a geojson source must never attempt a TileJSON round trip");
@@ -389,14 +393,32 @@ namespace MapRenderer.Tests.GeoJsons
 
             try
             {
-                Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(@"{""type"":""Nonsense""}")), "bad-data")),
+                var badDataStyle = StyleParser.Parse(StyleWithInlineData(@"{""type"":""Nonsense""}"));
+                SourceDefinition badDef = badDataStyle.GetSource("geo");
+                var parseError = Assert.Throws<GeoJsonFormatException>(
+                    () => GeoJsonParser.Parse(@"{""type"":""Nonsense""}"),
+                    "precondition: the fixture really is malformed GeoJSON");
+                Assert.AreEqual(parseError.Message, badDef.Data.Error,
+                    "the source must carry the SAME failure message the parser throws, parsed once at style load");
+                Assert.IsNull(badDef.Data.Dataset, "a failed inline parse must leave Dataset null");
+
+                LogAssert.Expect(LogType.Warning,
+                    $"[MapView.SetStyle] geojson source 'geo' failed to load or parse: {parseError.Message}. " +
+                    "Source skipped.");
+                Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(badDataStyle, "bad-data")),
                     "a malformed inline dataset must be skipped, not thrown — a fixture typo must not take " +
                     "the whole style down");
                 AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a malformed inline dataset");
 
-                Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData("42")), "number-data")),
+                var numberDataStyle = StyleParser.Parse(StyleWithInlineData("42"));
+                SourceDefinition numberDef = numberDataStyle.GetSource("geo");
+                Assert.IsNull(numberDef.Data.Url, "a bare number `data` sets no arm — not a URL");
+                Assert.IsNull(numberDef.Data.Dataset, "…nor a dataset");
+                Assert.IsNull(numberDef.Data.Error, "…nor a parse error: a bare number never reaches the parser");
+
+                LogAssert.Expect(LogType.Warning,
+                    "[MapView.SetStyle] geojson source 'geo' needs an inline object or URL string `data` — skipped.");
+                Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(numberDataStyle, "number-data")),
                     "a `data` that is neither a string nor an object must be skipped, not thrown");
                 AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a `data` that is a bare number");
             }
@@ -648,7 +670,7 @@ namespace MapRenderer.Tests.GeoJsons
             MaxZoom = 22,
             Scheme  = "xyz",
             Bounds  = null,
-            Data    = JsonParser.Parse(RectangleAt(RectMin, RectMax)),
+            Data    = SourcePayload.Parse(JsonParser.Parse(RectangleAt(RectMin, RectMax))),
         };
 
         /// <summary>
@@ -763,7 +785,7 @@ namespace MapRenderer.Tests.GeoJsons
                         {
                             created++;
                             var s = new GeoJsonTileFeatureSource(
-                                GeoJsonParser.Parse(def.Data), GeoJsonSliceOptions.Default, Scheduler);
+                                def.Data.Dataset, GeoJsonSliceOptions.Default, Scheduler);
                             sources.Add(s);
                             return s;
                         }),
@@ -812,7 +834,7 @@ namespace MapRenderer.Tests.GeoJsons
                         {
                             created++;
                             return new GeoJsonTileFeatureSource(
-                                GeoJsonParser.Parse(def.Data), GeoJsonSliceOptions.Default, Scheduler);
+                                def.Data.Dataset, GeoJsonSliceOptions.Default, Scheduler);
                         }),
                     };
                     view.View.TileManager.SetSources(specs, view.Config.Backend);

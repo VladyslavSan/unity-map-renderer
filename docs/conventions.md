@@ -227,18 +227,16 @@ attempt.
 - A typed wrapper may keep its own internal `Raw` for exactly one named downstream consumer that still
   needs the DOM node: `LayerFilter.Raw` feeds `NativeFilterCompiler`, which compiles from the normalised
   expression JSON because the parsed `Expression` tree's `==`/`!=`/`!` nodes are opaque closures.
+  `SourcePayload.Raw` feeds `TileManager.SourceKey`, which keys on the canonical authored JSON.
 
 **The test:** does the member name a property the spec defines? Then type it. Does it name the original
 document (or a sub-document a single named consumer still needs unparsed)? Then `Raw`/`Root` is right, and
 the doc says in one line who needs it unparsed. `JsonValue` as a `Parse(...)` parameter is correct and is
-not this rule.
-
-**Known live exception:** `SourceDefinition.Data` is still raw `JsonValue`, a temporary exception tracked
-by UMR-240. This is the rule new and touched code is held to, not a claim the codebase already keeps it
-everywhere.
+not this rule. Pinned for the style model (`MapRenderer.Unity.Style`) by `StyleLayerEncapsulationTests`.
 
 *(Prior art: `StyleProperty<T>` replacing raw `JsonValue` on `TextField`/`IconImage` (5cba86bc);
-`LayerFilter` replacing raw `JsonValue` on `StyleLayer.Filter`.)*
+`LayerFilter` replacing raw `JsonValue` on `StyleLayer.Filter`; `SourcePayload` replacing raw `JsonValue`
+on `SourceDefinition.Data`.)*
 
 ### Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`
 

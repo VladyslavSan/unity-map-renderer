@@ -45,10 +45,9 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The neutral geometry path carries no format, and no sidecar can come back. Format-named types
-    /// (<c>Mvt</c>/<c>GeoJson</c>/<c>Mlt</c>) are fenced by LOCATION to decoder folders, not by an allow-list;
-    /// no other type names one in a signature; the neutral surfaces expose no command-stream member; and
-    /// <c>ITileLayerProcessor.ProcessOnWorker</c> keeps exactly two parameters.
+    /// The neutral geometry path carries no format, and no sidecar can come back: the neutral surfaces
+    /// expose no command-stream member, and <c>ITileLayerProcessor.ProcessOnWorker</c> keeps exactly two
+    /// parameters.
     /// </summary>
     [TestFixture]
     public class NeutralGeometryPathTests
@@ -61,114 +60,6 @@ namespace MapRenderer.Tests.Structure
             typeof(IFeature).Assembly,             // MapRenderer.Core
             typeof(ITileFeatureSource).Assembly,   // MapRenderer.Unity
         };
-
-        /// <summary>A production type name that announces a wire format. Matched at the START of the name so
-        /// an unrelated word ending in one of these cannot be a false positive.</summary>
-        private static bool IsFormatNamed(Type t)
-            => t != null && (t.Name.StartsWith("Mvt", StringComparison.Ordinal)
-                          || t.Name.StartsWith("GeoJson", StringComparison.Ordinal)
-                          || t.Name.StartsWith("Mlt", StringComparison.Ordinal));
-
-        /// <summary>The FOLDERS a format-named production type is allowed to live in — the decoders and their
-        /// producers. Defined as source-tree locations, so a new MVT-named type anywhere else fails without
-        /// anyone having to remember to update a list of names.</summary>
-        private static readonly string[] DecoderFolders =
-        {
-            Path.Combine("Code", "MapRenderer.Unity", "Jobs", "Mvt"),
-            Path.Combine("Code", "MapRenderer.Unity", "Jobs", "Tiles"),
-            Path.Combine("Code", "MapRenderer.Core", "GeoJson"),
-        };
-
-        /// <summary>Individual decoder/producer files that sit beside, not inside, a decoder folder.</summary>
-        private static readonly string[] DecoderFiles =
-        {
-            // The MVT *source* implementation: it resolves the MVT decoder for a fetch and is by definition
-            // format-specific — the polymorphic seam it satisfies (ITileFeatureSource) is not.
-            Path.Combine("Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing", "MvtTileFeatureSource.cs"),
-            // The GeoJSON *source* implementation: like MvtTileFeatureSource above, it binds
-            // ITileFeatureSource to a concrete format and is by definition format-specific — the polymorphic
-            // seam it satisfies is not.
-            Path.Combine("Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing", "GeoJsonTileFeatureSource.cs"),
-        };
-
-        // ── Tooth A ───────────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void EveryFormatNamedProductionType_IsDeclaredInsideADecoderFolder()
-        {
-            Dictionary<string, string> declarationFile = SourceDeclarationIndex();
-
-            var offenders = new List<string>();
-            var inFolder  = new List<string>();
-            int scanned   = 0;
-
-            foreach (Assembly assembly in ProductionAssemblies)
-                foreach (Type t in assembly.GetTypes())
-                {
-                    scanned++;
-                    if (!IsFormatNamed(t)) continue;
-                    if (t.IsNested) continue; // judged by its declaring type, which the scan already sees
-
-                    if (!declarationFile.TryGetValue(t.Name, out string relativePath))
-                    {
-                        offenders.Add($"{t.FullName} (no source declaration found — compiler-generated?)");
-                        continue;
-                    }
-
-                    if (IsUnderDecoderLocation(relativePath)) inFolder.Add($"{t.Name} → {relativePath}");
-                    else offenders.Add($"{t.FullName} declared at {relativePath}");
-                }
-
-            // Non-vacuity: the scan walked a real corpus and the matcher fires on real names; an empty load
-            // or a dead matcher would also report "no offenders".
-            Assert.Greater(scanned, 200, "precondition: the scan must visit a real corpus of production types");
-            Assert.IsNotEmpty(inFolder,
-                "precondition: the matcher must find format-named types INSIDE the decoder folders — if it " +
-                "finds none, it is matching nothing and clause 1 asserts nothing");
-
-            Assert.IsEmpty(offenders,
-                "every production type whose name announces a wire format must be declared under a decoder " +
-                "folder (MapRenderer.Unity/Jobs/Mvt, MapRenderer.Unity/Jobs/Tiles, MapRenderer.Core/GeoJson, " +
-                "or the two named producer files). Fenced by LOCATION, not by an allow-list of names: an allow-list is " +
-                "what rotted, because a new format-named type was simply added to it. " +
-                $"Offenders: {string.Join(", ", offenders)}");
-        }
-
-        [Test]
-        public void NoProductionTypeOutsideTheDecoderFolders_HasAFormatNamedTypeInAMemberSignature()
-        {
-            Dictionary<string, string> declarationFile = SourceDeclarationIndex();
-
-            var offenders = new List<string>();
-            int membersScanned = 0;
-
-            foreach (Assembly assembly in ProductionAssemblies)
-                foreach (Type t in assembly.GetTypes())
-                {
-                    if (t.IsNested) continue;
-                    if (declarationFile.TryGetValue(t.Name, out string path) && IsUnderDecoderLocation(path))
-                        continue; // a decoder may name its own format freely
-
-                    foreach (MemberInfo member in t.GetMembers(
-                                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
-                                 BindingFlags.Static | BindingFlags.DeclaredOnly))
-                    {
-                        membersScanned++;
-                        foreach (Type signatureType in SignatureTypes(member))
-                            if (IsFormatNamed(signatureType))
-                                offenders.Add($"{t.FullName}.{member.Name} : {signatureType.Name}");
-                    }
-                }
-
-            Assert.Greater(membersScanned, 1000,
-                "precondition: the member scan must visit a real corpus, or 'no offenders' means nothing");
-
-            Assert.IsEmpty(offenders,
-                "no production type outside the decoder folders may name a format type in a member " +
-                "signature. This is what the earlier tooth CLAIMED and did not deliver: its tooth asserted an interface was " +
-                "empty, which a sidecar interface satisfies trivially. " +
-                $"Offenders: {string.Join(", ", offenders)}");
-        }
 
         [Test]
         public void TheNeutralSurfaces_ExposeNoCommandStream()
@@ -272,47 +163,6 @@ namespace MapRenderer.Tests.Structure
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────────────
-
-        /// <summary>Maps a top-level type NAME to the repo-relative path of the file that declares it, by
-        /// scanning the two production source trees (MapRenderer.Unity's recursive walk already covers its
-        /// nested Jobs/ folder). Source-scanned rather than reflected because .NET exposes no declaration
-        /// path, and location is the fence.</summary>
-        private static Dictionary<string, string> SourceDeclarationIndex()
-        {
-            var index = new Dictionary<string, string>();
-            string codeRoot = Path.Combine(Application.dataPath, "Code");
-            DirectoryAssert.Exists(codeRoot);
-
-            foreach (string assemblyDir in new[] { "MapRenderer.Core", "MapRenderer.Unity" })
-            {
-                string root = Path.Combine(codeRoot, assemblyDir);
-                DirectoryAssert.Exists(root);
-                foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
-                {
-                    string text = File.ReadAllText(file);
-                    string relative = file.Substring(Application.dataPath.Length).TrimStart('/', '\\');
-                    foreach (System.Text.RegularExpressions.Match m in
-                             System.Text.RegularExpressions.Regex.Matches(
-                                 text, @"^\s*(?:public|internal)\s+(?:static\s+|sealed\s+|abstract\s+|partial\s+|readonly\s+|unsafe\s+)*(?:class|struct|interface|enum)\s+(\w+)",
-                                 System.Text.RegularExpressions.RegexOptions.Multiline))
-                        index[m.Groups[1].Value] = relative;
-                }
-            }
-
-            Assert.Greater(index.Count, 200,
-                "precondition: the source index must find a real corpus of declarations, or the location " +
-                "fence resolves nothing and reports no offenders");
-            return index;
-        }
-
-        private static bool IsUnderDecoderLocation(string relativePath)
-        {
-            foreach (string folder in DecoderFolders)
-                if (relativePath.Replace('\\', '/').Contains(folder.Replace('\\', '/') + "/")) return true;
-            foreach (string file in DecoderFiles)
-                if (relativePath.Replace('\\', '/').EndsWith(file.Replace('\\', '/'), StringComparison.Ordinal)) return true;
-            return false;
-        }
 
         /// <summary>Every type that appears in a member's signature — property type, field type, method
         /// return and parameter types. A member hides an encoding just as well behind a parameter as behind

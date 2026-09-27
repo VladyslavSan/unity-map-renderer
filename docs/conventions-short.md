@@ -78,13 +78,11 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     unknown or forward-compat keys survive a round trip — `StyleLayer.Raw` is compared whole by the restyle
     survivor gate, which the typed views cannot do because they drop what they do not model. A typed
     wrapper may also keep its own internal `Raw` for one named downstream consumer that still needs the DOM
-    node — `LayerFilter.Raw` feeds `NativeFilterCompiler`.
+    node — `LayerFilter.Raw` feeds `NativeFilterCompiler`; `SourcePayload.Raw` feeds `TileManager.SourceKey`.
   - *The test:* does the member name a property the spec defines? Then type it. Does it name the original
-    document? Then `Raw` is right, and say in one line who needs it unparsed.
+    document? Then `Raw` is right, and say in one line who needs it unparsed. Pinned for the style model
+    (`MapRenderer.Unity.Style`) by `StyleLayerEncapsulationTests`.
   - `JsonValue` as a `Parse(...)` PARAMETER is correct and is not this rule.
-  - **Known live exception:** `SourceDefinition.Data` is still raw `JsonValue`, a temporary exception
-    tracked by UMR-240. This is the rule new and touched code is held to, not a claim that the codebase
-    already keeps it everywhere.
 
 - **Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`.**
   - Plain data carriers expose `init`-only auto-properties and are built with named members

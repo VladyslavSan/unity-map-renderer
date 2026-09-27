@@ -780,12 +780,10 @@ namespace MapRenderer.Tests.Visual
             SourceDefinition source = frame.ParsedStyle.GetSource("cities");
             Assert.IsNotNull(source, "the parsed style must carry the declared source");
             Assert.AreEqual(SourceType.GeoJson, source.Type, "…typed as geojson");
-            Assert.IsNotNull(source.Data, "…with a non-null `data`");
-            Assert.IsTrue(source.Data.IsObject,
-                "`data` must be a JSON OBJECT — exactly the precondition MapView.cs:323 gates the geojson " +
-                "branch on, which can only hold if the emitted JSON string went through StyleParser.Parse " +
-                "into a JsonValue tree. A composer that built a StyleDocument directly would have to " +
-                "reconstruct this shape by hand.");
+            Assert.IsNotNull(source.Data?.Dataset,
+                "`data` must have parsed into an inline GeoJSON dataset, which can only hold if the " +
+                "emitted JSON string went through StyleParser.Parse. A composer that built a StyleDocument " +
+                "directly would have to reconstruct this shape by hand.");
 
             bool boundLayerFound = false;
             foreach (StyleLayer layer in frame.ParsedStyle.Layers)

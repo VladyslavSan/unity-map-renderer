@@ -198,7 +198,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 string tiles      = def.Tiles != null ? string.Join("\n", def.Tiles) : null;
                 string boundsText = bounds.HasBounds ? JoinInvariant(bounds) : null;
-                string data       = def.Data  != null ? JsonCanonical.Write(def.Data) : null;
+                string data       = def.Data  != null ? JsonCanonical.Write(def.Data.Raw) : null;
                 string buffer     = def.Buffer.HasValue
                     ? def.Buffer.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
                     : null;

@@ -146,6 +146,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLayer.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/LayerFilter.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SourceDefinition.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SourcePayload.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SpriteReference.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleDocument.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleParser.cs" />

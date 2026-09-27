@@ -51,9 +51,8 @@ parity oracle call.
 
 **Why the split across two folders:** the job, matcher and rebind each name an MVT-specific type in a member
 signature (`NativeFilterEvaluationJob`'s `MvtValueNative` column, `MvtNativeFeatureMatcher`'s `MvtLayer`,
-`NativeFilterRebind`'s `MvtLayerPropertyResolver`) — a general production type outside a decoder folder may
-not do that — so they live in the `Mvt/` decoder folder. Everything format-agnostic (the compiler, program,
-opcodes, value) lives here in `Expressions/`.
+`NativeFilterRebind`'s `MvtLayerPropertyResolver`), so they live beside the MVT decoder in `Mvt/`. Everything
+format-agnostic (the compiler, program, opcodes, value) lives here in `Expressions/`.
 
 ## The opcode set (`NativeOperation`)
 

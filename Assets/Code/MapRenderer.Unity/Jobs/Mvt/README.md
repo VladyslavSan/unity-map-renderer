@@ -73,12 +73,10 @@ which `MvtTile.Dispose` drives. Reading through a store after that point is a us
 **Why the native filter VM's job, matcher and rebind live here, not in `Expressions/`.** Each names an
 MVT-specific type in a member signature — `NativeFilterEvaluationJob`'s `Values` column is
 `NativeArray<MvtValueNative>`, `MvtNativeFeatureMatcher` takes an `MvtLayer`, `NativeFilterRebind.Rebind`
-takes an `MvtLayerPropertyResolver` — and a production type outside a decoder folder may not name a
-format-specific type in a member signature (structurally enforced; see `NeutralGeometryPathTests`).
-`MvtNativeFeatureMatcher` is doubly pinned: naming `MvtLayer` also makes it format-named by location, not
-just by signature. All three are therefore MVT decoder-folder residents even though the opcode machine,
-program and value types they operate over (`NativeFilterCompiler`, `NativeFilterProgram`, `NativeValue`) are
-format-agnostic and stay in `Expressions/`. `Expressions/README.md` states the same split from that side.
+takes an `MvtLayerPropertyResolver`. All three are therefore MVT decoder-folder residents even though the
+opcode machine, program and value types they operate over (`NativeFilterCompiler`, `NativeFilterProgram`,
+`NativeValue`) are format-agnostic and stay in `Expressions/`. `Expressions/README.md` states the same split
+from that side.
 
 ## Components
 
