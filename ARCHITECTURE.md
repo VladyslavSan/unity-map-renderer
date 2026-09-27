@@ -316,10 +316,9 @@ frame — never read the camera's position back off a Unity `Transform` to recov
 
 ### Projection: spherical is the default, and the camera stays projection-agnostic
 The shipped demo scene runs the **spherical (globe)** projection, not Web Mercator — Mercator is the
-planar/legacy path. This is easy to get backwards from the code alone: the projection-dependent tile
-builders default their standalone `IProjection` to `WebMercatorProjection`, and a scene's projection choice
-is a serialized bool that only the `.unity` file carries, not a C# default. Check the scene, not a field
-initializer, when reasoning about which projection is live.
+planar/legacy path. `MapHost.UseGlobe` defaults to `true` to match it. `MapHost.Wire` and the
+projection-dependent tile builders resolve a missing `IProjection` to `WebMercatorProjection`, so code that
+bypasses `MapHost.Start()` gets Mercator unless it passes the projection.
 
 Camera interaction (pan/zoom/tilt) holds no projection constants of its own — no tile pixel size, no
 Mercator latitude clamp, no earth circumference. Pixel-to-ground conversion and world-edge clamping are a

@@ -63,7 +63,7 @@ namespace MapRenderer.App
         [Tooltip("Render on a 3D globe (SphericalProjection) instead of the flat Web-Mercator plane. " +
                  "Launch-time only — the projection is a session constant. Pan and zoom input cast " +
                  "the pixel ray at the sphere.")]
-        public bool UseGlobe = false;
+        public bool UseGlobe = true;
 
         private void Start()
         {

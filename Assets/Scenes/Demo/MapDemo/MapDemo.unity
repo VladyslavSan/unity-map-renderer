@@ -495,7 +495,7 @@ MonoBehaviour:
   InitialZoom: 13
   VerticalFovDeg: 60
   CapFrameRateToRefreshRate: 1
-  UseGlobe: 0
+  UseGlobe: 1
 --- !u!114 &300000006
 MonoBehaviour:
   m_ObjectHideFlags: 0
