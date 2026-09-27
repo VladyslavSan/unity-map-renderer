@@ -22,12 +22,28 @@ namespace MapRenderer.Unity.Rendering.Source
         /// response; throws for any other error.</summary>
         public static async UniTask<byte[]> FetchAsync(string uri, CancellationToken ct)
         {
-            Interlocked.Increment(ref _requestCount);
-
             using var req = UnityWebRequest.Get(uri);
             req.downloadHandler = new DownloadHandlerBuffer();
+            return await SendAsync(req, ct) ? req.downloadHandler.data : null;
+        }
 
-            // ToUniTask() throws on any non-2xx before responseCode is readable, so 404/204 map to null in
+        /// <summary>Fetches text from <paramref name="uri"/>. Returns <c>null</c> for a 204/404
+        /// response; throws for any other error.</summary>
+        public static async UniTask<string> FetchTextAsync(string uri, CancellationToken ct)
+        {
+            using var req = UnityWebRequest.Get(uri);
+            req.downloadHandler = new DownloadHandlerBuffer();
+            return await SendAsync(req, ct) ? req.downloadHandler.text : null;
+        }
+
+        /// <summary>Sends <paramref name="req"/>. Returns <c>false</c> for a 204/404 response (absent);
+        /// throws for any other error. The single copy of the HTTP status mapping every public method
+        /// shares.</summary>
+        private static async UniTask<bool> SendAsync(UnityWebRequest req, CancellationToken ct)
+        {
+            Interlocked.Increment(ref _requestCount);
+
+            // ToUniTask() throws on any non-2xx before responseCode is readable, so 404/204 map to absent in
             // the catch. Other errors re-throw to the caller; OperationCanceledException passes through.
             try
             {
@@ -37,7 +53,7 @@ namespace MapRenderer.Unity.Rendering.Source
                 ex.ResponseCode == (long)HttpStatusCode.NotFound ||
                 ex.ResponseCode == (long)HttpStatusCode.NoContent)
             {
-                return null;
+                return false;
             }
             catch (UnityWebRequestException) when (ct.IsCancellationRequested)
             {
@@ -47,10 +63,7 @@ namespace MapRenderer.Unity.Rendering.Source
             }
 
             // 204 No Content on a 2xx path (unusual but possible) — treat as absent.
-            if (req.responseCode == (long)HttpStatusCode.NoContent)
-                return null;
-
-            return req.downloadHandler.data;
+            return req.responseCode != (long)HttpStatusCode.NoContent;
         }
     }
 }

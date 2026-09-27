@@ -11,6 +11,6 @@ namespace MapRenderer.Unity.Rendering.Source
     internal static class GlyphSourceFactory
     {
         /// <summary>Builds the glyph source for <paramref name="style"/>'s root <c>glyphs</c> template.</summary>
-        public static IGlyphSource Create(StyleDocument style) => new UnityWebRequestGlyphSource(style?.Glyphs);
+        public static IGlyphSource Create(StyleDocument style) => new TemplatedGlyphSource(style?.Glyphs);
     }
 }

@@ -339,7 +339,7 @@ namespace MapRenderer.Tests.Text.Sprites
                 SpriteSourceFactory.Create(new StyleDocument { Sprite = "https://example.invalid/sprite" });
 
             Assert.IsNotNull(source, "a style with a sprite URL must yield a real source");
-            Assert.IsInstanceOf<UnityWebRequestSpriteSource>(source);
+            Assert.IsInstanceOf<SpriteSheetSource>(source);
         }
     }
 }

@@ -383,6 +383,53 @@ namespace MapRenderer.Tests.DataSources
             Assert.IsInstanceOf<OperationCanceledException>(caught,
                 "a mid-flight cancel must surface as OperationCanceledException.");
         }
+
+        /// <summary>A 200 response must yield the served body as text, over the same loopback helper the
+        /// byte-fetch teeth use — <see cref="HttpTransport.FetchTextAsync"/> shares <c>SendAsync</c> with
+        /// <see cref="HttpTransport.FetchAsync"/> and only reads <c>.text</c> instead of <c>.data</c>.</summary>
+        [UnityTest]
+        public IEnumerator HttpTransport_FetchText_200_ReturnsBody()
+        {
+            int port     = FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/sprite.json";
+            byte[] body  = System.Text.Encoding.UTF8.GetBytes("{\"a\":1}");
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 200, body);
+
+            string    response = null;
+            Exception caught   = null;
+            try
+            {
+                yield return HttpTransport.FetchTextAsync(url, default)
+                    .ContinueWith((Action<string>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsNull(caught, $"A 200 OK response must NOT throw. Exception: {caught?.Message}");
+            Assert.AreEqual("{\"a\":1}", response, "FetchTextAsync must return the served body as text.");
+        }
+
+        /// <summary>A 404 response must yield <c>null</c>, same absent mapping as the byte fetch.</summary>
+        [UnityTest]
+        public IEnumerator HttpTransport_FetchText_404_ReturnsNull()
+        {
+            int port     = FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/sprite.json";
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 404);
+
+            string    response = "not null yet";
+            Exception caught   = null;
+            try
+            {
+                yield return HttpTransport.FetchTextAsync(url, default)
+                    .ContinueWith((Action<string>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsNull(caught, $"A 404 response must NOT throw. Exception: {caught?.Message}");
+            Assert.IsNull(response, "HTTP 404 must produce a null body (absent).");
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
