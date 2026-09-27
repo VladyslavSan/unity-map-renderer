@@ -206,6 +206,40 @@ applies; prefer it for the larger blittable aggregates passed into `Execute`.
 *(Established 2026-06-26 — noticed in S62's `ViewInput` / `CameraProperties` by-value pass; `in
 EvaluationContext` is the prior-art that got it right.)*
 
+### A parse artifact never escapes the parser
+
+`JsonValue` is a parsed JSON DOM node — a parse artifact, not a style-model type. It belongs at the
+parsing boundary and dies there: a style-model member that names a SPEC PROPERTY (`TextField`,
+`IconImage`, `Filter`) is typed — `StyleProperty<T>`, an enum, an array, or a small wrapper class — never
+handed out as a raw `JsonValue`. A `JsonValue` member pushes "what shape is this really?" onto every
+consumer, forever, and hides the expression **Kind** a renderer switches on.
+
+**Parse once, keep the verdict.** A member that can fail to parse is not re-parsed at every read. It is
+parsed once, at style load, into a value that carries either the usable result or the failure — never a
+raw node a caller re-parses and re-fails on each use. `LayerFilter.Error` is this shape: `LayerFilter.Parse`
+never throws, and a malformed filter's message lives on the instance instead of recurring at every compile
+attempt.
+
+**The legitimate exceptions, and each must be NAMED for what it is:**
+- A `Raw`/`Root` member that exists so unknown or forward-compat keys survive a round trip —
+  `StyleLayer.Raw` is compared whole by the restyle survivor gate, which the typed views cannot do because
+  they drop what they do not model.
+- A typed wrapper may keep its own internal `Raw` for exactly one named downstream consumer that still
+  needs the DOM node: `LayerFilter.Raw` feeds `NativeFilterCompiler`, which compiles from the normalised
+  expression JSON because the parsed `Expression` tree's `==`/`!=`/`!` nodes are opaque closures.
+
+**The test:** does the member name a property the spec defines? Then type it. Does it name the original
+document (or a sub-document a single named consumer still needs unparsed)? Then `Raw`/`Root` is right, and
+the doc says in one line who needs it unparsed. `JsonValue` as a `Parse(...)` parameter is correct and is
+not this rule.
+
+**Known live exception:** `SourceDefinition.Data` is still raw `JsonValue`, a temporary exception tracked
+by UMR-240. This is the rule new and touched code is held to, not a claim the codebase already keeps it
+everywhere.
+
+*(Prior art: `StyleProperty<T>` replacing raw `JsonValue` on `TextField`/`IconImage` (5cba86bc);
+`LayerFilter` replacing raw `JsonValue` on `StyleLayer.Filter`.)*
+
 ### Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`
 
 **Prefer object initializers over positional constructors.** When a type is a plain data carrier (no

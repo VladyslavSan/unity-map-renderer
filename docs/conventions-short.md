@@ -71,15 +71,20 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     `StyleProperty<T>` / enum / array — never a `JsonValue`. Handing out a DOM node pushes "what shape is
     this really?" onto every consumer, forever, and hides the expression **Kind** the renderer switches on
     (`RidesUniform`, `SurvivingLayerGate`).
-  - *The one legitimate exception, and it must be NAMED for what it is:* a `Raw`/`Root` member that exists
-    so unknown or forward-compat keys survive a round trip — `StyleLayer.Raw` is compared whole by the
-    restyle survivor gate, which the typed views cannot do because they drop what they do not model.
+  - *Parse once, keep the verdict:* a member that can fail to parse is parsed once, at style load, into a
+    value carrying either the result or the failure — never a raw node re-parsed and re-failed on each use
+    (`LayerFilter.Error`).
+  - *The legitimate exceptions, and each must be NAMED for what it is:* a `Raw`/`Root` member that exists so
+    unknown or forward-compat keys survive a round trip — `StyleLayer.Raw` is compared whole by the restyle
+    survivor gate, which the typed views cannot do because they drop what they do not model. A typed
+    wrapper may also keep its own internal `Raw` for one named downstream consumer that still needs the DOM
+    node — `LayerFilter.Raw` feeds `NativeFilterCompiler`.
   - *The test:* does the member name a property the spec defines? Then type it. Does it name the original
     document? Then `Raw` is right, and say in one line who needs it unparsed.
   - `JsonValue` as a `Parse(...)` PARAMETER is correct and is not this rule.
-  - **Known live exceptions:** `StyleLayer.Filter` and `SourceDefinition.Data` are still raw `JsonValue`
-    today (`Data`'s own doc gives a reason: the key is either inline GeoJSON or a URL). This is the rule
-    new and touched code is held to, not a claim that the codebase already keeps it everywhere.
+  - **Known live exception:** `SourceDefinition.Data` is still raw `JsonValue`, a temporary exception
+    tracked by UMR-240. This is the rule new and touched code is held to, not a claim that the codebase
+    already keeps it everywhere.
 
 - **Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`.**
   - Plain data carriers expose `init`-only auto-properties and are built with named members

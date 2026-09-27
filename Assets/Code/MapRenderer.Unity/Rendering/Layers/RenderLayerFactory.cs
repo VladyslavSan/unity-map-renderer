@@ -1,5 +1,3 @@
-using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Filters;
 using MapRenderer.Unity.Style;
 using Fill = MapRenderer.Unity.Style.Fill;
 using Line = MapRenderer.Unity.Style.Line;
@@ -127,22 +125,13 @@ namespace MapRenderer.Unity.Rendering.Layers
                 or StyleLayerType.FillExtrusion
             && !string.IsNullOrEmpty(layer.Source);
 
-        /// <summary>True iff <paramref name="layer"/>'s <c>filter</c> compiles; otherwise <paramref name="error"/>
-        /// carries the failed compile's message. A load-time pre-check of the compile that
-        /// <c>FeatureSelector.FilterFor</c> repeats per filter node at tile build.</summary>
+        /// <summary>True iff <paramref name="layer"/>'s <c>filter</c> compiled; otherwise <paramref name="error"/>
+        /// carries the failed parse's message. Reads the verdict <see cref="LayerFilter.Parse"/> already
+        /// recorded at style load.</summary>
         private static bool FilterCompiles(StyleLayer layer, out string error)
         {
-            try
-            {
-                CompiledFilter.Compile(layer.Filter);
-                error = null;
-                return true;
-            }
-            catch (ExpressionParseException ex)
-            {
-                error = ex.Message;
-                return false;
-            }
+            error = layer.Filter?.Error;
+            return error == null;
         }
     }
 
@@ -184,8 +173,8 @@ namespace MapRenderer.Unity.Rendering.Layers
         FullyTransparent,
 
         /// <summary>The layer's <c>filter</c> does not compile — an unsupported operator or a malformed
-        /// filter (<see cref="ExpressionParseException"/> from <see cref="CompiledFilter.Compile"/>) — a
-        /// real compatibility gap.</summary>
+        /// filter (<see cref="LayerFilter.Error"/> from <see cref="LayerFilter.Parse"/>) — a real
+        /// compatibility gap.</summary>
         UnsupportedFilter,
     }
 }

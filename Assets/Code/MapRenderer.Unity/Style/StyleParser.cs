@@ -204,8 +204,8 @@ namespace MapRenderer.Unity.Style
             // LayoutProperties. Absent or any value but "none" means visible, the spec default.
             layer.Visible = layoutJson?.GetString("visibility") != "none";
 
-            // Raw sub-tree retained verbatim (null if the key is absent).
-            layer.Filter = json.Get("filter");
+            // Parses to null for an absent key; never throws (see LayerFilter.Parse).
+            layer.Filter = LayerFilter.Parse(json.Get("filter"));
 
             return layer;
         }

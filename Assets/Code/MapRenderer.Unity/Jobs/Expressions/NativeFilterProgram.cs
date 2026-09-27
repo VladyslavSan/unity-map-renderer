@@ -4,7 +4,7 @@ namespace MapRenderer.Unity.Jobs.Expressions
 {
     /// <summary>
     /// A compiled, tile-independent native filter, <see cref="NativeFilterCompiler.TryCompile"/>'s output. It
-    /// is immutable and memoized per filter node for the style's life
+    /// is immutable and memoized per <c>LayerFilter</c> instance for the style's life
     /// (<c>FeatureSelector.NativeProgramFor</c>).
     /// The MVT-specific <c>Mvt.NativeFilterRebind</c> resolves it against one tile layer's key/value tables,
     /// fresh per tile, because those tables belong to the tile layer.

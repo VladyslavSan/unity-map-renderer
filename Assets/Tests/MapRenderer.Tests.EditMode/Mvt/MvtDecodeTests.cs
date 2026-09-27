@@ -681,7 +681,7 @@ namespace MapRenderer.Tests.Mvt
             Id          = "test",
             Source      = "fixture",
             SourceLayer = "countries",
-            Filter      = JsonParser.Parse(filterJson),
+            Filter      = LayerFilter.Parse(JsonParser.Parse(filterJson)),
         };
 
         /// <summary>Counts <see cref="IFeatureKeyResolver.TryResolveKey"/> calls, forwarding to a real

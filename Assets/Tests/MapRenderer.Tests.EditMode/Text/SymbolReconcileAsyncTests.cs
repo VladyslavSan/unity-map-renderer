@@ -1223,7 +1223,7 @@ namespace MapRenderer.Tests.Text
                 SourceLayer = sourceLayer,
                 Paint       = TestStyle.SymbolPaint(),
                 Layout      = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"),
-                Filter      = filterJson != null ? JsonParser.Parse(filterJson) : null,
+                Filter      = LayerFilter.Parse(filterJson != null ? JsonParser.Parse(filterJson) : null),
             };
 
         private static SymbolStyle.StyleLayer LineSymbolLayer()
@@ -3189,7 +3189,7 @@ namespace MapRenderer.Tests.Text
             SourceLayer = "probe",
             Paint       = TestStyle.SymbolPaint(),
             Layout      = TestStyle.SymbolLayout(@"{""text-field"":""{cls}""}"),
-            Filter      = filterJson != null ? JsonParser.Parse(filterJson) : null,
+            Filter      = LayerFilter.Parse(filterJson != null ? JsonParser.Parse(filterJson) : null),
         };
 
         private static IFeature Feature(string cls, TileGeometryType kind, params IReadOnlyList<double2>[] rings)

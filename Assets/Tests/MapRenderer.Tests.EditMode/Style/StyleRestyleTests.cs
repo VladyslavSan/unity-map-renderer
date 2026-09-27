@@ -667,7 +667,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // =========================================================================================
-        // 6. Raw subtree retention: paint/layout/filter are queryable JsonValue when declared.
+        // 6. Raw subtree retention: paint/layout are queryable JsonValue when declared; filter's Raw is too.
         // =========================================================================================
         [Test]
         public void RawSubtrees_RetainedAndQueryable()
@@ -688,8 +688,8 @@ namespace MapRenderer.Tests.Style
             var layer = StyleParser.Parse(json).Layers[0];
 
             Assert.IsNotNull(layer.Filter);
-            Assert.IsTrue(layer.Filter.IsArray, "legacy filter retained as raw array");
-            Assert.AreEqual("==", layer.Filter.Items[0].AsString());
+            Assert.IsTrue(layer.Filter.Raw.IsArray, "legacy filter retained as raw array");
+            Assert.AreEqual("==", layer.Filter.Raw.Items[0].AsString());
 
             Assert.IsNotNull(layer.Raw.Get("layout"));
             Assert.AreEqual("round", layer.Raw.Get("layout").GetString("line-cap"));
@@ -1046,7 +1046,7 @@ namespace MapRenderer.Tests.Style
                 SourceLayer = "centroids",
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout("{\"text-field\":\"" + textField + "\"}"),
-                Filter = filterJson != null ? JsonParser.Parse(filterJson) : null,
+                Filter = LayerFilter.Parse(filterJson != null ? JsonParser.Parse(filterJson) : null),
             };
 
         [Test]

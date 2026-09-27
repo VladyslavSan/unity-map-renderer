@@ -861,7 +861,7 @@ namespace MapRenderer.Tests.Meshing
             SourceLayer = "p2",
             Paint       = TestStyle.LinePaint(PaintJson),
             Layout      = TestStyle.LineLayout(),
-            Filter      = JsonParser.Parse(FilterJson),
+            Filter      = LayerFilter.Parse(JsonParser.Parse(FilterJson)),
         };
 
         private static Line.PaintProperties  Paint()  => StyleLayerWithFilter().Paint;

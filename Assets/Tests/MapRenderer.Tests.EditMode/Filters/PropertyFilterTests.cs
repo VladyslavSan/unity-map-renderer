@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Filters
                 Id          = "test",
                 Source      = "fixture",
                 SourceLayer = "countries",
-                Filter      = filterJson != null ? JsonParser.Parse(filterJson) : null,
+                Filter      = LayerFilter.Parse(filterJson != null ? JsonParser.Parse(filterJson) : null),
             };
         }
 

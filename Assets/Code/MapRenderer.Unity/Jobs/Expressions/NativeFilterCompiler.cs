@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Jobs.Expressions
 
         /// <summary>
         /// Attempts to compile <paramref name="rawFilter"/> (a style layer's raw <c>filter</c> JSON, as
-        /// <c>StyleLayer.Filter</c> carries it — pre-normalisation). Returns false for anything outside the
+        /// <c>LayerFilter.Raw</c> carries it — pre-normalisation). Returns false for anything outside the
         /// accepted subset (see the type summary); <paramref name="program"/> is null on refusal.
         /// </summary>
         internal static bool TryCompile(JsonValue rawFilter, out NativeFilterProgram program)

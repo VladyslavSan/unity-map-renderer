@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using Unity.Collections;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
-using MapRenderer.Core.Json;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Expressions;
 
@@ -28,9 +27,10 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// <summary>
     /// The feature-selection seam: given a <see cref="StyleLayer"/> and a decoded <see cref="IDecodedTile"/>,
     /// returns the features of the matching source-layer (none if absent) that pass the layer's filter.
-    /// The filter compiles once per filter node (<see cref="FilterFor"/>). At each
-    /// <see cref="ITileLayer"/> entry point, a VM-compilable filter over an <see cref="INativeFilterSource"/>
-    /// layer runs on the Burst filter VM instead (<see cref="NativeProgramFor"/>), with the same result.
+    /// <see cref="LayerFilter"/> parses the filter once at style load; <see cref="FilterFor"/> reads that
+    /// verdict. At each <see cref="ITileLayer"/> entry point, a VM-compilable filter over an
+    /// <see cref="INativeFilterSource"/> layer runs on the Burst filter VM instead
+    /// (<see cref="NativeProgramFor"/>), with the same result.
     /// </summary>
     internal static class FeatureSelector
     {
@@ -49,8 +49,8 @@ namespace MapRenderer.Unity.Jobs.Tiles
             if (tileLayer == null)
                 return System.Array.Empty<IFeature>();
 
-            // 2. Probe the native-filter seam first. Only when it declines does the managed filter compile and
-            // bind; the native branch never rents a key-binding buffer or compiles CompiledFilter.
+            // 2. Probe the native-filter seam first. Only when it declines does the managed filter bind;
+            // the native branch never rents a key-binding buffer.
             INativeFeatureMatcher native = BindNativeFilter(tileLayer, layer);
             CompiledFilter filter = null;
             int[] binding = null;
@@ -265,41 +265,33 @@ namespace MapRenderer.Unity.Jobs.Tiles
             if (binding != null) KeyBindingBuffers.Return(binding);
         }
 
-        // ---- compiled-filter memo ---------------------------------------------------------------------
+        // ---- compiled-filter read ---------------------------------------------------------------------
 
         /// <summary>
-        /// The <see cref="CompiledFilter"/> for <paramref name="layer"/>, compiled on first use and then reused.
-        /// Non-obvious why: the memo keys on the filter JSON node, because <see cref="StyleLayer.Filter"/> is
-        /// mutable; it is a thread-safe, weak-keyed <see cref="ConditionalWeakTable{TKey,TValue}"/> because
-        /// tiles build off the main thread and entries must die with the style. A racing compile is harmless
-        /// (<see cref="CompiledFilter.Compile"/> is pure). A malformed filter throws and caches nothing.
+        /// The <see cref="CompiledFilter"/> for <paramref name="layer"/> — parsed once at style load
+        /// (<see cref="LayerFilter.Parse"/>), so this is a field read, not a recompile. Throws
+        /// <see cref="ExpressionParseException"/> with <see cref="LayerFilter.Error"/> for a malformed filter.
         /// </summary>
         internal static CompiledFilter FilterFor(StyleLayer layer)
         {
-            JsonValue filter = layer?.Filter;
+            LayerFilter filter = layer?.Filter;
             if (filter == null)
                 return CompiledFilter.Compile(null);
-
-            return CompiledFilters.GetValue(filter, CompileCallback);
+            if (filter.Error != null)
+                throw new ExpressionParseException(filter.Error);
+            return filter.Compiled;
         }
-
-        private static readonly ConditionalWeakTable<JsonValue, CompiledFilter> CompiledFilters =
-            new ConditionalWeakTable<JsonValue, CompiledFilter>();
-
-        // Hoisted so the lookup allocates no delegate per call.
-        private static readonly ConditionalWeakTable<JsonValue, CompiledFilter>.CreateValueCallback
-            CompileCallback = f => CompiledFilter.Compile(f);
 
         // ---- native-program memo -----------------------------------------------------------------------
 
         /// <summary>
         /// The <see cref="NativeFilterProgram"/> for <paramref name="filter"/> — compiled on first use and
-        /// reused thereafter, mirroring <see cref="FilterFor"/>'s memo exactly (same keyed-on-the-node
-        /// rationale: <see cref="StyleLayer.Filter"/> is mutable, so keying on the layer could serve a stale
-        /// compile). Returns <c>null</c> both for "no filter" and for "compiled, but outside the VM's
+        /// reused thereafter. Keyed on the <see cref="LayerFilter"/> instance, not the layer, because
+        /// <see cref="StyleLayer.Filter"/> is mutable and a memo keyed on the layer could serve a stale
+        /// compile. Returns <c>null</c> both for "no filter" and for "compiled, but outside the VM's
         /// accepted subset" — either way the caller falls back to the managed path.
         /// </summary>
-        internal static NativeFilterProgram NativeProgramFor(JsonValue filter)
+        internal static NativeFilterProgram NativeProgramFor(LayerFilter filter)
         {
             if (filter == null) return null; // no filter ⇒ managed match-all path
             return NativeProgramMemo_.GetValue(filter, CompileNativeCallback).Program;
@@ -315,11 +307,11 @@ namespace MapRenderer.Unity.Jobs.Tiles
             internal NativeFilterProgram Program;
         }
 
-        private static readonly ConditionalWeakTable<JsonValue, NativeProgramMemo> NativeProgramMemo_ =
-            new ConditionalWeakTable<JsonValue, NativeProgramMemo>();
+        private static readonly ConditionalWeakTable<LayerFilter, NativeProgramMemo> NativeProgramMemo_ =
+            new ConditionalWeakTable<LayerFilter, NativeProgramMemo>();
 
-        private static readonly ConditionalWeakTable<JsonValue, NativeProgramMemo>.CreateValueCallback
+        private static readonly ConditionalWeakTable<LayerFilter, NativeProgramMemo>.CreateValueCallback
             CompileNativeCallback = f =>
-                new NativeProgramMemo { Program = NativeFilterCompiler.TryCompile(f, out var p) ? p : null };
+                new NativeProgramMemo { Program = NativeFilterCompiler.TryCompile(f.Raw, out var p) ? p : null };
     }
 }

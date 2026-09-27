@@ -6,8 +6,8 @@ namespace MapRenderer.Unity.Style
     /// A style layer (Style Spec <c>layers[]</c>) — the generic base. Line and fill layers are specialized
     /// by <see cref="MapRenderer.Unity.Style.Line.StyleLayer"/> / <see cref="MapRenderer.Unity.Style.Fill.StyleLayer"/>,
     /// which add their typed, eagerly-parsed paint/layout; the other types are represented by this base
-    /// directly. The common fields are typed here; only <c>filter</c> and the whole-object <c>Raw</c> are
-    /// retained as raw <see cref="JsonValue"/> — <c>paint</c>/<c>layout</c> are parsed at construction.
+    /// directly. The common fields are typed here; <c>filter</c> is parsed into <see cref="LayerFilter"/>
+    /// and the whole-object <c>Raw</c> retained — <c>paint</c>/<c>layout</c> are parsed at construction.
     /// </summary>
     public class StyleLayer
     {
@@ -54,8 +54,10 @@ namespace MapRenderer.Unity.Style
         public bool IsVisibleAtZoom(double zoom)
             => Visible && (!MinZoom.HasValue || zoom >= MinZoom.Value) && (!MaxZoom.HasValue || zoom < MaxZoom.Value);
 
-        /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null.</summary>
-        public JsonValue Filter;
+        /// <summary>The parsed <c>filter</c> (legacy or expression dialect), or null when absent.
+        /// <see cref="LayerFilter.Parse"/> never throws; a malformed filter is carried as
+        /// <see cref="LayerFilter.Error"/> rather than failing the whole style load.</summary>
+        public LayerFilter Filter;
 
         /// <summary>The full original layer JSON object, retained so unknown/forward-compat keys survive.
         /// Callers read the typed <c>Paint</c>/<c>Layout</c> views instead, except the restyle survivor gate

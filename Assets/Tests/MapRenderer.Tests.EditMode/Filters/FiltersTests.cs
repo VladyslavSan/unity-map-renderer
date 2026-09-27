@@ -5,7 +5,7 @@
 //   MvtFeatureIFeatureContractTests   — MvtFeature implements IFeature directly against its exact documented
 //                                       Null-Object semantics (TryGetProperty/Properties/GeometryType).
 //   FeatureSelectorTests              — FeatureSelector.SelectFeatures: source-layer resolution, $type and
-//                                       expression-form filters, ordinal reporting, the compiled-filter memo.
+//                                       expression-form filters, ordinal reporting, the parsed LayerFilter.
 //   FeatureSelectorNativeFilterTests  — the native filter VM's production-boundary parity, dispatch
 //                                       coverage, and both refusal-fallback gates.
 //   NativeFilterVmTests               — the VM's own parity oracle against liberty.json's filter corpus,
@@ -110,7 +110,7 @@ namespace MapRenderer.Tests.Filters
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FeatureSelectorTests — source-layer resolution, $type filters, ordinals, the compile memo
+    // FeatureSelectorTests — source-layer resolution, $type filters, ordinals, the parsed LayerFilter
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -150,7 +150,7 @@ namespace MapRenderer.Tests.Filters
                 Id = "test",
                 Source = "mysource",
                 SourceLayer = sourceLayer,
-                Filter = filterJson != null ? JsonParser.Parse(filterJson) : null,
+                Filter = LayerFilter.Parse(filterJson != null ? JsonParser.Parse(filterJson) : null),
             };
         }
 
@@ -297,43 +297,36 @@ namespace MapRenderer.Tests.Filters
             Assert.AreEqual(0, selected.Count, "a null tile layer must leave the output empty");
         }
 
-        // ── Compiled-filter memo ──────────────────────────────────────────────────────────────────
-        // ARRAY filters only: the shared null/true/false singletons pass a reference check with no memo.
+        // ── The parsed LayerFilter ────────────────────────────────────────────────────────────────
+        // ARRAY filters only: the shared null/true/false singletons pass a reference check trivially.
 
         private const string ArrayFilter = "[\"==\",\"$type\",\"LineString\"]";
 
         [Test]
-        public void CompiledFilter_SameLayer_IsCompiledOnce()
+        public void CompiledFilter_IsTheParsedOne()
         {
+            // FilterFor must return the SAME CompiledFilter LayerFilter.Parse already built at style
+            // load — a stray CompiledFilter.Compile(f.Raw) here would recompile and return a distinct
+            // instance instead of reading the stored one.
             var layer = MakeLayer("roads", ArrayFilter);
-            Assert.AreSame(FeatureSelector.FilterFor(layer), FeatureSelector.FilterFor(layer),
-                "An array filter must be compiled once and reused — a second CompiledFilter instance " +
-                "means the memo missed and the filter was recompiled.");
+            Assert.AreSame(layer.Filter.Compiled, FeatureSelector.FilterFor(layer),
+                "FilterFor must read the LayerFilter's own Compiled field, not recompile.");
         }
 
         [Test]
-        public void CompiledFilter_DistinctFilterNodes_DoNotShare()
+        public void NativeProgram_ReassignedFilter_IsNotStale()
         {
-            // Same filter TEXT, two independently parsed nodes: the memo must key on the node, so these
-            // are two entries. Guards against a "cache" that collapses onto one global CompiledFilter.
-            Assert.AreNotSame(
-                FeatureSelector.FilterFor(MakeLayer("roads", ArrayFilter)),
-                FeatureSelector.FilterFor(MakeLayer("roads", ArrayFilter)),
-                "Two separately parsed filter nodes must compile to two CompiledFilters.");
-        }
-
-        [Test]
-        public void CompiledFilter_ReassignedFilter_IsRecompiled()
-        {
-            // StyleLayer.Filter is mutable: a memo keyed on the LAYER serves the stale compile here, while one
-            // keyed on the node recompiles.
+            // Reassigning StyleLayer.Filter builds a new LayerFilter instance; the native-program memo
+            // is keyed on that instance, so a reassignment must never serve the OLD filter's program.
             var layer = MakeLayer("roads", ArrayFilter);
-            var before = FeatureSelector.FilterFor(layer);
+            NativeFilterProgram before = FeatureSelector.NativeProgramFor(layer.Filter);
+            Assert.IsNotNull(before, "precondition: the $type filter must be native-compilable");
 
-            layer.Filter = JsonParser.Parse("[\"==\",\"$type\",\"Point\"]");
-            var after = FeatureSelector.FilterFor(layer);
+            layer.Filter = LayerFilter.Parse(JsonParser.Parse("[\"==\",\"$type\",\"Point\"]"));
+            NativeFilterProgram after = FeatureSelector.NativeProgramFor(layer.Filter);
 
-            Assert.AreNotSame(before, after, "Reassigning Filter must not keep serving the old compile.");
+            Assert.IsNotNull(after, "precondition: the reassigned filter must also be native-compilable");
+            Assert.AreNotSame(before, after, "Reassigning Filter must not keep serving the old native program.");
 
             var tile = BuildTile();
             Assert.That(FeatureSelector.SelectFeatures(layer, tile).Count, Is.EqualTo(1),
@@ -341,11 +334,16 @@ namespace MapRenderer.Tests.Filters
         }
 
         [Test]
-        public void CompiledFilter_MalformedFilter_ThrowsEveryTime()
+        public void MalformedFilter_ParsesToAnError_AndSelectionThrows()
         {
-            // Nothing is memoized on the throwing path, so the second call must throw too rather than
-            // silently succeeding off a half-populated entry.
+            // LayerFilter.Parse never throws — a malformed filter is carried as Error, not a parse-time
+            // crash.
             var layer = MakeLayer("roads", "[\"==\"]");
+            Assert.IsNotNull(layer.Filter, "precondition: LayerFilter.Parse must return an instance, not throw");
+            Assert.IsNotNull(layer.Filter.Error, "a malformed filter must carry the parse error, not compile");
+
+            // FilterFor still throws — the contract CompiledFilter.Compile used to enforce directly —
+            // every time, since nothing is (re)memoized on this path.
             Assert.Throws<MapRenderer.Core.Expressions.ExpressionParseException>(
                 () => FeatureSelector.FilterFor(layer));
             Assert.Throws<MapRenderer.Core.Expressions.ExpressionParseException>(
@@ -432,15 +430,15 @@ namespace MapRenderer.Tests.Filters
             foreach (StyleLayer layer in SymbolTestFixtures.LibertyDoc().Layers)
             {
                 if (layer.Filter == null) continue;
-                if (NativeFilterCompiler.TryCompile(layer.Filter, out _))
-                    covered.Add(layer.Filter);
+                if (NativeFilterCompiler.TryCompile(layer.Filter.Raw, out _))
+                    covered.Add(layer.Filter.Raw);
             }
             return covered;
         }
 
         private static StyleLayer MakeLayer(string sourceLayer, JsonValue filter) => new StyleLayer
         {
-            Id = "t", Source = "s", SourceLayer = sourceLayer, Filter = filter,
+            Id = "t", Source = "s", SourceLayer = sourceLayer, Filter = LayerFilter.Parse(filter),
         };
 
         /// <summary>The managed reference computation the parity and fallback tests compare the production
@@ -611,7 +609,7 @@ namespace MapRenderer.Tests.Filters
         public void NativeProgramFor_RefusesUnsupportedFilter_AndSelectionStaysManagedAndCorrect(string json)
         {
             JsonValue filterJson = JsonParser.Parse(json);
-            Assert.IsNull(FeatureSelector.NativeProgramFor(filterJson), "must refuse to compile");
+            Assert.IsNull(FeatureSelector.NativeProgramFor(LayerFilter.Parse(filterJson)), "must refuse to compile");
 
             MvtLayer layer = FirstNonEmptyLayer();
             List<IFeature> expected = ManagedSelect(filterJson, layer);
@@ -820,8 +818,8 @@ namespace MapRenderer.Tests.Filters
             {
                 if (layer.Filter == null) continue;
                 total++;
-                if (NativeFilterCompiler.TryCompile(layer.Filter, out _))
-                    covered.Add(layer.Filter);
+                if (NativeFilterCompiler.TryCompile(layer.Filter.Raw, out _))
+                    covered.Add(layer.Filter.Raw);
                 else
                     refused.Add(layer.Id);
             }

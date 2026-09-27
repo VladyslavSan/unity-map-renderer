@@ -162,7 +162,7 @@ namespace MapRenderer.Tests.Tiles
             var decodedTile = new OneLayerDecodedTile(spy, "countries");
             var styleLayer = new StyleLayer
             {
-                Id = "t", Source = "s", SourceLayer = "countries", Filter = filter,
+                Id = "t", Source = "s", SourceLayer = "countries", Filter = LayerFilter.Parse(filter),
                 LayerType = StyleLayerType.Fill,
             };
             var renderLayer = new CapturingTileMeshRenderLayer(styleLayer);
