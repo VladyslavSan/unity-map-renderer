@@ -2951,8 +2951,8 @@ namespace MapRenderer.Tests.Jobs
     /// <b>Every hole belongs to the same source-layer feature as its polygon's outer ring</b>, checked over real
     /// data. Non-local invariant: <c>FillMeshPipeline.HoleRingComparer</c> tiebreaks on ring index, so earcut's
     /// hole-bridge order is byte-identical only while a polygon's holes share its outer's feature.
-    /// <c>RingAssemblyJob.Execute</c> resets <c>exteriorSign</c> on each new feature before the area test, so
-    /// a feature's first surviving ring is always an outer.
+    /// <c>RingAssemblyJob.Execute</c> resets the shared <c>RingExteriorClassifier.State</c> on each new feature
+    /// before classifying, so a feature's first surviving ring is always an outer.
     /// </summary>
     [TestFixture]
     public class RingAssemblyHoleAttributionTests

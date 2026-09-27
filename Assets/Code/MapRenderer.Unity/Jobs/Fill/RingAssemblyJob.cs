@@ -3,22 +3,19 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Unity.Jobs.Geometry;
 
 namespace MapRenderer.Unity.Jobs.Fill
 {
     /// <summary>
-    /// Burst job: classifies decoded rings into polygon descriptors (outer + holes) by signed area. Each
-    /// feature's first non-degenerate ring sets the exterior sign; a same-sign ring starts a new polygon; an
-    /// opposite-sign ring is a hole only if it lies inside the current outer ring. Rings of non-Polygon
-    /// features are skipped, because a LineString ring looks like a polygon ring by area alone. Descriptor
-    /// arrays are sized for one polygon per ring. The Burst path calls no Core code.
+    /// Burst job: classifies decoded rings into polygon descriptors (outer + holes), through
+    /// <see cref="RingExteriorClassifier"/>. Rings of non-Polygon features are skipped, because a LineString
+    /// ring looks like a polygon ring by area alone. Descriptor arrays are sized for one polygon per ring.
+    /// The Burst path calls no Core code.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct RingAssemblyJob : IJob
     {
-        /// <summary>Rings with |2*area| (shoelace) below this threshold are skipped (degenerate).</summary>
-        private const double DegenerateThreshold = 1.0;
-
         // ── Input ──────────────────────────────────────────────────────────────────────────────
         [ReadOnly] public NativeArray<double2> Vertices;
         [ReadOnly] public NativeArray<int>     RingOffsets;   // length = ringCount + 1 (sentinel)
@@ -54,9 +51,9 @@ namespace MapRenderer.Unity.Jobs.Fill
             int polyCount     = 0;
             int holeListCount = 0;
 
-            int prevFeature   = -1;
-            double exteriorSign = 0.0;
-            int currentPolyIdx  = -1;
+            int prevFeature    = -1;
+            int currentPolyIdx = -1;
+            var classifier     = default(RingExteriorClassifier.State);
 
             for (int ri = 0; ri < ringCount; ri++)
             {
@@ -75,111 +72,35 @@ namespace MapRenderer.Unity.Jobs.Fill
                 // New feature resets exterior sign.
                 if (featureIdx != prevFeature)
                 {
-                    exteriorSign = 0.0;
-                    prevFeature  = featureIdx;
+                    classifier.Reset();
+                    prevFeature = featureIdx;
                 }
 
-                double area2 = SignedArea2(Vertices, rStart, rLen);
-                if (area2 < DegenerateThreshold && area2 > -DegenerateThreshold)
-                    continue; // degenerate ring
-
-                if (exteriorSign == 0.0)
+                switch (classifier.Classify(Vertices, rStart, rLen))
                 {
-                    // First valid ring in this feature: establishes exterior sign, creates polygon.
-                    exteriorSign = area2 > 0.0 ? 1.0 : -1.0;
-
-                    OutPolyOuterRingIdx[polyCount]  = ri;
-                    OutPolyHoleListStart[polyCount] = holeListCount;
-                    OutPolyHoleCount[polyCount]     = 0;
-                    currentPolyIdx = polyCount;
-                    polyCount++;
-                }
-                else
-                {
-                    double ringSign = area2 > 0.0 ? 1.0 : -1.0;
-                    if (ringSign == exteriorSign)
-                    {
-                        // Same sign as exterior → new outer ring (multipolygon island).
+                    case RingExteriorClassifier.Role.Outer:
                         OutPolyOuterRingIdx[polyCount]  = ri;
                         OutPolyHoleListStart[polyCount] = holeListCount;
                         OutPolyHoleCount[polyCount]     = 0;
                         currentPolyIdx = polyCount;
                         polyCount++;
-                    }
-                    else
-                    {
-                        // Opposite sign → candidate hole. Containment check: centroid (or first
-                        // vertex) must fall inside the current outer ring.
+                        break;
+
+                    case RingExteriorClassifier.Role.Hole:
                         if (currentPolyIdx >= 0)
                         {
-                            int outerRi    = OutPolyOuterRingIdx[currentPolyIdx];
-                            int outerStart = RingOffsets[outerRi];
-                            int outerLen   = RingOffsets[outerRi + 1] - outerStart;
-
-                            if (RingContainedIn(Vertices, rStart, rLen, outerStart, outerLen))
-                            {
-                                OutHoleRingIdxs[holeListCount] = ri;
-                                holeListCount++;
-                                OutPolyHoleCount[currentPolyIdx]++;
-                            }
-                            // else: disjoint artefact ring — drop it (same as managed assembler).
+                            OutHoleRingIdxs[holeListCount] = ri;
+                            holeListCount++;
+                            OutPolyHoleCount[currentPolyIdx]++;
                         }
-                    }
+                        break;
+
+                    // Role.Dropped: a degenerate or disjoint-artefact ring — nothing to record.
                 }
             }
 
             OutPolygonCount[0] = polyCount;
             OutHoleCount[0]    = holeListCount;
-        }
-
-        // ── Helpers ───────────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Shoelace signed area × 2: Σ (x_i*y_{i+1} − x_{i+1}*y_i).
-        /// Positive = CCW in Y-up = CW on screen in Y-down (MVT exterior).
-        /// </summary>
-        private static double SignedArea2(NativeArray<double2> verts, int start, int len)
-        {
-            double area = 0.0;
-            for (int i = 0; i < len; i++)
-            {
-                double2 a = verts[start + i];
-                double2 b = verts[start + (i + 1) % len];
-                area += a.x * b.y - b.x * a.y;
-            }
-            return area;
-        }
-
-        private static double2 Centroid(NativeArray<double2> verts, int start, int len)
-        {
-            double sx = 0.0, sy = 0.0;
-            for (int i = 0; i < len; i++) { sx += verts[start + i].x; sy += verts[start + i].y; }
-            return new double2(sx / len, sy / len);
-        }
-
-        /// <summary>Even-odd ray-cast point-in-polygon.</summary>
-        private static bool PointInRing(double2 p, NativeArray<double2> ring, int rStart, int rLen)
-        {
-            bool inside = false;
-            for (int i = 0, j = rLen - 1; i < rLen; j = i++)
-            {
-                double xi = ring[rStart + i].x, yi = ring[rStart + i].y;
-                double xj = ring[rStart + j].x, yj = ring[rStart + j].y;
-                bool straddle = (yi > p.y) != (yj > p.y);
-                if (straddle && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi))
-                    inside = !inside;
-            }
-            return inside;
-        }
-
-        private static bool RingContainedIn(
-            NativeArray<double2> verts,
-            int holeStart, int holeLen,
-            int outerStart, int outerLen)
-        {
-            double2 centroid = Centroid(verts, holeStart, holeLen);
-            if (PointInRing(centroid, verts, outerStart, outerLen)) return true;
-            return PointInRing(verts[holeStart], verts, outerStart, outerLen);
         }
     }
 }
