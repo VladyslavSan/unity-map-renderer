@@ -94,7 +94,9 @@ namespace MapRenderer.Tests.Visual
                 }
 
                 Color32 centrePx = snap.Pixels[SnapW / 2, row];
-                byte r = centrePx.r, g = centrePx.g, b = centrePx.b;
+                byte r = centrePx.r;
+                byte g = centrePx.g;
+                byte b = centrePx.b;
                 Debug.Log($"[LineStreamLayout] centre pixel RGB=({r},{g},{b}) at row={row} (expect cyan: g,b > r)");
 
                 // Cyan dominance: green AND blue clearly exceed red. A struct-order revert produces
@@ -265,7 +267,8 @@ namespace MapRenderer.Tests.Visual
         private static int FindLineCenterRow(Frame frame, int col)
         {
             int height = frame.Height;
-            int center = height / 2, seed = -1;
+            int center = height / 2;
+            int seed = -1;
             for (int d = 0; d <= height / 2; d++)
             {
                 if (IsNonBg(frame, col, center - d)) { seed = center - d; break; }
@@ -280,7 +283,8 @@ namespace MapRenderer.Tests.Visual
         private static int MeasureBandWidth(Frame frame, int col)
         {
             int height = frame.Height;
-            int center = height / 2, seed = -1;
+            int center = height / 2;
+            int seed = -1;
             for (int d = 0; d <= height / 2; d++)
             {
                 if (IsNonBg(frame, col, center - d)) { seed = center - d; break; }
@@ -1020,7 +1024,9 @@ namespace MapRenderer.Tests.Visual
         private static (int bottomRow, int topRow) BandRowSpan(
             Frame pixels, int column, float3 background, float3 coarsePlateau)
         {
-            int topRow = -1, bottomRow = -1, covered = 0;
+            int topRow = -1;
+            int bottomRow = -1;
+            int covered = 0;
             for (int row = 0; row < Size; row++)
             {
                 if (PixelCoverage.CoverageAt(pixels, column, row, background, coarsePlateau) < 0.5f)
@@ -1085,7 +1091,8 @@ namespace MapRenderer.Tests.Visual
             float atOuter  = PixelCoverage.CoverageAt(pixels, column, outer,  background, plateau);
             if (atAnchor >= 0.99f && atOuter <= 0.01f) return;
 
-            int from = math.min(anchor, outer), to = math.max(anchor, outer);
+            int from = math.min(anchor, outer);
+            int to = math.max(anchor, outer);
             float[] profile = PixelCoverage.CoverageProfileOnColumn(
                 pixels, column, from, to, background, plateau);
             Assert.Fail(
@@ -1157,8 +1164,10 @@ namespace MapRenderer.Tests.Visual
                     // Only ±10 columns (see TiltedSweepHalfWidth). The sweep is a uniformity PRECONDITION, not
                     // an error bar: every column lands on the same sub-pixel phase.
                     var ratios = new List<double>();
-                    double minFar = double.MaxValue, maxFar = double.MinValue;
-                    double minNear = double.MaxValue, maxNear = double.MinValue;
+                    double minFar = double.MaxValue;
+                    double maxFar = double.MinValue;
+                    double minNear = double.MaxValue;
+                    double maxNear = double.MinValue;
                     for (int column = CentreColumn - TiltedSweepHalfWidth;
                          column <= CentreColumn + TiltedSweepHalfWidth; column++)
                     {
@@ -1172,7 +1181,9 @@ namespace MapRenderer.Tests.Visual
                         minNear = math.min(minNear, s.NearScreenY); maxNear = math.max(maxNear, s.NearScreenY);
                     }
 
-                    double minRatio = double.MaxValue, maxRatio = double.MinValue, sum = 0.0;
+                    double minRatio = double.MaxValue;
+                    double maxRatio = double.MinValue;
+                    double sum = 0.0;
                     foreach (double r in ratios)
                     {
                         minRatio = math.min(minRatio, r);
@@ -1230,8 +1241,10 @@ namespace MapRenderer.Tests.Visual
 
                     var separations = new List<double>();
                     var ratios      = new List<double>();
-                    double minFar = double.MaxValue, maxFar = double.MinValue;
-                    double minNear = double.MaxValue, maxNear = double.MinValue;
+                    double minFar = double.MaxValue;
+                    double maxFar = double.MinValue;
+                    double minNear = double.MaxValue;
+                    double maxNear = double.MinValue;
                     for (int column = TopDownSweepFrom; column <= TopDownSweepTo; column++)
                     {
                         var s = MeasureColumn(pixels, column, background, coarse);
@@ -1307,7 +1320,8 @@ namespace MapRenderer.Tests.Visual
 
                     // Non-obvious why: the bracket is asymmetric, because past the camera plane (z ≈ −165 501 m)
                     // WorldToScreenPoint returns a mirrored y, which would void the bisection silently.
-                    const double Lo = -60_000.0, Hi = +200_000.0;
+                    const double Lo = -60_000.0;
+                    const double Hi = +200_000.0;
 
                     // The inset comes from the rendered band (8 rows here), where ±4 px windows would overlap.
                     // The asserted ratio L/H is dimensionless, so the inset does not enter it.
@@ -1360,7 +1374,8 @@ namespace MapRenderer.Tests.Visual
                         ratios.Add(0.5 * (far + near) / (0.5 * (far - near) - halfPadWorld));
                     }
 
-                    double minRatio = double.MaxValue, maxRatio = double.MinValue;
+                    double minRatio = double.MaxValue;
+                    double maxRatio = double.MinValue;
                     foreach (double r in ratios)
                     {
                         minRatio = math.min(minRatio, r);
@@ -1475,9 +1490,12 @@ namespace MapRenderer.Tests.Visual
                             $"width {width:F3} px, w·d {width * depth / 1000.0:F1} → ");
                     }
 
-                    double minProduct = double.MaxValue, maxProduct = double.MinValue;
-                    double minDepth   = double.MaxValue, maxDepth   = double.MinValue;
-                    double minWidth   = double.MaxValue, maxWidth   = double.MinValue;
+                    double minProduct = double.MaxValue;
+                    double maxProduct = double.MinValue;
+                    double minDepth   = double.MaxValue;
+                    double maxDepth   = double.MinValue;
+                    double minWidth   = double.MaxValue;
+                    double maxWidth   = double.MinValue;
                     for (int i = 0; i < products.Count; i++)
                     {
                         minProduct = math.min(minProduct, products[i]);

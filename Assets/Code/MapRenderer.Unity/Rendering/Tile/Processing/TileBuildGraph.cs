@@ -206,7 +206,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>Completes the write jobs and takes every layer's <see cref="MeshDataPayload"/>, in dense
         /// SLOT order (one exact-sized array). Non-local invariant: a repeat call returns the SAME array instead
         /// of throwing, because this graph owns it from the first call on. So a caller can resume a budget-bound
-        /// partial consume across Ticks without its own copy, and a caller whose consume threw gets back the
+        /// partial consume across Updates without its own copy, and a caller whose consume threw gets back the
         /// array with the slots that attempt already nulled, so the tile recovers.</summary>
         internal MeshDataPayload[] CompleteWriteAndTakePayloads()
         {
@@ -216,7 +216,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     "has a write step to complete, so this would silently return an empty array and settle " +
                     "the tile with no mesh.");
             // Idempotent, not a throw: the pump writes its LoadedTile copy back only after ConsumeMeshBuild returns,
-            // so a throw there loses the array. A throw here would fail the tile on every Tick and leak its meshes.
+            // so a throw there loses the array. A throw here would fail the tile on every Update and leak its meshes.
             if (_payloadsTaken) return _takenPayloads;
             _payloadsTaken = true;
 

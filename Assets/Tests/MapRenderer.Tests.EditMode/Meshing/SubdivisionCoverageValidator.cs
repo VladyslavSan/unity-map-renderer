@@ -23,12 +23,17 @@ namespace MapRenderer.Tests
 
         public readonly struct Report
         {
-            public readonly int SubTriangles, EarcutTriangles, MaxDepthReached;
+            public readonly int SubTriangles;
+            public readonly int EarcutTriangles;
+            public readonly int MaxDepthReached;
             public readonly bool BudgetFired;
             public readonly int TJunctions; // raw count — reported, NOT gated (meaningless as a threshold)
-            public readonly double MaxGapMeters, MaxGapFracTile, MeanGapMeters;
+            public readonly double MaxGapMeters;
+            public readonly double MaxGapFracTile;
+            public readonly double MeanGapMeters;
             public readonly int[] GapBuckets; // <1,<10,<100,<1k,<10k,>=10k meters
-            public readonly int DegenerateTris, FlippedTris;
+            public readonly int DegenerateTris;
+            public readonly int FlippedTris;
             public readonly double CoverageAreaRelError; // PER-ROOT max (not a global total — a global total
                                                          // lets a dropped region cancel a duplicated one).
             public readonly bool Subdivided;
@@ -109,7 +114,9 @@ namespace MapRenderer.Tests
             var roots = new List<RootTri>();
             for (int t = 0; t + 2 < srcIndexCount; t += 3)
             {
-                int i0 = triangleIndices[t], i1 = triangleIndices[t + 1], i2 = triangleIndices[t + 2];
+                int i0 = triangleIndices[t];
+                int i1 = triangleIndices[t + 1];
+                int i2 = triangleIndices[t + 2];
                 int feat = i0 < srcVertCount ? vertexFeatureIdx[i0] : 0;
                 roots.Add(new RootTri(tileVerts[i0], tileVerts[i1], tileVerts[i2], feat));
             }
@@ -150,7 +157,9 @@ namespace MapRenderer.Tests
         /// class's own Report analysis, carried only so Edit 4's parity tooth can assert Feature propagation.</summary>
         internal readonly struct RootTri
         {
-            public readonly double2 A, B, C;
+            public readonly double2 A;
+            public readonly double2 B;
+            public readonly double2 C;
             public readonly int Feature;
             public RootTri(double2 a, double2 b, double2 c, int feature = 0) { A = a; B = b; C = c; Feature = feature; }
         }
@@ -274,7 +283,11 @@ namespace MapRenderer.Tests
                          // vertex opposite the UNMARKED edge (shared by both marked edges); a0 = predecessor
                          // of apex, c0 = successor of apex in the A→B→C→A cycle.
                     {
-                        V apex, a0, c0, mVA0, mVC0;
+                        V apex;
+                        V a0;
+                        V c0;
+                        V mVA0;
+                        V mVC0;
                         if (!markAB)      { apex = w.c; a0 = w.b; c0 = w.a; mVA0 = mBC; mVC0 = mCA; } // unmarked=AB
                         else if (!markBC) { apex = w.a; a0 = w.c; c0 = w.b; mVA0 = mCA; mVC0 = mAB; } // unmarked=BC
                         else              { apex = w.b; a0 = w.a; c0 = w.c; mVA0 = mAB; mVC0 = mBC; } // unmarked=CA
@@ -312,7 +325,12 @@ namespace MapRenderer.Tests
 
         private static double2 Mid(double2 a, double2 b) => new double2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
 
-        private static double DistSq(double2 a, double2 b) { double dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; }
+        private static double DistSq(double2 a, double2 b)
+        {
+            double dx = a.x - b.x;
+            double dy = a.y - b.y;
+            return dx * dx + dy * dy;
+        }
 
         // -----------------------------------------------------------------------------------------------
         // Case (a): cross-parent T-junctions along a shared ORIGINAL earcut edge.
@@ -340,7 +358,8 @@ namespace MapRenderer.Tests
                 (int root0, int local0) = owners[0];
                 (int root1, _) = owners[1];
                 if (root0 == root1) continue;
-                double2 p = LocalEdgeStart(roots[root0], local0), q = LocalEdgeEnd(roots[root0], local0);
+                double2 p = LocalEdgeStart(roots[root0], local0);
+                double2 q = LocalEdgeEnd(roots[root0], local0);
                 adjacency.Add((root0, root1, p, q));
             }
             return adjacency;
@@ -356,8 +375,10 @@ namespace MapRenderer.Tests
 
         private static (long, long, long, long) EdgeKey(double2 a, double2 b)
         {
-            long ax = (long)math.round(a.x * 1e6), ay = (long)math.round(a.y * 1e6);
-            long bx = (long)math.round(b.x * 1e6), by = (long)math.round(b.y * 1e6);
+            long ax = (long)math.round(a.x * 1e6);
+            long ay = (long)math.round(a.y * 1e6);
+            long bx = (long)math.round(b.x * 1e6);
+            long by = (long)math.round(b.y * 1e6);
             if (ax > bx || (ax == bx && ay > by))
             {
                 (ax, bx) = (bx, ax);
@@ -415,7 +436,9 @@ namespace MapRenderer.Tests
             {
                 for (int i = 0; i + 2 < rootLeaves.Count; i += 3)
                 {
-                    LeafRef a = rootLeaves[i], b = rootLeaves[i + 1], c = rootLeaves[i + 2];
+                    LeafRef a = rootLeaves[i];
+                    LeafRef b = rootLeaves[i + 1];
+                    LeafRef c = rootLeaves[i + 2];
                     int leafDepth = a.Depth; // shared by all 3 vertices of one emitted leaf triangle
                     CheckSegment(a.Tile, b.Tile, leafDepth, new List<LeafRef> { a, b }, rootLeaves, ref tjCount, ref sumGap, ref maxGap, ref worstAt, gapBuckets);
                     CheckSegment(b.Tile, c.Tile, leafDepth, new List<LeafRef> { b, c }, rootLeaves, ref tjCount, ref sumGap, ref maxGap, ref worstAt, gapBuckets);
@@ -492,9 +515,12 @@ namespace MapRenderer.Tests
                 // Endpoints are always shared corner vertices in a correct mirror; skip defensively.
                 if (point.s <= sTol || point.s >= 1.0 - sTol) continue;
 
-                bool haveLo = false, haveHi = false;
-                double loS = double.NegativeInfinity, hiS = double.PositiveInfinity;
-                double3 loWorld = default, hiWorld = default;
+                bool haveLo = false;
+                bool haveHi = false;
+                double loS = double.NegativeInfinity;
+                double hiS = double.PositiveInfinity;
+                double3 loWorld = default;
+                double3 hiWorld = default;
                 foreach (var o in other)
                 {
                     if (o.s < point.s && o.s > loS) { loS = o.s; loWorld = o.world; haveLo = true; }
@@ -536,7 +562,9 @@ namespace MapRenderer.Tests
 
             for (int i = 0; i + 2 < leaves.Count; i += 3)
             {
-                LeafRef a = leaves[i], b = leaves[i + 1], c = leaves[i + 2];
+                LeafRef a = leaves[i];
+                LeafRef b = leaves[i + 1];
+                LeafRef c = leaves[i + 2];
                 double parentArea2 = rootArea2[a.RootIndex];
 
                 // Count only NEW degeneracy/flips: skip roots already degenerate (earcut bridge slits). Integer
@@ -567,7 +595,9 @@ namespace MapRenderer.Tests
                 if (root < realRoot.Length && !realRoot[root]) continue;
                 // Skip NEEDLE slivers (thinness = area2/longestEdge² < 0.03, ~30:1): subdivision cannot fix their
                 // angle and they paint ~nothing. Well-formed leaves (~0.3+) still trip the gate.
-                double2 ta = leaves[i].Tile, tb = leaves[i + 1].Tile, tc = leaves[i + 2].Tile;
+                double2 ta = leaves[i].Tile;
+                double2 tb = leaves[i + 1].Tile;
+                double2 tc = leaves[i + 2].Tile;
                 double longestSq = math.max(DistSq(ta, tb), math.max(DistSq(tb, tc), DistSq(tc, ta)));
                 double area2 = math.abs(SignedArea2(ta, tb, tc));
                 if (longestSq > 1e-9 && area2 / longestSq < 0.03) continue; // needle — not a fidelity signal

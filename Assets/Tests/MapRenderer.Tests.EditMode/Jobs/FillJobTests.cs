@@ -934,7 +934,8 @@ namespace MapRenderer.Tests.Jobs
             Assert.IsTrue(clip.TryWindow(Extent, out double2 clipMin, out double2 clipMax),
                 "the test's clip must be enabled — a Disabled knob never reaches the job.");
 
-            int totalVerts = 0, maxRingLen = 0;
+            int totalVerts = 0;
+            int maxRingLen = 0;
             foreach (var r in rings) { totalVerts += r.Length; maxRingLen = math.max(maxRingLen, r.Length); }
 
             var verts       = new NativeArray<double2>(totalVerts, Allocator.Persistent);
@@ -1403,8 +1404,10 @@ namespace MapRenderer.Tests.Jobs
 
         // Tile-local corners the fixture is authored to hit, at ExtentHigh. All even, so halving them for
         // ExtentLow lands on exact integers too — no quantization collapse between the two arms.
-        private const double OuterMin = 1000.0, OuterMax = 7000.0;
-        private const double HoleMin  = 3000.0, HoleMax  = 5000.0;
+        private const double OuterMin = 1000.0;
+        private const double OuterMax = 7000.0;
+        private const double HoleMin  = 3000.0;
+        private const double HoleMax  = 5000.0;
 
         /// <summary>
         /// The pipeline is <b>producer-blind</b>: a GeoJSON tile and an MVT tile carrying the same

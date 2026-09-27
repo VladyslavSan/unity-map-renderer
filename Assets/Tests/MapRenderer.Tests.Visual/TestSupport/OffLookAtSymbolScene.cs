@@ -1,5 +1,5 @@
 // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-// SymbolPlacementSystem.Tick. NOT registered in Tools/core-tests/core-tests.csproj.
+// SymbolPlacementSystem.Update. NOT registered in Tools/core-tests/core-tests.csproj.
 //
 // THE OFF-LOOK-AT, MULTI-DEPTH MEASUREMENT FIXTURE: SIX real symbols at TWO view depths — a curved symbol at
 // the look-at (depth d) and its twin at ~2d, from the SAME cell, TextSizePx and baked advances; the same pair
@@ -244,7 +244,7 @@ namespace MapRenderer.Tests
         private readonly Dictionary<OffLookAtSymbolId, SymbolTileBuffer> _symbolsById = new();
         private readonly SymbolPlacementSystem _system;
         private readonly TestSymbolPlan _plan;
-        // The construction passes' frame (a struct copy), so RenderIsolated re-Ticks with the same camera and
+        // The construction passes' frame (a struct copy), so RenderIsolated re-Updates with the same camera and
         // floating origin.
         private SceneFrame _frame;
         private readonly GlyphAtlasTexture _atlasF;
@@ -293,7 +293,7 @@ namespace MapRenderer.Tests
 
         /// <summary>This symbol's raw stream-0 <see cref="WorldBillboardVertex"/>s, in TL/TR/BR/BL order
         /// per glyph, as <c>WorldSymbolRenderer.Emit</c> wrote them, for teeth about the corner OFFSETS.
-        /// Non-obvious why: the ink pass re-Ticks and overwrites the slot meshes, so they are captured in the
+        /// Non-obvious why: the ink pass re-Updates and overwrites the slot meshes, so they are captured in the
         /// GEOMETRY pass; a lazy read would return another frame's geometry.</summary>
         public WorldBillboardVertex[] Vertices(OffLookAtSymbolId id) => _vertices[id];
 
@@ -308,18 +308,18 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// Re-Ticks the scene with ONLY <paramref name="id"/> and renders it, returning a fresh
+        /// Re-Updates the scene with ONLY <paramref name="id"/> and renders it, returning a fresh
         /// row-flipped frame (row 0 = the TOP scanline, same convention as <see cref="InkPixels"/>).
         /// Non-obvious why: the two receding symbols project into nearly the same columns, so no band can
         /// attribute their ink; one symbol per render removes the question. It runs only when a tooth asks,
-        /// and every other reading was captured in the geometry pass, so the re-Tick changes none of them.
+        /// and every other reading was captured in the geometry pass, so the re-Update changes none of them.
         /// </summary>
         public Color32[] RenderIsolated(OffLookAtSymbolId id)
             => RenderIsolated(id, out _, out _, out _);
 
         /// <summary>
         /// The same isolated pass, also returning the COLLISION BOXES, the RAW VERTICES and the slot transform
-        /// from the same Tick, so a box and its quad come from one staging pass. Non-local invariant: with one
+        /// from the same Update, so a box and its quad come from one staging pass. Non-local invariant: with one
         /// symbol, <c>boxes[g]</c> pairs with <c>vertices[4g … 4g+3]</c>, because staging appends both in one
         /// iteration and <c>CollisionJob</c> sorts candidates, not boxes. Callers must still ASSERT
         /// <c>boxes.Length == vertices.Length / 4</c>.
@@ -328,9 +328,9 @@ namespace MapRenderer.Tests
             out WorldBillboardVertex[] vertices, out Transform slot)
         {
             SymbolTileBuffer buffer = _symbolsById[id];
-            // Duplicate Tick — the collision verdict is harvested one Tick late.
-            _system.Tick(in _frame, _plan.Build(buffer), _atlasF);
-            _system.Tick(in _frame, _plan.Build(buffer), _atlasF);
+            // Duplicate Update — the collision verdict is harvested one Update late.
+            _system.Update(in _frame, _plan.Build(buffer), _atlasF);
+            _system.Update(in _frame, _plan.Build(buffer), _atlasF);
             int expected = buffer.Symbols[0].GlyphCount > 0 ? Config.GlyphCount : 1;
             Assert.That(_system.LastQuadCount, Is.EqualTo(expected),
                 $"P-M/W2 precondition ({id}): the isolated ink pass must stage exactly {expected} quads, got " +
@@ -389,7 +389,7 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Builds the scene, solves the two anchors, stages all six symbols through the REAL
-        /// <c>SymbolPlacementSystem.Tick</c>, measures every slot mesh, and renders the ink frame.
+        /// <c>SymbolPlacementSystem.Update</c>, measures every slot mesh, and renders the ink frame.
         /// Non-obvious why: pass 1 measures all six meshes; pass 2 renders only the cross-azimuth
         /// pair, because receding ink crosses their row bands. Unchanged cross geometry between the passes is
         /// ASSERTED. The ink is coarse corroboration only; it conflates spacing with glyph size.
@@ -470,7 +470,7 @@ namespace MapRenderer.Tests
             double viewportHeightPx = cam.pixelHeight;
 
             // ── the glyph run: N copies of ONE 'F' cell, at fixture-owned em advances ──────────────────
-            // Non-obvious why: the point arm's 'A' layout meets the 'F' atlas, which Tick uses only as a
+            // Non-obvious why: the point arm's 'A' layout meets the 'F' atlas, which Update uses only as a
             // texture; point ink is never read, so the mismatch reaches no reading.
             SymbolQuad cell;
             (atlasF, cell) = WorldCurvedAbRenderSnapshotTests.BuildGlyphF();
@@ -510,7 +510,7 @@ namespace MapRenderer.Tests
             };
 
             var buffer = new SymbolTileBuffer();
-            // A single-record buffer per id, so RenderIsolated can re-Tick ONE of them without depending on the
+            // A single-record buffer per id, so RenderIsolated can re-Update ONE of them without depending on the
             // combined buffer's order. Each is copied into `buffer`.
             var symbolsById = new Dictionary<OffLookAtSymbolId, SymbolTileBuffer>();
             var curvedIds = new[]
@@ -545,7 +545,10 @@ namespace MapRenderer.Tests
                     : (id == OffLookAtSymbolId.RecedingNear ? wNear : wFar);
                 double slopePlus = cross ? 0.0 : depthSlope;
 
-                double tPlus, tMinus, reachedPlusPx, reachedMinusPx;
+                double tPlus;
+                double tMinus;
+                double reachedPlusPx;
+                double reachedMinusPx;
                 if (cross)
                 {
                     tPlus = SolveGroundOffsetForScreenPx(cam, anchor, dir, targetHalfRoadPx, slopePlus,
@@ -660,9 +663,9 @@ namespace MapRenderer.Tests
             var slotVerticesById = new Dictionary<OffLookAtSymbolId, WorldBillboardVertex[]>();
             Color32[] inkPixels;
             {
-                // PASS 1 — geometry. Duplicate Tick: the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasF);
-                system.Tick(in frame, plan.Build(buffer), atlasF);
+                // PASS 1 — geometry. Duplicate Update: the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasF);
+                system.Update(in frame, plan.Build(buffer), atlasF);
                 Assert.That(plan.CollectedCount, Is.EqualTo(buffer.Symbols.Count),
                     $"P-M precondition: the collect must yield all {buffer.Symbols.Count} symbols (got " +
                     $"{plan.CollectedCount}) — a dedup/coverage drop must show up here, not as missing ink.");
@@ -689,7 +692,7 @@ namespace MapRenderer.Tests
                     measurements[id] = MeasureSlot(system, cam, TileKeyFor(baseTile, id), anchor,
                         out int vertexCount, out WorldBillboardVertex[] slotVertices);
                     vertexCounts[id] = vertexCount;
-                    // Captured HERE, in the geometry pass, because the ink pass below re-Ticks and
+                    // Captured HERE, in the geometry pass, because the ink pass below re-Updates and
                     // overwrites the cross-azimuth slot meshes.
                     slotVerticesById[id] = slotVertices;
                 }
@@ -723,8 +726,8 @@ namespace MapRenderer.Tests
                 var crossOnly = new SymbolTileBuffer();
                 TestSymbolTileBuffer.CopySymbolInto(crossOnly, buffer, 0);
                 TestSymbolTileBuffer.CopySymbolInto(crossOnly, buffer, 1);
-                system.Tick(in frame, plan.Build(crossOnly), atlasF);
-                system.Tick(in frame, plan.Build(crossOnly), atlasF);
+                system.Update(in frame, plan.Build(crossOnly), atlasF);
+                system.Update(in frame, plan.Build(crossOnly), atlasF);
                 Assert.That(system.LastQuadCount, Is.EqualTo(2 * config.GlyphCount),
                     $"P-M precondition: the ink pass must stage exactly the two cross-azimuth symbols " +
                     $"({2 * config.GlyphCount} quads), got {system.LastQuadCount}.");
@@ -862,7 +865,8 @@ namespace MapRenderer.Tests
             double capPx = Offset(tCap);
             double want = math.min(targetPx, 0.9 * capPx);
 
-            double lo = 0.0, hi = tCap;
+            double lo = 0.0;
+            double hi = tCap;
             for (int i = 0; i < 60; i++)
             {
                 double mid = 0.5 * (lo + hi);

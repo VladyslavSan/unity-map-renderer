@@ -174,12 +174,16 @@ namespace MapRenderer.Tests.Visual
             // The sprite is green and the layer sets no fill-color. Green dominance proves the sprite reached the
             // screen untinted: a black default would leave every channel near zero. (Lit shading scales
             // magnitude, not hue order.)
-            double meanG = 0, meanR = 0, meanB = 0;
+            double meanG = 0;
+            double meanR = 0;
+            double meanB = 0;
             int n = 0;
             for (int i = 0; i < SnapW * SnapH; i++)
             {
                 Color32 c = snap.Pixels.Pixels[i];
-                int dr = c.r - Bg32.r, dg = c.g - Bg32.g, db = c.b - Bg32.b;
+                int dr = c.r - Bg32.r;
+                int dg = c.g - Bg32.g;
+                int db = c.b - Bg32.b;
                 if (Mathf.Abs(dr) + Mathf.Abs(dg) + Mathf.Abs(db) <= SnapshotCoverage.Tolerance) continue;
                 meanR += c.r; meanG += c.g; meanB += c.b;
                 n++;
@@ -382,7 +386,8 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class FillPatternPeriodDiagnostic : BaseTestFixture
     {
-        private const int SnapW = 512, SnapH = 512;
+        private const int SnapW = 512;
+        private const int SnapH = 512;
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         private static readonly Color32 Bg32 = new Color32(26, 28, 38, 255);
 
@@ -442,7 +447,8 @@ namespace MapRenderer.Tests.Visual
             snap.WritePng("fill-pattern-period-diagnostic.png");
 
             // Walk the widest fully-covered scanline and classify each pixel red / blue / background.
-            int bestRow = -1, bestCover = 0;
+            int bestRow = -1;
+            int bestCover = 0;
             for (int row = 0; row < SnapH; row++)
             {
                 int cover = 0;
@@ -457,7 +463,9 @@ namespace MapRenderer.Tests.Visual
                 Assert.Fail("no geometry rendered");
             }
 
-            int redRuns = 0, blueRuns = 0, transitions = 0;
+            int redRuns = 0;
+            int blueRuns = 0;
+            int transitions = 0;
             int prev = 0; // 0 = bg, 1 = red-ish, 2 = blue-ish
             for (int col = 0; col < SnapW; col++)
             {
@@ -638,7 +646,8 @@ namespace MapRenderer.Tests.Visual
         /// a zero-pixel gap, exactly as a published sheet packs them.</summary>
         private static byte[] BuildTwoHueSheetPng()
         {
-            const int width = 32, height = 16;
+            const int width = 32;
+            const int height = 16;
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: false);
             var pixels = new Color32[width * height];
             for (int y = 0; y < height; y++)
@@ -1063,7 +1072,8 @@ namespace MapRenderer.Tests.Visual
         /// </summary>
         private static double MeanAbsDiff(Frame frameA, Frame frameB)
         {
-            Color32[] pixA = frameA.Pixels, pixB = frameB.Pixels;
+            Color32[] pixA = frameA.Pixels;
+            Color32[] pixB = frameB.Pixels;
             if (pixA == null || pixB == null || pixA.Length != pixB.Length) return 0.0;
             double sum = 0.0;
             for (int i = 0; i < pixA.Length; i++)
@@ -1222,7 +1232,8 @@ namespace MapRenderer.Tests.Visual
             var triangles = new System.Collections.Generic.List<int> { 0, 1, 2, 0, 2, 3 };
             for (int i = 0; i < 4; i++)
             {
-                int a = i, b = (i + 1) % 4;
+                int a = i;
+                int b = (i + 1) % 4;
                 triangles.AddRange(new[] { a, a + 4, b + 4, a, b + 4, b });
             }
 
@@ -1342,7 +1353,8 @@ namespace MapRenderer.Tests.Visual
 
             // Interior square spans +/-8 world units = +/-204.8 px about the frame centre; sample well inside.
             double worst = 1.0;
-            int worstX = -1, worstY = -1;
+            int worstX = -1;
+            int worstY = -1;
             for (int y = 156; y < 356; y++)
             for (int x = 156; x < 356; x++)
             {
@@ -1423,7 +1435,9 @@ namespace MapRenderer.Tests.Visual
             // Under an 80-degree tilt the quad compresses toward the frame's middle band; sample a box that
             // is interior at that pose, then report what was actually found rather than trusting the pose.
             double worst = 1.0;
-            int worstX = -1, worstY = -1, sampled = 0;
+            int worstX = -1;
+            int worstY = -1;
+            int sampled = 0;
             for (int y = 249; y < 263; y++)
             for (int x = 236; x < 276; x++)
             {
@@ -1452,7 +1466,8 @@ namespace MapRenderer.Tests.Visual
         public void ZeroCoverageFragment_WritesDepth_AndHidesGeometryBehindIt()
         {
             const int Box = 40;
-            int lo = SnapPx / 2 - Box, hi = SnapPx / 2 + Box;
+            int lo = SnapPx / 2 - Box;
+            int hi = SnapPx / 2 + Box;
 
             double[] redness = new double[2];
             foreach (bool zWrite in new[] { false, true })
@@ -1502,7 +1517,8 @@ namespace MapRenderer.Tests.Visual
             double2 Corner(double u, double v) => tile.ToLonLat(u, v, 1.0);
             string Rect(double westU, double eastU)
             {
-                double2 nw = Corner(westU, 0.2), se = Corner(eastU, 0.8);
+                double2 nw = Corner(westU, 0.2);
+                double2 se = Corner(eastU, 0.8);
                 // Tile-local v grows SOUTHWARD, so the small-v corner carries the NORTH latitude.
                 return GeoJsonTestFixtures.Feature(
                     "Polygon", $"[{GeoJsonTestFixtures.RectangleRing(nw.x, se.y, se.x, nw.y)}]");
@@ -1642,7 +1658,9 @@ namespace MapRenderer.Tests.Visual
             for (int y = 0; y < SnapPx; y++)
                 for (int x = 0; x < SnapPx; x++)
                 {
-                    int acc0 = 0, acc1 = 0, acc2 = 0;
+                    int acc0 = 0;
+                    int acc1 = 0;
+                    int acc2 = 0;
                     for (int sy = 0; sy < superSample; sy++)
                         for (int sx = 0; sx < superSample; sx++)
                         {
@@ -1731,7 +1749,8 @@ namespace MapRenderer.Tests.Visual
             }
             if (ink == 0) Assert.Ignore(NoGpuMessage);
 
-            int gained = 0, lost = 0;
+            int gained = 0;
+            int lost = 0;
             var lostDetail = new System.Text.StringBuilder();
             for (int i = 0; i < n; i++)
             {
@@ -1769,7 +1788,8 @@ namespace MapRenderer.Tests.Visual
 
             int reach = (int)FillBandJob.MiterLimit + 1;
             const int probe = 16;
-            int worst = 0, offenders = 0;
+            int worst = 0;
+            int offenders = 0;
             var offenderIndices = new List<int>();
             var detail = new System.Text.StringBuilder();
             for (int y = probe; y < SnapPx - probe; y++)
@@ -2048,14 +2068,17 @@ namespace MapRenderer.Tests.Visual
         /// across the edge and barely moves. Every caller asserts it rather than trusting the framing.</summary>
         private static bool TryCentroid(Frame frame, out Vector2 centroid, out bool touchesBorder)
         {
-            double sumX = 0, sumY = 0;
+            double sumX = 0;
+            double sumY = 0;
             int count = 0;
             touchesBorder = false;
             for (int row = 0; row < SnapH; row++)
             for (int col = 0; col < SnapW; col++)
             {
                 Color32 px = frame[col, row];
-                int dr = px.r - Bg32.r, dg = px.g - Bg32.g, db = px.b - Bg32.b;
+                int dr = px.r - Bg32.r;
+                int dg = px.g - Bg32.g;
+                int db = px.b - Bg32.b;
                 if (Mathf.Abs(dr) + Mathf.Abs(dg) + Mathf.Abs(db) <= SnapshotCoverage.Tolerance) continue;
                 sumX += col; sumY += row; count++;
                 if (row == 0 || col == 0 || row == SnapH - 1 || col == SnapW - 1) touchesBorder = true;

@@ -172,12 +172,12 @@ that works is not the obvious one.
 
 **The first population is unbounded.** The other two are paced (kicks by `MaxMeshBuildsPerTick`, parks by the
 sprite fetch), but neither is *hard*-capped: nothing caps how many kicks are in flight, only how many start per
-tick. A tile is resident from **fetch completion**, and nothing paces fetch completion:
+frame. A tile is resident from **fetch completion**, and nothing paces fetch completion:
 
 - **`TileScheduler` has no concurrency cap** — it holds dictionaries only: no semaphore, no queue. Every cover
   tile's request starts immediately.
 - **`TileCache` (LRU, 256 by default) resolves a pan-back or a restyle's whole cover synchronously from
-  bytes**, so every one of those tiles dispatches its decode on the same tick.
+  bytes**, so every one of those tiles dispatches its decode on the same frame.
 - **Kicks drain at `MaxMeshBuildsPerTick` (default 2)**, so the backlog leaves slowly.
 
 This is in tension with the repo's `always-bound-loops` principle. The call is to measure first, because the
@@ -191,11 +191,11 @@ remedy stays cheap.
 | decoded tile, peak | 967 KB | same |
 | tilted cover | 40–60 tiles | the tilted-frustum cover |
 | **peak resident** | **~20–60 MB** | median–peak × cover |
-| drain time | ~20–30 ticks | 40–60 tiles ÷ `MaxMeshBuildsPerTick = 2` |
+| drain time | ~20–30 frames | 40–60 tiles ÷ `MaxMeshBuildsPerTick = 2` |
 
 A decode at kick time self-limits residency to single digits of tiles (`MaxMeshBuildsPerTick` × task duration ÷
-tick duration), ~1–2 MB, so fetch-completion decode is a **~20× transient peak**, plus a burst of 40–60
-concurrent decodes on one tick. It is transient and self-draining. **It has not been measured on a real device.**
+frame duration), ~1–2 MB, so fetch-completion decode is a **~20× transient peak**, plus a burst of 40–60
+concurrent decodes on one frame. It is transient and self-draining. **It has not been measured on a real device.**
 
 ### The remedy, if a device profile ever shows it: decode at kick admission
 

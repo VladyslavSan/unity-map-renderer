@@ -85,7 +85,8 @@ namespace MapRenderer.Unity.Style.Symbol
             // text-translate: [x, y] in pixels (constant — the components are scalars, not expressions).
             // Narrow to float at the JSON boundary (px offsets are small; double is pointless here).
             JsonValue translateJson = paint?.Get(PropertyNames.TextTranslate);
-            float tx = 0f, ty = 0f;
+            float tx = 0f;
+            float ty = 0f;
             if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
             {
                 tx = (float)translateJson.Items[0].AsDouble(0.0);

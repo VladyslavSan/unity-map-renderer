@@ -119,7 +119,8 @@ namespace MapRenderer.Tests.Tiles
 
         private static void AssertUniformZoom(List<TileId> cover, int target, string label)
         {
-            int minZ = int.MaxValue, maxZ = int.MinValue;
+            int minZ = int.MaxValue;
+            int maxZ = int.MinValue;
             foreach (TileId t in cover) { if (t.Z < minZ) minZ = t.Z; if (t.Z > maxZ) maxZ = t.Z; }
             Assert.AreEqual(target, minZ, $"{label}: a tile stopped below the target zoom at tilt 0");
             Assert.AreEqual(target, maxZ, $"{label}: a tile went finer than the target zoom at tilt 0");
@@ -380,7 +381,8 @@ namespace MapRenderer.Tests.Tiles
         {
             // A cover wrapping the antimeridian: X in {0, 1, n-2, n-1} at z=5 (n=32). A max(X)-min(X)+1
             // implementation returns 32; the correct answer is 4 distinct columns.
-            const int z = 5, n = 1 << z;
+            const int z = 5;
+            const int n = 1 << z;
             var cover = new List<TileId>
             {
                 T(z, 0,     10), T(z, 1,     10),
@@ -398,7 +400,8 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void MixedZoomCover_SpanCorrect_AndDimsCountOnlyTheFinestLevel()
         {
-            const int nearZ = 6, farZ = 4;
+            const int nearZ = 6;
+            const int farZ = 4;
             var cover = new List<TileId>
             {
                 // A 2x3 near-field block at the finest level (nearZ).
@@ -711,7 +714,9 @@ namespace MapRenderer.Tests.Tiles
                 double2 lonLat = tile.ToLonLat(u, v, 1.0);
                 double3 world  = projection.Project(
                     new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
-                double rx = world.x - origin.x, ry = world.y - origin.y, rz = world.z - origin.z;
+                double rx = world.x - origin.x;
+                double ry = world.y - origin.y;
+                double rz = world.z - origin.z;
                 var render = new double3(
                     basis.c0.x * rx + basis.c0.y * ry + basis.c0.z * rz,
                     basis.c1.x * rx + basis.c1.y * ry + basis.c1.z * rz,

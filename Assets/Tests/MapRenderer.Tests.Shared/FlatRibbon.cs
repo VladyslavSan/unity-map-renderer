@@ -53,7 +53,8 @@ namespace MapRenderer.Tests.TestSupport
                     OutIndexCount  = ic,
                 }.Schedule().Complete();
 
-                int nv = vc[0], ni = ic[0];
+                int nv = vc[0];
+                int ni = ic[0];
                 var verts   = new LineRibbonVertex[nv];
                 var indices = new int[ni];
                 for (int i = 0; i < nv; i++) verts[i]   = outV[i];

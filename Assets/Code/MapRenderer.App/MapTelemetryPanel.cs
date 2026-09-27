@@ -116,30 +116,30 @@ namespace MapRenderer.App
         public int SymbolCoverageDropped;
 
         [Header("Symbol labels — PLACEMENT (published by SymbolPlacementSystem)")]
-        [Tooltip("Symbols fed into the last placement Tick (before projection cull) — sum over active tiles.")]
+        [Tooltip("Symbols fed into the last placement Update (before projection cull) — sum over active tiles.")]
         public int SymbolInputCount;
 
-        [Tooltip("B-3: labels skipped by the pre-projection horizon/distance cull last Tick (never projected/" +
+        [Tooltip("B-3: labels skipped by the pre-projection horizon/distance cull last Update (never projected/" +
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
         public int SymbolDistanceCulled;
 
         [Tooltip("Tile-coverage pre-cull companion: labels whose tile just crossed below coverage and finished " +
-                 "fading out this Tick (they faded, not popped) — the transient tail of the coverage drop.")]
+                 "fading out this Update (they faded, not popped) — the transient tail of the coverage drop.")]
         public int SymbolCoverageFading;
 
-        [Tooltip("Symbols skipped last Tick because their layer is out of the live zoom's [minzoom, maxzoom) — " +
+        [Tooltip("Symbols skipped last Update because their layer is out of the live zoom's [minzoom, maxzoom) — " +
                  "the display-time gate moved ahead of projection, so overzoom points (a z14 tile's poi_r* before " +
                  "the camera reaches their minzoom) are never projected/staged. Watch against InputSymbolCount.")]
         public int SymbolZoomCulled;
 
-        [Tooltip("Collision candidates on the last Tick (labels that survived projection; a point label is 1, " +
+        [Tooltip("Collision candidates on the last Update (labels that survived projection; a point label is 1, " +
                  "a curved/repeated line label is 1 per along-line anchor).")]
         public int SymbolCollisionCandidates;
 
-        [Tooltip("Collision survivors on the last Tick (candidates actually placed; the rest lost a collision).")]
+        [Tooltip("Collision survivors on the last Update (candidates actually placed; the rest lost a collision).")]
         public int SymbolCollisionSurvivors;
 
-        [Tooltip("Glyph quads submitted to the GPU on the last Tick (4 vertices each) — the drawn label load.")]
+        [Tooltip("Glyph quads submitted to the GPU on the last Update (4 vertices each) — the drawn label load.")]
         public int SymbolPlacedQuads;
 
         [Tooltip("A-4 fade records held — the size of the map the per-frame decay sweep walks, so a cost, not " +

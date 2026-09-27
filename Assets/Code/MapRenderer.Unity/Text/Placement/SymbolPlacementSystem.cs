@@ -27,7 +27,7 @@ namespace MapRenderer.Unity.Text.Placement
     /// <summary>Per-frame symbol renderer, owned by <see cref="MapView"/>, ticked last after
     /// <see cref="MapCamera.SyncToCamera"/>. Collision runs across every symbol layer; only the draw step
     /// splits by material slot. The class is <c>internal</c>, but members stay <c>public</c> so
-    /// <see cref="Tick"/>'s <c>internal</c> <see cref="Backend.SceneFrame"/> param avoids CS0051.</summary>
+    /// <see cref="Update"/>'s <c>internal</c> <see cref="Backend.SceneFrame"/> param avoids CS0051.</summary>
     // `partial`: the opt-in breakdown diagnostic lives in SymbolPlacementSystem.Diagnostics.cs.
     internal sealed partial class SymbolPlacementSystem : VerifiedDisposable
     {
@@ -37,7 +37,7 @@ namespace MapRenderer.Unity.Text.Placement
         {
             /// <summary>Marker for Stage-2 mirror compaction — a same-version frame mostly measures a memo hit.</summary>
             internal const string Gather      = "MapRenderer.Symbol.Gather";
-            internal const string Tick        = "MapRenderer.Symbol.SymbolTick";
+            internal const string Update      = "MapRenderer.Symbol.SymbolUpdate";
             internal const string Project     = "MapRenderer.Symbol.Project";
             /// <summary>Marker for the per-symbol cull scan, split out so its cost isn't lumped into ProjectPositions.</summary>
             internal const string GatherPoints = "MapRenderer.Symbol.GatherPoints";
@@ -48,7 +48,7 @@ namespace MapRenderer.Unity.Text.Placement
             internal const string Stage       = "MapRenderer.Symbol.Stage";
             // Grid sizing + Schedule only — the job's own wait lives in CollideHarvest.
             internal const string Collide     = "MapRenderer.Symbol.Collide";
-            /// <summary>Marker for harvesting the previous Tick's scheduled collision — should read ≈0.</summary>
+            /// <summary>Marker for harvesting the previous Update's scheduled collision — should read ≈0.</summary>
             internal const string CollideHarvest = "MapRenderer.Symbol.CollideHarvest";
             internal const string Emit        = "MapRenderer.Symbol.Emit";
             /// <summary>Emit splits into EmitLoop (per-candidate) and EmitDecay (per-live-fade-identity) —
@@ -57,12 +57,12 @@ namespace MapRenderer.Unity.Text.Placement
             internal const string EmitDecay   = "MapRenderer.Symbol.EmitDecay";
         }
 
-        // Per-frame profiler markers (Profiler window → search "MapRenderer.Symbol"); PmTick covers the whole submit.
+        // Per-frame profiler markers (Profiler window → search "MapRenderer.Symbol"); PmUpdate covers the whole submit.
         private static readonly ProfilerMarker PmGather =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Gather);
 
-        private static readonly ProfilerMarker PmTick =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Tick);
+        private static readonly ProfilerMarker PmUpdate =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Update);
 
         private static readonly ProfilerMarker PmProject =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Project);
@@ -106,7 +106,7 @@ namespace MapRenderer.Unity.Text.Placement
         private Material _worldTextMaterial;
         private Material _worldIconMaterial;
 
-        /// <summary>The world-anchored point/icon renderer, ticked BeginFrame/Emit/EndFrame every <see cref="Tick"/>.
+        /// <summary>The world-anchored point/icon renderer, ticked BeginFrame/Emit/EndFrame every <see cref="Update"/>.
         /// <c>internal</c> so test-only accessors reach it as extension methods instead of living here.</summary>
         internal WorldSymbolRenderer WorldRenderer { get; } = new WorldSymbolRenderer();
 
@@ -118,7 +118,7 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<int>            _gridNodeNext;
         private NativeArray<int>           _survivorCountOut;
 
-        /// <summary>Scheduled at the end of a Tick, harvested at the start of the next. Null means nothing
+        /// <summary>Scheduled at the end of a Update, harvested at the start of the next. Null means nothing
         /// scheduled; <c>_pendingCandidateCount</c> pins the count since the next stage job overwrites it.</summary>
         private JobHandle? _collisionHandle;
         private int        _pendingCandidateCount;
@@ -243,7 +243,7 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mirrorFadeCount;
         private int _mirrorWorldPointCount;
         /// <summary><c>_mirrorCount</c> includes Dropped symbols, so it does not mean "any placement
-        /// work this frame". <c>TickCore</c>'s gate reads this field instead, so an all-Dropped frame keeps fades frozen.</summary>
+        /// work this frame". <c>UpdateCore</c>'s gate reads this field instead, so an all-Dropped frame keeps fades frozen.</summary>
         private int _mirrorNonDroppedCount;
 
         // ── mirror: staging-output upper bounds (camera-independent — summed from the gathered blocks) ──
@@ -251,7 +251,7 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mirrorMaxQuads;
         private int _mirrorMaxCandidates;
 
-        // ── stage-job buffers (pre-sized to the mirror's worst case, refilled every Tick) ──
+        // ── stage-job buffers (pre-sized to the mirror's worst case, refilled every Update) ──
         /// <summary>Gather output; -1 = culled.</summary>
         private NativeList<int>            _stagePointOffset;
         /// <summary>Per-frame anchor incumbency — filled by StageJob, sized here.</summary>
@@ -269,9 +269,9 @@ namespace MapRenderer.Unity.Text.Placement
 
         // A surviving candidate's built quads live in _stageQuads as a range (EmitStart/EmitCount) the sort can't disturb.
 
-        /// <summary>Number of <see cref="Tick"/> calls so far — the vertex buffer rebuilds every Tick, not
+        /// <summary>Number of <see cref="Update"/> calls so far — the vertex buffer rebuilds every Update, not
         /// once at tile consume. Test surface.</summary>
-        internal int TickCount { get; private set; }
+        internal int UpdateCount { get; private set; }
 
         /// <summary>Heavy mirror fills so far — bumped once per real <see cref="GatherIntoMirror"/> rebuild,
         /// never on a memo hit. Drives the telemetry panel's rebuilds/second readout.</summary>
@@ -280,7 +280,7 @@ namespace MapRenderer.Unity.Text.Placement
         private SymbolPlacementTelemetrySnapshot _telemetry;
 
         /// <summary>This provider's levels, handed out by reference (see <c>docs/telemetry-design.md</c>).
-        /// Refreshed at the end of <see cref="Tick"/>, so the numbers are this pass's, not last frame's.</summary>
+        /// Refreshed at the end of <see cref="Update"/>, so the numbers are this pass's, not last frame's.</summary>
         internal ref readonly SymbolPlacementTelemetrySnapshot Telemetry => ref _telemetry;
 
         private void RefreshTelemetry() =>
@@ -298,44 +298,44 @@ namespace MapRenderer.Unity.Text.Placement
                 LiveFadeSymbolCount     = LiveFadeSymbolCount,
             };
 
-        /// <summary>The quad count submitted on the LAST <see cref="Tick"/> (0 if nothing was visible). Test surface.</summary>
+        /// <summary>The quad count submitted on the LAST <see cref="Update"/> (0 if nothing was visible). Test surface.</summary>
         internal int LastQuadCount { get; private set; }
 
-        /// <summary>Symbols fed into the LAST <see cref="Tick"/> (before any projection cull) — telemetry.</summary>
+        /// <summary>Symbols fed into the LAST <see cref="Update"/> (before any projection cull) — telemetry.</summary>
         internal int LastInputSymbolCount { get; private set; }
 
-        /// <summary>Collision boxes staged on the last <see cref="Tick"/> — a point symbol is 1, a curved symbol is 1 per glyph.</summary>
+        /// <summary>Collision boxes staged on the last <see cref="Update"/> — a point symbol is 1, a curved symbol is 1 per glyph.</summary>
         internal int LastBoxCount { get; private set; }
 
-        /// <summary>Collision candidates on the last Tick — a point symbol is 1, a curved/repeated line symbol is 1 per anchor.</summary>
+        /// <summary>Collision candidates on the last Update — a point symbol is 1, a curved/repeated line symbol is 1 per anchor.</summary>
         internal int LastCandidateCount { get; private set; }
 
-        /// <summary>Collision survivors — one Tick behind <see cref="LastCandidateCount"/>, since collision is
-        /// deferred: this is the raw, unfiltered survivor count from the previous Tick's candidates.</summary>
+        /// <summary>Collision survivors — one Update behind <see cref="LastCandidateCount"/>, since collision is
+        /// deferred: this is the raw, unfiltered survivor count from the previous Update's candidates.</summary>
         internal int LastSurvivorCount { get; private set; }
 
-        /// <summary>Symbols skipped by the pre-projection far-distance cull on the last Tick (past
+        /// <summary>Symbols skipped by the pre-projection far-distance cull on the last Update (past
         /// <see cref="SymbolMaxDistanceFraction"/> × far plane).</summary>
         internal int LastDistanceCulledCount { get; private set; }
 
-        /// <summary>Symbols skipped on the last Tick because their tile is leaving cover and has finished
+        /// <summary>Symbols skipped on the last Update because their tile is leaving cover and has finished
         /// fading out — before that they stay staged, fading, so there's no pop.</summary>
         internal int LastDepartingCulledCount { get; private set; }
 
-        /// <summary>Symbols skipped on the last Tick because their anchor is hidden behind the globe's bulk
+        /// <summary>Symbols skipped on the last Update because their anchor is hidden behind the globe's bulk
         /// (<see cref="HorizonCull"/>). Always 0 under a planar projection.</summary>
         internal int LastHorizonCulledCount { get; private set; }
 
-        /// <summary>Symbols skipped by the pre-projection zoom gate on the last Tick — out of the live camera
+        /// <summary>Symbols skipped by the pre-projection zoom gate on the last Update — out of the live camera
         /// zoom range and not fading. A still-fading symbol stays staged instead; <see cref="ApplySuppression"/> hides it same-frame.</summary>
         internal int LastZoomCulledCount { get; private set; }
 
         /// <summary>Live fade-identity count — the size of the map <see cref="DecayUnseenFadeSymbols"/> walks
-        /// each Tick, the cost being measured. Keep it the raw size: filtering it would silently disarm
-        /// <c>SymbolFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind</c>, which pins this exact count.</summary>
+        /// each Update, the cost being measured. Keep it the raw size: filtering it would silently disarm
+        /// <c>SymbolFadeTests.Update_StableCollisionLoser_LeavesNoFadeRecordBehind</c>, which pins this exact count.</summary>
         internal int LiveFadeSymbolCount => _fadeOpacity.Count;
 
-        /// <summary>Symbols skipped on the last Tick because their tile's coverage dropped below threshold and
+        /// <summary>Symbols skipped on the last Update because their tile's coverage dropped below threshold and
         /// have now fully faded out. Mirrors <see cref="LastDepartingCulledCount"/> for the coverage trigger.</summary>
         internal int LastCoverageFadingCulledCount { get; private set; }
 
@@ -344,7 +344,7 @@ namespace MapRenderer.Unity.Text.Placement
         private readonly MapCamera _camera;
 
         /// <summary>Default world materials — the fallback for slots with no per-layer material (owned instead
-        /// by <c>SymbolRenderLayer</c>), cloned since <see cref="Tick"/> mutates them every frame.</summary>
+        /// by <c>SymbolRenderLayer</c>), cloned since <see cref="Update"/> mutates them every frame.</summary>
         /// <param name="worldTextBase">The only world-anchored point-text draw path; no <c>Shader.Find</c> fallback, the caller must supply it.</param>
         /// <param name="worldIconBase">The world-anchored icon draw path; null leaves world icons inert.</param>
         public SymbolPlacementSystem(MapCamera camera, Material worldTextBase, Material worldIconBase = null)
@@ -434,28 +434,28 @@ namespace MapRenderer.Unity.Text.Placement
         /// compacts each winner into the native mirror, then project→stage→collide→emit runs off it.</summary>
         /// <param name="symbolLayers">Per-symbol-layer render layers, index == <see cref="ShapedSymbol.MaterialIndex"/>; null/empty draws through the fallback.</param>
         /// <param name="spriteTexture">The sprite sheet backing every icon's UVs; null means icons never build.</param>
-        public void Tick(in SceneFrame frame, SymbolGatherPlan plan, GlyphAtlasTexture atlas,
+        public void Update(in SceneFrame frame, SymbolGatherPlan plan, GlyphAtlasTexture atlas,
             float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null,
             Texture2D spriteTexture = null)
         {
             using (PmGather.Auto())
                 GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount, which includes Dropped symbols
-            TickCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
-            RefreshTelemetry();   // after the pass, so the levels are this Tick's
+            UpdateCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
+            RefreshTelemetry();   // after the pass, so the levels are this Update's
         }
 
 
-        // The per-frame core reads only the native mirror, never a managed source — split out from Tick.
-        private void TickCore(in SceneFrame frame, GlyphAtlasTexture atlas,
+        // The per-frame core reads only the native mirror, never a managed source — split out from Update.
+        private void UpdateCore(in SceneFrame frame, GlyphAtlasTexture atlas,
             float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers, int inputSymbolCount,
             Texture2D spriteTexture = null)
         {
-            TickCount++;
+            UpdateCount++;
             LastInputSymbolCount = inputSymbolCount;
 
-            using (PmTick.Auto())
+            using (PmUpdate.Auto())
             {
-                // Completes the previous Tick's scheduled collision, re-keying survivors into _placedLastFrame.
+                // Completes the previous Update's scheduled collision, re-keying survivors into _placedLastFrame.
                 using (PmCollideHarvest.Auto())
                     HarvestCollision();
 
@@ -463,7 +463,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // The world ruler for map-pitched curved symbols — converts device pixels to logical pixels once, here.
                 float metresPerLogicalPixel = (float)(_camera.MetresPerDevicePixel * _camera.DevicePixelRatio);
                 // text-halo-width/-blur are LOGICAL px on the emit; the SDF shader measures in DEVICE px.
-                // Read once per Tick against the LIVE ratio, so a dpr change needs no re-bake anywhere.
+                // Read once per Update against the LIVE ratio, so a dpr change needs no re-bake anywhere.
                 float haloDevicePixelRatio =
                     (float)DeviceScaling.LogicalToDevicePx(1.0, PixelSpace.Device, _camera.DevicePixelRatio);
 
@@ -491,7 +491,7 @@ namespace MapRenderer.Unity.Text.Placement
                         ViewportLogicalPx = viewportLogicalPx,
                     };
 
-                    // Globe horizon-cull params, built once per Tick — on a planar projection occ is false, so HorizonCull is a no-op.
+                    // Globe horizon-cull params, built once per Update — on a planar projection occ is false, so HorizonCull is a no-op.
                     bool occ = _camera.Projection.TryGetHorizonOccluder(out double3 occCentre, out double occRadius);
                     double  globeRadiusSq  = occ ? occRadius * occRadius : -1.0;
 
@@ -502,7 +502,8 @@ namespace MapRenderer.Unity.Text.Placement
                     float bearingRadians = (float)_camera.CurrentProperties.Heading.Radians;
 
                     // (1) Project and stage every symbol into the unified native pools (the Burst StageJob).
-                    int candidateCount = 0, boxCount = 0;
+                    int candidateCount = 0;
+                    int boxCount = 0;
                     using (PmProject.Auto())
                     {
                         // Gathers every un-culled symbol's world point — O(input), since it culls even when everything is culled.
@@ -581,7 +582,7 @@ namespace MapRenderer.Unity.Text.Placement
 
                 LastQuadCount = totalQuads;
 
-                // Builds and places every non-empty world slot, hiding the rest, since a prior Tick may have left slots visible.
+                // Builds and places every non-empty world slot, hiding the rest, since a prior Update may have left slots visible.
                 WorldRenderer.EndFrame(in frame, symbolLayers, _worldTextMaterial, _worldIconMaterial,
                     atlas?.Texture, spriteTexture, viewportLogicalPx);
             }
@@ -679,7 +680,7 @@ namespace MapRenderer.Unity.Text.Placement
         {
             if (_collisionHandle is not { } scheduled)
             {
-                // No collision in flight means last Tick produced no verdict — same state as an empty-build clear.
+                // No collision in flight means last Update produced no verdict — same state as an empty-build clear.
                 _placedLastFrame.Clear();
                 _droppedHalvesLastFrame.Clear();
                 LastSurvivorCount = 0;
@@ -698,17 +699,17 @@ namespace MapRenderer.Unity.Text.Placement
                 long fadeId = candidate.FadeId;
                 if (_forceFadeOut.Contains(fadeId)) continue;
                 _placedLastFrame.Add(fadeId);
-                // A survivor missing an optional half is labeled here, read back by next Tick's staging for the emit gate.
+                // A survivor missing an optional half is labeled here, read back by next Update's staging for the emit gate.
                 if (candidate.DroppedBoxMask != 0) _droppedHalvesLastFrame[fadeId] = candidate.DroppedBoxMask;
             }
             LastSurvivorCount = _survivorCountOut[0];
         }
 
         // Runs collision as a Burst job over the stage output, scheduled but not completed here — Complete moves
-        // to next Tick's harvest, so the main thread never blocks. Outputs are read by that next Tick, not this one.
+        // to next Update's harvest, so the main thread never blocks. Outputs are read by that next Update, not this one.
         private void ScheduleCollision(int candidateCount, int boxCount)
         {
-            if (candidateCount <= 0) return; // nothing pending ⇒ next Tick's harvest reads "no verdict"
+            if (candidateCount <= 0) return; // nothing pending ⇒ next Update's harvest reads "no verdict"
 
             _nSurvivors.Resize(candidateCount, NativeArrayOptions.UninitializedMemory);
             NativeArray<SymbolCandidate> nc = _stageCandidates.AsArray(); // stage job's candidates — sorted IN PLACE here
@@ -926,7 +927,7 @@ namespace MapRenderer.Unity.Text.Placement
             // The per-frame masks + _mirrorNonDroppedCount are the only per-frame inputs, written by one shared writer.
             WritePerFrameMasks(plan);
 
-            // Stamps the shared source key so a later same-plan-and-version Tick memo-hits above; anything else rebuilds.
+            // Stamps the shared source key so a later same-plan-and-version Update memo-hits above; anything else rebuilds.
             _mirrorPlan = plan; _mirrorVersion = plan?.WinnerSetVersion ?? long.MinValue;
         }
 
@@ -975,7 +976,7 @@ namespace MapRenderer.Unity.Text.Placement
             NativeArray<byte>.Copy(plan.Departing.AsArray(), 0, _mirrorSymbolDeparting.AsArray(), 0, _mirrorCount);
             NativeArray<byte>.Copy(plan.CoverageFading.AsArray(), 0, _mirrorSymbolCoverageFading.AsArray(), 0, _mirrorCount);
             NativeArray<byte>.Copy(plan.Dropped.AsArray(), 0, _mirrorSymbolDropped.AsArray(), 0, _mirrorCount);
-            _mirrorNonDroppedCount = _mirrorCount - plan.DroppedCount; // TickCore gates on this, not _mirrorCount
+            _mirrorNonDroppedCount = _mirrorCount - plan.DroppedCount; // UpdateCore gates on this, not _mirrorCount
         }
 
         // Debug-only. A fire means the memo key said "same set" but the count disagrees — a future site landed without bumping WinnerSetVersion.
@@ -1183,7 +1184,7 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        /// <summary>The camera's view-projection matrix — the single definition shared by <see cref="Tick"/>
+        /// <summary>The camera's view-projection matrix — the single definition shared by <see cref="Update"/>
         /// and the coverage pre-cull, so both see the same frame. Column-major, matching <c>SymbolScreenProjection</c>'s convention.</summary>
         internal static float4x4 ViewProj(Camera camera)
             => math.mul(ToFloat4x4(camera.projectionMatrix), ToFloat4x4(camera.worldToCameraMatrix));

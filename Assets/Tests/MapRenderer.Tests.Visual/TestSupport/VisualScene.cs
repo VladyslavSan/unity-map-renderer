@@ -315,7 +315,7 @@ namespace MapRenderer.Tests
         /// <summary>Pumps <c>LateUpdate</c> until every loaded tile has settled — mirrors
         /// <c>GeoJsonSourceTests.PumpUntilSettled</c>. <c>AllTilesSettled</c> counts a disjoint tile's
         /// definitively-absent null handle as settled. Non-obvious why: it pumps the real <c>LateUpdate</c>
-        /// Tick, which harvests symbols, not <c>TileManager.DrainMeshBuilds</c>, which passes no
+        /// Update, which harvests symbols, not <c>TileManager.DrainMeshBuilds</c>, which passes no
         /// <c>symbolPass</c>. <see cref="TileManager.AwaitInFlightMeshBuilds"/> between ticks only waits; it
         /// consumes and harvests nothing.</summary>
         private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)

@@ -193,7 +193,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[64];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
             var textQuads = new SymbolQuad[textLayoutQuads.Count];
             for (int q = 0; q < textQuads.Length; q++) textQuads[q] = textLayoutQuads[q];
             int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
@@ -253,7 +255,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[8];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
 
             // Synthetic half-bounds + a rider translate: label_city's real -0.1 em offset cannot separate the
             // boxes, so a blocker could not hit the text half alone. The real bounds are pinned above.
@@ -341,7 +345,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
             int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
@@ -401,7 +407,8 @@ namespace MapRenderer.Tests.Style
             SymbolFeatureExtractor.Extract(layer, BerlinFixtureTile(), BerlinTileId, 13.0,
                 new WebMercatorProjection(), symbols, SyntheticAtlas("road_3"));
 
-            int atAnchorIcons = 0, curvedTexts = 0;
+            int atAnchorIcons = 0;
+            int curvedTexts = 0;
             foreach (SymbolFeature l in symbols)
             {
                 if (l.Kind == SymbolKind.Icon && l.Placement == SymbolPlacement.Point) atAnchorIcons++;
@@ -569,7 +576,8 @@ namespace MapRenderer.Tests.Style
         private static uint[] LineStringGeometry(params double2[] points)
         {
             var stream = new List<uint> { 1u | (1u << 3) };
-            long cx = (long)points[0].x, cy = (long)points[0].y;
+            long cx = (long)points[0].x;
+            long cy = (long)points[0].y;
             stream.Add(ZigZagEncode(cx));
             stream.Add(ZigZagEncode(cy));
             if (points.Length > 1)
@@ -577,7 +585,8 @@ namespace MapRenderer.Tests.Style
                 stream.Add(2u | ((uint)(points.Length - 1) << 3));
                 for (int i = 1; i < points.Length; i++)
                 {
-                    long x = (long)points[i].x, y = (long)points[i].y;
+                    long x = (long)points[i].x;
+                    long y = (long)points[i].y;
                     stream.Add(ZigZagEncode(x - cx));
                     stream.Add(ZigZagEncode(y - cy));
                     cx = x; cy = y;
@@ -646,7 +655,8 @@ namespace MapRenderer.Tests.Style
             foreach (SymbolFeature l in symbols)
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "every label must be Point-placed below the step");
 
-            int icons = CountIcons(symbols), texts = CountTexts(symbols);
+            int icons = CountIcons(symbols);
+            int texts = CountTexts(symbols);
             Assert.Greater(icons, 0, "icon count must be > 0");
             Assert.Greater(texts, 0, "text count must be > 0");
             Assert.AreEqual(texts, icons, "icon count must equal text count (one pair per feature)");
@@ -716,7 +726,8 @@ namespace MapRenderer.Tests.Style
                 Assert.IsNull(l.PathRender, "an upright-at-anchor label carries no curved path");
             }
 
-            int icons = CountIcons(symbols), texts = CountTexts(symbols);
+            int icons = CountIcons(symbols);
+            int texts = CountTexts(symbols);
             Assert.Greater(icons, 0, "icon count must be > 0 at z13");
             Assert.Greater(texts, 0, "text count must be > 0 at z13");
             Assert.AreEqual(texts, icons, "icon count must equal text count at z13");
@@ -986,7 +997,8 @@ namespace MapRenderer.Tests.Style
                     ",\"text-field\":[\"to-string\",[\"get\",\"ref\"]],\"text-rotation-alignment\":\"viewport\""),
                 BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
 
-            int atAnchorTexts = 0, alongLineIcons = 0;
+            int atAnchorTexts = 0;
+            int alongLineIcons = 0;
             foreach (SymbolFeature l in symbols)
             {
                 if (l.Kind == SymbolKind.Text && l.Placement == SymbolPlacement.Point) atAnchorTexts++;
@@ -1138,7 +1150,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
 
             // Candidate 0: a higher-priority blocker sitting where the icon box will land — big enough to
             // cover it regardless of icon-padding's exact magnitude.
@@ -1165,7 +1179,8 @@ namespace MapRenderer.Tests.Style
             var survivor = new bool[2];
             NativeCollisionRunner.RunCollision(candidates, 2, boxes, boxCount, survivor);
 
-            bool blockerPlaced = false, pairPlaced = false;
+            bool blockerPlaced = false;
+            bool pairPlaced = false;
             for (int k = 0; k < 2; k++)
             {
                 if (candidates[k].SymbolIndex == 0) blockerPlaced = survivor[k];
@@ -1196,7 +1211,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
 
             int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
@@ -1222,7 +1239,8 @@ namespace MapRenderer.Tests.Style
             var survivor = new bool[2];
             NativeCollisionRunner.RunCollision(candidates, 2, boxes, boxCount, survivor);
 
-            bool pairPlaced = false, laterPlaced = false;
+            bool pairPlaced = false;
+            bool laterPlaced = false;
             for (int k = 0; k < 2; k++)
             {
                 if (candidates[k].SymbolIndex == 0) pairPlaced = survivor[k];
@@ -1251,7 +1269,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
 
             int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
@@ -1321,7 +1341,9 @@ namespace MapRenderer.Tests.Style
             var quads = new PlacedQuad[8];
             var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
 
             int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
@@ -1481,7 +1503,8 @@ namespace MapRenderer.Tests.Style
 
             // (b) mid-arc lands INSIDE [0, extent) — exactly one symbol, at the true mid-arc point.
             {
-                double2 p0 = new double2(500, 500), p1 = new double2(3500, 3500);
+                double2 p0 = new double2(500, 500);
+                double2 p1 = new double2(3500, 3500);
                 var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.LineString, hasId: false, geometry: LineStringGeometry(p0, p1));
                 var tile = TestDecodedTiles.Of("lines", SyntheticTileId, new List<IFeature> { feature }, Extent);
                 var styleLayer = new SymbolStyle.StyleLayer
@@ -1504,7 +1527,9 @@ namespace MapRenderer.Tests.Style
 
             // (c) under LINE placement (viewport-aligned -> upright-at-anchor), only in-tile anchors emit.
             {
-                double2 p0 = new double2(-3000, 1000), p1 = new double2(3000, 1000); // length 6000
+                // length 6000
+                double2 p0 = new double2(-3000, 1000);
+                double2 p1 = new double2(3000, 1000);
                 var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.LineString, hasId: false, geometry: LineStringGeometry(p0, p1));
                 var tile = TestDecodedTiles.Of("lines", SyntheticTileId, new List<IFeature> { feature }, Extent);
                 var styleLayer = new SymbolStyle.StyleLayer

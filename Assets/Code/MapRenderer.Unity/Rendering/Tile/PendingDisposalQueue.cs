@@ -8,7 +8,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>Owns the three release-time holding pens for work abandoned mid-flight — a prologue build, a
     /// graph build, a fetch — so each is disposed once it settles instead of leaking. Stashed by
-    /// <see cref="TileManager.RenderTeardownRecord"/>; drained once per Tick, flushed at teardown.
+    /// <see cref="TileManager.RenderTeardownRecord"/>; drained once per Update, flushed at teardown.
     /// <para><b>Main thread only.</b> Both drain methods complete the graph arm's job handles
     /// synchronously — call only from the main thread.</para></summary>
     internal sealed class PendingDisposalQueue
@@ -45,7 +45,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 var handle = _prologue[i];
                 if (!handle.IsCompleted)
-                    continue; // still in-flight; check again next Tick
+                    continue; // still in-flight; check again next Update
 
                 if (handle.IsSucceeded)
                     handle.GetResult().Dispose();

@@ -83,7 +83,8 @@ namespace MapRenderer.Tests.Jobs
 
                 for (int pi = 0; pi < polyCount; pi++)
                 {
-                    int sOff = s.Buffers.WorkOffsets[pi], sLen = s.Buffers.WorkOffsets[pi + 1] - sOff;
+                    int sOff = s.Buffers.WorkOffsets[pi];
+                    int sLen = s.Buffers.WorkOffsets[pi + 1] - sOff;
                     new EarcutJob
                     {
                         PolyVertices     = flatVertsArr.GetSubArray(s.Buffers.VertexOffsets[pi], s.Buffers.VertexOffsets[pi + 1] - s.Buffers.VertexOffsets[pi]),
@@ -151,7 +152,8 @@ namespace MapRenderer.Tests.Jobs
 
                     // Content, not just the summary scalars — both arms allocate a full index array per
                     // polygon; comparing only counts would leave a transposed/mis-offset index undetected.
-                    int idxOff = s.Buffers.IndexOffsets[pi], idxLen = refIndexCounts[pi];
+                    int idxOff = s.Buffers.IndexOffsets[pi];
+                    int idxLen = refIndexCounts[pi];
                     for (int i = 0; i < idxLen; i++)
                         Assert.AreEqual(refIdx[idxOff + i], batchIdx[idxOff + i], $"polygon {pi}: OutIndices[{i}]");
                 }

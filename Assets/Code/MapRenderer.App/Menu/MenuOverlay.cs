@@ -122,7 +122,8 @@ namespace MapRenderer.App.Menu
         {
             IMenuPage page = _stack.Peek();
 
-            bool back = false, close = false;
+            bool back = false;
+            bool close = false;
             using (new GUILayout.HorizontalScope())
             {
                 if (_stack.Count > 1) back = GUILayout.Button("< Back", GUILayout.Width(72f));

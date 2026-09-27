@@ -69,7 +69,9 @@ namespace MapRenderer.Tests.Text.Placement
             var boxes = new SymbolBox[n];
             for (int i = 0; i < n; i++)
             {
-                float x = i * 500f, y = i * 500f; // far apart → disjoint → all survive
+                // far apart → disjoint → all survive
+                float x = i * 500f;
+                float y = i * 500f;
                 boxes[i] = new SymbolBox { Min = new float2(x, y), Max = new float2(x + 20f, y + 12f) };
                 cands[i] = new SymbolCandidate { BoxStart = i, BoxCount = 1, SortKey = 0,
                     FeatureIndex = i, TileKey = 0, SymbolIndex = i };
@@ -849,7 +851,8 @@ namespace MapRenderer.Tests.Text.Placement
             public readonly MapCamera Camera;
             public readonly MapView View;
             public readonly GlyphAtlasTexture Atlas;
-            private readonly GameObject _rootGo, _camGo;
+            private readonly GameObject _rootGo;
+            private readonly GameObject _camGo;
 
             public Harness(CameraProperties initial)
             {
@@ -927,7 +930,9 @@ namespace MapRenderer.Tests.Text.Placement
         public void OffAxisAnchor_HorizonCullFiresPerHeading_PinsEastNorthAxes()
         {
             var lookAt = new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 };
-            const double bearingDeg = 20.0, distanceDeg = 50.0; // oblique β so a swap/px-flip is visible (β≠0,45,90)
+            // oblique β so a swap/px-flip is visible (β≠0,45,90)
+            const double bearingDeg = 20.0;
+            const double distanceDeg = 50.0;
             GeoCoordinate anchorGeo = Destination(bearingDeg, distanceDeg);
 
             // The correct pattern is {1,1,0}; tilt=45° makes the off-axis anchor's occlusion depend on heading
@@ -963,7 +968,7 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(buffer, anchor, "A", 0);
 
             // 1) The camera looks straight at the anchor — visible, snaps to full opacity (default deltaTime).
-            // Duplicate — the collision verdict is harvested one Tick late.
+            // Duplicate — the collision verdict is harvested one Update late.
             SceneFrame frame1 = h.Frame();
             h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
             h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
@@ -1276,7 +1281,8 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Non-obvious why: the w's also go into the depth span, so an implementation that wrongly reads
             // depthPath as clip w produces the perspective-correct point and reds, instead of reading zeros.
-            const double w0 = 300.0, w1 = 600.0;
+            const double w0 = 300.0;
+            const double w1 = 600.0;
             var depthPathCarryingW = new[] { (float)w0, (float)w1 };
 
             int staged = Stage(in s, screenPath, worldPath, glyphs, anchors, ref p, depthPathCarryingW);
@@ -2333,7 +2339,9 @@ namespace MapRenderer.Tests.Text.Placement
         {
             SymbolViewTransform view = OriginView();
             // Entirely ABOVE the anchor — the whole point (see this tooth's doc).
-            const float cellTopBaked = 18f, cellBottomBaked = 6f, cellHalfWidthBaked = 20f;
+            const float cellTopBaked = 18f;
+            const float cellBottomBaked = 6f;
+            const float cellHalfWidthBaked = 20f;
             var offCentreCell = new SymbolQuad
             {
                 TopLeft     = new float2(-cellHalfWidthBaked, cellTopBaked),

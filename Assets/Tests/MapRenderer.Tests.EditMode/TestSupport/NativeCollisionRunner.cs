@@ -97,7 +97,8 @@ namespace MapRenderer.Tests.TestSupport
             for (int i = 0; i < candCount; i++)
             {
                 SymbolCandidate c = sortedCands[i];
-                int start = c.BoxStart, end = c.BoxStart + c.BoxCount;
+                int start = c.BoxStart;
+                int end = c.BoxStart + c.BoxCount;
                 bool placed = survivor[i];
 
                 if (c.Suppressed)

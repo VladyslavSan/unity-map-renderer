@@ -77,7 +77,9 @@ namespace MapRenderer.Core.Text
             }
 
             // Candidate shelf placement (locals — only committed on success).
-            int shelfY = _shelfY, shelfNextX = _shelfNextX, shelfHeight = _shelfHeight;
+            int shelfY = _shelfY;
+            int shelfNextX = _shelfNextX;
+            int shelfHeight = _shelfHeight;
             if (shelfNextX + w > _width)
             {
                 shelfY += shelfHeight;

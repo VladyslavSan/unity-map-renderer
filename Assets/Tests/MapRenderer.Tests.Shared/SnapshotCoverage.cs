@@ -98,7 +98,8 @@ namespace MapRenderer.Tests
         {
             Color32[] pixels = frame.Pixels;
             if (pixels == null) throw new ArgumentNullException(nameof(frame));
-            int width = frame.Width, height = frame.Height;
+            int width = frame.Width;
+            int height = frame.Height;
             int totalPixels = width * height;
             if (totalPixels == 0) return new SnapshotVerdict(0f, 1f, 0, true, false);
             if (pixels.Length < totalPixels)
@@ -121,7 +122,9 @@ namespace MapRenderer.Tests
                 for (int x = 0; x < width; x++)
                 {
                     Color32 px = pixels[y * width + x];
-                    byte r = px.r, g = px.g, b = px.b;
+                    byte r = px.r;
+                    byte g = px.g;
+                    byte b = px.b;
                     // Alpha ignored for coverage analysis.
 
                     // Black check.
@@ -180,7 +183,8 @@ namespace MapRenderer.Tests
         {
             Color32[] pixels = frame.Pixels;
             if (pixels == null) throw new ArgumentNullException(nameof(frame));
-            int width = frame.Width, height = frame.Height;
+            int width = frame.Width;
+            int height = frame.Height;
             int total = width * height;
             if (total == 0) return 0.0;
             if (pixels.Length < total)
@@ -222,7 +226,8 @@ namespace MapRenderer.Tests
         {
             Color32[] pixels = frame.Pixels;
             if (pixels == null) throw new ArgumentNullException(nameof(frame));
-            int width = frame.Width, height = frame.Height;
+            int width = frame.Width;
+            int height = frame.Height;
             int total = width * height;
             if (pixels.Length < total)
                 throw new ArgumentException(
@@ -230,7 +235,9 @@ namespace MapRenderer.Tests
 
             ClampRect(ref x0, ref y0, ref x1, ref y1, width, height);
 
-            long sumR = 0, sumG = 0, sumB = 0;
+            long sumR = 0;
+            long sumG = 0;
+            long sumB = 0;
             int count = 0;
             for (int y = y0; y < y1; y++)
             {
@@ -263,7 +270,8 @@ namespace MapRenderer.Tests
         {
             Color32[] pixels = frame.Pixels;
             if (pixels == null) throw new ArgumentNullException(nameof(frame));
-            int width = frame.Width, height = frame.Height;
+            int width = frame.Width;
+            int height = frame.Height;
             int total = width * height;
             if (pixels.Length < total)
                 throw new ArgumentException(
@@ -274,7 +282,9 @@ namespace MapRenderer.Tests
             // Two passes: mean, then variance. Region is small (sample sub-rect), so cost is negligible.
             double[] mean = SampleRegionMeanColor(frame, x0, y0, x1, y1);
 
-            double sumSqR = 0, sumSqG = 0, sumSqB = 0;
+            double sumSqR = 0;
+            double sumSqG = 0;
+            double sumSqB = 0;
             int count = 0;
             for (int y = y0; y < y1; y++)
             {

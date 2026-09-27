@@ -69,7 +69,7 @@ namespace MapRenderer.Unity.Rendering.Map
             internal const string CameraAdvance    = "MapRenderer.Camera.Advance";
             internal const string ApplyZoom        = "MapRenderer.View.ApplyZoom";
             internal const string InstancedRebuild = "MapRenderer.View.InstancedRebuild";
-            internal const string ManagerTick      = "MapRenderer.Tile.ManagerTick";
+            internal const string ManagerUpdate    = "MapRenderer.Tile.ManagerUpdate";
             internal const string SceneFrame       = "MapRenderer.View.SceneFrame";
             internal const string SymbolCollect    = "MapRenderer.Symbol.Collect";
             internal const string SymbolBatch      = "MapRenderer.Symbol.BatchBuild";
@@ -92,8 +92,8 @@ namespace MapRenderer.Unity.Rendering.Map
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.InstancedRebuild);
 
         // Cover select + request/release + build pump (CoverSelect/FetchPoll nest under it).
-        private static readonly ProfilerMarker PmManagerTick =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ManagerTick);
+        private static readonly ProfilerMarker PmManagerUpdate =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ManagerUpdate);
 
         // Build the per-frame floating-origin scene frame (projection Project + tangent basis).
         private static readonly ProfilerMarker PmSceneFrame =
@@ -190,7 +190,7 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.SymbolWorkerFactory = SymbolSubsystem;
         }
 
-        // Production symbols (real map data), fed to SymbolPlacementSystem.Tick each frame.
+        // Production symbols (real map data), fed to SymbolPlacementSystem.Update each frame.
         internal readonly SymbolSubsystem SymbolSubsystem;
 
         /// <summary>The sun/sky/haze writers, wired via <see cref="SetEnvironment"/>. Null until wired; a
@@ -210,7 +210,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private readonly List<Symbol.StyleLayer> _symbolStyleLayers = new List<Symbol.StyleLayer>();
 
         // The SymbolRenderLayer objects themselves (same walk as _symbolStyleLayers, same order) —
-        // handed to SymbolPlacementSystem.Tick each frame so each layer's survivors draw with its own material/presenter.
+        // handed to SymbolPlacementSystem.Update each frame so each layer's survivors draw with its own material/presenter.
         private readonly List<Rendering.Layers.SymbolRenderLayer> _symbolRenderLayers = new List<Rendering.Layers.SymbolRenderLayer>();
 
         // Reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
@@ -633,8 +633,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 TileManager.InstancedRebuild(sceneFrame);
 
             EnsureSelector();
-            using (PmManagerTick.Auto())
-                TileManager.Tick(cameraProperties, BuildTileSelectionConfig());
+            using (PmManagerUpdate.Auto())
+                TileManager.Update(cameraProperties, BuildTileSelectionConfig());
 
             // Pull the sprite sheet, which the symbol subsystem owns and fetches, into the fill-pattern layers each
             // frame. SetSprites early-outs on an unchanged pair.
@@ -647,7 +647,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 // One clock read shared by ReconcileLoadedTiles' and CurrentBatch's grace windows.
                 double now = Time.timeAsDouble;
 
-                // Pull the post-Tick loaded-tile set and reconcile the symbol store: it restores kept-warm symbols
+                // Pull the post-Update loaded-tile set and reconcile the symbol store: it restores kept-warm symbols
                 // for cache-hit re-entries and releases tiles that left cover.
                 using (PmSymbolCollect.Auto())
                 {
@@ -666,7 +666,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 // Push the far-distance cull fraction live, then gather, project, collide and present each slot
                 // through its own SymbolRenderLayer.
                 SymbolPlacementSystem.SymbolMaxDistanceFraction = _config.SymbolMaxDistanceFraction;
-                SymbolPlacementSystem.Tick(sceneFrame, plan, SymbolSubsystem.Atlas, Time.deltaTime,
+                SymbolPlacementSystem.Update(sceneFrame, plan, SymbolSubsystem.Atlas, Time.deltaTime,
                     _symbolRenderLayers, SymbolSubsystem.IconTexture);
             }
         }

@@ -4,10 +4,10 @@
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// A pull-based snapshot of runtime tile/render telemetry — <see cref="Tile.TileManager.Tick"/> stores the
+    /// A pull-based snapshot of runtime tile/render telemetry — <see cref="Tile.TileManager.Update"/> stores the
     /// one <c>CaptureTelemetry</c> builds on every call, and readers pull it by reference. Every field is an
     /// instantaneous <b>level</b> (a count or a zoom number at the instant of capture) — never a duration or a
-    /// per-tick rate (those are <c>*LastTick</c> territory). A plain data carrier: <c>init</c>-only,
+    /// per-frame rate (those are <c>*LastTick</c> territory). A plain data carrier: <c>init</c>-only,
     /// engine-free, so it compiles in the fast <c>dotnet</c> core-tests project and the Unity runner alike.
     /// </summary>
     public readonly struct TileTelemetrySnapshot
@@ -41,7 +41,7 @@ namespace MapRenderer.Unity.View
         public double FractionalZoom { get; init; }
 
         /// <summary>Number of currently loaded-or-loading <c>(tile, source)</c> records. Equals
-        /// <see cref="VisibleTileCount"/> post-Tick for a single source with a wide zoom range; diverges
+        /// <see cref="VisibleTileCount"/> post-Update for a single source with a wide zoom range; diverges
         /// under multiple rendered sources (one record per source pipeline per admitted tile).</summary>
         public int LoadedTileCount { get; init; }
 

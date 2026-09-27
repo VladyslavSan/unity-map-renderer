@@ -61,18 +61,21 @@ namespace MapRenderer.App
             if (Map == null) Map = FindAnyObjectByType<MapViewComponent>();
         }
 
-        private void Update() => Tick(Time.deltaTime);
+        // Unity sends its Update message to the parameterless overload; the float overload does not
+        // trigger its "can not take parameters" error (observed in Unity 6000.6, 2026-09-28).
+        private void Update() => Update(Time.deltaTime);
 
         /// <summary>
-        /// Advance the motion clock by <paramref name="dt"/> seconds and push the resulting zoom + look-at
+        /// Advance the motion clock by <paramref name="deltaSeconds"/> and push the resulting zoom + look-at
         /// onto the live camera. <c>internal</c> so an EditMode test drives it deterministically (the
-        /// MonoBehaviour game loop does not run under the EditMode test runner).
+        /// MonoBehaviour game loop does not run under the EditMode test runner) — Unity still calls the
+        /// parameterless overload as its own <c>Update()</c> message regardless of access modifier.
         /// </summary>
-        internal void Tick(float dt)
+        internal void Update(float deltaSeconds)
         {
             if (!SweepEnabled || Map == null || Map.Camera == null) return;
 
-            _elapsed += dt;
+            _elapsed += deltaSeconds;
 
             double zoom          = ZoomAt(_elapsed, MinZoom, MaxZoom, ZoomPeriodSeconds);
             var (latitude, longitude) = LookAtAt(

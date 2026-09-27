@@ -105,7 +105,8 @@ namespace MapRenderer.Tests.Visual
             int bitsPerChannel = 4,
             int minPixels = 50)
         {
-            int width = frame.Width, height = frame.Height;
+            int width = frame.Width;
+            int height = frame.Height;
             Color32[] pixels = frame.Pixels;
             int shift = 8 - bitsPerChannel;
             int buckets = (1 << bitsPerChannel);
@@ -122,7 +123,9 @@ namespace MapRenderer.Tests.Visual
             for (int i = 0; i < totalPx; i++)
             {
                 Color32 px = pixels[i];
-                byte r = px.r, g = px.g, bl = px.b;
+                byte r = px.r;
+                byte g = px.g;
+                byte bl = px.b;
 
                 // Skip background pixels.
                 int dist = Math.Abs(r - bg.r) + Math.Abs(g - bg.g) + Math.Abs(bl - bg.b);
@@ -130,17 +133,21 @@ namespace MapRenderer.Tests.Visual
 
                 // Skip the antialiased rim: its pixels blend fill and background, so one hue would read as several
                 // clusters. Non-obvious why: the radius is 2, as a one-pixel band spans two pixels of a diagonal edge.
-                int ix = i % width, iy = i / width;
+                int ix = i % width;
+                int iy = i / width;
                 bool nearBackground = false;
                 for (int dy = -RimRadius; dy <= RimRadius && !nearBackground; dy++)
                 for (int dx = -RimRadius; dx <= RimRadius && !nearBackground; dx++)
                 {
-                    int nx = ix + dx, ny = iy + dy;
+                    int nx = ix + dx;
+                    int ny = iy + dy;
                     nearBackground = nx < 0 || ny < 0 || nx >= width || ny >= height || IsBackground(nx, ny);
                 }
                 if (nearBackground) continue;
 
-                int ri = r >> shift, gi = g >> shift, bi = bl >> shift;
+                int ri = r >> shift;
+                int gi = g >> shift;
+                int bi = bl >> shift;
                 hist[ri * buckets * buckets + gi * buckets + bi]++;
             }
 
@@ -669,7 +676,9 @@ namespace MapRenderer.Tests.Visual
         private static string Diagnose(VisualFrame frame, Ink[] classes)
         {
             Color32[] px = frame.Pixels.Pixels;
-            int bg = 0, full = 0, graded = 0;
+            int bg = 0;
+            int full = 0;
+            int graded = 0;
             foreach (Ink c in classes)
             {
                 if (c == Ink.Background) bg++; else if (c == Ink.Full) full++; else graded++;
@@ -709,7 +718,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void ASquareFillHasGradedBoundaryPixels_AndAnUngradedInterior()
         {
-            const double lo = 0.25, hi = 0.75;
+            const double lo = 0.25;
+            const double hi = 0.75;
             VisualFrame frame = Render(1.0, PolygonFeature(
                 new double2(lo, lo), new double2(lo, hi), new double2(hi, hi), new double2(hi, lo)));
             if (!Classify(frame, out Ink[] classes)) Assert.Ignore(NoGpuMessage);
@@ -721,7 +731,8 @@ namespace MapRenderer.Tests.Visual
 
             // No graded pixel in the interior [0.35,0.65]²: coverage stays 1 wherever the hard fill was (the
             // lemma's precondition), which an inward-displaced band breaks first.
-            int lo35 = (int)(0.35 * SnapPx), hi65 = (int)(0.65 * SnapPx);
+            int lo35 = (int)(0.35 * SnapPx);
+            int hi65 = (int)(0.65 * SnapPx);
             for (int y = lo35; y < hi65; y++)
                 for (int x = lo35; x < hi65; x++)
                     Assert.AreEqual(Ink.Full, classes[y * frame.Width + x],
@@ -730,7 +741,8 @@ namespace MapRenderer.Tests.Visual
 
             // And no graded pixel may sit far outside it either: the band is ONE device pixel, so nothing
             // beyond a few px of the boundary may be partially covered.
-            int outerLo = (int)(lo * SnapPx) - 6, outerHi = (int)(hi * SnapPx) + 6;
+            int outerLo = (int)(lo * SnapPx) - 6;
+            int outerHi = (int)(hi * SnapPx) + 6;
             for (int y = 0; y < frame.Height; y++)
                 for (int x = 0; x < frame.Width; x++)
                 {
@@ -779,9 +791,11 @@ namespace MapRenderer.Tests.Visual
         public void TheRampIsOneDevicePixelWide_OnADiagonalSilhouetteAsWellAsAnAxisAlignedOne(
             [Values(false, true)] bool diagonal)
         {
-            const double c = 0.5, r = 0.25;
+            const double c = 0.5;
+            const double r = 0.25;
             VisualFrame frame;
-            double hardAreaPx, perimeterPx;
+            double hardAreaPx;
+            double perimeterPx;
             if (diagonal)
             {
                 // A diamond: same centre, same circumradius, every edge at 45° on screen. Diagonals are
@@ -824,7 +838,9 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void AbuttingPolygonsInOneLayerLeaveNoBackgroundAlongTheirSharedEdge()
         {
-            const double lo = 0.25, mid = 0.5, hi = 0.75;
+            const double lo = 0.25;
+            const double mid = 0.5;
+            const double hi = 0.75;
             const double opacity = 0.3;
             VisualFrame frame = Render(opacity,
                 PolygonFeature(new double2(lo, lo), new double2(lo, hi), new double2(mid, hi), new double2(mid, lo)),
@@ -856,7 +872,8 @@ namespace MapRenderer.Tests.Visual
                 $"{outerRampPx:F3} px. A hard silhouette leaves no background at a shared edge either, so " +
                 "without this the seam assertion below is satisfied by the very state this tooth exists to reject.");
 
-            int seamLo = (int)(mid * SnapPx) - 4, seamHi = (int)(mid * SnapPx) + 4;
+            int seamLo = (int)(mid * SnapPx) - 4;
+            int seamHi = (int)(mid * SnapPx) + 4;
             double peak = 0.0;
             for (int x = seamLo; x <= seamHi; x++)
             {

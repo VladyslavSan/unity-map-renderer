@@ -37,6 +37,16 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
 
 ## Types & data modeling
 
+- **One declaration per line — no statement declares more than one name.**
+  - `private float _h, _s, _v;` becomes three lines, one field each. Same rule for locals
+    (`double a, b;`); a `for (int i = 0, j = n; …)` loop header is the one allowed exception.
+  - A group of *state* that is one concept becomes a named struct nested in its owner, or an
+    existing math type when one fits (three `double` components of one vector → `double3`).
+  - **Fold only when all hold:** one concept, a fitting type or obvious nested struct exists, every use
+    is inside the owning file, and the fields are not serialized (a `[SerializeField]`/public
+    `MonoBehaviour` field would lose its baked scene value on rename). No fitting type (e.g. three
+    `ulong` components — no `ulong3`) or a local-variable group → just split the lines.
+
 - **A member that is just get/set is ONE auto-property, never a field plus a forwarding accessor.**
   - `internal SymbolStringTable StringTable { get; }`, not `private readonly _stringTable` plus
     `internal StringTable => _stringTable`. The compiler already gives an auto-property a backing field;
@@ -248,6 +258,8 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - Keep a qualifier that distinguishes (`FlatWorkVerts` — flattened across the layer's polygons), drop one
     that does not (`FlatScratchWorkVerts`). Test: delete the word — if the name is still unambiguous, it was
     filler.
+  - **A type name does not repeat its namespace** — `Interpolation.Smoothstep<T>`, not
+    `Interpolation.SmoothstepInterpolation<T>`. The type already qualifies the member.
   - **NOT yet enforced across the codebase — read this as the rule new and touched code is held to.**
     `Scratch` alone still appears ~160 times outside the fill-graph path (symbols, `TileManager`,
     placement, `TileBuildScratch*`), and `PathScratch`/`CumScratch`/`cumScratch`/`keysScratch` are live.
@@ -275,6 +287,14 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     `grep -rE 'UnityEngine\.<Name>\b'` first. Same failure on an unqualified `using` that imports a name
     (e.g. `CameraProperties`) this repo also defines (`CS0104`) — qualify the new import, don't alias the
     incumbent.
+
+- **A per-frame method is named `Update`, never `Tick`, `Advance`, or `Step`.**
+  - One verb for one recurring role, so a reader never has to learn which synonym a given subsystem
+    picked, and a grep for the role finds every caller.
+  - In a MonoBehaviour, the per-frame work lives in Unity's own `Update()`, with no separate `Tick`
+    behind it. Unity calls `Update()` whatever its access modifier, so a test can call an
+    `internal Update()` directly. If a test must supply a value, add an `internal Update(float)`
+    overload and make the parameterless `Update()` forward to it.
 
 ## Documentation & tests
 

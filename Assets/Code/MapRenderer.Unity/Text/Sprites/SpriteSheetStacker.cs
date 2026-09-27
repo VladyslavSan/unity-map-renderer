@@ -34,7 +34,8 @@ namespace MapRenderer.Unity.Text.Sprites
             if (sheets == null || sheets.Count == 0)
                 return (Array.Empty<byte>(), new int2(0, 0), new SpriteIndex());
 
-            int width = 0, height = 0;
+            int width = 0;
+            int height = 0;
             foreach (Sheet sheet in sheets)
             {
                 width = math.max(width, sheet.Size.x);

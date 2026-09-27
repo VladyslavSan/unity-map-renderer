@@ -56,7 +56,8 @@ namespace MapRenderer.Tests
                 new List<double2> { new double2(-20, -20), new double2(20, 20)  },                      // diagonal
             };
 
-            int totalV = 0, totalI = 0;
+            int totalV = 0;
+            int totalI = 0;
             var results = new (LineRibbonVertex[] Vertices, int[] Indices)[lines.Count];
             for (int k = 0; k < lines.Count; k++)
             {
@@ -74,7 +75,8 @@ namespace MapRenderer.Tests
             var indices = new int[totalI];
 
             var white = new Vector4(1f, 1f, 1f, 1f);
-            int vOff = 0, iOff = 0;
+            int vOff = 0;
+            int iOff = 0;
             foreach (var res in results)
             {
                 for (int i = 0; i < res.Vertices.Length; i++)

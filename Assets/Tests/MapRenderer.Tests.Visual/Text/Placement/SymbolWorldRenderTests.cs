@@ -34,7 +34,7 @@ using MapRenderer.Unity.View;
 namespace MapRenderer.Tests.Text.Placement
 {
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
-    // NOT registered in core-tests.csproj. It renders ONLY the world CURVED path (a real Tick through
+    // NOT registered in core-tests.csproj. It renders ONLY the world CURVED path (a real Update through
     // Map/Symbol/TextWorld) and asserts the asymmetric 'F' glyph's centroid and bounding box against goldens.
     //
     // Limitation: a golden catches a later shift or mirror, but cannot prove the rotation SIGN, because a
@@ -253,7 +253,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.That(actualMaxCol, Is.EqualTo(maxCol).Within(GoldenBboxTolerancePx), $"ink bbox right edge must match the committed golden ({label}).");
         }
 
-        // ── a REAL curved symbol through a REAL SymbolPlacementSystem.Tick (curved routes to the world
+        // ── a REAL curved symbol through a REAL SymbolPlacementSystem.Update (curved routes to the world
         //    sink) → Map/Symbol/TextWorld. ────────────────────────────────────────────────────────────────
         private static Color32[] RenderNewWorldPath(Camera uCam, MapCamera mapCamera, in SceneFrame frame,
             double3 pathA, double3 pathB, in SymbolQuad quad, GlyphAtlasTexture atlasTexture, long tileKey)
@@ -274,9 +274,9 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the NEW world path must place the label.");
 
                 using var snap = new SnapshotRenderer(Size, Size);
@@ -286,7 +286,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
     }
 
-    // Unity EditMode only. Point symbols through the REAL Tick render upright, render pixel-equivalent under a
+    // Unity EditMode only. Point symbols through the REAL Update render upright, render pixel-equivalent under a
     // zero and a nonzero AnchorLocal (the RTC cancellation), and leak nothing.
 
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -367,9 +367,9 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, plan.CollectedCount, "precondition: the collect must yield the label.");
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label must not be culled.");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world presenter must be showing.");
@@ -420,7 +420,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Rebase = float3x3.identity,
             };
 
-            Color32[] zeroPixels, nonzeroPixels;
+            Color32[] zeroPixels;
+            Color32[] nonzeroPixels;
             using var plan = new TestSymbolPlan(projection);
             using var _atlas = atlasTexture;
             using var system = new SymbolPlacementSystem(mapCamera,
@@ -431,9 +432,9 @@ namespace MapRenderer.Tests.Text.Placement
                     paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: zeroTileKey);
                 using (var snapZero = new SnapshotRenderer(Size, Size))
                 {
-                    // Duplicate Tick — the collision verdict is harvested one Tick late.
-                    system.Tick(in frame, plan.Build(zeroBuffer), atlasTexture);
-                    system.Tick(in frame, plan.Build(zeroBuffer), atlasTexture);
+                    // Duplicate Update — the collision verdict is harvested one Update late.
+                    system.Update(in frame, plan.Build(zeroBuffer), atlasTexture);
+                    system.Update(in frame, plan.Build(zeroBuffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (zero-AnchorLocal case): must not be culled.");
                     snapZero.Render(uCam);
                     zeroPixels = (Color32[])snapZero.Pixels.Pixels.Clone();
@@ -444,9 +445,9 @@ namespace MapRenderer.Tests.Text.Placement
                     paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: nonzeroTileKey);
                 using (var snapNonzero = new SnapshotRenderer(Size, Size))
                 {
-                    // Duplicate Tick — the collision verdict is harvested one Tick late.
-                    system.Tick(in frame, plan.Build(nonzeroBuffer), atlasTexture);
-                    system.Tick(in frame, plan.Build(nonzeroBuffer), atlasTexture);
+                    // Duplicate Update — the collision verdict is harvested one Update late.
+                    system.Update(in frame, plan.Build(nonzeroBuffer), atlasTexture);
+                    system.Update(in frame, plan.Build(nonzeroBuffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (nonzero-AnchorLocal case): must not be culled.");
                     snapNonzero.Render(uCam);
                     nonzeroPixels = (Color32[])snapNonzero.Pixels.Pixels.Clone();
@@ -499,7 +500,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // Three DIFFERENT tiles over three Ticks → three distinct world slots created (one mesh + one
+                // Three DIFFERENT tiles over three Updates → three distinct world slots created (one mesh + one
                 // presenter each) — exercises the dictionary growing, not just one static slot.
                 for (int i = 0; i < 3; i++)
                 {
@@ -510,10 +511,10 @@ namespace MapRenderer.Tests.Text.Placement
                     // previous iteration's placement. Distinct text keeps each id unique.
                     TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, quads, bounds.Min, bounds.Max,
                         text: "T" + i, paint: SymbolPaint.Default, textSizePx: 40f, sortKey: 0f, featureIndex: i, tileKey: tileKey);
-                    // Collision verdicts apply one Tick late, so a second, identical Tick precedes the assert. It
+                    // Collision verdicts apply one Update late, so a second, identical Update precedes the assert. It
                     // is fade-neutral: deltaTime defaults to +inf.
-                    system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                    system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                    system.Update(in frame, plan.Build(buffer), atlasTexture);
+                    system.Update(in frame, plan.Build(buffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, $"tick {i} must place its label.");
                 }
 

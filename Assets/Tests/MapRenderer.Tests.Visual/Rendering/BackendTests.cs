@@ -140,7 +140,7 @@ namespace MapRenderer.Tests.Visual
                         Value = new AABB { Center = float3.zero, Extents = new float3(1e6f) }
                     });
 
-                // Tick the three top-level groups, twice (register/upload, then steady). EntitiesGraphicsSystem
+                // Update the three top-level groups, twice (register/upload, then steady). EntitiesGraphicsSystem
                 // in the presentation group registers BRG batches; camera.Render() then makes EG submit.
                 for (int pass = 0; pass < 2; pass++)
                 {
@@ -657,7 +657,8 @@ namespace MapRenderer.Tests.Visual
 
     public class GlobeBackendSnapshotTests : BaseTestFixture
     {
-        private const int SnapW = 512, SnapH = 512;
+        private const int SnapW = 512;
+        private const int SnapH = 512;
         private static readonly Color OceanBg = new Color(0.04f, 0.09f, 0.18f, 1f);
 
         [Test]

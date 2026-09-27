@@ -44,11 +44,13 @@ namespace MapRenderer.Tests.GeoJsons
 
         // Tile-local corners of the authored rectangle at GeoJsonSliceOptions.Default's extent, well inside
         // [0, extent] so no clip can touch them.
-        private const double RectMin = 1024.0, RectMax = 3072.0;
+        private const double RectMin = 1024.0;
+        private const double RectMax = 3072.0;
 
         // A second rectangle, disjoint from the first, for the restyle arms. Its whole point is that a mesh
         // built from it CANNOT be mistaken for one built from the first.
-        private const double OtherMin = 3200.0, OtherMax = 3900.0;
+        private const double OtherMin = 3200.0;
+        private const double OtherMax = 3900.0;
 
         // ── Fixture builders ──────────────────────────────────────────────────────────────────────────
 
@@ -143,7 +145,9 @@ namespace MapRenderer.Tests.GeoJsons
             double total = 0.0;
             for (int i = 0; i + 2 < indices.Length; i += 3)
             {
-                Vector3 a = vertices[indices[i]], b = vertices[indices[i + 1]], c = vertices[indices[i + 2]];
+                Vector3 a = vertices[indices[i]];
+                Vector3 b = vertices[indices[i + 1]];
+                Vector3 c = vertices[indices[i + 2]];
                 total += 0.5 * math.abs((b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z));
             }
             return total;
@@ -163,7 +167,8 @@ namespace MapRenderer.Tests.GeoJsons
         {
             var view = NewView(out var go);
             Track(go);
-            int docFetches = 0, factoryCalls = 0;
+            int docFetches = 0;
+            int factoryCalls = 0;
             view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
             view.View.TileSourceFactoryOverride = template => { Interlocked.Increment(ref factoryCalls); return TestDataSource.Absent(); };
 
@@ -188,7 +193,8 @@ namespace MapRenderer.Tests.GeoJsons
         {
             var view = NewView(out var go);
             Track(go);
-            int docFetches = 0, factoryCalls = 0;
+            int docFetches = 0;
+            int factoryCalls = 0;
             string geoJsonText = RectangleAt(RectMin, RectMax);
             view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(geoJsonText); };
             view.View.TileSourceFactoryOverride = template => { Interlocked.Increment(ref factoryCalls); return TestDataSource.Absent(); };
@@ -376,7 +382,8 @@ namespace MapRenderer.Tests.GeoJsons
         {
             var view = NewView(out var go);
             Track(go);
-            int docFetches = 0, factoryCalls = 0;
+            int docFetches = 0;
+            int factoryCalls = 0;
             view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
             view.View.TileSourceFactoryOverride = template => { Interlocked.Increment(ref factoryCalls); return TestDataSource.Absent(); };
 
@@ -906,7 +913,8 @@ namespace MapRenderer.Tests.GeoJsons
 
             yield return null; // let the recorder's frame close
 
-            long mainHits = 0, anyHits = 0;
+            long mainHits = 0;
+            long anyHits = 0;
             for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
             for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits  += anyThread.GetSample(i).Count;
 
@@ -915,7 +923,7 @@ namespace MapRenderer.Tests.GeoJsons
                 "handing back something that had never been built");
             Assert.AreEqual(0, mainHits,
                 "DECISIVE: MapRenderer.Tile.Decode must NOT fire on the main thread. GetTile is called once " +
-                "per cover tile from inside Tick, so a source that sliced inline would put a full slice on " +
+                "per cover tile from inside Update, so a source that sliced inline would put a full slice on " +
                 "the frame thread for every one of them — the cost TileDecodeDispatch.DecodeAsync exists " +
                 "to avoid.");
         }
@@ -953,7 +961,8 @@ namespace MapRenderer.Tests.GeoJsons
 
             yield return null; // let the recorder's frame close
 
-            long mainHits = 0, anyHits = 0;
+            long mainHits = 0;
+            long anyHits = 0;
             for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
             for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits  += anyThread.GetSample(i).Count;
 

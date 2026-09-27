@@ -517,7 +517,7 @@ runtime type instead, and there are three paths:
 |---|---|---|
 | **Fill** | `ITileMeshRenderLayer` — once per `(tile,layer)`, Burst kernels, `Mesh.MeshData`; backend redraws (BRG `OnPerformCulling` / EG entities / MeshRenderers) | global index |
 | **Line** | `ITileMeshRenderLayer` (same) | global index |
-| **Symbol/text** | Frame-placed — global collision → per-slot billboard mesh rebuilt every `Tick`; a persistent per-slot `MeshRenderer` (`WorldSymbolRenderer`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** |
+| **Symbol/text** | Frame-placed — global collision → per-slot billboard mesh rebuilt every `Update`; a persistent per-slot `MeshRenderer` (`WorldSymbolRenderer`) swaps its mesh each `Update`, so the backend redraws it with no orchestrator | global index **per symbol layer** |
 | **Background** | Source-less, per-covered-tile (`BackgroundQuad` + `TileBuildGraph`) — dispatched by concrete type, NOT `ITileMeshRenderLayer` | global index |
 | **Fill-extrusion** | `ITileMeshRenderLayer` (+ ZWrite on) — `FillExtrusionRenderLayer` / `StyledFillExtrusionTileBuilder` | global index |
 | **Raster** *(reserved seat, not built)* | Per-tile textured quad — feature-driven vs. source-less dispatch is open (see "Non-goals / open questions") | global index |
@@ -638,7 +638,7 @@ symbol layers, and of a symbol layer and the layers around it, is the style's.
 ## Symbols: drawn by persistent renderers
 
 Symbols draw as **persistent per-slot `MeshRenderer`s** (`WorldSymbolRenderer`), not immediate-mode
-`Graphics.RenderMesh`. `Tick` does everything up to and including the per-slot mesh write (project → collide →
+`Graphics.RenderMesh`. `Update` does everything up to and including the per-slot mesh write (project → collide →
 fade/emit → mesh upload) and swaps the renderer's mesh; Unity redraws it every camera
 render automatically. This: (i) avoids the Editor "blink" of immediate mode (a Game-View repaint without the
 player loop gets no re-submission) with **no `beginCameraRendering` orchestrator**; (ii) inherits deterministic

@@ -5,8 +5,8 @@
 // Contents:
 //   TeardownPenOrderTests                   — Unity EditMode only — drives a real TileManager.Dispose().
 //   ThrottleTests                           — Throttle acceptance tests.
-//   TileLoadMeasurementTests                — Tooth (c) (consume-tick alloc-free) is NOT duplicated here — it is already guaranteed by MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory (asserts Is.Not.AllocatingGCMemory() over the budgeted-consume Tick in the all-built steady state,…
-//   TileLoadStressDriverTests               — Tests for the TileLoadStressDriver debug harness: the pure motion math (ZoomAt triangle wave + LookAtAt circular orbit) and the wired live-plumbing (Tick pushes the swept zoom + orbited look-at onto the real MapCamera; disabled/unwired are clean no-ops).
+//   TileLoadMeasurementTests                — Tooth (c) (consume-tick alloc-free) is NOT duplicated here — it is already guaranteed by MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory (asserts Is.Not.AllocatingGCMemory() over the budgeted-consume Update in the all-built steady state,…
+//   TileLoadStressDriverTests               — Tests for the TileLoadStressDriver debug harness: the pure motion math (ZoomAt triangle wave + LookAtAt circular orbit) and the wired live-plumbing (Update pushes the swept zoom + orbited look-at onto the real MapCamera; disabled/unwired are clean no-ops).
 //   TileManagerBackgroundRegistrationTests  — The source-less per-covered-tile background processor's TileManager wiring.
 //   TileManagerLoadPriorityTests            — The load concurrency cap and the priority order: which tile builds first, the cap across a full load, no cancel in flight, re-prioritization, the strategy toggle, and an allocation-free admission path.
 //   TileSymbolKickTests                     — The feed swap (TileManager's per-tile kick drives the symbol worker pass, retiring the SymbolTileBytesReady push).
@@ -72,7 +72,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary><c>DoDispose</c> must call <c>_pending.FlushAll()</c> AFTER the <c>_loaded</c> teardown
         /// pass stashes into the pens — an inverted call flushes pens that are then refilled and never emptied.
         /// One Dispose call drives the graph arm (a write step complete but unconsumed) and the fetch arm (a
-        /// fetch task complete but not yet observed by a Tick). The prologue arm shares the same
+        /// fetch task complete but not yet observed by a Update). The prologue arm shares the same
         /// <c>FlushAll</c> call, and reaching it needs a racy camera pan, so it is out of scope.</summary>
         /// <remarks>RED: hoist <c>FlushAll</c> above the teardown loop (reds <c>graphBaseline</c>), or delete
         /// the <c>_fetch</c> loop in <c>PendingDisposalQueue.FlushAll</c> (reds <c>fetchBaseline</c>).</remarks>
@@ -299,10 +299,10 @@ namespace MapRenderer.Tests.Tiles
         // ── Tooth (a): Mesh build cap binds ────────────────────────────────────────────────
 
         /// <summary>
-        /// MaxMeshBuildsPerTick=1 limits kick-offs to exactly 1 per Tick even when multiple
+        /// MaxMeshBuildsPerTick=1 limits kick-offs to exactly 1 per Update even when multiple
         /// tiles have ready fetch bytes. Uses z=5 (a known 9-tile cover) to guarantee >= 2 tiles.
         ///
-        /// Timing note: with the two-tick kick pattern (fetch observe on Tick N, kick on Tick N+1),
+        /// Timing note: with the two-tick kick pattern (fetch observe on Update N, kick on Update N+1),
         /// TileBuildsStartedLastTick is 0 on the observe tick and 1 on the first kick tick.
         /// </summary>
         [Test]
@@ -314,19 +314,19 @@ namespace MapRenderer.Tests.Tiles
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick          = 64;
-            view.Config.MaxMeshBuildsPerTick   = 1;  // one kick per Tick
+            view.Config.MaxMeshBuildsPerTick   = 1;  // one kick per Update
             view.Config.MaxVerticesPerTick        = int.MaxValue;
 
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
 
-                // Tick 1: request tiles. PumpPending sees no tiles, then cover adds them.
+                // Update 1: request tiles. PumpPending sees no tiles, then cover adds them.
                 view.LateUpdate();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 2,
                     "Need at least 2 tiles at z=5 for the cap test to be non-vacuous.");
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
-                    "Tooth (a): after Tick 1 (requests only), no kicks issued yet.");
+                    "Tooth (a): after Update 1 (requests only), no kicks issued yet.");
 
                 // Pump to the FIRST kick tick: the fetch task carries the DECODE, so its tick number varies.
                 // Non-obvious why: AwaitInFlightMeshBuilds neither kicks nor consumes, but DrainMeshBuilds
@@ -653,7 +653,8 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void Tooth_e_ThrottledRender_NonBlankCoverage_EntitiesBackend()
         {
-            const int SnapW = 512, SnapH = 512;
+            const int SnapW = 512;
+            const int SnapH = 512;
             const int Zoom  = 3;
             var bgColor  = new Color(0.10f, 0.11f, 0.15f, 1f);
             var bg32 = new Color32(26, 28, 38, 255);
@@ -801,7 +802,7 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        /// <summary>Pumps Tick() until every loaded tile has settled or a spin budget is hit.</summary>
+        /// <summary>Pumps Update() until every loaded tile has settled or a spin budget is hit.</summary>
         private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
@@ -950,7 +951,7 @@ namespace MapRenderer.Tests.Tiles
                 // Anti-vacuity: the recompute ran (not an early-out), and the cover is unchanged (a crossed edge
                 // tile would issue a real, allocating Request/Release — a different cost).
                 Assert.AreEqual(1, view.CoverRecomputesLastTick(),
-                    "The measured Tick must have run the full recompute (CoverRecomputesLastTick == 1) — " +
+                    "The measured Update must have run the full recompute (CoverRecomputesLastTick == 1) — " +
                     "otherwise the alloc-free assertion above passed vacuously via an early-out.");
                 Assert.AreEqual(loadedBefore, view.LoadedTileCount(),
                     "The sub-tile nudge must not change the loaded tile set — otherwise the request/release " +
@@ -966,7 +967,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Baseline: drives N sub-tile camera nudges and asserts <c>CoverRecomputesLastTick</c> sums to N —
-        /// with no recompute throttle, every dirty Tick recomputes. It guards the counter against
+        /// with no recompute throttle, every dirty Update recomputes. It guards the counter against
         /// under-reporting. A sub-tile-recompute throttle would fail it and need <c>recomputes &lt; N</c>.
         /// </summary>
         [Test]
@@ -999,7 +1000,7 @@ namespace MapRenderer.Tests.Tiles
                 }
 
                 Assert.AreEqual(N, recomputes,
-                    $"Baseline: with no throttle yet, every sub-tile-dirtied Tick must run the full recompute " +
+                    $"Baseline: with no throttle yet, every sub-tile-dirtied Update must run the full recompute " +
                     $"(CoverRecomputesLastTick must sum to {N} across {N} nudges; got {recomputes}). If this " +
                     "ever reads less than N without an explicit throttle fix landing, the counter itself has " +
                     "a false negative.");
@@ -1153,7 +1154,7 @@ namespace MapRenderer.Tests.Tiles
                 "inverse-cos scaling must widen the longitude offset beyond the raw radius away from the equator");
         }
 
-        // ── Wired live-plumbing: Tick drives the real camera zoom + look-at ──────────────────────────
+        // ── Wired live-plumbing: Update drives the real camera zoom + look-at ──────────────────────────
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -1188,21 +1189,21 @@ namespace MapRenderer.Tests.Tiles
         }
 
         [Test]
-        public void Tick_DrivesCameraZoomAndLookAt_AlongTheMotionCurves()
+        public void Update_DrivesCameraZoomAndLookAt_AlongTheMotionCurves()
         {
             var (go, view, driver) = WireDriver();
             Track(go);
             try
             {
                 // Half period: zoom at MaxZoom, orbit due-west (lat centre, lon −radius).
-                driver.Tick(4.0f);
+                driver.Update(4.0f);
                 var cam = view.Camera.CurrentProperties;
                 Assert.AreEqual(9.0,   cam.Zoom,               1e-3, "half period ⇒ MaxZoom");
                 Assert.AreEqual(0.0,   cam.LookAt.Latitude,    1e-3, "half period ⇒ orbit latitude back at centre");
                 Assert.AreEqual(-10.0, cam.LookAt.Longitude,   1e-3, "half period ⇒ orbit due-west of centre");
 
                 // Another half period: zoom back to MinZoom, orbit due-east again (full lap).
-                driver.Tick(4.0f);
+                driver.Update(4.0f);
                 cam = view.Camera.CurrentProperties;
                 Assert.AreEqual(3.0,  cam.Zoom,             1e-3, "full period ⇒ MinZoom");
                 Assert.AreEqual(0.0,  cam.LookAt.Latitude,  1e-3);
@@ -1215,7 +1216,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         [Test]
-        public void Tick_Disabled_LeavesCameraUntouched()
+        public void Update_Disabled_LeavesCameraUntouched()
         {
             var (go, view, driver) = WireDriver();
             Track(go);
@@ -1223,7 +1224,7 @@ namespace MapRenderer.Tests.Tiles
             {
                 driver.SweepEnabled = false;
                 var before = view.Camera.CurrentProperties;
-                driver.Tick(4.0f);
+                driver.Update(4.0f);
                 var after = view.Camera.CurrentProperties;
                 Assert.AreEqual(before.Zoom,             after.Zoom,             Tol, "zoom must be untouched");
                 Assert.AreEqual(before.LookAt.Latitude,  after.LookAt.Latitude,  Tol, "look-at must be untouched");
@@ -1236,14 +1237,14 @@ namespace MapRenderer.Tests.Tiles
         }
 
         [Test]
-        public void Tick_Unwired_NoOpsCleanly()
+        public void Update_Unwired_NoOpsCleanly()
         {
             var go   = Track(new GameObject("StressDriver_Unwired"));
             try
             {
                 var driver = go.AddComponent<TileLoadStressDriver>();
                 driver.Map = null;
-                Assert.DoesNotThrow(() => driver.Tick(1.0f));
+                Assert.DoesNotThrow(() => driver.Update(1.0f));
             }
             finally
             {
@@ -1267,7 +1268,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>Two dense background layers over one covered tile — the reachable proxy, in THIS stage,
         /// for "a tile with many fill layers": each becomes its own
         /// <c>ILayerMeshBuild</c>/write output, so a <c>MaxConsumesPerTick</c> budget of 1 forces
-        /// a genuine partial consume — one layer taken this Tick, one left for the next.</summary>
+        /// a genuine partial consume — one layer taken this Update, one left for the next.</summary>
         private static string TwoBackgroundLayersStyle() => @"{
             ""version"": 8,
             ""layers"": [
@@ -1383,7 +1384,8 @@ namespace MapRenderer.Tests.Tiles
 
                 view.LoadTestStyle(null, Cam(0, 0, 0), StyleParser.Parse(BackgroundOnlyStyle()));
 
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 10000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -1403,11 +1405,13 @@ namespace MapRenderer.Tests.Tiles
 
                 gate[0] = 1; // release — Measure, then Write, proceed normally from here on
 
-                // Non-local invariant: each PumpPending arm visits a tile at most once per Tick (every arm ends
+                // Non-local invariant: each PumpPending arm visits a tile at most once per Update (every arm ends
                 // in `continue`), so a correct three-step pump cannot settle before kickTick+2; one that folds
                 // write-completion into the measure-complete tick settles at kickTick+1. Record the tick the
                 // WRITE step was kicked (MeshDataArray allocated) and the tick the tile was CONSUMED.
-                int allocTick = -1, consumeTick = -1, settleTick = -1;
+                int allocTick = -1;
+                int consumeTick = -1;
+                int settleTick = -1;
                 for (; tick < 10000 && settleTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -1419,7 +1423,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.GreaterOrEqual(settleTick, 0, "the cover must eventually settle.");
 
                 Assert.AreEqual(1, view.LoadedTileCount(),
-                    "precondition: exactly ONE covered tile. Both counters below are per-Tick GLOBALS, so " +
+                    "precondition: exactly ONE covered tile. Both counters below are per-Update GLOBALS, so " +
                     "with two tiles one tile's alloc could coincide with another's consume and the ordering " +
                     "assertions would read a coincidence rather than this tile's step separation.");
                 Assert.GreaterOrEqual(allocTick,   0, "the write step must have allocated a MeshDataArray.");
@@ -1663,8 +1667,8 @@ namespace MapRenderer.Tests.Tiles
         // ── A partially-consumed graph tile keeps its Graph alive across ticks ─────────────────────────
         //
         // Non-local invariant: TileManager.FinishConsume is the single disposal site for LoadedTile.Graph.
-        // Two dense layers under MaxConsumesPerTick=1 keep Step at Write for more than one Tick, and a Graph
-        // disposed before the last consume makes the next Tick's `lt.Graph.IsStepComplete` throw an NRE.
+        // Two dense layers under MaxConsumesPerTick=1 keep Step at Write for more than one Update, and a Graph
+        // disposed before the last consume makes the next Update's `lt.Graph.IsStepComplete` throw an NRE.
 
         [UnityTest]
         public IEnumerator PartiallyConsumedGraphTile_KeepsGraphAlive_UntilBothLayersSettle()
@@ -1684,7 +1688,8 @@ namespace MapRenderer.Tests.Tiles
 
                 // AllTilesSettled() reads vacuously true on an empty cover, so pump until the tile is loaded
                 // and kicked before relying on it.
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 2000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -1732,7 +1737,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary><b>RED injection:</b> in <c>PumpPending</c>'s write-consume arm, add
         /// <c>lt.Graph.Dispose(); lt.Graph = null;</c> right after <c>CompleteWriteAndTakePayloads()</c>. The
-        /// next Tick with <c>Step == Write</c> throws a <see cref="System.NullReferenceException"/>, which
+        /// next Update with <c>Step == Write</c> throws a <see cref="System.NullReferenceException"/>, which
         /// NUnit reports as a test ERROR.</summary>
 
         // ── Tooth 2: no fetch, no decode for background ───────────────────────────────────────────────
@@ -1771,8 +1776,8 @@ namespace MapRenderer.Tests.Tiles
             {
                 view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
 
-                // Admission runs on the SAME Tick as the cover recompute that creates these records, so the
-                // first record can be kicked on tick 1. The per-Tick CAP must bind on that tick too.
+                // Admission runs on the SAME Update as the cover recompute that creates these records, so the
+                // first record can be kicked on tick 1. The per-Update CAP must bind on that tick too.
                 view.LateUpdate();
                 int loaded = view.LoadedTileCount();
                 Assert.Greater(loaded, 1, "non-vacuous: must cover more than one tile.");
@@ -1785,7 +1790,7 @@ namespace MapRenderer.Tests.Tiles
                 {
                     view.LateUpdate();
                     Assert.LessOrEqual(view.TileBuildsStartedLastTick(), 1,
-                        "at most MaxMeshBuildsPerTick source-less tiles may be started in a single Tick — " +
+                        "at most MaxMeshBuildsPerTick source-less tiles may be started in a single Update — " +
                         "never the whole cover synchronously in one burst.");
                     yield return null;
                 }
@@ -1955,7 +1960,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(gated.Source, Cam(lonA, latA, 5.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                // Tick 1 admits the WHOLE cover in A-priority order. The gate holds every fetch PENDING, so
+                // Update 1 admits the WHOLE cover in A-priority order. The gate holds every fetch PENDING, so
                 // no fetch that lands early can get a non-center tile kicked first.
                 view.LateUpdate();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 5,
@@ -2035,7 +2040,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Admission holds the active (admitted, not-yet-Built) set at the concurrency cap. Without a
-        /// cap, a cover-wide cover/zoom transition would fetch every newly-entering tile in one Tick, and
+        /// cap, a cover-wide cover/zoom transition would fetch every newly-entering tile in one Update, and
         /// the active set would jump straight to the full cover size. A per-tile GATE holds every fetch open
         /// (never completing) so the active set can only GROW via admission, never shrink via completion —
         /// isolating the cap.
@@ -2274,7 +2279,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>Loads a fresh view capped to a single admission slot (gated — never completes), pumps
-        /// one Tick, and returns the SOLE admitted tile plus the full cover (admitted ∪ desired).</summary>
+        /// one Update, and returns the SOLE admitted tile plus the full cover (admitted ∪ desired).</summary>
         private static TileId RunToFirstAdmission(double lon, double lat, double tilt,
             TilePriorityStrategy strategy, out List<TileId> cover)
         {
@@ -2319,10 +2324,10 @@ namespace MapRenderer.Tests.Tiles
         // ── the admission/sort path stays allocation-free under sustained churn ─────────────────────
 
         /// <summary>
-        /// A capped, gated load keeps the desired list populated across many Ticks (nothing ever completes,
+        /// A capped, gated load keeps the desired list populated across many Updates (nothing ever completes,
         /// so <see cref="MapRenderer.Unity.Rendering.Tile.TileManager.AdmitFromDesired"/>'s sort+admit-attempt
-        /// runs every Tick against a non-empty list) — the scenario the steady-state zero-alloc tooth in
-        /// MapViewLiveLoopTests doesn't reach (there, admission is uncapped and settles in one Tick).
+        /// runs every Update against a non-empty list) — the scenario the steady-state zero-alloc tooth in
+        /// MapViewLiveLoopTests doesn't reach (there, admission is uncapped and settles in one Update).
         /// </summary>
         [Test]
         public void AdmissionAndPrioritySort_UnderSustainedChurn_DoesNotAllocateGCMemory()
@@ -2342,14 +2347,14 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 view.LoadTestStyle(gated.Source, Cam(0, 0, 6.0), style: FillStyle());
-                view.LateUpdate(); // first Tick — grows the reused scratch buffers to steady capacity
+                view.LateUpdate(); // first Update — grows the reused scratch buffers to steady capacity
                 Assert.Greater(view.DesiredCount(), 0,
                     "sanity: the desired list must stay non-empty (gated fetches never free a slot) for " +
-                    "the sort/admit-attempt path to actually run every Tick.");
+                    "the sort/admit-attempt path to actually run every Update.");
 
                 const int N = 30;
                 AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
-                    $"AdmitFromDesired's priority sort + admit-attempt must not allocate across {N} Ticks " +
+                    $"AdmitFromDesired's priority sort + admit-attempt must not allocate across {N} Updates " +
                     "of sustained desired-list churn (capped, nothing completing).");
             }
             finally
@@ -2444,7 +2449,8 @@ namespace MapRenderer.Tests.Tiles
 
         private static int CountOccurrences(string text, string needle)
         {
-            int n = 0, i = 0;
+            int n = 0;
+            int i = 0;
             while ((i = text.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
             return n;
         }
@@ -2519,9 +2525,9 @@ namespace MapRenderer.Tests.Tiles
             {
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
 
-                view.LateUpdate();          // Tick 1: cover created (9 tiles), fetches requested
+                view.LateUpdate();          // Update 1: cover created (9 tiles), fetches requested
                 view.DrainMeshBuilds();     // land the fetch decodes deterministically (symbol-silent, see DrainMeshBuilds_NeverDrivesSymbolFactory)
-                view.LateUpdate();          // Tick 2: fetches observed → lt.Decode set, 0 kicked
+                view.LateUpdate();          // Update 2: fetches observed → lt.Decode set, 0 kicked
                 Assert.AreEqual(0, spy.BeginBuildCalls.Count, "sanity: nothing kicked before the tile has a prior lt.Decode.");
 
                 var oldKeys = new List<LoadedTileKey>();
@@ -3128,7 +3134,7 @@ namespace MapRenderer.Tests.Tiles
             Assert.IsTrue(gate.IsDirty,
                 "a newly constructed, never-committed, never-invalidated gate must be dirty as soon as " +
                 "MarkStaleIfMoved runs — this pins the HEAD `_dirty = true` initializer together with the " +
-                "`!_initialised` clause, so the first Tick always recomputes.");
+                "`!_initialised` clause, so the first Update always recomputes.");
         }
 
         [Test]

@@ -77,7 +77,8 @@ namespace MapRenderer.Tests.TestSupport
 
         private static double2 Centroid(List<double2> ring)
         {
-            double sx = 0.0, sy = 0.0;
+            double sx = 0.0;
+            double sy = 0.0;
             for (int i = 0; i < ring.Count; i++) { sx += ring[i].x; sy += ring[i].y; }
             return new double2(sx / ring.Count, sy / ring.Count);
         }
@@ -89,7 +90,10 @@ namespace MapRenderer.Tests.TestSupport
             int n = ring.Count;
             for (int i = 0, j = n - 1; i < n; j = i++)
             {
-                double xi = ring[i].x, yi = ring[i].y, xj = ring[j].x, yj = ring[j].y;
+                double xi = ring[i].x;
+                double yi = ring[i].y;
+                double xj = ring[j].x;
+                double yj = ring[j].y;
                 bool straddle = (yi > p.y) != (yj > p.y);
                 if (straddle && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi))
                     inside = !inside;

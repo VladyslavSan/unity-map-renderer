@@ -501,13 +501,13 @@ namespace MapRenderer.Tests.Visual
                     "MapView must build 1 fill render bundle for the zoom-opacity style. " +
                     "If 0, RenderLayerSet.Build is not creating bundles for zoom-dependent layers.");
 
-                // Tick once to pump tiles and fire ApplyZoom.
+                // Update once to pump tiles and fire ApplyZoom.
                 view.LateUpdate();
 
-                // ── DECISIVE: ApplyZoom is called in Tick — proven by ZoomStyleApplier test above.
-                // Structural assertion: Tick does not throw, the fill bundle count is still 1 after Tick.
+                // ── DECISIVE: ApplyZoom is called in Update — proven by ZoomStyleApplier test above.
+                // Structural assertion: Update does not throw, the fill bundle count is still 1 after Update.
                 Assert.AreEqual(1, view.FillLayerCount(),
-                    "fill bundle count must remain 1 after Tick (bundles must not be cleared on Tick).");
+                    "fill bundle count must remain 1 after Update (bundles must not be cleared on Update).");
             }
             finally
             {
@@ -601,10 +601,12 @@ namespace MapRenderer.Tests.Visual
 
         // Polygon spans the tile-local unit square [0.2,0.8]², clear of GeoJsonSliceOptions.Default's
         // ~1.5%-of-tile buffer, so it has no tile-edge interaction.
-        private const double PolyLo = 0.2, PolyHi = 0.8;
+        private const double PolyLo = 0.2;
+        private const double PolyHi = 0.8;
 
         // Center sample box: unit square [0.45,0.55]² — well inside the filled [0.2,0.8]² region.
-        private const int CenterLo = 230, CenterHi = 282;
+        private const int CenterLo = 230;
+        private const int CenterHi = 282;
 
         // Corner sample boxes: 51×51 px at each frame corner, outside the fill. They are read as a SET, so
         // the frame's bottom-left origin does not matter.

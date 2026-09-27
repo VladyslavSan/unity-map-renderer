@@ -52,10 +52,10 @@ changes (different sources, different source-layers, structural layer changes).
    only) patches in place. See `docs/tile-pipeline-design.md` § "Partial-survival restyle".
 3. **Warm reuse beyond sources.** The in-place arm above keeps every render layer, material, and prepared
    mesh when the diff says geometry is unchanged; `SetSources` keeps `PreparedTileCache` — its only
-   `_prepared.Clear()` runs in `TileManager.TickCore`, on a `BufferClip` change.
+   `_prepared.Clear()` runs in `TileManager.UpdateCore`, on a `BufferClip` change.
 4. **Smooth visual transition.** `ZoomStyleApplier.BindOrRetarget` eases a retargeted paint
    property (color/opacity/px-valued) from its old value to the new one over `StyleTransition`; `RenderLayerSet.
-   AdvanceFade` eases a layer's zoom-range fade the same way. Uses the shared machinery
+   UpdateFade` eases a layer's zoom-range fade the same way. Uses the shared machinery
    (§ "Shared easing machinery" below).
 5. **In-flight preservation.** Don't cancel in-flight tile fetches / label builds that are still valid under the
    new style. Not built.
@@ -92,7 +92,7 @@ evaluating only the Zoom-kind bindings):
   halo is geometry (a second glyph run), so those two ride its vertex stream per feature and move only
   when the tile is rebuilt.
 - **Easing** — a restyle does not pop a changed uniform: `ZoomStyleApplier.BindOrRetarget` eases a
-  retargeted binding, and `RenderLayerSet.AdvanceFade` eases a layer's zoom-range fade, both over
+  retargeted binding, and `RenderLayerSet.UpdateFade` eases a layer's zoom-range fade, both over
   `StyleTransition` (§ "Shared easing machinery" below). This covers restyle-triggered changes only; it says
   nothing about easing a continuous camera-zoom step (the goal of § "Camera-driven property
   re-evaluation", open in the gaps below).
@@ -143,7 +143,7 @@ duration.** A compatible restyle (§ "Style switching", sub-topic 4) and a camer
 - **Where easing lives — settled.** A per-property animator over the applier layer:
   `ZoomStyleApplier`'s `Binding<T>` carries `Origin`/`StartSeconds`/`DurationSeconds` per bound
   property, and `BindOrRetarget` arms them on a retarget. The layer-level fade (`minzoom`/`maxzoom`/
-  `visibility`) eases the same way, one level up, in `RenderLayerSet.AdvanceFade` — the target/duration/clock
+  `visibility`) eases the same way, one level up, in `RenderLayerSet.UpdateFade` — the target/duration/clock
   are the *set*'s, not any one layer's, so no transition and no clock cross `IFadeableRenderLayer`.
 - **The scene writers outside the render layers.** `SunLight`, `SkyGradient` and `DistanceHaze`, owned by one
   `SceneEnvironment`, ease the root `light` and `sky` values on the same clock and smoothstep curve

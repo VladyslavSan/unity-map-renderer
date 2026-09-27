@@ -116,7 +116,7 @@ namespace MapRenderer.Tests.Text.Placement
                 AddText(buffer, frame.SceneOriginRender, tileAKey, featureIndex: 0);
                 AddIcon(buffer, frame.SceneOriginRender, tileAKey, featureIndex: 1);
                 AddText(buffer, frame.SceneOriginRender, tileBKey, featureIndex: 2);
-                // Duplicate — the collision verdict is harvested one Tick late.
+                // Duplicate — the collision verdict is harvested one Update late.
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 

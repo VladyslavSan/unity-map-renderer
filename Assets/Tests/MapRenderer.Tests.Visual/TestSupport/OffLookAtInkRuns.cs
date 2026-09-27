@@ -22,7 +22,8 @@ namespace MapRenderer.Tests
         public static (int start, int end)[] AlongColumns(Color32[] pixels, int size, int rowFrom, int rowTo)
         {
             var inked = new bool[size];
-            int first = math.max(0, rowFrom), last = math.min(size - 1, rowTo);
+            int first = math.max(0, rowFrom);
+            int last = math.min(size - 1, rowTo);
             for (int col = 0; col < size; col++)
                 for (int row = first; row <= last; row++)
                     if (pixels[row * size + col].r < WorldSymbolInkAnalysis.InkThreshold) { inked[col] = true; break; }
@@ -34,7 +35,8 @@ namespace MapRenderer.Tests
         public static (int start, int end)[] AlongRows(Color32[] pixels, int size, int colFrom, int colTo)
         {
             var inked = new bool[size];
-            int first = math.max(0, colFrom), last = math.min(size - 1, colTo);
+            int first = math.max(0, colFrom);
+            int last = math.min(size - 1, colTo);
             for (int row = 0; row < size; row++)
                 for (int col = first; col <= last; col++)
                     if (pixels[row * size + col].r < WorldSymbolInkAnalysis.InkThreshold) { inked[row] = true; break; }

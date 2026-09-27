@@ -22,7 +22,7 @@
 //   SymbolStringTableTests              — SymbolStringTable — the string→int table that lets the cross-tile dedup key partition by an integer id instead of a string hash.
 //   SymbolTileCoverageFilterTests       — ClassifyActive — the per-block tile-coverage classifier that WRITES a per-record Keep / Fade / Drop decision (a tile that WAS on screen fades out instead of popping) without compacting the record list.
 //   SymbolTileCoverageTests             — The per-tile screen-coverage pre-cull metric.
-//   SymbolTranslateTests                — the pure text-translate screen-delta math (the engine-free half; the SymbolPlacementSystem.Tick integration is proven separately in EditMode).
+//   SymbolTranslateTests                — the pure text-translate screen-delta math (the engine-free half; the SymbolPlacementSystem.Update integration is proven separately in EditMode).
 
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -340,7 +340,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             // Rebased P = (0,0,0), cam = (0,altitude,0), centre = (0,-R,0): dot(P-C, cam-C) = R·(altitude+R) > R²
             // for any altitude > 0, so the look-at under the camera is never hidden.
-            const double r = 6378137.0, altitude = 500.0;
+            const double r = 6378137.0;
+            const double altitude = 500.0;
             var origin = new double3(0, 0, 0);
             var cam = new double3(0, altitude, 0);
             var centre = new double3(0, -r, 0);
@@ -411,7 +412,8 @@ namespace MapRenderer.Tests.Text.Placement
             // so the sweep skips a 5° collar; the near-limb test probes just outside it.
             double horizonDeg = math.acos(1.0 / 3.0) * 180.0 / math.PI_DBL;
 
-            bool sawHidden = false, sawVisible = false;
+            bool sawHidden = false;
+            bool sawVisible = false;
             for (double lon = -180.0; lon <= 180.0; lon += 5.0)
             {
                 if (math.abs(math.abs(lon) - horizonDeg) < 5.0) continue; // skip the near-tangent collar
@@ -1871,7 +1873,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var anchor = new float2(-40f, 12f);
             float rotation = math.radians(rotationDeg);
-            const float textSizePx = 48f, paddingPx = 2.5f;
+            const float textSizePx = 48f;
+            const float paddingPx = 2.5f;
             var cell = new SymbolQuad
             {
                 TopLeft = new float2(-7f, 11f), BottomRight = new float2(5f, -3f), LineIndex = 0,
@@ -1889,7 +1892,8 @@ namespace MapRenderer.Tests.Text.Placement
                 anchor + Rotate(cell.BottomRight * scale),
                 anchor + Rotate(new float2(cell.TopLeft.x, cell.BottomRight.y) * scale),
             };
-            float2 min = corners[0], max = corners[0];
+            float2 min = corners[0];
+            float2 max = corners[0];
             foreach (float2 c in corners) { min = math.min(min, c); max = math.max(max, c); }
 
             Assert.AreEqual(min.x - paddingPx, actual.Min.x, Tol, "Min.x");
@@ -1945,7 +1949,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// Lever C step 1: the pure blittable-input staging math extracted from SymbolPlacementSystem. Hand-computable
     /// cases (axis-aligned point box, horizontal curved line → zero rotation) pin the geometry; the full byte-parity
-    /// gate is the engine EditMode Tick tests that now call this same code.
+    /// gate is the engine EditMode Update tests that now call this same code.
     /// </summary>
     [TestFixture]
     public class SymbolStagingMathTests
@@ -2677,7 +2681,7 @@ namespace MapRenderer.Tests.Text.Placement
 
     /// <summary>
     /// The pure <c>text-translate</c> screen-delta math: the engine-free half; the
-    /// <c>SymbolPlacementSystem.Tick</c> integration is covered in EditMode. The bearing tests assert
+    /// <c>SymbolPlacementSystem.Update</c> integration is covered in EditMode. The bearing tests assert
     /// structure, not exact coordinates: the map-under-bearing SIGN is SymbolBearing.MapAlignedSign, which
     /// SymbolIconRenderSnapshotTests.MapAlignedPointIcon_TurnsWithTheMap_UnderAnActiveBearing pins.
     /// </summary>

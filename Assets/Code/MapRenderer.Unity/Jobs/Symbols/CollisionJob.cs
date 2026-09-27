@@ -30,18 +30,23 @@ namespace MapRenderer.Unity.Jobs.Symbols
         public NativeArray<int> CellHead; // per-cell head node index or -1; length GridW*GridH (caller fills -1)
         public NativeArray<int> NodeBox;  // node -> box index; length >= node upper bound
         public NativeArray<int> NodeNext; // node -> next node in the same cell, or -1
-        public float GridMinX, GridMinY, GridInvCell;
-        public int   GridW, GridH;
+        public float GridMinX;
+        public float GridMinY;
+        public float GridInvCell;
+        public int GridW;
+        public int GridH;
 
         public void Execute()
         {
             Sort(); // heapsort Candidates[0..CandidateCount) into placement order
 
-            int nodeCount = 0, survivors = 0;
+            int nodeCount = 0;
+            int survivors = 0;
             for (int i = 0; i < CandidateCount; i++)
             {
                 SymbolCandidate c = Candidates[i];
-                int start = c.BoxStart, end = c.BoxStart + c.BoxCount;
+                int start = c.BoxStart;
+                int end = c.BoxStart + c.BoxCount;
 
                 // A zoom-gated candidate (layer outside minzoom/maxzoom) is ABSENT for collision: never placed,
                 // never a blocker, while the caller still emits it fading to 0.
@@ -89,8 +94,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
         private bool OverlapsAny(int boxIndex)
         {
             SymbolBox box = Boxes[boxIndex];
-            int cx0 = CellX(box.Min.x), cx1 = CellX(box.Max.x);
-            int cy0 = CellY(box.Min.y), cy1 = CellY(box.Max.y);
+            int cx0 = CellX(box.Min.x);
+            int cx1 = CellX(box.Max.x);
+            int cy0 = CellY(box.Min.y);
+            int cy1 = CellY(box.Max.y);
             for (int cy = cy0; cy <= cy1; cy++)
             {
                 int rowBase = cy * GridW;
@@ -107,8 +114,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
         private int Insert(int boxIndex, int nodeCount)
         {
             SymbolBox box = Boxes[boxIndex];
-            int cx0 = CellX(box.Min.x), cx1 = CellX(box.Max.x);
-            int cy0 = CellY(box.Min.y), cy1 = CellY(box.Max.y);
+            int cx0 = CellX(box.Min.x);
+            int cx1 = CellX(box.Max.x);
+            int cy0 = CellY(box.Min.y);
+            int cy1 = CellY(box.Max.y);
             for (int cy = cy0; cy <= cy1; cy++)
             {
                 int rowBase = cy * GridW;
@@ -162,10 +171,12 @@ namespace MapRenderer.Unity.Jobs.Symbols
                 if (child >= n) break;
                 if (child + 1 < n)
                 {
-                    SymbolCandidate cc = Candidates[child], cc1 = Candidates[child + 1];
+                    SymbolCandidate cc = Candidates[child];
+                    SymbolCandidate cc1 = Candidates[child + 1];
                     if (SymbolCollision.ComparePlacementOrder(in cc, in cc1) < 0) child++;
                 }
-                SymbolCandidate cr = Candidates[root], ck = Candidates[child];
+                SymbolCandidate cr = Candidates[root];
+                SymbolCandidate ck = Candidates[child];
                 if (SymbolCollision.ComparePlacementOrder(in cr, in ck) >= 0) break;
                 (Candidates[root], Candidates[child]) = (Candidates[child], Candidates[root]);
                 root = child;
@@ -187,15 +198,20 @@ namespace MapRenderer.Unity.Jobs.Symbols
 
         internal struct Dims
         {
-            public float MinX, MinY, InvCell;
-            public int   W, H;
+            public float MinX;
+            public float MinY;
+            public float InvCell;
+            public int W;
+            public int H;
         }
 
         /// <summary>The grid dims bounding <paramref name="boxes"/><c>[0..count)</c>.</summary>
         public static Dims ComputeDims(NativeArray<SymbolBox> boxes, int count)
         {
-            float minX = float.PositiveInfinity, minY = float.PositiveInfinity;
-            float maxX = float.NegativeInfinity, maxY = float.NegativeInfinity;
+            float minX = float.PositiveInfinity;
+            float minY = float.PositiveInfinity;
+            float maxX = float.NegativeInfinity;
+            float maxY = float.NegativeInfinity;
             for (int i = 0; i < count; i++)
             {
                 SymbolBox b = boxes[i];
@@ -230,8 +246,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
             for (int i = 0; i < count; i++)
             {
                 SymbolBox b = boxes[i];
-                int cx0 = CellX(b.Min.x, d), cx1 = CellX(b.Max.x, d);
-                int cy0 = CellY(b.Min.y, d), cy1 = CellY(b.Max.y, d);
+                int cx0 = CellX(b.Min.x, d);
+                int cx1 = CellX(b.Max.x, d);
+                int cy0 = CellY(b.Min.y, d);
+                int cy1 = CellY(b.Max.y, d);
                 total += (cx1 - cx0 + 3) * (cy1 - cy0 + 3); // +1 exact span, +2 for the ±1-cell Mono/Burst drift margin
             }
             return total;
@@ -255,8 +273,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
                 for (int b = lo; b < hi; b++)
                 {
                     SymbolBox bx = boxes[b];
-                    int cx0 = CellX(bx.Min.x, d), cx1 = CellX(bx.Max.x, d);
-                    int cy0 = CellY(bx.Min.y, d), cy1 = CellY(bx.Max.y, d);
+                    int cx0 = CellX(bx.Min.x, d);
+                    int cx1 = CellX(bx.Max.x, d);
+                    int cy0 = CellY(bx.Min.y, d);
+                    int cy1 = CellY(bx.Max.y, d);
                     total += (cx1 - cx0 + 3) * (cy1 - cy0 + 3); // +1 exact span, +2 for the ±1-cell Mono/Burst drift margin
                 }
             }

@@ -35,7 +35,8 @@ namespace MapRenderer.Unity.Jobs.Geometry
 
         private static double2 Centroid(NativeArray<double2> verts, int start, int len)
         {
-            double sx = 0.0, sy = 0.0;
+            double sx = 0.0;
+            double sy = 0.0;
             for (int i = 0; i < len; i++) { sx += verts[start + i].x; sy += verts[start + i].y; }
             return new double2(sx / len, sy / len);
         }
@@ -46,8 +47,10 @@ namespace MapRenderer.Unity.Jobs.Geometry
             bool inside = false;
             for (int i = 0, j = rLen - 1; i < rLen; j = i++)
             {
-                double xi = ring[rStart + i].x, yi = ring[rStart + i].y;
-                double xj = ring[rStart + j].x, yj = ring[rStart + j].y;
+                double xi = ring[rStart + i].x;
+                double yi = ring[rStart + i].y;
+                double xj = ring[rStart + j].x;
+                double yj = ring[rStart + j].y;
                 bool straddle = (yi > p.y) != (yj > p.y);
                 if (straddle && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi))
                     inside = !inside;

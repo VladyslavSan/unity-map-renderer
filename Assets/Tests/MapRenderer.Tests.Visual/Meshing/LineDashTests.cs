@@ -591,7 +591,8 @@ namespace MapRenderer.Tests.Visual
 
                     // Pair by ARC PROXIMITY, not index: the probes clip the frame at different world x, so index
                     // pairing could compare edge n against edge n+1.
-                    double maxSkew = 0.0, worstArc = 0.0;
+                    double maxSkew = 0.0;
+                    double worstArc = 0.0;
                     int    pairs   = 0;
                     for (int i = 0; i < upperArc.Count; i++)
                     {

@@ -43,7 +43,8 @@ namespace MapRenderer.App.View.Cameras
             CameraPropertiesUpdate patch = default;
 
             // ── Zoom — field-vs-baseline in zoom levels ───────────────────────────────────────────
-            double displayZoom, baselineZoom;
+            double displayZoom;
+            double baselineZoom;
             if (math.abs(fields.Zoom - baseline.Zoom) > ZoomEpsilon)
             {
                 patch.Zoom  = fields.Zoom;   // canonical zoom — ApplyTo takes it directly
@@ -57,7 +58,8 @@ namespace MapRenderer.App.View.Cameras
             }
 
             // ── Tilt — field-vs-baseline in degrees; constraint round-trips through ConstrainedAngle ──
-            double displayTilt, baselineTilt;
+            double displayTilt;
+            double baselineTilt;
             if (math.abs(fields.Tilt - baseline.Tilt) > AngleEpsilonDeg)
             {
                 patch.Tilt   = fields.Tilt;                            // raw; ApplyTo re-applies the [0,90] Clamp
@@ -71,7 +73,8 @@ namespace MapRenderer.App.View.Cameras
             }
 
             // ── Heading — field-vs-baseline in degrees; constraint round-trips through ConstrainedAngle ──
-            double displayHeading, baselineHeading;
+            double displayHeading;
+            double baselineHeading;
             if (math.abs(fields.Heading - baseline.Heading) > AngleEpsilonDeg)
             {
                 patch.Heading   = fields.Heading;                               // raw; ApplyTo re-applies [0,360) Wrap

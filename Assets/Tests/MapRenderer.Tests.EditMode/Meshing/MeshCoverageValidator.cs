@@ -15,9 +15,17 @@ namespace MapRenderer.Tests
     {
         public readonly struct Report
         {
-            public readonly int    Polygons, Triangles, ForceClips, WindingFlips;
-            public readonly double AreaExpected, AreaActual, AreaRelError;
-            public readonly int    PolyCells, MissingCells, ExtraCells;   // rasterised
+            public readonly int Polygons;
+            public readonly int Triangles;
+            public readonly int ForceClips;
+            public readonly int WindingFlips;
+            public readonly double AreaExpected;
+            public readonly double AreaActual;
+            public readonly double AreaRelError;
+            // rasterised
+            public readonly int PolyCells;
+            public readonly int MissingCells;
+            public readonly int ExtraCells;
             public readonly double MismatchPct;
             public readonly string AsciiMap;
 
@@ -66,7 +74,8 @@ namespace MapRenderer.Tests
             }
 
             double actual = 0;
-            int pos = 0, neg = 0;
+            int pos = 0;
+            int neg = 0;
             var triSigns = new List<int>(tris.Count);
             foreach (var (a, b, c) in tris)
             {
@@ -104,7 +113,8 @@ namespace MapRenderer.Tests
                     int n = ring.Count;
                     for (int i = 0; i < n; i++)
                     {
-                        double2 a = ring[i], b = ring[(i + 1) % n];
+                        double2 a = ring[i];
+                        double2 b = ring[(i + 1) % n];
                         if ((a.y <= yc && b.y > yc) || (b.y <= yc && a.y > yc))
                             xs.Add(a.x + (yc - a.y) / (b.y - a.y) * (b.x - a.x));
                     }
@@ -123,10 +133,14 @@ namespace MapRenderer.Tests
 
             foreach (var (a, b, c) in tris)
             {
-                double minX = math.min(a.x, math.min(b.x, c.x)), maxX = math.max(a.x, math.max(b.x, c.x));
-                double minY = math.min(a.y, math.min(b.y, c.y)), maxY = math.max(a.y, math.max(b.y, c.y));
-                int cc0 = (int)math.floor(minX / cell), cc1 = (int)math.ceil(maxX / cell);
-                int rr0 = (int)math.floor(minY / cell), rr1 = (int)math.ceil(maxY / cell);
+                double minX = math.min(a.x, math.min(b.x, c.x));
+                double maxX = math.max(a.x, math.max(b.x, c.x));
+                double minY = math.min(a.y, math.min(b.y, c.y));
+                double maxY = math.max(a.y, math.max(b.y, c.y));
+                int cc0 = (int)math.floor(minX / cell);
+                int cc1 = (int)math.ceil(maxX / cell);
+                int rr0 = (int)math.floor(minY / cell);
+                int rr1 = (int)math.ceil(maxY / cell);
                 if (cc0 < 0) cc0 = 0; if (cc1 >= N) cc1 = N - 1;
                 if (rr0 < 0) rr0 = 0; if (rr1 >= N) rr1 = N - 1;
                 for (int r = rr0; r <= rr1; r++)
@@ -141,7 +155,9 @@ namespace MapRenderer.Tests
                 }
             }
 
-            int missing = 0, extra = 0, polyCells = 0;
+            int missing = 0;
+            int extra = 0;
+            int polyCells = 0;
             for (int i = 0; i < N * N; i++)
             {
                 if (inPoly[i]) { polyCells++; if (!inTri[i]) missing++; }
@@ -152,15 +168,20 @@ namespace MapRenderer.Tests
 
         private static string Ascii(bool[] inPoly, bool[] inTri, int N)
         {
-            int cols = 80, rowsA = 40;
+            int cols = 80;
+            int rowsA = 40;
             var art = new StringBuilder();
             for (int ar = 0; ar < rowsA; ar++)
             {
                 for (int ac = 0; ac < cols; ac++)
                 {
-                    int r0 = ar * N / rowsA, r1 = (ar + 1) * N / rowsA;
-                    int c0 = ac * N / cols,  c1 = (ac + 1) * N / cols;
-                    bool m = false, x = false, ok = false;
+                    int r0 = ar * N / rowsA;
+                    int r1 = (ar + 1) * N / rowsA;
+                    int c0 = ac * N / cols;
+                    int c1 = (ac + 1) * N / cols;
+                    bool m = false;
+                    bool x = false;
+                    bool ok = false;
                     for (int r = r0; r < r1; r++)
                         for (int c = c0; c < c1; c++)
                         {

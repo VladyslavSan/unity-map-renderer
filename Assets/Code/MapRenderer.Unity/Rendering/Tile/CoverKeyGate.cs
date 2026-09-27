@@ -52,7 +52,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Records the current framing as the last-known key and clears dirty. Must run only after
-        /// the recompute this tick's dirty flag triggered.</summary>
+        /// the recompute this update's dirty flag triggered.</summary>
         public void Commit(in CameraProperties cam, in TileManager.TileSelectionConfig cfg)
         {
             _lon         = cam.LookAt.Longitude;

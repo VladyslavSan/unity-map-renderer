@@ -59,7 +59,9 @@ namespace MapRenderer.Core.Expressions.Ops
         private readonly InterpolationKind _curve;
         private readonly InterpolationSpace _space;
         private readonly double _base;            // exponential base (1 for linear)
-        private readonly double _p1x, _p1y, _p2x, _p2y; // cubic-bezier control points
+        // cubic-bezier control points
+        private readonly double2 _p1;
+        private readonly double2 _p2;
         private readonly Expression _input;
         private readonly double[] _stops;
         private readonly Expression[] _outputs;
@@ -73,7 +75,8 @@ namespace MapRenderer.Core.Expressions.Ops
             _curve = curve;
             _space = space;
             _base = baseValue;
-            _p1x = p1x; _p1y = p1y; _p2x = p2x; _p2y = p2y;
+            _p1 = new double2(p1x, p1y);
+            _p2 = new double2(p2x, p2y);
             _input = input;
             _stops = stops;
             _outputs = outputs;
@@ -97,7 +100,8 @@ namespace MapRenderer.Core.Expressions.Ops
             while (hi < _stops.Length && _stops[hi] < x) hi++;
             int lo = hi - 1;
 
-            double loStop = _stops[lo], hiStop = _stops[hi];
+            double loStop = _stops[lo];
+            double hiStop = _stops[hi];
             double t = Progress(x, loStop, hiStop);
 
             Value a = _outputs[lo].Evaluate(context);
@@ -119,7 +123,7 @@ namespace MapRenderer.Core.Expressions.Ops
                     return normalized;
                 case InterpolationKind.CubicBezier:
                     normalized = (x - lo) / (hi - lo);
-                    return CubicBezier.Solve(normalized, _p1x, _p1y, _p2x, _p2y);
+                    return CubicBezier.Solve(normalized, _p1.x, _p1.y, _p2.x, _p2.y);
                 case InterpolationKind.Linear:
                 default:
                     return (x - lo) / (hi - lo);
@@ -240,7 +244,8 @@ namespace MapRenderer.Core.Expressions.Ops
                 s -= xs / d;
             }
             // Fallback: bisection on [0,1].
-            double lo = 0.0, hi = 1.0;
+            double lo = 0.0;
+            double hi = 1.0;
             s = x;
             for (int i = 0; i < 40; i++)
             {

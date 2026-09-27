@@ -1359,7 +1359,9 @@ namespace MapRenderer.Tests.Text
             foreach (uint cp in new uint[] { 66u /*B*/, 77u /*M*/, 111u /*o*/, 46u /*.*/ })
             {
                 if (!stack.Glyphs.TryGetValue(cp, out SdfGlyph g) || g.Bitmap == null) continue;
-                int max = 0, above075 = 0, nonZero = 0;
+                int max = 0;
+                int above075 = 0;
+                int nonZero = 0;
                 foreach (byte b in g.Bitmap)
                 {
                     if (b > max) max = b;
@@ -3038,7 +3040,8 @@ namespace MapRenderer.Tests.Text
         // (PlaceGlyph pads symmetrically, so the cell centre IS the ink centre — asserted by V0 below).
         private static (float min, float max) InkBandY(IReadOnlyList<SymbolQuad> quads)
         {
-            float min = float.MaxValue, max = float.MinValue;
+            float min = float.MaxValue;
+            float max = float.MinValue;
             foreach (SymbolQuad q in quads)
             {
                 min = math.min(min, q.BottomRight.y + GlyphSdf.Buffer);

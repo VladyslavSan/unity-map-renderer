@@ -1,4 +1,4 @@
-// Lets a render/snapshot fixture drive the PRODUCTION Tick(in SceneFrame, SymbolGatherPlan, ...) overload from
+// Lets a render/snapshot fixture drive the PRODUCTION Update(in SceneFrame, SymbolGatherPlan, ...) overload from
 // its SymbolTileBuffer: the store-and-bake half of SymbolSubsystem's per-frame work.
 //
 // Non-obvious why: it owns no camera, RenderTexture, atlas or material, because each fixture captured its

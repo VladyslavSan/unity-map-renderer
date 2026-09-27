@@ -118,8 +118,12 @@ namespace MapRenderer.Tests.Meshing
             double worst = 0;
             for (int t = 0; t + 2 < tris.Length; t += 3)
             {
-                Vector3 a = verts[tris[t]], b = verts[tris[t + 1]], c = verts[tris[t + 2]];
-                double e0 = Vector3.Distance(a, b), e1 = Vector3.Distance(b, c), e2 = Vector3.Distance(c, a);
+                Vector3 a = verts[tris[t]];
+                Vector3 b = verts[tris[t + 1]];
+                Vector3 c = verts[tris[t + 2]];
+                double e0 = Vector3.Distance(a, b);
+                double e1 = Vector3.Distance(b, c);
+                double e2 = Vector3.Distance(c, a);
                 double e = math.max(e0, math.max(e1, e2));
                 if (e > threshold)
                 {
@@ -1282,7 +1286,9 @@ namespace MapRenderer.Tests.Meshing
             for (int i = 0; i + 2 < t.Length; i += 3)
             {
                 // Mercator at z0 is a flat XZ sheet, so the planar cross product in XZ is the area.
-                Vector3 p0 = v[t[i]], p1 = v[t[i + 1]], p2 = v[t[i + 2]];
+                Vector3 p0 = v[t[i]];
+                Vector3 p1 = v[t[i + 1]];
+                Vector3 p2 = v[t[i + 2]];
                 a += math.abs((p1.x - p0.x) * (p2.z - p0.z) - (p2.x - p0.x) * (p1.z - p0.z)) * 0.5;
             }
             return a;
@@ -1405,7 +1411,8 @@ namespace MapRenderer.Tests.Meshing
         /// there is no second copy to pass, which is the property the two teeth above assert.</summary>
         private static Mesh BuildQuad(TileId tile, double extent)
         {
-            double lo = extent * 0.25, hi = extent * 0.75;
+            double lo = extent * 0.25;
+            double hi = extent * 0.75;
             var paths = new[]
             {
                 new[]
@@ -2603,7 +2610,9 @@ namespace MapRenderer.Tests.Meshing
                 for (int i = 0; i < output.Vertices.Length; i++)
                 {
                     LineRibbonVertex rv = output.Vertices[i];
-                    float3 pos = (float3)rv.Position, up = (float3)rv.Up, across = (float3)rv.Across;
+                    float3 pos = (float3)rv.Position;
+                    float3 up = (float3)rv.Up;
+                    float3 across = (float3)rv.Across;
                     posMax.Observe(Ulp(pos.x, posHex[i * 3 + 0]), i); posMax.Observe(Ulp(pos.y, posHex[i * 3 + 1]), i); posMax.Observe(Ulp(pos.z, posHex[i * 3 + 2]), i);
                     normMax.Observe(Ulp(up.x, normHex[i * 3 + 0]), i); normMax.Observe(Ulp(up.y, normHex[i * 3 + 1]), i); normMax.Observe(Ulp(up.z, normHex[i * 3 + 2]), i);
                     acrossMax.Observe(Ulp(across.x, acrossHex[i * 3 + 0]), i); acrossMax.Observe(Ulp(across.y, acrossHex[i * 3 + 1]), i); acrossMax.Observe(Ulp(across.z, acrossHex[i * 3 + 2]), i);
@@ -2729,7 +2738,8 @@ namespace MapRenderer.Tests.Meshing
         private static ulong ToUlpOrder(uint bits) => (bits & 0x80000000U) != 0 ? ~bits : (bits | 0x80000000U);
         private static ulong UlpDistance(uint a, uint b)
         {
-            ulong oa = ToUlpOrder(a), ob = ToUlpOrder(b);
+            ulong oa = ToUlpOrder(a);
+            ulong ob = ToUlpOrder(b);
             return oa > ob ? oa - ob : ob - oa;
         }
 
@@ -2882,7 +2892,8 @@ namespace MapRenderer.Tests.Meshing
                     "precondition: the selected LineStrings must produce ribbon geometry");
 
                 // Only ordinals 1 (mixed-kind ring) and 2 (two-point ring) may appear; never 0 (polygon) or 3.
-                bool sawFeature1 = false, sawFeature2 = false;
+                bool sawFeature1 = false;
+                bool sawFeature2 = false;
                 for (int i = 0; i < output.VertexFeatureIdx.Length; i++)
                 {
                     int f = output.VertexFeatureIdx[i];
@@ -2930,8 +2941,10 @@ namespace MapRenderer.Tests.Meshing
                 Assert.AreEqual(LineGraphCounts.Ok, output.Error.Value);
                 Assert.Greater(output.Vertices.Length, 0, "precondition: both rings must ribbon");
 
-                double ring0Max = 0.0, ring1Max = 0.0;
-                bool sawRing0Zero = false, sawRing1Zero = false;
+                double ring0Max = 0.0;
+                double ring1Max = 0.0;
+                bool sawRing0Zero = false;
+                bool sawRing1Zero = false;
                 for (int i = 0; i < output.Vertices.Length; i++)
                 {
                     int f = output.VertexFeatureIdx[i];
@@ -3061,7 +3074,8 @@ namespace MapRenderer.Tests.Meshing
             (LayerInput rhInput, TileGeometryBuffers rhGeometry) =
                 SyntheticLineInput(rhProjection, LineMeshGraph.DefaultMaxOutputVertices, pts);
 
-            LineGraphOutput flatOutput = default, rhOutput = default;
+            LineGraphOutput flatOutput = default;
+            LineGraphOutput rhOutput = default;
             try
             {
                 flatOutput = LineMeshGraph.Schedule(flatInput);
@@ -3098,19 +3112,29 @@ namespace MapRenderer.Tests.Meshing
         /// <c>GlobeLineWindingTests.RibbonWindingSign</c> (which reads a finished <c>Mesh</c>).</summary>
         private static (int sign, double uniformity) RibbonWindingSign(LineGraphOutput output)
         {
-            int pos = 0, neg = 0;
+            int pos = 0;
+            int neg = 0;
             for (int i = 0; i + 2 < output.Indices.Length; i += 3)
             {
-                int ia = output.Indices[i], ib = output.Indices[i + 1], ic = output.Indices[i + 2];
-                LineRibbonVertex va = output.Vertices[ia], vb = output.Vertices[ib], vc = output.Vertices[ic];
-                double3 pa = va.Position, pb = vb.Position, pc = vc.Position;
+                int ia = output.Indices[i];
+                int ib = output.Indices[i + 1];
+                int ic = output.Indices[i + 2];
+                LineRibbonVertex va = output.Vertices[ia];
+                LineRibbonVertex vb = output.Vertices[ib];
+                LineRibbonVertex vc = output.Vertices[ic];
+                double3 pa = va.Position;
+                double3 pb = vb.Position;
+                double3 pc = vc.Position;
                 double d = math.max(math.distance(pa, pb), math.max(math.distance(pb, pc), math.distance(pc, pa)));
                 if (d < 1e-6) continue;
                 double w = 0.05 * d;
-                double3 ea = pa + va.Across * w, eb = pb + vb.Across * w, ec = pc + vc.Across * w;
+                double3 ea = pa + va.Across * w;
+                double3 eb = pb + vb.Across * w;
+                double3 ec = pc + vc.Across * w;
                 double3 g = math.cross(eb - ea, ec - ea);
                 double3 n = va.Up;
-                double gm = math.length(g), nm = math.length(n);
+                double gm = math.length(g);
+                double nm = math.length(n);
                 if (gm <= 0.0 || nm <= 0.0) continue;
                 double cos = math.dot(g, n) / (gm * nm);
                 if (math.abs(cos) < 0.5) continue;
@@ -3211,9 +3235,13 @@ namespace MapRenderer.Tests.Meshing
         {
             double lambda = geo.Longitude * math.PI_DBL / 180.0;
             double phi    = geo.Latitude  * math.PI_DBL / 180.0;
-            double cosPhi = math.cos(phi), sinPhi = math.sin(phi);
-            double cosLam = math.cos(lambda), sinLam = math.sin(lambda);
-            double upX = cosPhi * cosLam, upY = cosPhi * sinLam, upZ = sinPhi;
+            double cosPhi = math.cos(phi);
+            double sinPhi = math.sin(phi);
+            double cosLam = math.cos(lambda);
+            double sinLam = math.sin(lambda);
+            double upX = cosPhi * cosLam;
+            double upY = cosPhi * sinLam;
+            double upZ = sinPhi;
             return new ProjectedPoint
             {
                 World = new double3(upX * Radius, upY * Radius, upZ * Radius),
@@ -3228,8 +3256,10 @@ namespace MapRenderer.Tests.Meshing
         {
             double lambda = geo.Longitude * math.PI_DBL / 180.0;
             double phi    = geo.Latitude  * math.PI_DBL / 180.0;
-            double cosPhi = math.cos(phi), sinPhi = math.sin(phi);
-            double cosLam = math.cos(lambda), sinLam = math.sin(lambda);
+            double cosPhi = math.cos(phi);
+            double sinPhi = math.sin(phi);
+            double cosLam = math.cos(lambda);
+            double sinLam = math.sin(lambda);
             double3 up   = new double3(cosPhi * cosLam, cosPhi * sinLam, sinPhi);
             double3 east = new double3(-sinLam, cosLam, 0.0);
             double3 north = math.cross(up, east);

@@ -168,9 +168,9 @@ disagree.
 **Where the conversion is applied.** Material-bound device-px properties go through
 `ZoomStyleApplier.BindDevicePixelFloat` / `BindDevicePixelVector`, whose call sites are in `MaterialFactory`.
 `text-halo-width` / `text-halo-blur` are the exception and are not material-bound: they ride the per-feature
-vertex stream, and `SymbolPlacementSystem` reads the ratio once per Tick through the same
+vertex stream, and `SymbolPlacementSystem` reads the ratio once per Update through the same
 `LogicalToDevicePx` and hands it to `WorldSymbolRenderer.Emit`, which widens the emitted halo. Reading it
-per Tick against the **live** ratio is what lets a dpr change take effect with no re-bake anywhere.
+per Update against the **live** ratio is what lets a dpr change take effect with no re-bake anywhere.
 
 **A device-px binding always queues; it never takes the bind-time constant shortcut.** The ratio is a
 per-frame input that can change while the map is live — a window dragged between panels — so a Constant
@@ -395,7 +395,7 @@ single fallback), `FrustumTileSelector` (the selection zoom offset the `TilePixe
 `MapRenderer.Unity/Rendering/Layers/`: `ZoomStyleApplier.BindDevicePixelFloat` / `BindDevicePixelVector` (the
 material-bound seam), `SymbolRenderLayer` (colour tints only — the halo is not bound here).
 `MapRenderer.Unity/Rendering/Materials/MaterialFactory` — the device-px binding call sites.
-`MapRenderer.Unity/Text/Placement/`: `SymbolPlacementSystem` (the per-Tick halo ratio read),
+`MapRenderer.Unity/Text/Placement/`: `SymbolPlacementSystem` (the per-Update halo ratio read),
 `WorldSymbolRenderer.Emit` (where the halo widens).
 `MapRenderer.Unity/Text/SymbolFeatureExtractor` — `symbol-spacing` in tile units.
 `MapRenderer.Unity/Shaders/Map/`: `Line/Line_VertexExtrude.hlsl` (`_MapFrameMetersPerDevicePixel`, the AA

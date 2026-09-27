@@ -255,7 +255,8 @@ namespace MapRenderer.Tests.Visual
         {
             // 512×512 world-fill map: land fills the central ~40% of the frame, background (ocean) fills
             // the rest.
-            const int W = 512, H = 512;
+            const int W = 512;
+            const int H = 512;
             // Fill a horizontal band from row 100 to 400, col 50 to 460 (roughly 55% area).
             // That exceeds 40% to be safe; use a region that hits multiple grid buckets.
             Frame frame = PartialFillBuffer(
@@ -293,7 +294,8 @@ namespace MapRenderer.Tests.Visual
         {
             // An 8×8 grid over 64×64 px: paint one whole 8×8 bucket so DistinctRegionBucketsHit == 1.
             // Fill fraction = 64/4096 = 1.5%, below the default 10% gate.
-            const int W = 64, H = 64;
+            const int W = 64;
+            const int H = 64;
             Frame frame = PartialFillBuffer(
                 W, H,
                 x0: 0, y0: 0, x1: 8, y1: 8,   // exactly one 8×8 bucket
@@ -320,7 +322,8 @@ namespace MapRenderer.Tests.Visual
         {
             // Non-obvious why: a 16×24 strip in 64×64 (9.4% fill) clears the blank (97%) and uniform (95%)
             // gates. It spans ~6 grid buckets, so minBuckets=1 passes and the default 8 would not.
-            const int W = 64, H = 64;
+            const int W = 64;
+            const int H = 64;
             Frame frame = PartialFillBuffer(
                 W, H,
                 x0: 0, y0: 0, x1: 16, y1: 24,   // 16×24 = 384 px of fill (9.4%)
@@ -383,7 +386,8 @@ namespace MapRenderer.Tests.Visual
         {
             // Fill (20,180,70) is 190 from bg (26,28,38), past Tolerance 15, but shares its R nibble. Full-RGB
             // buckets keep them apart: bg (1,1,2), fill (1,11,4). The fill region is 410×300 px (~47%).
-            const int W = 512, H = 512;
+            const int W = 512;
+            const int H = 512;
             const byte NibbleFillR = 20;
             const byte NibbleFillG = 180;
             const byte NibbleFillB = 70;
@@ -423,7 +427,8 @@ namespace MapRenderer.Tests.Visual
         {
             // 1 fill pixel in 8×8: background is 98.4% >= BlankThreshold (97%), so the frame is blank and
             // fails the gate; its 1.5% fill is also below minFill=10%.
-            const int W = 8, H = 8;
+            const int W = 8;
+            const int H = 8;
             Frame frame = PartialFillBuffer(W, H, 0, 0, 1, 1, BgR, BgG, BbB, FillR, FillG, FillB);
             var result = SnapshotCoverage.Analyse(frame, Bg);
 
@@ -469,7 +474,8 @@ namespace MapRenderer.Tests.Visual
         public void PixelsNearBackground_WithinTolerance_CountedAsBackground()
         {
             // Create a buffer where all pixels are within SnapshotCoverage.Tolerance of BgR/BgG/BbB.
-            const int W = 16, H = 16;
+            const int W = 16;
+            const int H = 16;
             var buf = new Color32[W * H];
             var c = new Color32((byte)(BgR + 1), (byte)(BgG + 1), (byte)(BbB + 1), 255); // within tolerance
             for (int i = 0; i < buf.Length; i++) buf[i] = c;
@@ -486,7 +492,8 @@ namespace MapRenderer.Tests.Visual
         {
             // Each pixel differs from background by exactly Tolerance+1 (16).
             // Use a 6-unit shift per channel: 6+6+6 = 18 > 15 = Tolerance.
-            const int W = 16, H = 16;
+            const int W = 16;
+            const int H = 16;
             int delta = SnapshotCoverage.Tolerance / 3 + 3; // 8 per channel → total dist 24 > 15
             var buf = new Color32[W * H];
             var c = new Color32(

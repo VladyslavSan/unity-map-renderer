@@ -178,8 +178,10 @@ namespace MapRenderer.Unity.Rendering.Backend
         {
             if (_nodes.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
 
-            float minX = float.MaxValue, maxX = float.MinValue;
-            float minZ = float.MaxValue, maxZ = float.MinValue;
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float minZ = float.MaxValue;
+            float maxZ = float.MinValue;
             foreach (var kv in _nodes)
             {
                 if (kv.Value.Go == null) continue;
@@ -191,7 +193,8 @@ namespace MapRenderer.Unity.Rendering.Backend
             }
 
             if (minX == float.MaxValue) return new Bounds(Vector3.zero, Vector3.zero);
-            float cx = (minX + maxX) * 0.5f, cz = (minZ + maxZ) * 0.5f;
+            float cx = (minX + maxX) * 0.5f;
+            float cz = (minZ + maxZ) * 0.5f;
             return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
         }
 

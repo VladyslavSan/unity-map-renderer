@@ -632,7 +632,8 @@ namespace MapRenderer.Tests.Text.Sprites
             Assert.AreEqual(expected.Blits.Count, actual.Blits.Count, $"{what}: blit count");
             for (int i = 0; i < expected.Blits.Count; i++)
             {
-                SpriteBlit e = expected.Blits[i], a = actual.Blits[i];
+                SpriteBlit e = expected.Blits[i];
+                SpriteBlit a = actual.Blits[i];
                 Assert.AreEqual(e.SrcX, a.SrcX, $"{what}: blit {i} SrcX");
                 Assert.AreEqual(e.SrcY, a.SrcY, $"{what}: blit {i} SrcY");
                 Assert.AreEqual(e.DstX, a.DstX, $"{what}: blit {i} DstX");

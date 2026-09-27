@@ -9,7 +9,7 @@ processor a kick fans out to), and `docs/smooth-transitions-design.md` (the fade
 
 Hard constraints throughout: Core stays engine-free; UniTask only; `UnityEngine.Object` create/destroy and
 `Mesh.AllocateWritableMeshData` / `ApplyAndDisposeWritableMeshData` are main-thread only; a `Mesh` has a
-single owner and a transfer nulls the source; the steady-state Tick allocates no managed memory
+single owner and a transfer nulls the source; the steady-state Update allocates no managed memory
 (`MapView_SteadyStateTick_DoesNotAllocateGCMemory`).
 
 ---
@@ -39,7 +39,7 @@ Each of those needs a budget, a gate, or a cheaper operation — not a tuning va
 | tile-layer meshes uploaded and registered | `MaxConsumesPerTick` (4) | `PumpPending`; consume is resumable mesh by mesh |
 | vertices uploaded | `MaxVerticesPerTick` | `PumpPending` |
 | records released | `MaxReleasesPerTick` (4) | `TileManager.DrainReleaseQueue` over the deferred queue (§ "Deferred release, and re-validation at the dequeue") |
-| cover descent + diff | camera or viewport movement | `CoverKeyGate.IsDirty` (§ "The Tick order, and what the cover gate does not gate") |
+| cover descent + diff | camera or viewport movement | `CoverKeyGate.IsDirty` (§ "The Update order, and what the cover gate does not gate") |
 | symbol builds started | one per frame | the symbol pump, which also carries the coalesced atlas upload |
 
 The rate caps bound work *started or finished* per frame; `MaxConcurrentTileLoads` bounds the *active set*.
@@ -58,12 +58,12 @@ Two costs carry no per-frame bound, each for its own reason.
 ## 3. What may leave `TileManager`
 
 The `LoadedTile` state machine and its exit paths stay (§ "The itch" above), and so does cover-key tracking,
-which is cohesive with `Tick`. Three things sit beside the lifecycle rather than inside it.
+which is cohesive with `Update`. Three things sit beside the lifecycle rather than inside it.
 
 ### 3.1 The boundary with `MapView`
 
 `MapView` keeps the camera, the `RenderLayerSet` and the scene origin. `TileManager` keeps the scheduler,
-the loaded-tile table and the in-flight async machinery, and is ticked once per frame. Three things travel
+the loaded-tile table and the in-flight async machinery, and is updated once per frame. Three things travel
 from `MapView` **per call**, so that its inspector-editable config and its rebasing scene origin stay
 authoritative: the current `CameraProperties`, the Mercator scene origin for tile placement, and the
 tile-selection config. The `RenderLayerSet` is stable for the object's life, so it is injected once at
@@ -103,18 +103,18 @@ what holds the invariant in its place.
 
 Work abandoned mid-flight has no result yet to dispose, so it is stashed and disposed when it settles.
 `PendingDisposalQueue` owns three pens — a prologue build, a graph build, a fetch — filled from the single
-site that abandons a record, `TileManager.RenderTeardownRecord`, polled once per Tick and flushed at
+site that abandons a record, `TileManager.RenderTeardownRecord`, polled once per Update and flushed at
 teardown. Both drain methods complete the graph arm's job handles synchronously, so both are main-thread
 only. The pens are a lifetime concern rather than a lifecycle one, which is why they are the part that
 leaves.
 
 ## 4. The per-frame budgets
 
-### 4.1 The Tick order, and what the cover gate does not gate
+### 4.1 The Update order, and what the cover gate does not gate
 
 The cover descent, the desired-list merge and the leaving-tile enqueue run only when `CoverKeyGate.IsDirty`
 — the camera or viewport moved since the last commit. Admission, `PumpPending` and `DrainReleaseQueue` run
-every Tick, in or out of that gate, so a backlog drains while the camera is still.
+every Update, in or out of that gate, so a backlog drains while the camera is still.
 
 The gate does not read the pending count. A pending tile forcing the descent every frame buys nothing: the
 request loop keys off `_loaded` membership and finds nothing new on an unchanged cover, and the release loop
@@ -130,7 +130,7 @@ test builds a backlog. The two readings of the same value are live; § "Open" be
 ### 4.3 The paint-order seam
 
 `PumpPending` sorts its work list by the priority context before the processing loop. Without the sort a
-corner tile wins the per-Tick kick and consume race from `Dictionary` enumeration order even though
+corner tile wins the per-Update kick and consume race from `Dictionary` enumeration order even though
 admission is already priority-ordered — the cover fills from its edges and the middle stays white. The sort
 is as load-bearing as the admission gate. It reuses the shared `_toRelease` scratch field, which is sound
 because the list is filled and fully consumed inside this one single-threaded call and is never live across
@@ -140,8 +140,8 @@ calls.
 
 A zoom-out or a fast pan takes N tiles out of cover at once, and each record costs L entity destroys, L cache
 puts and a mesh-destroy burst. Releasing them in the frame they leave is the mirror image of an unbudgeted
-consume, so the Tick **enqueues** instead: a record leaving cover joins `_releaseQueue`, deduped by
-`_releaseQueued`. `DrainReleaseQueue` frees up to `MaxReleasesPerTick` records per Tick.
+consume, so the Update **enqueues** instead: a record leaving cover joins `_releaseQueue`, deduped by
+`_releaseQueued`. `DrainReleaseQueue` frees up to `MaxReleasesPerTick` records per Update.
 
 Each dequeue is **re-validated against the live cover** before it spends budget. A key whose tile is back in
 `_coverSet` (the camera panned back during the one-to-three-frame linger) or whose record is already gone (a
@@ -193,7 +193,7 @@ cache token or gets its own purge.** The current inputs split across the two mec
 fold into `TileManager.CurrentStyle`'s `StyleToken` (`MapView.SetStyle`, keyed through
 `JsonCanonical.CacheKey`) — the resolved identity because a TileJSON can resolve differently under identical
 style text, and `PreparedKey` carries no source identity of its own to catch that. The clip window has its
-own diff-and-purge in `TileManager.TickCore`, where a changed `BufferClip` clears the prepared cache
+own diff-and-purge in `TileManager.UpdateCore`, where a changed `BufferClip` clears the prepared cache
 directly. `Zoom = id.Z` and the projection are session-constant, so neither needs a token component or a
 purge.
 
@@ -256,7 +256,7 @@ and a restyle in one pass.
    that pipeline instance, with its source, scheduler and cache, so already-fetched bytes are reused. A new or
    changed spec builds a fresh pipeline. A pipeline matched by no spec is torn down, disposing its scheduler
    and its source if it owns one.
-3. **Rebuild the backend** (the material list changed) and re-arm cover selection. The next Tick re-requests
+3. **Rebuild the backend** (the material list changed) and re-arm cover selection. The next Update re-requests
    the cover and hits the kept caches.
 
 The teardown loop is the one mutation site that repeats within a single `SetStyle`. `MapView.CommitProbe` is
@@ -321,7 +321,7 @@ break the unmodified-on-refusal contract. Its predicate is *"this slot's render 
 the in-place arm does not refresh"*. `MapView._symbolRenderLayers` is the only field outside `RenderLayerSet`
 that holds render-layer references — every other site threads them as a parameter — so `SymbolRenderLayer` is
 the only kind that qualifies, and a second such field is what would change the answer. Without the
-fence that list outlives the disposed slot and `SymbolPlacementSystem.Tick` resolves materials
+fence that list outlives the disposed slot and `SymbolPlacementSystem.Update` resolves materials
 `SymbolRenderLayer.Dispose` has destroyed. A removed symbol layer takes the full rebuild instead. A
 **reorder** is not fenced: that arm skips the `_symbolRenderLayers` rebuild and `SymbolSubsystem.SetStyle`
 together, so the list and the subsystem's slot numbering stay mutually consistent, and removal is the only
@@ -436,7 +436,7 @@ Two properties of that predicate are load-bearing, and each has its own tooth:
 
 - **Settled, not merely heading for zero.** A layer mid-fade still shows something, so it keeps submitting —
   the fade needs something to blend. For `fill-extrusion`, the visibility fade (entering/leaving the zoom
-  range) snaps instead of easing: `RenderLayerSet.AdvanceFade` arms it Instant whenever
+  range) snaps instead of easing: `RenderLayerSet.UpdateFade` arms it Instant whenever
   `FillExtrusionRenderLayer.FadesGradually` is a constant false. The always-blend contract can carry a
   gradual fade (`true`) but is not built.
 - **A feature-dependent opacity fails safe.** All four paint binders in `Materials.MaterialFactory` bind a
@@ -521,7 +521,7 @@ snapshot per tile build, on the load path.
 
 - **Per-chunk mesh output, and a per-layer vertex cap to force it.** The cap was meant to stop one
   100k-vertex layer uploading whole, since `MaxVerticesPerTick` is checked before each layer. Three facts
-  kill it. `MaxConsumesPerTick` already bounds meshes uploaded per Tick and consume is already mesh-by-mesh,
+  kill it. `MaxConsumesPerTick` already bounds meshes uploaded per Update and consume is already mesh-by-mesh,
   so a rich tile already spreads across frames. The main-thread cost is mostly **per-mesh**, not per-vertex:
   `MeshDataPayload.Upload` does `new Mesh` plus `ApplyAndDisposeWritableMeshData` with validation and bounds
   recalculation disabled, while filling, bounds and index validation are already off-main. So splitting a
@@ -573,7 +573,7 @@ snapshot per tile build, on the load path.
 
 ## 13. Grounding (file:symbol touch points)
 
-`MapRenderer.Unity/Rendering/Tile/`: `TileManager` (`TickCore`, `AdmitFromDesired`, `PumpPending`,
+`MapRenderer.Unity/Rendering/Tile/`: `TileManager` (`UpdateCore`, `AdmitFromDesired`, `PumpPending`,
 `ConsumeMeshBuild`, `DrainReleaseQueue`, `ReleaseTile`, `RenderTeardownRecord`, `SetSources`,
 `RestyleSourcesInPlace`, `SourcesUnchanged`, `ComputeDenseLayerIds`, `LoadedTile`/`LoadedKey`),
 `SourceRegistry` (`Rebuild`, the ten slot-keyed operations), `PendingDisposalQueue` (`DrainCompleted`),
@@ -583,7 +583,7 @@ snapshot per tile build, on the load path.
 `MapRenderer.Unity/Rendering/Map/`: `MapView` (`SetStyle`'s two arms, `LayerNumbering`, `CommitProbe`,
 `_symbolRenderLayers`), `MapViewConfig` (the caps, `FillTileBufferClip`, `MaterialSet`).
 `MapRenderer.Unity/Rendering/Layers/`: `RenderLayerSet` (`Build`, `TryRestyleInPlace`, `ApplyZoom`,
-`AdvanceFade`), `TombstoneRenderLayer`, `SurvivingLayerGate`, `RenderLayerFactory` (`Create`,
+`UpdateFade`), `TombstoneRenderLayer`, `SurvivingLayerGate`, `RenderLayerFactory` (`Create`,
 `TryGetFetchSource`), `LayerSkipReason`, `ZoomStyleApplier` (`BindOpacity`, `EffectiveOpacityIsZero`,
 `VisibleOpacityEpsilon`), `LayerDrawOrder.QueueFor`, `IFadeableRenderLayer`,
 `FillExtrusionRenderLayer` (`TryCreate`, `FadesGradually`).
@@ -594,4 +594,4 @@ snapshot per tile build, on the load path.
 `MapRenderer.Unity/Rendering/Materials/`: `MapMaterialSet.Validate`, `MaterialFactory`,
 `FillExtrusionTweaker.ApplyContract`.
 `MapRenderer.Core/Text/`: `GlyphCache`, `GlyphAtlas`, `FontStackResolver`, `IGlyphAtlasView`.
-`MapRenderer.Unity/Text/Placement/`: `SymbolPlacementSystem.Tick`.
+`MapRenderer.Unity/Text/Placement/`: `SymbolPlacementSystem.Update`.

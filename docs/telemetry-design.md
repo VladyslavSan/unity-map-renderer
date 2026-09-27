@@ -74,15 +74,15 @@ to compose one view-level snapshot out of three providers' counters — the shap
 
 | provider | snapshot | refreshes at the end of |
 |---|---|---|
-| `TileManager` | `TileTelemetrySnapshot` | `Tick` — via a `TickCore` shell, so the clean-cover early return still refreshes |
+| `TileManager` | `TileTelemetrySnapshot` | `Update` — via a `UpdateCore` shell, so the clean-cover early return still refreshes |
 | `SymbolSubsystem` | `SymbolStoreTelemetrySnapshot` | `CurrentBatch`, where the last of its levels is decided |
-| `SymbolPlacementSystem` | `SymbolPlacementTelemetrySnapshot` | `Tick` |
+| `SymbolPlacementSystem` | `SymbolPlacementTelemetrySnapshot` | `Update` |
 
 A reader takes a reference whenever it wants one. Nothing registers, nothing unregisters.
 
 **Two of the three refreshes are free.** `SymbolPlacementSystem` and `SymbolSubsystem` already store every
 level their pass produces (`LastQuadCount`, `ActiveTileCount`, …), so the refresh just repackages fields. Only
-`TileManager` derives anything — `TileCoverStats.Compute` plus a walk of `_loaded` — and it does so once per `Tick`
+`TileManager` derives anything — `TileCoverStats.Compute` plus a walk of `_loaded` — and it does so once per `Update`
 unconditionally, because both are bounded by the cover plus its pad ring over reused scratch arrays. That is the
 whole reason no staleness flag or demand counter exists anywhere in this design.
 
@@ -179,10 +179,10 @@ split under two symbol headers naming the owning provider, so the readout mirror
 
 ## 5. What no test observes
 
-**That the tile provider refreshes on a clean tick.** `TileManager.Tick` is a thin shell over `TickCore`, and the
-refresh is one line in `Tick`, outside `TickCore`, so the clean-cover early return still refreshes. A pull has no
+**That the tile provider refreshes on a clean update.** `TileManager.Update` is a thin shell over `UpdateCore`, and the
+refresh is one line in `Update`, outside `UpdateCore`, so the clean-cover early return still refreshes. A pull has no
 callback to count, and no captured value can be perturbed from a test without production surface the
-no-test-only-members rule forbids. The guarantee is therefore structural. A test still fails if a clean tick
+no-test-only-members rule forbids. The guarantee is therefore structural. A test still fails if a clean update
 zeroes the readout; it cannot tell "refreshed" from "left alone".
 
 ## 6. Risks
@@ -204,7 +204,7 @@ zeroes the readout; it cannot tell "refreshed" from "left alone".
 - **No MapView-level EditMode test can reach the label providers.** `MapViewTestExtensions.LoadTestStyle` builds
   the render layers and the tile sources but never applies the style to the symbol subsystem, so
   `SymbolSubsystem.HasSymbolLayers` is false in EditMode and `MapView.LateUpdate` skips the whole label block —
-  `CurrentBatch` and `SymbolPlacementSystem.Tick` are unreachable through the view. The label providers are
+  `CurrentBatch` and `SymbolPlacementSystem.Update` are unreachable through the view. The label providers are
   therefore tested where they ARE driven; anything that genuinely needs labels end-to-end through the view has to
   fix the harness first.
 - **Namespace collisions.** A namespace segment equal to a bare `UnityEngine` type is `CS0118`; pluralize

@@ -1477,7 +1477,7 @@ namespace MapRenderer.Tests.Visual
                 matrix.GetColumn(0), matrix.GetColumn(1), matrix.GetColumn(2), matrix.GetColumn(3));
 
         /// <summary>
-        /// Ticks the three top-level system groups twice. Entities Graphics uploads instance data and
+        /// Updates the three top-level system groups twice. Entities Graphics uploads instance data and
         /// registers its BRG batches from <c>PresentationSystemGroup</c>, which the player loop drives —
         /// and the player loop does not run in headless EditMode, so without this an entity renders blank.
         /// </summary>
@@ -1572,7 +1572,10 @@ namespace MapRenderer.Tests.Visual
         private static RectInt ProjectGroundBox(Camera camera, Vector3 centre, Vector3 halfExtents)
         {
             Matrix4x4 worldToClip = camera.projectionMatrix * camera.worldToCameraMatrix;
-            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
+            int minX = int.MaxValue;
+            int minY = int.MaxValue;
+            int maxX = int.MinValue;
+            int maxY = int.MinValue;
 
             for (int corner = 0; corner < 4; corner++)
             {
@@ -1637,10 +1640,13 @@ namespace MapRenderer.Tests.Visual
         /// <returns>Fraction in [0,1]; 0 when the rectangle is empty.</returns>
         private static double BoxClippedFraction(Frame frame, RectInt rect)
         {
-            int x0 = math.clamp(rect.xMin, 0, SnapW), x1 = math.clamp(rect.xMax, 0, SnapW);
-            int y0 = math.clamp(rect.yMin, 0, SnapH), y1 = math.clamp(rect.yMax, 0, SnapH);
+            int x0 = math.clamp(rect.xMin, 0, SnapW);
+            int x1 = math.clamp(rect.xMax, 0, SnapW);
+            int y0 = math.clamp(rect.yMin, 0, SnapH);
+            int y1 = math.clamp(rect.yMax, 0, SnapH);
 
-            int clipped = 0, count = 0;
+            int clipped = 0;
+            int count = 0;
             for (int y = y0; y < y1; y++)
             {
                 for (int x = x0; x < x1; x++)

@@ -16,8 +16,11 @@ namespace MapRenderer.Tests.TestSupport
     public static class MvtFixtureStreams
     {
         private const int TileLayers = 3;
-        private const int LayerName = 1, LayerFeatures = 2, LayerExtent = 5;
-        private const int FeatureType = 3, FeatureGeometry = 4;
+        private const int LayerName = 1;
+        private const int LayerFeatures = 2;
+        private const int LayerExtent = 5;
+        private const int FeatureType = 3;
+        private const int FeatureGeometry = 4;
 
         /// <summary>One layer's features, as (kind, command stream) pairs in decode order — the exact order
         /// <c>RingFeatureIdx</c> indexes.</summary>

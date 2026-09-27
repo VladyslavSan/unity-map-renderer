@@ -7,7 +7,7 @@
 //   SymbolCollisionOrderTests         — the real teeth for SymbolStagingMath.SanitizeSortKey: a NON-FINITE baked symbol-sort-key makes ComparePlacementOrder intransitive (NaN compares false both ways, so the sort-key branch never ties and the…
 //   SymbolCompactJobTests             — CompactJob — the Burst port of SymbolPlacementSystem.GatherSymbolPoints's Compact pass — must produce the SAME _stagePointOffset / kept-point pools / _forceFadeOut membership / per-trigger counters, in the SAME record order, as an independent managed reference.
 //   SymbolCullJobTests                — CullJob — the Burst port of SymbolPlacementSystem.GatherSymbolPoints's Cull pass — must produce the SAME per-record GatherTrigger verdict, in the SAME chain-priority order (dropped → departing → coverage → zoom → horizon → distance → none), as an…
-//   SymbolDeferredCollisionTests      — Deferred collision: the collision is scheduled at the END of a Tick and Completed + re-keyed at the START of the next one, so the main thread never blocks on the single-threaded greedy.
+//   SymbolDeferredCollisionTests      — Deferred collision: the collision is scheduled at the END of a Update and Completed + re-keyed at the START of the next one, so the main thread never blocks on the single-threaded greedy.
 //   SymbolFadeTests                   — the placement layer is a fade state machine.
 //   SymbolFarDistanceCullGatherTests  — The harness injects a FIXED far-plane policy (the cull reads MapCamera.CurrentFarMetres, derived from that policy — NOT the raw Camera.farClipPlane, which is Unity's default until a SyncToCamera runs), so the far distance each assertion asserts against is…
 //   SymbolGatherMemoTests             — GatherIntoMirror memoizes its heavy compaction on WinnerSetVersion — a same-source, same-version frame runs only the three per-frame masks (Departing/CoverageFading/Dropped), not the full pool rebuild.
@@ -392,7 +392,9 @@ namespace MapRenderer.Tests.Text.Placement
             var quads = new PlacedQuad[n];
             var candidates = new SymbolCandidate[n];
             var emit = new CandidateEmit[n];
-            int boxCount = 0, quadCount = 0, emitCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
             var quad = new[] { UnitCell() };
 
             for (int i = 0; i < n; i++)
@@ -685,7 +687,8 @@ namespace MapRenderer.Tests.Text.Placement
                 }
 
                 outOffset[r] = outPoints.Count;
-                int ws = worldStart[r], wc = worldCount[r];
+                int ws = worldStart[r];
+                int wc = worldCount[r];
                 for (int v = 0; v < wc; v++)
                 {
                     outPoints.Add(worldPoints[ws + v]);
@@ -994,7 +997,9 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Cull_MatchesManagedReference_EveryVerdictAndOrder()
         {
-            byte[] dropped = SymbolDropped(), departing = SymbolDeparting(), coverage = SymbolCoverageFading();
+            byte[] dropped = SymbolDropped();
+            byte[] departing = SymbolDeparting();
+            byte[] coverage = SymbolCoverageFading();
             double3[] repAnchor = RepAnchor();
             SymbolPlacementKind[] kinds = Kinds();
             int[] detail = Detail();
@@ -1099,8 +1104,8 @@ namespace MapRenderer.Tests.Text.Placement
                 $"{because} — sampled ({actual.x:F3},{actual.y:F3},{actual.z:F3}) vs expected ({expected.x:F3},{expected.y:F3},{expected.z:F3}).");
         }
 
-        // ── A Tick's emit reads the collision scheduled at the end of the PREVIOUS Tick, over that Tick's candidates.
-        //    So an incumbent holds its slot for one more Tick after a newcomer that beats it appears. ──
+        // ── A Update's emit reads the collision scheduled at the end of the PREVIOUS Update, over that Update's candidates.
+        //    So an incumbent holds its slot for one more Update after a newcomer that beats it appears. ──
         [Test]
         public void Collision_VerdictAppliesOneFrameLate_IncumbentHoldsUntilTheNextTick()
         {
@@ -1114,29 +1119,29 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(aAndB, h.Origin, sortKey: 10f, text: "A", feature: 0, color: red);
             AddPoint(aAndB, h.Origin, sortKey: 5f, text: "B", feature: 1, color: blue);
 
-            // Tick 1: {A} alone — nothing has been harvested yet (no prior scheduled collision) ⇒ nothing shows.
+            // Update 1: {A} alone — nothing has been harvested yet (no prior scheduled collision) ⇒ nothing shows.
             h.System.TickSymbols(in h.Frame, aOnly, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(0, h.System.LastQuadCount, "tick 1: no pending verdict yet — nothing shows (symbol-label-perf-design.md § \"The collision verdict applies one frame late\").");
 
-            // Tick 2: {A} again — harvests tick 1's scheduled collision over {A} ⇒ A shows.
+            // Update 2: {A} again — harvests tick 1's scheduled collision over {A} ⇒ A shows.
             h.System.TickSymbols(in h.Frame, aOnly, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "tick 2: A's own collision has now been harvested.");
             AssertColorMatches(h.System, PaintOf(red), "tick 2 must show A");
 
-            // Tick 3: {A, B} — the harvested verdict is still tick 2's, over {A} ALONE (B did not exist when
-            // that collision was scheduled) ⇒ A still shows, B does not — the one-Tick verdict latency.
+            // Update 3: {A, B} — the harvested verdict is still tick 2's, over {A} ALONE (B did not exist when
+            // that collision was scheduled) ⇒ A still shows, B does not — the one-Update verdict latency.
             h.System.TickSymbols(in h.Frame, aAndB, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "tick 3: the deferred verdict is still A-only.");
             AssertColorMatches(h.System, PaintOf(red), "tick 3 must still show A, not B");
 
-            // Tick 4: {A, B} again — harvests tick 3's scheduled collision over {A, B}, where B wins ⇒ B shows,
+            // Update 4: {A, B} again — harvests tick 3's scheduled collision over {A, B}, where B wins ⇒ B shows,
             // A eases toward 0 with deltaTime = +inf (snaps instantly), so only B is emitted.
             h.System.TickSymbols(in h.Frame, aAndB, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "tick 4: B has now won the harvested verdict.");
             AssertColorMatches(h.System, PaintOf(blue), "tick 4 must show B, A has snapped to 0");
         }
 
-        // ── The first Tick after construction schedules but shows nothing;
+        // ── The first Update after construction schedules but shows nothing;
         //    the second shows the survivor of that scheduled collision. ──
         [Test]
         public void FirstTick_SchedulesOnly_SecondTickShowsTheSurvivors()
@@ -1146,14 +1151,14 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(buffer, h.Origin, sortKey: 0f, text: "A", feature: 0, color: new float4(1f, 1f, 1f, 1f));
 
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
-            Assert.AreEqual(0, h.System.LastQuadCount, "the first Tick has no prior verdict to harvest.");
+            Assert.AreEqual(0, h.System.LastQuadCount, "the first Update has no prior verdict to harvest.");
 
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
-            Assert.AreEqual(1, h.System.LastQuadCount, "the second Tick harvests the first Tick's scheduled collision.");
+            Assert.AreEqual(1, h.System.LastQuadCount, "the second Update harvests the first Update's scheduled collision.");
         }
 
         // ── DoDispose must Complete() a pending collision before it disposes the buffers the job holds, or the job
-        //    safety system throws. One Tick leaves the collision pending, because only the next Tick harvests it. ──
+        //    safety system throws. One Update leaves the collision pending, because only the next Update harvests it. ──
         [Test]
         public void Dispose_WithPendingCollision_CompletesCleanly()
         {
@@ -1203,9 +1208,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(1, h.System.LastQuadCount, "tick 2: the label has won its harvested verdict and shows.");
 
                 // tick 3: the SAME symbol under a layer whose minzoom excludes the live zoom. The harvested verdict
-                // still says "won", but Suppressed must hide it THIS Tick.
+                // still says "won", but Suppressed must hide it THIS Update.
                 h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity, symbolLayers: suppressedLayers);
-                Assert.AreEqual(0, h.System.LastQuadCount, "tick 3: suppression is a same-frame override, not one-Tick-late.");
+                Assert.AreEqual(0, h.System.LastQuadCount, "tick 3: suppression is a same-frame override, not one-Update-late.");
             }
             finally
             {
@@ -1306,9 +1311,9 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Telemetry provider (docs/telemetry-design.md): the placement system OWNS its results as a struct
-        //    field, refreshes it at the end of Tick, and hands it out BY REFERENCE. ──
+        //    field, refreshes it at the end of Update, and hands it out BY REFERENCE. ──
         [Test]
-        public void Tick_RefreshesItsOwnTelemetryStruct_HandedOutByReference()
+        public void Update_RefreshesItsOwnTelemetryStruct_HandedOutByReference()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
@@ -1316,41 +1321,41 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(h.Projection);
 
             Assert.AreEqual(0, h.System.Telemetry.PlacedQuadCount,
-                "before any Tick the provider's struct is still default — it reports levels, it does not invent them.");
+                "before any Update the provider's struct is still default — it reports levels, it does not invent them.");
 
             // `live` aliases the provider's own field, so a later refresh is visible through it. A BY-VALUE accessor
-            // would give a copy taken before the Tick, and every assertion below would read 0.
+            // would give a copy taken before the Update, and every assertion below would read 0.
             ref readonly SymbolPlacementTelemetrySnapshot live = ref h.System.Telemetry;
 
-            // TWO ticks before asserting a placed quad: the collision verdict is deferred by one Tick, so the
+            // TWO ticks before asserting a placed quad: the collision verdict is deferred by one Update, so the
             // first pass places nothing. Asserting after one tick reads 0 and says nothing about the ref-return.
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas);
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas);
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas);
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas);
 
             Assert.AreEqual(1, h.System.LastQuadCount,
                 "sanity: the label placed, so there is a non-zero level to carry.");
             Assert.AreEqual(h.System.LastQuadCount, live.PlacedQuadCount,
-                "the struct must carry the pass's own results, seen through the reference taken BEFORE any Tick.");
+                "the struct must carry the pass's own results, seen through the reference taken BEFORE any Update.");
             Assert.AreEqual(h.System.MirrorRebuildCount, live.MirrorRebuildCount);
 
             // And it keeps tracking: a further pass refreshes the same storage, still visible through `live`.
             int rebuildsSoFar = live.MirrorRebuildCount;
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas);
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas);
 
             Assert.AreEqual(h.System.MirrorRebuildCount, live.MirrorRebuildCount,
-                "every Tick refreshes the provider's own field — the reference never goes stale.");
+                "every Update refreshes the provider's own field — the reference never goes stale.");
             Assert.GreaterOrEqual(live.MirrorRebuildCount, rebuildsSoFar,
                 "MirrorRebuildCount is CUMULATIVE; it must never go backwards.");
         }
 
         // ── The default (infinite) deltaTime SNAPS to full opacity, so a test that passes no deltaTime sees no fade. ──
         [Test]
-        public void Tick_DefaultDeltaTime_SnapsToFullOpacity()
+        public void Update_DefaultDeltaTime_SnapsToFullOpacity()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, h.Origin, 0f, "A", 0);
-            // The collision verdict applies one Tick late (HarvestCollision consumes the PREVIOUS Tick's
+            // The collision verdict applies one Update late (HarvestCollision consumes the PREVIOUS Update's
             // scheduled job) — a fade-neutral duplicate tick is needed before placement can be asserted.
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection); // default deltaTime = +inf
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection);
@@ -1360,13 +1365,13 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── A real small deltaTime fades the symbol IN over successive frames (alpha rises 0 → 1). ──
         [Test]
-        public void Tick_SmallDeltaTime_FadesInOverFrames()
+        public void Update_SmallDeltaTime_FadesInOverFrames()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, h.Origin, 0f, "A", 0);
 
-            h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: 0.05f); // Verdict is one Tick late
+            h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: 0.05f); // Verdict is one Update late
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: 0.05f);
             float first = MaxAlpha(h.System);
             Assert.Greater(first, 0f, "it has started to appear");
@@ -1379,12 +1384,12 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A stable symbol keeps its opacity across frames — it does NOT re-fade every frame (the persistent
         //    record is the anti-blink property; a one-frame flip becomes a sub-perceptual alpha step, not a pop). ──
         [Test]
-        public void Tick_StableSymbol_KeepsOpacity_NoReFade()
+        public void Update_StableSymbol_KeepsOpacity_NoReFade()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, h.Origin, 0f, "A", 0);
-            h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection); // Verdict is one Tick late
+            h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection); // Verdict is one Update late
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection); // snap to full
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection, deltaTime: 0.05f); // same id again, small step
             Assert.Greater(MaxAlpha(h.System), 0.99f, "a persistent label stays at full opacity — no re-fade");
@@ -1393,7 +1398,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A collision-suppressed symbol fades OUT while still drawn: mid-transition BOTH the fading-out loser
         //    and the fading-in winner are emitted (2 quads), then it settles to just the winner (1). ──
         [Test]
-        public void Tick_CollisionSuppression_FadesOutWhileStillDrawn()
+        public void Update_CollisionSuppression_FadesOutWhileStillDrawn()
         {
             using var h = new Harness();
             // A wins alone first (lower sort key = higher priority). Then B (higher priority) appears on the SAME
@@ -1404,8 +1409,8 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(both, h.Origin, 10f, "A", 0);  // was placed → now the loser (fades out)
             AddPoint(both, h.Origin, 5f, "B", 1);   // higher priority → the winner (fades in)
 
-            // Each candidate-set change needs its own extra Tick before its placement can be asserted —
-            // the collision verdict a Tick's emit reads is the one harvested from the PREVIOUS Tick.
+            // Each candidate-set change needs its own extra Update before its placement can be asserted —
+            // the collision verdict a Update's emit reads is the one harvested from the PREVIOUS Update.
             h.System.TickSymbols(in h.Frame, aOnly, h.Atlas, h.Projection);
             h.System.TickSymbols(in h.Frame, aOnly, h.Atlas, h.Projection); // A at full opacity
             Assert.AreEqual(1, h.System.LastQuadCount);
@@ -1421,7 +1426,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A stable collision loser eases fully to 0 and STAYS hidden. The total-order tiebreak makes the survivor set
         //    a fixed point (SymbolCandidateCollisionTests.Collision_SameFeatureAnchors_*), so a plain ease works. ──
         [Test]
-        public void Tick_StableCollisionLoser_FadesFullyOutAndStaysHidden()
+        public void Update_StableCollisionLoser_FadesFullyOutAndStaysHidden()
         {
             using var h = new Harness();
             var bOnly = new SymbolTileBuffer();
@@ -1431,7 +1436,7 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(aBeatsB, h.Origin, 5f, "A", 0);
             AddPoint(aBeatsB, h.Origin, 10f, "B", 1);
 
-            // Each candidate-set change needs its own extra Tick before its placement can be asserted.
+            // Each candidate-set change needs its own extra Update before its placement can be asserted.
             h.System.TickSymbols(in h.Frame, bOnly, h.Atlas, h.Projection);
             h.System.TickSymbols(in h.Frame, bOnly, h.Atlas, h.Projection); // B alone, snap to full
             Assert.AreEqual(1, h.System.LastQuadCount, "B places alone");
@@ -1448,13 +1453,13 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── A candidate staged every frame and placed by none never parks a fade record: its opacity never leaves 0,
         //    so EaseFade does not store it. Non-obvious why: the decay sweep skips ids seen this frame, so a stored 0
-        //    is never collected, and DecayUnseenFadeSymbols walks every held record each Tick. ──
+        //    is never collected, and DecayUnseenFadeSymbols walks every held record each Update. ──
         [Test]
-        public void Tick_StableCollisionLoser_LeavesNoFadeRecordBehind()
+        public void Update_StableCollisionLoser_LeavesNoFadeRecordBehind()
         {
             using var h = new Harness();
             // Same fixture as the test above: A beats B at the same anchor every frame (lower sort key), so B is
-            // a candidate on every Tick and a survivor on none.
+            // a candidate on every Update and a survivor on none.
             var aBeatsB = new SymbolTileBuffer();
             AddPoint(aBeatsB, h.Origin, 5f, "A", 0);
             AddPoint(aBeatsB, h.Origin, 10f, "B", 1);
@@ -1484,13 +1489,13 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A symbol far past the far-plane cull distance is skipped BEFORE projection/collision; the near symbol
         //    still places. SymbolFarPlaneCullTests pins the distance math; this pins the wiring. ──
         [Test]
-        public void Tick_FarSymbol_IsDistanceCulled_WhileNearSymbolPlaces()
+        public void Update_FarSymbol_IsDistanceCulled_WhileNearSymbolPlaces()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, h.Origin, 0f, "N", 0);
             AddPoint(buffer, h.Origin + new double3(1e8, 0, 1e8), 0f, "F", 1); // far past any horizon radius
-            h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection); // Verdict is one Tick late
+            h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection); // Verdict is one Update late
             h.System.TickSymbols(in h.Frame, buffer, h.Atlas, h.Projection);
             Assert.AreEqual(1, h.System.LastDistanceCulledCount, "the far label is skipped pre-projection");
             Assert.AreEqual(1, h.System.LastQuadCount, "only the near label places");
@@ -1499,7 +1504,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── When a tile leaves cover its symbols are flagged DEPARTING (SymbolDeparting, set from CollectInto's
         //    active/departing split), so they FADE OUT in place instead of popping. ──
         [Test]
-        public void Tick_DepartingRecord_FadesOut_InsteadOfPopping()
+        public void Update_DepartingRecord_FadesOut_InsteadOfPopping()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
@@ -1511,8 +1516,8 @@ namespace MapRenderer.Tests.Text.Placement
             var departingTiles = new HashSet<long> { 0L }; // the symbol above carries TileKey = 0L
 
             // 1) Active (not departing) → it places and snaps to full opacity.
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas); // Verdict is one Tick late
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas); // default dt → snap to full
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas); // Verdict is one Update late
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas); // default dt → snap to full
             Assert.AreEqual(1, h.System.LastQuadCount, "the active label places");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
 
@@ -1522,7 +1527,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, departingPlan.Departing[0],
                 "sanity: the record is flagged departing — without this the rest of the test would be " +
                 "asserting an ordinary fade and could not fail for the reason it names.");
-            h.System.Tick(in h.Frame, departingPlan, h.Atlas, deltaTime: 0.1f);
+            h.System.Update(in h.Frame, departingPlan, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a departing-but-visible label keeps drawing (fading, not popping)");
             float dim = MaxAlpha(h.System);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
@@ -1530,7 +1535,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // 3) After enough steps it finishes fading and is dropped — counted as departing (not coverage/distance).
             for (int i = 0; i < 10; i++)
-                h.System.Tick(in h.Frame, plan.Build(buffer, departingTiles: departingTiles), h.Atlas, deltaTime: 0.1f);
+                h.System.Update(in h.Frame, plan.Build(buffer, departingTiles: departingTiles), h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the departing label is fully skipped");
             Assert.Greater(h.System.LastDepartingCulledCount, 0, "…and its skip is attributed to departing telemetry");
         }
@@ -1538,7 +1543,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A coverage-fading record (SymbolCoverageFading: a separate flag from SymbolDeparting, because the tile is
         //    still ACTIVE, just small on screen) FADES OUT in place, like the departing test above. ──
         [Test]
-        public void Tick_CoverageFadingRecord_FadesOut_InsteadOfPopping()
+        public void Update_CoverageFadingRecord_FadesOut_InsteadOfPopping()
         {
             using var h = new Harness();
             var buffer = new SymbolTileBuffer();
@@ -1549,8 +1554,8 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(h.Projection);
 
             // 1) Not coverage-fading (no coverageFadingTiles) → places and snaps to full opacity.
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas); // Verdict is one Tick late
-            h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas);
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas); // Verdict is one Update late
+            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas);
             Assert.AreEqual(1, h.System.LastQuadCount, "the label places");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
 
@@ -1561,7 +1566,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, fadingPlan.CoverageFading[0],
                 "sanity: the record is flagged coverage-fading — without this the rest of the test would be " +
                 "asserting an ordinary fade and could not fail for the reason it names.");
-            h.System.Tick(in h.Frame, fadingPlan, h.Atlas, deltaTime: 0.1f);
+            h.System.Update(in h.Frame, fadingPlan, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a coverage-fading-but-visible label keeps drawing (fading, not popping)");
             float dim = MaxAlpha(h.System);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
@@ -1569,7 +1574,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // 3) After enough steps it finishes fading and is dropped — counted as coverage-fading (not departing).
             for (int i = 0; i < 10; i++)
-                h.System.Tick(in h.Frame, plan.Build(buffer, coverageFadingTiles: fadingTiles), h.Atlas, deltaTime: 0.1f);
+                h.System.Update(in h.Frame, plan.Build(buffer, coverageFadingTiles: fadingTiles), h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the coverage-fading label is fully skipped");
             Assert.Greater(h.System.LastCoverageFadingCulledCount, 0, "…and its skip is attributed to coverage-fading telemetry");
         }
@@ -1653,7 +1658,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── incumbency plumbing: _placedLastFrame → WasPlacedLastFrame, end to end. X and Y share an anchor and an
         //    EQUAL SortKey, so incumbency decides before FeatureIndex; distinct text gives distinct fade ids. ──
         [Test]
-        public void Tick_IncumbentKeepsSlot_OverEqualSortKeyNewcomer()
+        public void Update_IncumbentKeepsSlot_OverEqualSortKeyNewcomer()
         {
             using var h = new Harness();
             var yOnly = new SymbolTileBuffer();
@@ -1662,14 +1667,14 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(xAndY, h.Origin, sortKey: 0f, text: "A", feature: 0, quads: NQuads(1)); // newcomer
             AddPoint(xAndY, h.Origin, sortKey: 0f, text: "B", feature: 1, quads: NQuads(2)); // incumbent
 
-            // Tick 1: Y alone places. Duplicated because the verdict is one Tick late, and Y must be the harvested
-            // incumbent before the {X,Y} Tick stages, or StageJob never sees WasPlacedLastFrame=true for Y.
+            // Update 1: Y alone places. Duplicated because the verdict is one Update late, and Y must be the harvested
+            // incumbent before the {X,Y} Update stages, or StageJob never sees WasPlacedLastFrame=true for Y.
             h.System.TickSymbols(in h.Frame, yOnly, h.Atlas, h.Projection);
             h.System.TickSymbols(in h.Frame, yOnly, h.Atlas, h.Projection);
             Assert.AreEqual(2, h.System.LastQuadCount, "Y places alone");
 
-            // Tick 2: X and Y tie on SortKey; incumbent Y wins and X fades to 0 in the same tick. The SECOND {X,Y}
-            // Tick is the one whose harvest reflects the {X,Y} collision staged with Y's incumbency.
+            // Update 2: X and Y tie on SortKey; incumbent Y wins and X fades to 0 in the same tick. The SECOND {X,Y}
+            // Update is the one whose harvest reflects the {X,Y} collision staged with Y's incumbency.
             h.System.TickSymbols(in h.Frame, xAndY, h.Atlas, h.Projection, deltaTime: 0.1f);
             h.System.TickSymbols(in h.Frame, xAndY, h.Atlas, h.Projection, deltaTime: 0.1f);
             Assert.AreEqual(2, h.System.LastQuadCount, "the incumbent Y keeps its slot over the equal-sort-key newcomer X");
@@ -1927,7 +1932,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // A REAL look-at + atlas (mirrors SymbolGatherPlanDropMaskTests.Harness) — needed by any test that drives
-        // a full Tick (projection/staging/collision/emit), not just GatherIntoMirror/CopyMirrorInto.
+        // a full Update (projection/staging/collision/emit), not just GatherIntoMirror/CopyMirrorInto.
         private sealed class TickHarness : System.IDisposable
         {
             public readonly SymbolPlacementSystem System;
@@ -2013,7 +2018,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var tileA = new TileId { Z = 6, X = 20, Y = 20 };
             var tileB = new TileId { Z = 6, X = 21, Y = 20 };
-            long keyA = Tk(tileA), keyB = Tk(tileB);
+            long keyA = Tk(tileA);
+            long keyB = Tk(tileB);
             var storeA = new SymbolTileStore(cacheCap: 8);
             var storeB = new SymbolTileStore(cacheCap: 8);
             SeedTile(storeA, tileA, PointSymbol(new double3(100, 0, 200), "a", 1, keyA, 0.1f));
@@ -2116,7 +2122,7 @@ namespace MapRenderer.Tests.Text.Placement
             => AssertMaskFlipTrackedWhilePoolsHeld(41, GatherMask.CoverageFading);
 
         // ═══ Dropped is invisible through CopyMirrorInto (GatherSymbolPoints hard-skips it), so assert it through a
-        //     real Tick on a memo-HIT frame, against a reference that never collected the dropped tile. ═══
+        //     real Update on a memo-HIT frame, against a reference that never collected the dropped tile. ═══
 
         // Full vertex + opacity byte comparison of two world-slot meshes — mirrors
         // SymbolGatherPlanDropMaskTests.FirstMeshDifference. Returns the first difference, or null if byte-identical.
@@ -2138,7 +2144,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var keepTile = new TileId { Z = 12, X = 2500, Y = 1500 };
             var dropTile = new TileId { Z = 12, X = 2501, Y = 1500 };
-            long keepKey = Tk(keepTile), dropKey = Tk(dropTile);
+            long keepKey = Tk(keepTile);
+            long dropKey = Tk(dropTile);
             var dropOffset = new double3(0, 0, 1600); // clears collision with KEEP — mirrors DropMaskTests' DropOffset
 
             using var hMasked = new TickHarness();
@@ -2158,20 +2165,20 @@ namespace MapRenderer.Tests.Text.Placement
                 try
                 {
                     // Frame 1: both tiles Keep on both sides. Ticked twice (the second a memo HIT) because the verdict
-                    // is one Tick late; else the drop slot never shows and the HIDDEN assertion below passes vacuously.
+                    // is one Update late; else the drop slot never shows and the HIDDEN assertion below passes vacuously.
                     BuildPlan(storeMasked, planMasked, version: 0);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     BuildPlan(storeRef, planRef, version: 0);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
-                        "sanity: frame 1 is a heavy rebuild — the duplicate Tick is a memo HIT (same plan+version), not a second rebuild");
+                        "sanity: frame 1 is a heavy rebuild — the duplicate Update is a memo HIT (same plan+version), not a second rebuild");
 
                     // Frame 2: MASKED flags the drop tile Dropped at the SAME version (a memo HIT); REFERENCE leaves
                     // the drop tile out of its plan.
                     BuildPlan(storeMasked, planMasked, version: 0, dropTileKey: dropKey);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
                         "the Drop flip at a fixed version must be a memo HIT — this is what makes the assertions below meaningful");
 
@@ -2190,7 +2197,7 @@ namespace MapRenderer.Tests.Text.Placement
                         refIsDeparting.Add(allIsDeparting[i]); refDecisions.Add(SymbolTileCoverageFilter.Keep);
                     }
                     planRef.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, storeRef.OrderedBlocks, winnerSetVersion: 1);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
 
                     Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
                         "masked-Drop's emitted quad count (on a memo-HIT frame) must equal the reference's");
@@ -2387,12 +2394,14 @@ namespace MapRenderer.Tests.Text.Placement
 
                 if (kind == SymbolPlacementKind.Point)
                 {
-                    int quadStart = block.PointQuadStart[detail], quadCount = block.PointQuadCount[detail];
+                    int quadStart = block.PointQuadStart[detail];
+                    int quadCount = block.PointQuadCount[detail];
                     int expectedQuadStart = expected.QuadCount;
                     for (int q = 0; q < quadCount; q++) expected.AddQuad(block.Quads[quadStart + q]);
                     int expectedDetail = expected.AddPoint(block.Points[detail], expectedQuadStart, quadCount);
 
-                    int worldStartSrc = block.WorldStart[raw], worldCount = block.WorldCount[raw];
+                    int worldStartSrc = block.WorldStart[raw];
+                    int worldCount = block.WorldCount[raw];
                     int expectedWorldStart = expected.WorldPointCount;
                     for (int v = 0; v < worldCount; v++)
                     {
@@ -2404,11 +2413,13 @@ namespace MapRenderer.Tests.Text.Placement
                 }
                 else
                 {
-                    int glyphStart = block.CurvedGlyphStart[detail], glyphCount = block.CurvedGlyphCount[detail];
+                    int glyphStart = block.CurvedGlyphStart[detail];
+                    int glyphCount = block.CurvedGlyphCount[detail];
                     int expectedGlyphStart = expected.GlyphCount;
                     for (int g = 0; g < glyphCount; g++) expected.AddGlyph(block.Glyphs[glyphStart + g]);
 
-                    int anchorStart = block.CurvedAnchorStart[detail], anchorCount = block.CurvedAnchorCount[detail];
+                    int anchorStart = block.CurvedAnchorStart[detail];
+                    int anchorCount = block.CurvedAnchorCount[detail];
                     int expectedAnchorStart = expected.AnchorCount;
                     for (int a = 0; a < anchorCount; a++) expected.AddAnchor(block.Anchors[anchorStart + a]);
 
@@ -2419,7 +2430,8 @@ namespace MapRenderer.Tests.Text.Placement
                     int expectedDetail = expected.AddCurved(block.Curveds[detail], expectedGlyphStart, glyphCount,
                         expectedAnchorStart, anchorCount, expectedFadeStart);
 
-                    int worldStartSrc = block.WorldStart[raw], worldCount = block.WorldCount[raw];
+                    int worldStartSrc = block.WorldStart[raw];
+                    int worldCount = block.WorldCount[raw];
                     int expectedWorldStart = expected.WorldPointCount;
                     for (int v = 0; v < worldCount; v++)
                     {
@@ -2659,7 +2671,8 @@ namespace MapRenderer.Tests.Text.Placement
             var b = new TileId { Z = 5, X = 21, Y = 16 };
             double3 originA = TileRenderOrigin.Project(a, P);
             double3 originB = TileRenderOrigin.Project(b, P);
-            long tkA = Tk(a), tkB = Tk(b);
+            long tkA = Tk(a);
+            long tkB = Tk(b);
 
             // Block A raw slots: [0] point ZERO quads, [1] point #1, [2] point #2, [3] curved #1, [4] curved ZERO
             // glyphs, [5] curved #2. Non-obvious why: two points and two curveds in one block give each #2 a non-zero
@@ -2985,7 +2998,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var keepTile = new TileId { Z = 12, X = 2200, Y = 1500 };
             var dropTile = new TileId { Z = 12, X = 2201, Y = 1500 };
-            long keepKey = Tk(keepTile), dropKey = Tk(dropTile);
+            long keepKey = Tk(keepTile);
+            long dropKey = Tk(dropTile);
 
             using var hMasked = new Harness();
             using var hRef = new Harness();
@@ -3003,27 +3017,29 @@ namespace MapRenderer.Tests.Text.Placement
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
-                int maskedVersion = 0, refVersion = 0; // Each rebuild of the SAME plan object gets a fresh version
+                // Each rebuild of the SAME plan object gets a fresh version
+                int maskedVersion = 0;
+                int refVersion = 0;
                 try
                 {
                     // Frame 1: both tiles Keep on both harnesses, so the drop tile's point has a live full-opacity fade.
-                    // Each Tick is duplicated because the verdict is one Tick late.
+                    // Each Update is duplicated because the verdict is one Update late.
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f, "sanity: the drop tile's point is genuinely live before the Drop");
 
                     // Frame 2: MASKED flags the drop tile's winner Dropped; REFERENCE excludes it. Duplicated, or
                     // the counts still read frame 1's pre-Drop verdict and the comparison passes without the mask.
                     BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     BuildReferencePlan(storeRef, planRef, dropKey, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
 
                     Assert.AreEqual(hRef.System.LastCandidateCount, hMasked.System.LastCandidateCount,
                         "masked-Drop's candidate count must equal the reference's (the Dropped point is absent from collision)");
@@ -3065,7 +3081,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var keepTile = new TileId { Z = 12, X = 2300, Y = 1500 };
             var dropTile = new TileId { Z = 12, X = 2301, Y = 1500 };
-            long keepKey = Tk(keepTile), dropKey = Tk(dropTile);
+            long keepKey = Tk(keepTile);
+            long dropKey = Tk(dropTile);
 
             using var hMasked = new Harness();
             using var hRef = new Harness();
@@ -3082,17 +3099,19 @@ namespace MapRenderer.Tests.Text.Placement
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
-                int maskedVersion = 0, refVersion = 0; // Each rebuild of the SAME plan object gets a fresh version
+                // Each rebuild of the SAME plan object gets a fresh version
+                int maskedVersion = 0;
+                int refVersion = 0;
                 try
                 {
                     // Frame 1: both tiles Keep; the drop tile's CURVED record must place with a LIVE fade, or a Drop
-                    // folded into MarkFadeOutIfAlive's OR-chain cannot diverge. Each Tick is duplicated (verdict lag).
+                    // folded into MarkFadeOutIfAlive's OR-chain cannot diverge. Each Update is duplicated (verdict lag).
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(hMasked.System.LastSurvivorCount, 0, "sanity: at least one curved placement survived frame 1");
                     Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f,
                         "the drop tile's curved record must be a genuinely LIVE (placed, positive-opacity) fade before the Drop");
@@ -3100,11 +3119,11 @@ namespace MapRenderer.Tests.Text.Placement
                     // Frame 2: MASKED flags the curved winner Dropped (resident); REFERENCE excludes it. Duplicated,
                     // or the comparison reads frame 1's stale verdict, not frame 2's Drop-masked collision.
                     BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     BuildReferencePlan(storeRef, planRef, dropKey, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
 
                     Assert.AreEqual(hRef.System.LastCandidateCount, hMasked.System.LastCandidateCount,
                         "masked-Drop's candidate count must equal the reference's (the Dropped curved anchors are absent)");
@@ -3158,38 +3177,40 @@ namespace MapRenderer.Tests.Text.Placement
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
-                int maskedVersion = 0, refVersion = 0; // Each rebuild of the SAME plan object gets a fresh version
+                // Each rebuild of the SAME plan object gets a fresh version
+                int maskedVersion = 0;
+                int refVersion = 0;
                 try
                 {
-                    // Frame 1 (default +∞ deltaTime): opacity snaps to 1.0 on both sides. Each Tick is duplicated
-                    // because the verdict is one Tick late.
+                    // Frame 1 (default +∞ deltaTime): opacity snaps to 1.0 on both sides. Each Update is duplicated
+                    // because the verdict is one Update late.
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
                     BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(MaxAlpha(hMasked.System, soloKey), 0.99f, "sanity: frame 1 is fully visible");
 
                     // Frame 2: the only tile is Dropped; the reference excludes it (0 winners, independent of any gate).
                     // A LARGE deltaTime makes a wrongly-firing decay zero and remove the fade entry.
                     const float bigDeltaTime = 1.0f;
                     BuildMaskedPlan(storeMasked, planMasked, soloKey, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, bigDeltaTime);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas, bigDeltaTime);
                     BuildReferencePlan(storeRef, planRef, soloKey, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, bigDeltaTime);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas, bigDeltaTime);
 
                     // Frame 3: reappear with a SMALL deltaTime, so a frozen fade (1.0) and a decayed one (fading in from
-                    // 0) land at different opacities. Non-obvious why: the Tick is duplicated; frame 2 schedules no
+                    // 0) land at different opacities. Non-obvious why: the Update is duplicated; frame 2 schedules no
                     // collision (the gate is _mirrorNonDroppedCount > 0), so frame 3's first emit reads an empty
-                    // _placedLastFrame and dips solo one step on both sides; the second Tick's harvest recovers it.
+                    // _placedLastFrame and dips solo one step on both sides; the second Update's harvest recovers it.
                     const float smallDeltaTime = 0.05f;
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
-                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
+                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
                     BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
-                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
+                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
 
                     float reappearMasked = MaxAlpha(hMasked.System, soloKey);
                     float reappearRef = MaxAlpha(hRef.System, soloKey);
@@ -3253,7 +3274,7 @@ namespace MapRenderer.Tests.Text.Placement
             return buffer;
         }
 
-        /// <summary>Runs one real Tick at <paramref name="devicePixelRatio"/> and returns the built world
+        /// <summary>Runs one real Update at <paramref name="devicePixelRatio"/> and returns the built world
         /// mesh's stream-0 vertices, its stream-1 opacity and its index buffer.</summary>
         private static void RunTick(SymbolTileBuffer buffer, double devicePixelRatio,
             out WorldBillboardVertex[] vertices, out float[] opacity, out int[] indices)
@@ -3285,7 +3306,7 @@ namespace MapRenderer.Tests.Text.Placement
                 var system = new SymbolPlacementSystem(mapCamera, worldTextBase: textMaterial);
                 try
                 {
-                    // Collision verdicts apply one Tick late — duplicate before reading placement.
+                    // Collision verdicts apply one Update late — duplicate before reading placement.
                     system.TickSymbols(in frame, buffer, atlasTexture, projection);
                     system.TickSymbols(in frame, buffer, atlasTexture, projection);
                     Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh mesh),

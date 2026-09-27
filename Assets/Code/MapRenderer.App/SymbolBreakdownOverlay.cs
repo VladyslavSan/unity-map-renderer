@@ -6,7 +6,7 @@ namespace MapRenderer.App
     /// <summary>
     /// Dev diagnostic (opt-in, not part of the render path): an on-screen button that arms a one-shot
     /// symbol-breakdown capture on the live <see cref="MapView"/>'s <c>SymbolPlacementSystem</c>. The next
-    /// placement Tick logs a per-style-layer and per-vertical-screen-band tally of that frame's input records to
+    /// placement Update logs a per-style-layer and per-vertical-screen-band tally of that frame's input records to
     /// the Console. Delete this file and <c>SymbolPlacementSystem.Diagnostics.cs</c> to strip the feature.
     /// </summary>
     public sealed class SymbolBreakdownOverlay : MonoBehaviour

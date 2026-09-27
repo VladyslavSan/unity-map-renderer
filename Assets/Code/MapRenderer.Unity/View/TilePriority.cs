@@ -26,7 +26,7 @@ namespace MapRenderer.Unity.View
     }
 
     /// <summary>
-    /// Render-space inputs shared by every tile's priority computation within one Tick — computed once
+    /// Render-space inputs shared by every tile's priority computation within one Update — computed once
     /// (the SAME <see cref="CameraPoseMath"/> pose math the render camera and <see cref="FrustumTileSelector"/>
     /// use) and reused per tile, so <see cref="TilePriority.Key"/> stays a pure, allocation-free function of
     /// <c>(tile, context)</c> rather than re-deriving the camera pose on every call.
@@ -60,7 +60,7 @@ namespace MapRenderer.Unity.View
         }
 
         /// <summary>
-        /// Builds the context for one Tick from the camera + viewport — the exact render-space frame
+        /// Builds the context for one Update from the camera + viewport — the exact render-space frame
         /// <see cref="FrustumTileSelector.SelectVisibleTiles"/> builds (look-at clamped to the projection's
         /// valid latitude, then projected; pose from <see cref="CameraPoseMath.ComputeRelativePose"/> at the
         /// same altitude/near derivation), so priority ranking and cover selection never disagree about
@@ -108,7 +108,9 @@ namespace MapRenderer.Unity.View
 
             if (ctx.Strategy == TilePriorityStrategy.CameraDistance)
             {
-                double dx = c.x - ctx.CameraPos.x, dy = c.y - ctx.CameraPos.y, dz = c.z - ctx.CameraPos.z;
+                double dx = c.x - ctx.CameraPos.x;
+                double dy = c.y - ctx.CameraPos.y;
+                double dz = c.z - ctx.CameraPos.z;
                 return math.sqrt(dx * dx + dy * dy + dz * dz);
             }
 
@@ -126,7 +128,9 @@ namespace MapRenderer.Unity.View
         {
             double2 ll = t.ToLonLat(0.5, 0.5, 1.0);
             double3 w  = proj.Project(new GeoCoordinate { Latitude = ll.y, Longitude = ll.x });
-            double  rx = w.x - origin.x, ry = w.y - origin.y, rz = w.z - origin.z;
+            double rx = w.x - origin.x;
+            double ry = w.y - origin.y;
+            double rz = w.z - origin.z;
             return new double3(
                 basis.c0.x * rx + basis.c0.y * ry + basis.c0.z * rz,
                 basis.c1.x * rx + basis.c1.y * ry + basis.c1.z * rz,
@@ -142,7 +146,7 @@ namespace MapRenderer.Unity.View
         /// <param name="tiles">The list to sort in place.</param>
         /// <param name="sortKeys">Caller-owned scratch array, grown (never shrunk) to at least
         /// <c>tiles.Count</c> by this call if it starts smaller.</param>
-        /// <param name="ctx">The shared render-space priority context for this Tick.</param>
+        /// <param name="ctx">The shared render-space priority context for this Update.</param>
         public static void SortByPriority(List<TileId> tiles, ref double[] sortKeys, in TilePriorityContext ctx)
         {
             int n = tiles.Count;

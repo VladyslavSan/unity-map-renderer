@@ -2,7 +2,7 @@
 //
 // Contents:
 //   PreparedCacheTests        — PreparedTileCache MapView-integration teeth: real cover-fetch-build-consume-evict cycles, PlayMode half.
-//   Stall2ReleaseBudgetTests  — the deferred-release queue budgets how many (tile, source) records free per Tick.
+//   Stall2ReleaseBudgetTests  — the deferred-release queue budgets how many (tile, source) records free per Update.
 
 using System.Collections;
 using System.Collections.Generic;
@@ -239,7 +239,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.Config.MaxVerticesPerTick      = int.MaxValue;
             view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — synchronous whole-cover eviction+transfer
 
-            const double Z1 = 4.2, Z2 = 4.8;
+            const double Z1 = 4.2;
+            const double Z2 = 4.8;
 
             try
             {
@@ -320,7 +321,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate();
                 // Limitation: TileBuildsStartedLastTick counts admitted tiles, so it misses a write kick on a
-                // DIFFERENT cover tile in this Tick; it still proves the revisit is a hit, not a re-prepare.
+                // DIFFERENT cover tile in this Update; it still proves the revisit is a hit, not a re-prepare.
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "Revisit must be a hit, not a re-prepare.");
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
@@ -334,7 +335,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // Stall2ReleaseBudgetTests — the deferred-release queue's per-Tick budget
+    // Stall2ReleaseBudgetTests — the deferred-release queue's per-Update budget
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -384,7 +385,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             return (go, view);
         }
 
-        // ── Budget: no single Tick releases more than MaxReleasesPerTick; the backlog drains over frames ──
+        // ── Budget: no single Update releases more than MaxReleasesPerTick; the backlog drains over frames ──
         [UnityTest]
         public IEnumerator ReleaseQueue_BoundsReleasesPerTick_AndDrainsBacklog()
         {

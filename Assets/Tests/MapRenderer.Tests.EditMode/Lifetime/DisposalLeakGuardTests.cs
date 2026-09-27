@@ -60,7 +60,7 @@ namespace MapRenderer.Tests.Lifetime
 
 
         /// <summary>
-        /// Pumps Tick until all tiles settle or maxFrames is reached.
+        /// Pumps Update until all tiles settle or maxFrames is reached.
         /// </summary>
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
@@ -667,7 +667,7 @@ namespace MapRenderer.Tests.Lifetime
                 view.Config.MaxConsumesPerTick = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
 
-                // Pump until the cover settles; each Tick's PendingDisposalQueue.DrainCompleted() disposes the
+                // Pump until the cover settles; each Update's PendingDisposalQueue.DrainCompleted() disposes the
                 // released tiles' resources as their held step completes.
                 PumpUntilSettled(view, maxFrames: 500);
 
@@ -689,7 +689,7 @@ namespace MapRenderer.Tests.Lifetime
                 Assert.AreEqual(buildGraphBefore, buildGraphAfter,
                     $"TileBuildGraph.DebugLiveCount must return to baseline after load+mid-flight-release " +
                     $"cycle. Baseline: {buildGraphBefore}, after: {buildGraphAfter}. Check: (a) the pen in " +
-                    "RenderTeardownRecord, (b) PendingDisposalQueue.DrainCompleted() called in Tick, (c) Teardown() spins+" +
+                    "RenderTeardownRecord, (b) PendingDisposalQueue.DrainCompleted() called in Update, (c) Teardown() spins+" +
                     "disposes pending tasks.");
             }
             finally
@@ -771,7 +771,7 @@ namespace MapRenderer.Tests.Lifetime
         /// then destroy the MapView and verify zero orphaned Meshes.
         ///
         /// Exercises the full pipeline: fetch → build → consume (via DrainMeshBuilds) →
-        /// destroy (via OnDestroy). Both consumption paths (Tick/PumpPending and DrainMeshBuilds)
+        /// destroy (via OnDestroy). Both consumption paths (Update/PumpPending and DrainMeshBuilds)
         /// are covered by <see cref="BuildAndRelease_NoOrphanedMesh"/> and this test respectively.
         /// </summary>
         [Test]

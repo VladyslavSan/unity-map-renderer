@@ -2830,7 +2830,8 @@ namespace MapRenderer.Tests.Structure
 
         private static int CountOccurrences(string text, string token)
         {
-            int count = 0, index = 0;
+            int count = 0;
+            int index = 0;
             while ((index = text.IndexOf(token, index, StringComparison.Ordinal)) >= 0)
             {
                 count++;

@@ -166,7 +166,8 @@ namespace MapRenderer.Tests.Tiles
             for (int i = 0; i < fixtures.Length; i++) layers[i] = fixtures[i].Build;
 
             Assert.AreEqual(4, layers.Length, "precondition: the fixture must supply exactly four layers.");
-            int emptyByInput = 0, nonEmptyByInput = 0;
+            int emptyByInput = 0;
+            int nonEmptyByInput = 0;
             foreach (LayerFixture f in fixtures)
             {
                 if (f.VisitOrder.Length == 0) emptyByInput++;
@@ -354,7 +355,9 @@ namespace MapRenderer.Tests.Tiles
                 {
                     for (int i = 0; i + 2 < bi.Length; i += 3)
                     {
-                        int ta = bi[i], tb = bi[i + 1], tc = bi[i + 2];
+                        int ta = bi[i];
+                        int tb = bi[i + 1];
+                        int tc = bi[i + 2];
                         if (b1[ta].Band.z != 0f || b1[tb].Band.z != 0f || b1[tc].Band.z != 0f) continue;
                         isInterior[ta] = true; isInterior[tb] = true; isInterior[tc] = true;
                     }
@@ -376,7 +379,8 @@ namespace MapRenderer.Tests.Tiles
                 var s0 = new List<byte>(); var s1 = new List<byte>(); var s2 = new List<byte>(); var s3 = new List<byte>();
                 foreach (int i in interiorIndices)
                 {
-                    Vector3 p = b0[i].Position, n = b0[i].Normal;
+                    Vector3 p = b0[i].Position;
+                    Vector3 n = b0[i].Normal;
                     s0.AddRange(BitConverter.GetBytes(p.x)); s0.AddRange(BitConverter.GetBytes(p.y)); s0.AddRange(BitConverter.GetBytes(p.z));
                     s0.AddRange(BitConverter.GetBytes(n.x)); s0.AddRange(BitConverter.GetBytes(n.y)); s0.AddRange(BitConverter.GetBytes(n.z));
                     // Hash only the UV half of stream 1 (it also carries the band attribute), so the golden
@@ -590,7 +594,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreSame(first, second,
                     "a repeat call must return the SAME array instance the graph cached on the first call — " +
                     "not a fresh allocation, and not a throw. A caller that resumes a budget-bound partial " +
-                    "consume across Ticks (or that retries after its own consume loop threw) relies on this: " +
+                    "consume across Updates (or that retries after its own consume loop threw) relies on this: " +
                     "getting back a different array would desync from whichever slots an earlier call already " +
                     "nulled, and getting a throw would leave the tile permanently stuck (the defect this " +
                     "replaced — see CompleteWriteAndTakePayloads_RecoversAfterTheCallerLosesItsFirstReference, " +
@@ -620,7 +624,7 @@ namespace MapRenderer.Tests.Tiles
                     "precondition: the first take must have produced a real, still-live array — otherwise " +
                     "the retry below proves nothing about recovery.");
 
-                // "Retries on a later Tick" — must NOT throw, and must get back a real, usable array rather
+                // "Retries on a later Update" — must NOT throw, and must get back a real, usable array rather
                 // than an empty stand-in (the recovery, not just a non-throwing no-op).
                 MeshDataPayload[] retried = null;
                 Assert.DoesNotThrow(() => retried = graph.CompleteWriteAndTakePayloads(),
@@ -1547,7 +1551,8 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -1590,7 +1595,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// (f) On a LINE-ONLY style, <see cref="MapViewTestExtensions.MeshDataArraysAllocatedLastKick"/> is
-        /// 0 at the kick Tick and non-zero once the write step runs, and the tile still produces a mesh with
+        /// 0 at the kick Update and non-zero once the write step runs, and the tile still produces a mesh with
         /// real vertices. Tooth (c) observes where the graph runs; this one observes that the line layer's
         /// graph path allocates nothing at kick.
         /// </summary>
@@ -1613,7 +1618,8 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -1625,7 +1631,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
                     "NO MeshDataArray at kick for a line-only style — line is graph-arm now, exactly like fill.");
                 Assert.AreEqual(0, view.MeshDataArraysAllocatedLastKick(),
-                    "the kick Tick itself allocates nothing — only a later write-kick does.");
+                    "the kick Update itself allocates nothing — only a later write-kick does.");
 
                 int writeTick = -1;
                 for (; tick < 3000 && writeTick < 0; tick++)

@@ -32,7 +32,8 @@ namespace MapRenderer.Tests
         {
             double RowAt(double z) => camera.WorldToScreenPoint(new Vector3(0f, 0f, (float)z)).y;
 
-            double lo = loMetres, hi = hiMetres;
+            double lo = loMetres;
+            double hi = hiMetres;
             Assert.That(RowAt(lo), Is.LessThan(targetScreenY), "probe bracket: target row below the low bound.");
             Assert.That(RowAt(hi), Is.GreaterThan(targetScreenY), "probe bracket: target row above the high bound.");
             for (int i = 0; i < 60; i++)

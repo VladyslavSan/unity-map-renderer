@@ -26,11 +26,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// tile transform.</summary>
         public double3 TileOriginRender { get; init; }
 
-        /// <summary>The active pixel↔ground projection for this worker pass, cached once per Tick.</summary>
+        /// <summary>The active pixel↔ground projection for this worker pass, cached once per Update.</summary>
         public IProjection Projection { get; init; }
 
         /// <summary>How much of the tile's MVT buffer the fill mesh keeps — the single global knob, read live
-        /// off <c>MapViewConfig</c> each Tick. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
+        /// off <c>MapViewConfig</c> each Update. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
         public TileBufferClip BufferClip { get; init; }
 
         /// <summary>This build's rented <see cref="TileBuildBuffers"/> — populated by

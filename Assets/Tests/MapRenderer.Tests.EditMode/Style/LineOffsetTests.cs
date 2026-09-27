@@ -251,8 +251,10 @@ namespace MapRenderer.Tests.Style
 
             // Find a station (e.g., DistanceAlong == 0).
             // Both vertices at dist=0 contribute to band center.
-            Station left  = default, right = default;
-            bool foundLeft = false, foundRight = false;
+            Station left  = default;
+            Station right = default;
+            bool foundLeft = false;
+            bool foundRight = false;
             foreach (var v in FlatRibbonStations.StraightLine())
             {
                 if (Math.Abs(v.DistanceAlong) < 1e-9)

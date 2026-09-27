@@ -1321,8 +1321,12 @@ namespace MapRenderer.Tests.GeoJsons
         public void OneLineClippedFromTwoAdjacentTiles_PutsTheSeamVertexExactlyOnTheSeam()
         {
             const double extent = 4096.0;                                  // == Max.x: buffer off, so the
-            const double startX = 100.0,  startY = 1000.0;                 // tile edge IS the clip boundary
-            const double endX   = 5600.0, endY   = 3000.0;                 // and the two windows partition
+            // tile edge IS the clip boundary
+            const double startX = 100.0;
+            const double startY = 1000.0;
+            // and the two windows partition
+            const double endX   = 5600.0;
+            const double endY   = 3000.0;
 
             double t     = (extent - startX) / (endX - startX);
             double naive = startX + t * (endX - startX);
@@ -1377,7 +1381,8 @@ namespace MapRenderer.Tests.GeoJsons
         private static void AssertCornerCrossing(
             List<double2> line, double2 boundary, bool first, double2 corner)
         {
-            double2 a = line[0], b = line[1];
+            double2 a = line[0];
+            double2 b = line[1];
             double tx = (boundary.x - a.x) / (b.x - a.x);
             double ty = (boundary.y - a.y) / (b.y - a.y);
 

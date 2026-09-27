@@ -11,7 +11,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// <summary>
     /// The Burst gather (docs/symbol-label-perf-design.md): compacts each winner's <see cref="BlockView"/> slice
     /// into contiguous native mirror pools, remapping each <c>Detail</c>/<c>*Start</c> field by the pool offset.
-    /// It runs through <c>.Run()</c> before <c>TickCore</c> reads any element. Pass 1 totals the pool sizes and
+    /// It runs through <c>.Run()</c> before <c>UpdateCore</c> reads any element. Pass 1 totals the pool sizes and
     /// resizes the caller's mirror lists once; pass 2 fills. <c>WritePerFrameMasks</c>, not this job, writes
     /// the per-frame masks (<c>SymbolDeparting</c>/<c>SymbolCoverageFading</c>/<c>SymbolDropped</c>).
     /// </summary>
@@ -40,12 +40,19 @@ namespace MapRenderer.Unity.Jobs.Symbols
 
         // ── outputs: the mirror pools (record order == winner order; NOT the three per-frame masks) ──
         public NativeList<SymbolPlacementKind> MKinds;
-        public NativeList<int>  MDetail, MWorldCount, MWorldStart;
+        public NativeList<int> MDetail;
+        public NativeList<int> MWorldCount;
+        public NativeList<int> MWorldStart;
         public NativeList<double3> MRepAnchor;
         public NativeList<PointStageInput> MPoints;
-        public NativeList<int> MPointQuadStart, MPointQuadCount;
+        public NativeList<int> MPointQuadStart;
+        public NativeList<int> MPointQuadCount;
         public NativeList<CurvedStageInput> MCurveds;
-        public NativeList<int> MCurvedGlyphStart, MCurvedGlyphCount, MCurvedAnchorStart, MCurvedAnchorCount, MCurvedAnchorFadeStart;
+        public NativeList<int> MCurvedGlyphStart;
+        public NativeList<int> MCurvedGlyphCount;
+        public NativeList<int> MCurvedAnchorStart;
+        public NativeList<int> MCurvedAnchorCount;
+        public NativeList<int> MCurvedAnchorFadeStart;
         public NativeList<SymbolQuad>  MQuads;
         public NativeList<CurvedGlyph> MGlyphs;
         public NativeList<LineAnchor>  MAnchors;
@@ -63,7 +70,14 @@ namespace MapRenderer.Unity.Jobs.Symbols
             int winners = WinnerCount;
 
             // Pass 1: total the per-pool sizes, so each mirror list is resized ONCE.
-            int records = winners, points = 0, curveds = 0, quads = 0, glyphs = 0, anchors = 0, fades = 0, worlds = 0;
+            int records = winners;
+            int points = 0;
+            int curveds = 0;
+            int quads = 0;
+            int glyphs = 0;
+            int anchors = 0;
+            int fades = 0;
+            int worlds = 0;
             for (int r = 0; r < winners; r++)
             {
                 BlockView block = BlockViews[BlockId[r]];
@@ -106,8 +120,16 @@ namespace MapRenderer.Unity.Jobs.Symbols
             NativeArray<double3>     dstWorlds  = MWorldPoints.AsArray();
             NativeArray<float3>      dstWorldUps = MWorldUps.AsArray();
 
-            int mPoint = 0, mCurved = 0, mQuad = 0, mGlyph = 0, mAnchor = 0, mFade = 0, mWorld = 0;
-            int maxBoxes = 0, maxQuads = 0, maxCandidates = 0;
+            int mPoint = 0;
+            int mCurved = 0;
+            int mQuad = 0;
+            int mGlyph = 0;
+            int mAnchor = 0;
+            int mFade = 0;
+            int mWorld = 0;
+            int maxBoxes = 0;
+            int maxQuads = 0;
+            int maxCandidates = 0;
 
             // Pass 2 (mirrors :1092-1150): fill, remapping every Detail/*Start by the running pool offset.
             for (int r = 0; r < winners; r++)
@@ -115,7 +137,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
                 BlockView block = BlockViews[BlockId[r]];
                 int li = LocalIndex[r];
                 int detail = block.Detail[li];
-                int worldStartSrc = block.WorldStart[li], worldCount = block.WorldCount[li];
+                int worldStartSrc = block.WorldStart[li];
+                int worldCount = block.WorldCount[li];
                 int worldStart = mWorld;
                 if (worldCount > 0)
                 {
@@ -126,7 +149,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
 
                 if (block.Kinds[li] == SymbolPlacementKind.Point)
                 {
-                    int quadStartSrc = block.PointQuadStart[detail], quadCount = block.PointQuadCount[detail];
+                    int quadStartSrc = block.PointQuadStart[detail];
+                    int quadCount = block.PointQuadCount[detail];
                     int quadStart = mQuad;
                     if (quadCount > 0) CopyView(block.Quads, quadStartSrc, dstQuads, mQuad, quadCount);
                     mQuad += quadCount;
@@ -142,18 +166,21 @@ namespace MapRenderer.Unity.Jobs.Symbols
                 }
                 else
                 {
-                    int glyphStartSrc = block.CurvedGlyphStart[detail], glyphCount = block.CurvedGlyphCount[detail];
+                    int glyphStartSrc = block.CurvedGlyphStart[detail];
+                    int glyphCount = block.CurvedGlyphCount[detail];
                     int glyphStart = mGlyph;
                     if (glyphCount > 0) CopyView(block.Glyphs, glyphStartSrc, dstGlyphs, mGlyph, glyphCount);
                     mGlyph += glyphCount;
 
-                    int anchorStartSrc = block.CurvedAnchorStart[detail], anchorCount = block.CurvedAnchorCount[detail];
+                    int anchorStartSrc = block.CurvedAnchorStart[detail];
+                    int anchorCount = block.CurvedAnchorCount[detail];
                     int anchorStart = mAnchor;
                     if (anchorCount > 0) CopyView(block.Anchors, anchorStartSrc, dstAnchors, mAnchor, anchorCount);
                     mAnchor += anchorCount;
 
                     // No count > 0 guard here: fadeCount = anchorCount + 1 >= 1 always.
-                    int fadeStartSrc = block.CurvedAnchorFadeStart[detail], fadeCount = anchorCount + 1;
+                    int fadeStartSrc = block.CurvedAnchorFadeStart[detail];
+                    int fadeCount = anchorCount + 1;
                     int fadeStart = mFade;
                     CopyView(block.AnchorFadeIds, fadeStartSrc, dstFades, mFade, fadeCount);
                     mFade += fadeCount;

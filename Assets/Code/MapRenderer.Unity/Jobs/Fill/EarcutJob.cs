@@ -99,7 +99,10 @@ namespace MapRenderer.Unity.Jobs.Fill
         private readonly struct EarGrid
         {
             public readonly int Dim;
-            public readonly double MinX, MinY, InvCellW, InvCellH;
+            public readonly double MinX;
+            public readonly double MinY;
+            public readonly double InvCellW;
+            public readonly double InvCellH;
             public readonly NativeArray<int> CellStart;
             public readonly NativeArray<int> CellItems;
             public readonly NativeList<int> Overflow;
@@ -121,8 +124,10 @@ namespace MapRenderer.Unity.Jobs.Fill
         {
             int dim = math.clamp((int)math.ceil(math.sqrt(total)), 1, 256);
 
-            double minX = double.MaxValue, minY = double.MaxValue;
-            double maxX = double.MinValue, maxY = double.MinValue;
+            double minX = double.MaxValue;
+            double minY = double.MaxValue;
+            double maxX = double.MinValue;
+            double maxY = double.MinValue;
             for (int i = 0; i < total; i++)
             {
                 double2 vi = Verts[i];
@@ -237,7 +242,8 @@ namespace MapRenderer.Unity.Jobs.Fill
                     {
                         if (BridgeValid(holeLM, scan, mergedRingStart, mergedRingCount, holeStart, holeCount))
                         {
-                            double bdx = Verts[scan].x - Verts[holeLM].x, bdy = Verts[scan].y - Verts[holeLM].y;
+                            double bdx = Verts[scan].x - Verts[holeLM].x;
+                            double bdy = Verts[scan].y - Verts[holeLM].y;
                             double bd  = bdx * bdx + bdy * bdy;
                             if (bd < bestDist) { bestDist = bd; bestCand = scan; }
                         }
@@ -318,7 +324,9 @@ namespace MapRenderer.Unity.Jobs.Fill
 
             // Refresh ear status for this ring's own live vertices on entry.
             {
-                int p = start, guard = 0, bound = remaining + 8;
+                int p = start;
+                int guard = 0;
+                int bound = remaining + 8;
                 do
                 {
                     if (!Removed[p]) IsEar[p] = ComputeIsEar(total, grid, p);
@@ -331,7 +339,8 @@ namespace MapRenderer.Unity.Jobs.Fill
             {
                 if (Removed[start])
                 {
-                    int s = start, guard = 0;
+                    int s = start;
+                    int guard = 0;
                     while (Removed[s] && guard < total + 8) { s = Next[s]; guard++; }
                     start = s;
                 }
@@ -348,7 +357,8 @@ namespace MapRenderer.Unity.Jobs.Fill
 
                     if (IsEar[v])
                     {
-                        int p = Prev[v], n = Next[v];
+                        int p = Prev[v];
+                        int n = Next[v];
                         OutIndices[outBase + outCount]     = p;
                         OutIndices[outBase + outCount + 1] = v;
                         OutIndices[outBase + outCount + 2] = n;
@@ -376,7 +386,9 @@ namespace MapRenderer.Unity.Jobs.Fill
                             if (!didFullRefresh)
                             {
                                 // First stall: full refresh of this ring's remaining ear statuses.
-                                int p2 = v, guard2 = 0, bound2 = remaining + 8;
+                                int p2 = v;
+                                int guard2 = 0;
+                                int bound2 = remaining + 8;
                                 do
                                 {
                                     if (!Removed[p2]) IsEar[p2] = ComputeIsEar(total, grid, p2);
@@ -425,8 +437,12 @@ namespace MapRenderer.Unity.Jobs.Fill
             // order (matches managed's tie-break), with the Area2>0 swap enforcing CCW-on-screen output.
             if (remaining == 3)
             {
-                int t0 = -1, t1 = -1, t2 = -1;
-                int p3 = start, guard3 = 0, bound3 = remaining + 8;
+                int t0 = -1;
+                int t1 = -1;
+                int t2 = -1;
+                int p3 = start;
+                int guard3 = 0;
+                int bound3 = remaining + 8;
                 do
                 {
                     if (!Removed[p3])
@@ -643,7 +659,10 @@ namespace MapRenderer.Unity.Jobs.Fill
                 if (!Removed[p])
                 {
                     int q = Next[p];
-                    double px = Verts[p].x, py = Verts[p].y, qx = Verts[q].x, qy = Verts[q].y;
+                    double px = Verts[p].x;
+                    double py = Verts[p].y;
+                    double qx = Verts[q].x;
+                    double qy = Verts[q].y;
                     if ((py > my) != (qy > my))
                     {
                         double ix = px + (my - py) / (qy - py) * (qx - px);
@@ -709,8 +728,10 @@ namespace MapRenderer.Unity.Jobs.Fill
             for (int iter = 0; iter < mergedRingCount * 2; iter++)
             {
                 int nc = Next[cur];
-                double ax = Verts[cur].x, ay = Verts[cur].y;
-                double bx = Verts[nc].x,  by = Verts[nc].y;
+                double ax = Verts[cur].x;
+                double ay = Verts[cur].y;
+                double bx = Verts[nc].x;
+                double by = Verts[nc].y;
 
                 bool straddles = (ay > hy) != (by > hy);
                 if (straddles)
@@ -740,7 +761,8 @@ namespace MapRenderer.Unity.Jobs.Fill
                     cur = mergedRingStart;
                     for (int iter = 0; iter < mergedRingCount * 2; iter++)
                     {
-                        double qx = Verts[cur].x, qy = Verts[cur].y;
+                        double qx = Verts[cur].x;
+                        double qy = Verts[cur].y;
                         if (cur != holeLM && math.abs(qy - hy) < 1e-10 && qx > candX && qx < hx)
                         { bestVert = cur; candX = qx; }
                         cur = Next[cur];
@@ -755,7 +777,8 @@ namespace MapRenderer.Unity.Jobs.Fill
                     cur = mergedRingStart;
                     for (int iter = 0; iter < mergedRingCount * 2; iter++)
                     {
-                        double qx = Verts[cur].x, qy = Verts[cur].y;
+                        double qx = Verts[cur].x;
+                        double qy = Verts[cur].y;
                         if (qx > mx && qx < hx && cur != holeLM)
                         {
                             double sHMQ = (mx - hx) * (qy - hy);
@@ -798,7 +821,8 @@ namespace MapRenderer.Unity.Jobs.Fill
                 cur = mergedRingStart;
                 for (int iter = 0; iter < mergedRingCount; iter++)
                 {
-                    double dx = Verts[cur].x - hx, dy = Verts[cur].y - hy;
+                    double dx = Verts[cur].x - hx;
+                    double dy = Verts[cur].y - hy;
                     double d  = dx * dx + dy * dy;
                     if (d < bestDist) { bestDist = d; bestVert = cur; }
                     cur = Next[cur];
@@ -828,7 +852,8 @@ namespace MapRenderer.Unity.Jobs.Fill
         {
             if (Removed[i] || i == p || i == v || i == n) return false;
             if (IsBridgeCopy[i]) return false;
-            double vxi = Verts[i].x, vyi = Verts[i].y;
+            double vxi = Verts[i].x;
+            double vyi = Verts[i].y;
             if ((vxi == a.x && vyi == a.y) || (vxi == b.x && vyi == b.y) || (vxi == c.x && vyi == c.y))
                 return false;
             return PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi);
@@ -841,18 +866,25 @@ namespace MapRenderer.Unity.Jobs.Fill
         private bool ComputeIsEar(int total, in EarGrid grid, int v)
         {
             if (Removed[v]) return false;
-            int p = Prev[v], n = Next[v];
+            int p = Prev[v];
+            int n = Next[v];
             if (Removed[p] || Removed[n]) return false;
 
-            double2 a = Verts[p], b = Verts[v], c = Verts[n];
+            double2 a = Verts[p];
+            double2 b = Verts[v];
+            double2 c = Verts[n];
 
             double triArea2 = Area2(a, b, c);
             if (triArea2 > 1e-10) return false; // reflex vertex
 
-            double triMinX = math.min(a.x, math.min(b.x, c.x)), triMaxX = math.max(a.x, math.max(b.x, c.x));
-            double triMinY = math.min(a.y, math.min(b.y, c.y)), triMaxY = math.max(a.y, math.max(b.y, c.y));
-            int cx0 = grid.CellX(triMinX), cx1 = grid.CellX(triMaxX);
-            int cy0 = grid.CellY(triMinY), cy1 = grid.CellY(triMaxY);
+            double triMinX = math.min(a.x, math.min(b.x, c.x));
+            double triMaxX = math.max(a.x, math.max(b.x, c.x));
+            double triMinY = math.min(a.y, math.min(b.y, c.y));
+            double triMaxY = math.max(a.y, math.max(b.y, c.y));
+            int cx0 = grid.CellX(triMinX);
+            int cx1 = grid.CellX(triMaxX);
+            int cy0 = grid.CellY(triMinY);
+            int cy1 = grid.CellY(triMaxY);
             long overlappedCells = (long)(cx1 - cx0 + 1) * (cy1 - cy0 + 1);
 
             // Wide-AABB guard: fall back to the linear scan rather than walk more cells than a
@@ -873,7 +905,8 @@ namespace MapRenderer.Unity.Jobs.Fill
                 for (int gx = cx0; gx <= cx1; gx++)
                 {
                     int cell = rowBase + gx;
-                    int start = grid.CellStart[cell], end = grid.CellStart[cell + 1];
+                    int start = grid.CellStart[cell];
+                    int end = grid.CellStart[cell + 1];
                     for (int k = start; k < end; k++)
                     {
                         _candidateVisits++;
@@ -904,7 +937,8 @@ namespace MapRenderer.Unity.Jobs.Fill
         /// geometry in this convention, for both convex and reflex a.</summary>
         private bool LocallyInside(int a, int b)
         {
-            int ap = Prev[a], an = Next[a];
+            int ap = Prev[a];
+            int an = Next[a];
 
             bool aConvex = Area2(Verts[ap], Verts[a], Verts[an]) <= 0.0;
             bool insidePrevEdge = Area2(Verts[ap], Verts[a], Verts[b]) <= 0.0;
@@ -917,8 +951,10 @@ namespace MapRenderer.Unity.Jobs.Fill
         /// <see cref="FindBridgeVertex"/> only.</summary>
         private bool SectorContainsSector(int m, int p)
         {
-            int mp = Prev[m], mn = Next[m];
-            int pp = Prev[p], pn = Next[p];
+            int mp = Prev[m];
+            int mn = Next[m];
+            int pp = Prev[p];
+            int pn = Next[p];
             return Area2(Verts[mp], Verts[m], Verts[pp]) < 0.0 &&
                    Area2(Verts[pn], Verts[m], Verts[mn]) < 0.0;
         }
@@ -962,10 +998,14 @@ namespace MapRenderer.Unity.Jobs.Fill
             double o3 = Area2(Verts[p2], Verts[q2], Verts[p1]);
             double o4 = Area2(Verts[p2], Verts[q2], Verts[q1]);
 
-            bool s1 = o1 > 0.0, s1n = o1 < 0.0;
-            bool s2 = o2 > 0.0, s2n = o2 < 0.0;
-            bool s3 = o3 > 0.0, s3n = o3 < 0.0;
-            bool s4 = o4 > 0.0, s4n = o4 < 0.0;
+            bool s1 = o1 > 0.0;
+            bool s1n = o1 < 0.0;
+            bool s2 = o2 > 0.0;
+            bool s2n = o2 < 0.0;
+            bool s3 = o3 > 0.0;
+            bool s3n = o3 < 0.0;
+            bool s4 = o4 > 0.0;
+            bool s4n = o4 < 0.0;
 
             if ((s1 != s2 || s1n != s2n) && (s3 != s4 || s3n != s4n)) return true; // general case
 
@@ -980,7 +1020,12 @@ namespace MapRenderer.Unity.Jobs.Fill
         /// <summary>Given p, q, r already collinear, is q within the bounding box of segment p-r?</summary>
         private bool OnSegment(int p, int q, int r)
         {
-            double px = Verts[p].x, py = Verts[p].y, qx = Verts[q].x, qy = Verts[q].y, rx = Verts[r].x, ry = Verts[r].y;
+            double px = Verts[p].x;
+            double py = Verts[p].y;
+            double qx = Verts[q].x;
+            double qy = Verts[q].y;
+            double rx = Verts[r].x;
+            double ry = Verts[r].y;
             return qx <= math.max(px, rx) && qx >= math.min(px, rx) &&
                    qy <= math.max(py, ry) && qy >= math.min(py, ry);
         }
@@ -1006,7 +1051,10 @@ namespace MapRenderer.Unity.Jobs.Fill
         /// or cand are skipped. <see cref="BridgeValid"/> calls it for the merged ring and the hole's own ring.</summary>
         private bool BridgeCrossesRing(int holeLM, int cand, int ringStart, int ringCount)
         {
-            double ax = Verts[holeLM].x, ay = Verts[holeLM].y, bx = Verts[cand].x, by = Verts[cand].y;
+            double ax = Verts[holeLM].x;
+            double ay = Verts[holeLM].y;
+            double bx = Verts[cand].x;
+            double by = Verts[cand].y;
             int c = ringStart;
             for (int i = 0; i < ringCount; i++)
             {

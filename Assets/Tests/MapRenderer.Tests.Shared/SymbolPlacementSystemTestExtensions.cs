@@ -23,8 +23,8 @@ namespace MapRenderer.Tests
     internal static class SymbolPlacementSystemTestExtensions
     {
         /// <summary>
-        /// Ticks <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry with a
-        /// throwaway plan, which is safe because <c>GatherIntoMirror</c> copies before <c>Tick</c> returns. It
+        /// Updates <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry with a
+        /// throwaway plan, which is safe because <c>GatherIntoMirror</c> copies before <c>Update</c> returns. It
         /// allocates per call; use the fixture-owned-plan overload inside <c>Is.Not.AllocatingGCMemory</c> or
         /// where the gather memo needs a stable plan identity:
         /// <see cref="TickSymbols(SymbolPlacementSystem, in SceneFrame, TestSymbolPlan, SymbolTileBuffer, GlyphAtlasTexture, float, IReadOnlyList{SymbolRenderLayer}, Texture2D)"/>.
@@ -35,7 +35,7 @@ namespace MapRenderer.Tests
             IReadOnlyList<SymbolRenderLayer> symbolLayers = null, Texture2D spriteTexture = null)
         {
             using var plan = new TestSymbolPlan(projection);
-            system.Tick(in frame, plan.Build(buffer, SlotCountFor(buffer)), atlas, deltaTime,
+            system.Update(in frame, plan.Build(buffer, SlotCountFor(buffer)), atlas, deltaTime,
                 symbolLayers, spriteTexture);
         }
 
@@ -47,12 +47,12 @@ namespace MapRenderer.Tests
             TestSymbolPlan plan, SymbolTileBuffer buffer, GlyphAtlasTexture atlas,
             float deltaTime = float.PositiveInfinity,
             IReadOnlyList<SymbolRenderLayer> symbolLayers = null, Texture2D spriteTexture = null)
-            => system.Tick(in frame, plan.Build(buffer, SlotCountFor(buffer)), atlas, deltaTime,
+            => system.Update(in frame, plan.Build(buffer, SlotCountFor(buffer)), atlas, deltaTime,
                 symbolLayers, spriteTexture);
 
         // ── Staged collision boxes ───────────────────────────────────────────────────────────────────
 
-        /// <summary>Non-local invariant: the last <c>Tick</c>'s staged collision boxes, valid over
+        /// <summary>Non-local invariant: the last <c>Update</c>'s staged collision boxes, valid over
         /// <c>[0, SymbolPlacementSystem.LastBoxCount)</c> — lives here, not on the system, for the same
         /// reason the world-slot forwards below do (a "Test surface" DATA accessor is the shape the
         /// conventions bar from a production class; <c>LastBoxCount</c> stays there because it's a

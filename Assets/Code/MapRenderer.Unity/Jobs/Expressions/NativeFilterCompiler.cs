@@ -202,7 +202,8 @@ namespace MapRenderer.Unity.Jobs.Expressions
         private static bool TryEmitCompare(IReadOnlyList<JsonValue> items, string comparisonOperator, Builder b)
         {
             if (items.Count != 3) return false;
-            JsonValue a = items[1], c = items[2];
+            JsonValue a = items[1];
+            JsonValue c = items[2];
 
             bool aIsGet = IsGetNode(a);
             bool cIsGet = IsGetNode(c);
@@ -263,7 +264,8 @@ namespace MapRenderer.Unity.Jobs.Expressions
         private static bool TryEmitEq(IReadOnlyList<JsonValue> items, bool negate, Builder b)
         {
             if (items.Count != 3) return false;
-            JsonValue a = items[1], c = items[2];
+            JsonValue a = items[1];
+            JsonValue c = items[2];
             bool aGeom = IsGeometryTypeNode(a);
             bool cGeom = IsGeometryTypeNode(c);
 
@@ -302,7 +304,10 @@ namespace MapRenderer.Unity.Jobs.Expressions
         {
             // ["match", input, label, output, default] — exactly one arm; a multi-arm match stays managed.
             if (items.Count != 5) return false;
-            JsonValue input = items[1], label = items[2], output = items[3], fallback = items[4];
+            JsonValue input = items[1];
+            JsonValue label = items[2];
+            JsonValue output = items[3];
+            JsonValue fallback = items[4];
 
             if (!IsGetNode(input) && !IsGeometryTypeNode(input)) return false; // computed input stays managed
             if (output.Kind != JsonKind.Bool || fallback.Kind != JsonKind.Bool) return false;

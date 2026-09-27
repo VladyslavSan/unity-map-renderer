@@ -52,7 +52,8 @@ namespace MapRenderer.Unity.Jobs.Fill
 
             int outerLen  = perPolyOuterCount[pi];
             int holeCount = PolyHoleCount[pi];
-            int sOff = workOffsets[pi], sLen = workOffsets[pi + 1] - sOff;
+            int sOff = workOffsets[pi];
+            int sLen = workOffsets[pi + 1] - sOff;
 
             new EarcutJob
             {

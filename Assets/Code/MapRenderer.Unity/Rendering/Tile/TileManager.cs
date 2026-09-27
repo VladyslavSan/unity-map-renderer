@@ -63,7 +63,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private static readonly ProfilerMarker PmMeshDataAllocate =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.MeshDataAllocate);
 
-        /// <summary>Tile-selection knobs from MapView's serialized fields, read live each <see cref="Tick"/> — not snapshotted.</summary>
+        /// <summary>Tile-selection knobs from MapView's serialized fields, read live each <see cref="Update"/> — not snapshotted.</summary>
         public struct TileSelectionConfig
         {
             /// <summary>The framing viewport in pixels — <c>(refH · liveAspect, refH)</c>, not raw live px
@@ -76,7 +76,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// <summary>Per-frame mesh-upload budget — unlike the budgets below, 0 blocks consume rather than uncapping it.</summary>
             public int MaxConsumesPerTick;
 
-            /// <summary>Max tiles admitted per Tick (default 2), capping mesh-build fan-out. 0 means uncapped.</summary>
+            /// <summary>Max tiles admitted per Update (default 2), capping mesh-build fan-out. 0 means uncapped.</summary>
             public int MaxMeshBuildsPerTick;
 
             /// <summary>Per-frame vertex budget for consume — the mesh that crosses it still finishes. 0 means uncapped.</summary>
@@ -282,7 +282,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>The normalized source-id a rendered style layer draws from (null → "").</summary>
         private static string SourceIdOf(StyleLayer layer) => layer?.Source ?? string.Empty;
 
-        /// <summary>Dense global material indices whose style layer's source is <paramref name="sourceId"/> — shared by the kick, cache-transfer, and Tick probe.</summary>
+        /// <summary>Dense global material indices whose style layer's source is <paramref name="sourceId"/> — shared by the kick, cache-transfer, and Update probe.</summary>
         private void ComputeDenseLayerIds(string sourceId, List<int> into)
         {
             into.Clear();
@@ -304,10 +304,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Tile render backend (Entities, BRG, or GameObject) — constructed in SetSources ────
         private Backend.ITileRenderBackend _instanced; // null only before SetSources / after Dispose
 
-        /// <summary>The launch-time projection, cached each Tick — null means WebMercator; it's launch-constant, so any Tick's value is correct.</summary>
+        /// <summary>The launch-time projection, cached each Update — null means WebMercator; it's launch-constant, so any Update's value is correct.</summary>
         private IProjection _projection;
 
-        /// <summary>The live fill tile-buffer clip, cached each Tick — unlike <c>_projection</c> it can change at runtime, which is why <see cref="TickCore"/> diffs it.</summary>
+        /// <summary>The live fill tile-buffer clip, cached each Update — unlike <c>_projection</c> it can change at runtime, which is why <see cref="UpdateCore"/> diffs it.</summary>
         private TileBufferClip _bufferClip;
         /// <summary>The visible-tile selection seam (default <see cref="FrustumTileSelector"/>), owning the per-tick request/release transition.</summary>
         internal IVisibleTileSelector Selector { get; set; }
@@ -321,13 +321,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new();
         private readonly List<LoadedKey>                   _toRelease = new(32);
 
-        /// <summary>Deferred-release queue — <see cref="Tick"/> enqueues records leaving cover; <see cref="DrainReleaseQueue"/> frees up to the per-Tick budget.</summary>
+        /// <summary>Deferred-release queue — <see cref="Update"/> enqueues records leaving cover; <see cref="DrainReleaseQueue"/> frees up to the per-Update budget.</summary>
         private readonly Queue<LoadedKey> _releaseQueue = new(64);
 
         /// <summary>Dedups <c>_releaseQueue</c> and lets <see cref="PumpPending"/> skip an already-condemned record. Pre-sized to avoid a lazy allocation.</summary>
         private readonly HashSet<LoadedKey> _releaseQueued = new(64);
 
-        /// <summary>Keys wanting to load but not yet admitted, kept in priority order (re-sorted each Tick by
+        /// <summary>Keys wanting to load but not yet admitted, kept in priority order (re-sorted each Update by
         /// <see cref="AdmitFromDesired"/>). <c>_desiredSet</c> mirrors this for O(1) membership; both pre-sized.</summary>
         private readonly List<LoadedKey>    _desired    = new(64);
         private readonly HashSet<LoadedKey> _desiredSet = new(64);
@@ -367,7 +367,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>The active style's opaque cache-key token, set by MapView in SetStyle.</summary>
         internal StyleToken CurrentStyle { get; set; } = StyleToken.Default;
 
-        /// <summary>Prepared-cache hit count (telemetry only) — forwards to the cache's own counter, bumped by the Tick probe on a hit.</summary>
+        /// <summary>Prepared-cache hit count (telemetry only) — forwards to the cache's own counter, bumped by the Update probe on a hit.</summary>
         internal int PreparedCacheHits => _prepared.Hits;
 
         /// <summary>Prepared-cache miss count (see <see cref="PreparedCacheHits"/>).</summary>
@@ -648,32 +648,32 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Number of tiles released while their fetch was still in-flight.</summary>
         internal int ReleasedMidFetchCount { get; private set; }
 
-        /// <summary>Times the full cover recompute ran in the most recent <see cref="Tick"/>, as opposed to an early-out.</summary>
+        /// <summary>Times the full cover recompute ran in the most recent <see cref="Update"/>, as opposed to an early-out.</summary>
         internal int CoverRecomputesLastTick { get; private set; }
 
-        /// <summary>Tiles newly started in the most recent <see cref="Tick"/> — incremented once
+        /// <summary>Tiles newly started in the most recent <see cref="Update"/> — incremented once
         /// per tile, at its first kick. This is what <see cref="Config.MaxMeshBuildsPerTick"/> bounds.</summary>
         internal int TileBuildsStartedLastTick { get; private set; }
 
         /// <summary><see cref="Mesh.MeshDataArray"/>s allocated by the graph arm's write step in the most recent pass — one per non-empty layer.</summary>
         internal long MeshDataArraysAllocatedLastKick { get; private set; }
 
-        /// <summary>Sum of layer-mesh vertex counts consumed in the most recent <see cref="Tick"/>.</summary>
+        /// <summary>Sum of layer-mesh vertex counts consumed in the most recent <see cref="Update"/>.</summary>
         internal int VerticesConsumedLastTick { get; private set; }
 
-        /// <summary>Tiles that reached <c>Built</c> in the most recent <see cref="Tick"/>.</summary>
+        /// <summary>Tiles that reached <c>Built</c> in the most recent <see cref="Update"/>.</summary>
         internal int TilesConsumedLastTick { get; private set; }
 
-        /// <summary>Layer meshes uploaded and registered in the most recent <see cref="Tick"/> — the per-frame mesh-count budget observable.</summary>
+        /// <summary>Layer meshes uploaded and registered in the most recent <see cref="Update"/> — the per-frame mesh-count budget observable.</summary>
         internal int MeshesConsumedLastTick { get; private set; }
 
-        /// <summary>(Tile, source) records fully released in the most recent <see cref="Tick"/>.</summary>
+        /// <summary>(Tile, source) records fully released in the most recent <see cref="Update"/>.</summary>
         internal int TilesReleasedLastTick { get; private set; }
 
         /// <summary>Current deferred-release backlog depth (records awaiting <see cref="DrainReleaseQueue"/>).</summary>
         internal int ReleaseQueueDepth => _releaseQueue.Count;
 
-        /// <summary>Pull-based telemetry, refreshed at the end of every <see cref="Tick"/> whether or not anyone
+        /// <summary>Pull-based telemetry, refreshed at the end of every <see cref="Update"/> whether or not anyone
         /// reads it — never read by the request/release decision. Returned by reference, no copy or boxing
         /// (<c>docs/telemetry-design.md</c>).</summary>
         internal ref readonly TileTelemetrySnapshot Telemetry => ref _telemetry;
@@ -685,7 +685,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(_cover, _coverStatsX, _coverStatsY);
 
             // One shared pass for Pending + ConsumeBacklog — only a completed Write step, unconsumed, counts as backlog.
-            int pending = 0, backlog = 0, prologue = 0, graphMeasure = 0, graphWrite = 0;
+            int pending = 0;
+            int backlog = 0;
+            int prologue = 0;
+            int graphMeasure = 0;
+            int graphWrite = 0;
             foreach (var kv in _loaded)
             {
                 LoadedTile lt = kv.Value;
@@ -740,7 +744,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>The live GameObject renderer, or null when not on the GameObject backend / before <see cref="SetSources"/>.</summary>
         internal GOBackend.TileRenderer GameObjectRenderer => _instanced as GOBackend.TileRenderer;
 
-        /// <summary>Invalidates the cached cover-selection key so the next <see cref="Tick"/> re-selects the
+        /// <summary>Invalidates the cached cover-selection key so the next <see cref="Update"/> re-selects the
         /// cover. Called when the camera is re-wired (<see cref="Map.View.SetCamera"/>).</summary>
         public void InvalidateCover() => _coverGate.Invalidate();
 
@@ -769,7 +773,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// the union produced geometry. N=1 ⇒ identical to a single-record (built + has-geometry) check.</summary>
         internal bool TryGetBuiltTile(TileId id)
         {
-            bool any = false, anyGeom = false;
+            bool any = false;
+            bool anyGeom = false;
             foreach (var kv in _loaded)
             {
                 if (!kv.Key.Tile.Equals(id)) continue;
@@ -837,16 +842,16 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
-        /// <summary>One frame of the tile loop — a thin shell over <see cref="TickCore"/> so telemetry
+        /// <summary>One frame of the tile loop — a thin shell over <see cref="UpdateCore"/> so telemetry
         /// refreshes after every return from it, early returns included (a dirty-frame-only update would
-        /// freeze when the map goes still). A throw from <see cref="TickCore"/> skips the refresh.</summary>
-        public void Tick(CameraProperties cam, TileSelectionConfig cfg)
+        /// freeze when the map goes still). A throw from <see cref="UpdateCore"/> skips the refresh.</summary>
+        public void Update(CameraProperties cam, TileSelectionConfig cfg)
         {
-            TickCore(cam, cfg);
+            UpdateCore(cam, cfg);
             _telemetry = CaptureTelemetry();
         }
 
-        private void TickCore(CameraProperties cam, TileSelectionConfig cfg)
+        private void UpdateCore(CameraProperties cam, TileSelectionConfig cfg)
         {
             if (Selector == null) return;
 
@@ -875,7 +880,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // The cover recompute is gated on _coverGate alone — a clean camera must not re-run the descent.
             if (_coverGate.IsDirty)
             {
-                CoverRecomputesLastTick = 1; // The full recompute (descent + diff) runs this Tick
+                CoverRecomputesLastTick = 1; // The full recompute (descent + diff) runs this Update
 
                 // Not `using var` — closed explicitly so CoverSelect attribution excludes admission/pump/drain costs.
                 var sCoverSel = PmCoverSelect.Auto();
@@ -936,22 +941,22 @@ namespace MapRenderer.Unity.Rendering.Tile
                 sCoverSel.Dispose();
             }
 
-            // Runs every Tick, clean or dirty — admission is not gated on _coverGate, so entries drain once the camera stills.
+            // Runs every Update, clean or dirty — admission is not gated on _coverGate, so entries drain once the camera stills.
             AdmitFromDesired(in priorityCtx, cfg.MaxConcurrentTileLoads);
             PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick, in priorityCtx);
 
-            // Drain a budgeted slice of the deferred-release backlog EVERY Tick, after admission/pump.
+            // Drain a budgeted slice of the deferred-release backlog EVERY Update, after admission/pump.
             DrainReleaseQueue(cfg.MaxReleasesPerTick);
         }
 
         /// <summary>Zeroes the six per-tick counters — cover recomputes, builds started, tiles/vertices/meshes
-        /// consumed, tiles released — at the top of <see cref="TickCore"/>. Five are read-only telemetry;
+        /// consumed, tiles released — at the top of <see cref="UpdateCore"/>. Five are read-only telemetry;
         /// <see cref="TileBuildsStartedLastTick"/> also bounds <see cref="PumpPending"/>'s build cap, over
-        /// the whole Tick rather than just the pump — a stray charge before <c>PumpPending</c> fails safe
+        /// the whole Update rather than just the pump — a stray charge before <c>PumpPending</c> fails safe
         /// (admits nothing) instead of silently doubling the cap, though no tooth tells which path charged it.</summary>
         private void ResetPerTickCounters()
         {
-            // A throw before PumpPending still clears the previous Tick's counts, rather than retaining them.
+            // A throw before PumpPending still clears the previous Update's counts, rather than retaining them.
             CoverRecomputesLastTick   = 0;
             TileBuildsStartedLastTick = 0;
             VerticesConsumedLastTick  = 0;
@@ -1112,7 +1117,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Kicks each tile's mesh build then consumes it, bounded by the mesh-build/consume/vertex
-        /// budgets — whichever binds first stops it for this Tick. Sorted by <paramref name="priorityCtx"/>, the paint-order seam (<c>docs/tile-pipeline-design.md</c>).</summary>
+        /// budgets — whichever binds first stops it for this Update. Sorted by <paramref name="priorityCtx"/>, the paint-order seam (<c>docs/tile-pipeline-design.md</c>).</summary>
         private int PumpPending(
             CameraProperties cam,
             int              maxConsumesPerTick,
@@ -1122,7 +1127,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             using var sFetchPoll = PmFetchPoll.Auto();
 
-            // The four consume/build counters reset in ResetPerTickCounters() (once per Tick); this field's
+            // The four consume/build counters reset in ResetPerTickCounters() (once per Update); this field's
             // window is the KICK pass — the suffix says so — and DrainMeshBuilds also accumulates into it.
             MeshDataArraysAllocatedLastKick = 0;
 
@@ -1203,7 +1208,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     MeshesConsumedLastTick   =  meshesConsumed;
                     VerticesConsumedLastTick =  verticesConsumed;
                     if (complete) TilesConsumedLastTick++;
-                    else pending++; // tile partially consumed — resume next Tick
+                    else pending++; // tile partially consumed — resume next Update
                     _loaded[key] = lt;
                     continue;
                 }
@@ -1246,7 +1251,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                     if (TileBuildsStartedLastTick >= buildCap)
                     {
-                        // Cap reached — the record keeps its reference until a later Tick kicks it.
+                        // Cap reached — the record keeps its reference until a later Update kicks it.
                         pending++;
                         continue;
                     }
@@ -1449,7 +1454,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Resumable per-mesh consume: uploads and registers layers from <see cref="LoadedTile.ConsumeCursor"/>
-        /// until a budget binds or the tile finishes. Returns true when fully consumed, false to resume next Tick.</summary>
+        /// until a budget binds or the tile finishes. Returns true when fully consumed, false to resume next Update.</summary>
         private bool ConsumeMeshBuild(
             TileId id, ref LoadedTile lt, MeshDataPayload[] payloads, int meshBudget, int vertBudget,
             out int meshesConsumed, out int vertsConsumed)
@@ -1526,7 +1531,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Marks a tile fully consumed and clears its build state — the single disposal site for
-        /// <see cref="LoadedTile.Graph"/>; disposing earlier would leave a partial tile whose null Graph the next Tick dereferences.</summary>
+        /// <see cref="LoadedTile.Graph"/>; disposing earlier would leave a partial tile whose null Graph the next Update dereferences.</summary>
         private static void FinishConsume(ref LoadedTile lt)
         {
             lt.Graph?.Dispose();
@@ -1569,7 +1574,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 payloads[li]?.Dispose();
         }
 
-        /// <summary>Releases up to <paramref name="budget"/> queued records this Tick (0 = uncapped). Each
+        /// <summary>Releases up to <paramref name="budget"/> queued records this Update (0 = uncapped). Each
         /// key is re-validated — one back in cover, or already cleared by a restyle, is skipped without spending budget.</summary>
         private void DrainReleaseQueue(int budget)
         {
@@ -1659,7 +1664,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Admits one desired key: probes the cache (a hit builds synchronously without occupying
-        /// an active slot), else kicks a fetch. Shared by the capped per-Tick gate and the uncapped drain.</summary>
+        /// an active slot), else kicks a fetch. Shared by the capped per-Update gate and the uncapped drain.</summary>
         private void AdmitTile(TileId id, int slot, IProjection projection)
         {
             var key = new LoadedKey(id, slot);
@@ -1738,7 +1743,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Admits from the head of <see cref="_desired"/> while the active set stays under
-        /// <paramref name="cap"/> — runs every Tick, or a cap reached mid-recompute would stall once <c>_coverGate</c> goes clean.</summary>
+        /// <paramref name="cap"/> — runs every Update, or a cap reached mid-recompute would stall once <c>_coverGate</c> goes clean.</summary>
         private void AdmitFromDesired(in TilePriorityContext priorityCtx, int cap)
         {
             if (_desired.Count == 0) return;

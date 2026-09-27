@@ -3,9 +3,9 @@
 // Split by the CS0104 bare-`Object` collision, then by content. No bare-Object user is in this file.
 //
 // Contents:
-//   MapPitchedGlyphSizeTests          — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback.
+//   MapPitchedGlyphSizeTests          — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Update), off-screen GPU render + CPU readback.
 //   DevicePixelRatioSnapshotTests     — Unity EditMode only — real MapCamera + Camera/RenderTexture, off-screen GPU render + CPU readback.
-//   MapPitchedGlyphSizeTiltZeroTests  — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader.
+//   MapPitchedGlyphSizeTiltZeroTests  — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Update + the real Map/Symbol/TextWorld shader.
 
 using System.Collections.Generic;
 using System.Globalization;
@@ -35,7 +35,7 @@ using MapRenderer.Unity.Style.Symbol;
 namespace MapRenderer.Tests.Visual
 {
     // Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real
-    // SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback. NOT registered in
+    // SymbolPlacementSystem.Update), off-screen GPU render + CPU readback. NOT registered in
     // Tools/core-tests/core-tests.csproj.
     //
     // THE SIZE TEETH. Under `*-pitch-alignment: map` a glyph's DRAWN SIZE is a world-metre quantity carried by
@@ -93,7 +93,8 @@ namespace MapRenderer.Tests.Visual
         {
             using var f = OffLookAtSymbolScene.Create(InkRunPose());
 
-            double nearDepth = 0.0, farDepth = 0.0;
+            double nearDepth = 0.0;
+            double farDepth = 0.0;
             foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 GlyphMeasurement[] glyphs = f.Measure(id).Glyphs;
@@ -146,7 +147,8 @@ namespace MapRenderer.Tests.Visual
             const double resolvableExtentPx = 4.0; // below this, ±1 px per edge dominates AND biases upward
             var ratios = new List<double>();
             var depths = new List<double>();
-            double minExtent = double.MaxValue, minAdvance = double.MaxValue;
+            double minExtent = double.MaxValue;
+            double minAdvance = double.MaxValue;
             double maxAdjacentDepthRatio = 1.0;
             var table = new System.Text.StringBuilder();
             table.AppendLine(string.Format(CultureInfo.InvariantCulture,
@@ -192,9 +194,11 @@ namespace MapRenderer.Tests.Visual
                 $"or more, got {ratios.Count}. Below that there is no rendered ratio to read at all and the " +
                 "tooth would be vacuous — escalate rather than lowering the floor.");
 
-            double minR = double.MaxValue, maxR = double.MinValue;
+            double minR = double.MaxValue;
+            double maxR = double.MinValue;
             foreach (double r in ratios) { minR = math.min(minR, r); maxR = math.max(maxR, r); }
-            double minDepth = double.MaxValue, maxDepth = double.MinValue;
+            double minDepth = double.MaxValue;
+            double maxDepth = double.MinValue;
             foreach (double d in depths) { minDepth = math.min(minDepth, d); maxDepth = math.max(maxDepth, d); }
             double resolvedDepthRatio = maxDepth / minDepth;
 
@@ -886,9 +890,9 @@ namespace MapRenderer.Tests.Visual
             using var plan = new TestSymbolPlan(scene.MapCam.Projection);
             try
             {
-                // Duplicated Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in scene.Frame, plan.Build(buffer), glyphAtlas, float.PositiveInfinity, layers);
-                system.Tick(in scene.Frame, plan.Build(buffer), glyphAtlas, float.PositiveInfinity, layers);
+                // Duplicated Update — the collision verdict is harvested one Update late.
+                system.Update(in scene.Frame, plan.Build(buffer), glyphAtlas, float.PositiveInfinity, layers);
+                system.Update(in scene.Frame, plan.Build(buffer), glyphAtlas, float.PositiveInfinity, layers);
                 Assert.AreEqual(1, system.LastQuadCount,
                     $"the single 'A' must place at dpr {scene.MapCam.DevicePixelRatio} (precondition, not the tooth).");
 
@@ -926,7 +930,8 @@ namespace MapRenderer.Tests.Visual
                 $"dpr {dpr}: no ink distinguishable from the background — the label did not render, so its " +
                 "height is not measurable.");
 
-            int minRow = int.MaxValue, maxRow = int.MinValue;
+            int minRow = int.MaxValue;
+            int maxRow = int.MinValue;
             for (int row = 0; row < Size; row++)
             {
                 bool inked = false;
@@ -960,7 +965,8 @@ namespace MapRenderer.Tests.Visual
                 // The ground feature's world size is fixed ONCE, from the dpr-1 camera, and reused verbatim at
                 // dpr 2 — that is what makes it a fixed GROUND quantity rather than a re-derived screen one.
                 double groundWidthMetres;
-                float lineAt1, groundAt1;
+                float lineAt1;
+                float groundAt1;
                 using (var scene1 = BuildScene(Dpr1))
                 {
                     groundWidthMetres = GroundFeatureDevicePx * scene1.MetresPerDevicePx;
@@ -968,7 +974,8 @@ namespace MapRenderer.Tests.Visual
                     groundAt1 = MeasureGroundSpanPx(scene1, snap, groundWidthMetres);
                 }
 
-                float lineAt2, groundAt2;
+                float lineAt2;
+                float groundAt2;
                 using (var scene2 = BuildScene(Dpr2))
                 {
                     double metresPerDevicePxAt1 = groundWidthMetres / GroundFeatureDevicePx;
@@ -1020,7 +1027,10 @@ namespace MapRenderer.Tests.Visual
         {
             int id = ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel;
 
-            double pushedAt1, sceneAt1, pushedAt2, sceneAt2;
+            double pushedAt1;
+            double sceneAt1;
+            double pushedAt2;
+            double sceneAt2;
             // BuildScene asserts the equality; these read the numbers back so the RATIO clause below has both
             // halves at once.
             using (var scene1 = BuildScene(Dpr1))
@@ -1068,14 +1078,16 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(Size, Size);
             try
             {
-                float lineAt1, textAt1;
+                float lineAt1;
+                float textAt1;
                 using (var scene1 = BuildScene(Dpr1))
                 {
                     lineAt1  = MeasureStyledLineWidthPx(scene1, snap);
                     textAt1 = MeasureTextHeightPx(scene1, snap);
                 }
 
-                float lineAt2, textAt2;
+                float lineAt2;
+                float textAt2;
                 using (var scene2 = BuildScene(Dpr2))
                 {
                     lineAt2  = MeasureStyledLineWidthPx(scene2, snap);
@@ -1110,7 +1122,7 @@ namespace MapRenderer.Tests.Visual
     }
 
     // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-    // SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
+    // SymbolPlacementSystem.Update + the real Map/Symbol/TextWorld shader. NOT registered in
     // Tools/core-tests/core-tests.csproj (it renders).
     //
     // THE TILT-ZERO CALIBRATION ARM. Non-obvious why: at tilt 0 every ground point shares ONE view depth, where
@@ -1309,7 +1321,7 @@ namespace MapRenderer.Tests.Visual
         /// Renders the SAME curved symbol twice through ONE scene, camera and
         /// <see cref="SymbolPlacementSystem"/> — once with <c>PitchAlignment = Map</c>, once with
         /// <see cref="AlignmentMode.Auto"/>, which resolves to the screen path — and returns both ink
-        /// signatures. Each Tick is duplicated because the collision verdict is harvested one Tick late.
+        /// signatures. Each Update is duplicated because the collision verdict is harvested one Update late.
         /// </summary>
         private static void Measure(double devicePixelRatio, float roadAngleDeg, bool degenerateUp,
             out InkReading map, out InkReading viewport)
@@ -1396,9 +1408,9 @@ namespace MapRenderer.Tests.Visual
                 featureIndex: 0,
                 tileKey: tileKey);
 
-            // Duplicate Tick — the collision verdict is harvested one Tick late.
-            system.Tick(in frame, plan.Build(buffer), atlas);
-            system.Tick(in frame, plan.Build(buffer), atlas);
+            // Duplicate Update — the collision verdict is harvested one Update late.
+            system.Update(in frame, plan.Build(buffer), atlas);
+            system.Update(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
                 $"tilt-0 precondition ({armName}): the label must stage exactly one quad, got " +
                 $"{system.LastQuadCount}. A zero means it spilled its road (StageCurved's centerArc ± halfSpan " +

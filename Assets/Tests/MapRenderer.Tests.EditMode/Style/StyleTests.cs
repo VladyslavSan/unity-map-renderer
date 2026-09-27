@@ -2420,7 +2420,8 @@ namespace MapRenderer.Tests.Style
             float[] pattern = new float[] { 2f, 1f };
             double widthM = 1.0;
 
-            int onCount = 0, offCount = 0;
+            int onCount = 0;
+            int offCount = 0;
             int totalSamples = 30000;
             for (int i = 0; i < totalSamples; i++)
             {

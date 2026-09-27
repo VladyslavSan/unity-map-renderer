@@ -9,14 +9,18 @@ namespace MapRenderer.Core.Expressions.Ops
         public static Expression Rgb(Expression[] args)
             => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
-                double r = Channel(vals[0]), g = Channel(vals[1]), b = Channel(vals[2]);
+                double r = Channel(vals[0]);
+                double g = Channel(vals[1]);
+                double b = Channel(vals[2]);
                 return Value.OfColor(Color.From255(r, g, b, 1.0));
             }, args, ValueType.Color);
 
         public static Expression Rgba(Expression[] args)
             => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
-                double r = Channel(vals[0]), g = Channel(vals[1]), b = Channel(vals[2]);
+                double r = Channel(vals[0]);
+                double g = Channel(vals[1]);
+                double b = Channel(vals[2]);
                 double a = Alpha(vals[3]);
                 return Value.OfColor(Color.From255(r, g, b, a));
             }, args, ValueType.Color);

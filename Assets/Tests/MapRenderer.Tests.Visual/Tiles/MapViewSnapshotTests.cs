@@ -28,10 +28,12 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapViewSnapshotTests : BaseTestFixture
     {
-        private const int SnapW = 512, SnapH = 512;
+        private const int SnapW = 512;
+        private const int SnapH = 512;
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         private static readonly Color32 Bg32 = new Color32(26, 28, 38, 255);
-        private const float MinFill = 0.05f, MaxFill = 0.95f;
+        private const float MinFill = 0.05f;
+        private const float MaxFill = 0.95f;
         private const int   MinBuckets = 4;
 
 

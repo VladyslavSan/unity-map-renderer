@@ -46,14 +46,12 @@ namespace MapRenderer.App
         private SliderValues _baseline;
         private bool         _baselineInitialised;
 
-        private void Update() => Tick();
-
         /// <summary>
         /// One reconcile pass. <c>internal</c> so EditMode tests can drive it deterministically (the
-        /// MonoBehaviour game loop does not run under the EditMode test runner). Production calls it from
-        /// <see cref="Update"/>; it is not part of the public surface.
+        /// MonoBehaviour game loop does not run under the EditMode test runner) — Unity still calls it as
+        /// the <c>Update()</c> message regardless of access modifier, so it is not part of the public surface.
         /// </summary>
-        internal void Tick()
+        internal void Update()
         {
             // Play-mode only: null-guard until the bootstrapper wires the camera (edit mode has no MapCamera).
             if (Map == null || Map.Camera == null) return;

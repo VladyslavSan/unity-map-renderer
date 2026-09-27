@@ -66,7 +66,9 @@ namespace MapRenderer.Unity.Jobs.Fill
             // return leaves stale; the indexer bounds check is gone in a player.
             int polyCount = perPolyMergedVertexCount.Length;
 
-            int totalMergedVerts = 0, totalIdxCount = 0, totalForceClips = 0;
+            int totalMergedVerts = 0;
+            int totalIdxCount = 0;
+            int totalForceClips = 0;
             for (int pi = 0; pi < polyCount; pi++)
             {
                 totalMergedVerts += perPolyMergedVertexCount[pi];

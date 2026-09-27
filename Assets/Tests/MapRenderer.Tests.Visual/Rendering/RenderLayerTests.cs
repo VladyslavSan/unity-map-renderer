@@ -71,7 +71,10 @@ namespace MapRenderer.Tests.Visual
         private const float LineHalfWidth = 22f;  // line half-width (m) — wider than the overlap
 
         // Central sample sub-rect (pixels) — well inside the projected overlap, away from edges.
-        private const int SX0 = 216, SY0 = 216, SX1 = 296, SY1 = 296;
+        private const int SX0 = 216;
+        private const int SY0 = 216;
+        private const int SX1 = 296;
+        private const int SY1 = 296;
 
         // Variance threshold for a clean composite. Calibrated against the measured clean value
         // (logged) with headroom; a coplanar z-fight speckle between two saturated colours far exceeds this.
@@ -493,7 +496,8 @@ namespace MapRenderer.Tests.Visual
             Assert.That(FogFraction(clear[column, edgeRow], hazed[column, edgeRow]), Is.EqualTo(expected).Within(0.1),
                 $"row {edgeRow} near the far cut: clear {clear[column, edgeRow]}, hazed {hazed[column, edgeRow]}.");
 
-            Color32 clearBottom = clear[column, 0], hazedBottom = hazed[column, 0];
+            Color32 clearBottom = clear[column, 0];
+            Color32 hazedBottom = hazed[column, 0];
             Assert.That(math.abs(clearBottom.r - hazedBottom.r) <= 2 && math.abs(clearBottom.g - hazedBottom.g) <= 2
                         && math.abs(clearBottom.b - hazedBottom.b) <= 2,
                 $"the screen bottom must be un-hazed: clear {clearBottom}, hazed {hazedBottom}.");
@@ -506,9 +510,14 @@ namespace MapRenderer.Tests.Visual
             const double Zoom = 6.0;
             var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
             double altitude = CameraPoseMath.AltitudeForZoom(Zoom, Size, FovDeg);
-            double height = altitude * 0.5, reach = altitude * 0.8660254037844386; // tilt 60
-            double near = CameraPoseMath.NearClip(altitude), far = 4.0 * altitude;  // the far-plane cap binds
-            double farDepth = 3.25 * altitude, nearDepth = 0.7 * altitude;
+            // tilt 60
+            double height = altitude * 0.5;
+            double reach = altitude * 0.8660254037844386;
+            // the far-plane cap binds
+            double near = CameraPoseMath.NearClip(altitude);
+            double far = 4.0 * altitude;
+            double farDepth = 3.25 * altitude;
+            double nearDepth = 0.7 * altitude;
             GeoCoordinate farPoint  = PointAtDepth(lookAt, farDepth, height, reach, altitude);
             GeoCoordinate nearPoint = PointAtDepth(lookAt, nearDepth, height, reach, altitude);
 
@@ -567,7 +576,9 @@ namespace MapRenderer.Tests.Visual
         {
             double north = (depth * altitude - height * height) / reach - reach;
             var projection = new WebMercatorProjection();
-            double target = projection.Project(lookAt).z + north, south = -80.0, northLat = 84.0;
+            double target = projection.Project(lookAt).z + north;
+            double south = -80.0;
+            double northLat = 84.0;
             for (int i = 0; i < 60; i++)
             {
                 double mid = 0.5 * (south + northLat);
@@ -588,10 +599,12 @@ namespace MapRenderer.Tests.Visual
             double edgeRow = (0.5 + 0.5 * math.tan(math.radians(SkyGradient.MapEdgeElevation(
                     camera.CameraRelativePosition, camera.CurrentFarMetres, camera.Projection).Degrees + 90.0 - TiltDeg))
                 / math.tan(math.radians(FovDeg * 0.5))) * frame.Height;
-            int cx = (int)math.round(px.x), cy = (int)math.round(px.y);
+            int cx = (int)math.round(px.x);
+            int cy = (int)math.round(px.y);
             int yEnd = math.min(math.min(frame.Height, cy + 30), (int)edgeRow - 2);
             Assert.That(yEnd - cy, Is.GreaterThan(8), "precondition: the glyph sits clear of the far cut.");
-            double darkest = double.MaxValue, brightest = 0.0;
+            double darkest = double.MaxValue;
+            double brightest = 0.0;
             for (int y = math.max(0, cy - 30); y < yEnd; y++)
             for (int x = math.max(0, cx - 30); x < math.min(frame.Width, cx + 30); x++)
             {
@@ -606,7 +619,8 @@ namespace MapRenderer.Tests.Visual
         // How far the hazed pixel moved from the clear one toward white, in linear colour, over the three channels.
         private static double FogFraction(Color32 clear, Color32 hazed)
         {
-            Color clearLinear = ((Color)clear).linear, hazedLinear = ((Color)hazed).linear;
+            Color clearLinear = ((Color)clear).linear;
+            Color hazedLinear = ((Color)hazed).linear;
             double sum = 0.0;
             for (int channel = 0; channel < 3; channel++)
                 sum += (hazedLinear[channel] - clearLinear[channel]) / (1.0 - clearLinear[channel]);

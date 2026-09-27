@@ -250,7 +250,10 @@ namespace MapRenderer.Unity.Style
                 parsed[i] = items[i].AsDouble();
             }
 
-            double west = parsed[0], south = parsed[1], east = parsed[2], north = parsed[3];
+            double west = parsed[0];
+            double south = parsed[1];
+            double east = parsed[2];
+            double north = parsed[3];
             if (south > north || west < -180.0 || west > 180.0 || east < -180.0 || east > 180.0)
             {
                 malformed = true;

@@ -90,7 +90,9 @@ namespace MapRenderer.Tests
             {
                 var geo = new GeoCoordinate { Latitude = lat, Longitude = lon };
                 float3x3 b = proj.TangentBasisAt(geo);
-                float3 east = b.c0, up = b.c1, north = b.c2;
+                float3 east = b.c0;
+                float3 up = b.c1;
+                float3 north = b.c2;
 
                 // Orthonormal columns.
                 Assert.That(LenF(east),  Is.EqualTo(1.0).Within(1e-5), "east unit");

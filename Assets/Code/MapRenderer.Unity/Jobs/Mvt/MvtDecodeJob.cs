@@ -68,7 +68,9 @@ namespace MapRenderer.Unity.Jobs.Mvt
                 int cmdLength = FeatureLengths[fi];
                 int cmdEnd    = cmdStart + cmdLength;
 
-                long cx = 0, cy = 0;  // running cursor
+                // running cursor
+                long cx = 0;
+                long cy = 0;
                 int i = cmdStart;
 
                 while (i < cmdEnd)

@@ -89,7 +89,10 @@ namespace MapRenderer.Core.Expressions
                     var arr = v.AsArray();
                     if ((arr.Count == 3 || arr.Count == 4))
                     {
-                        double r, g, b, a = 1.0;
+                        double r;
+                        double g;
+                        double b;
+                        double a = 1.0;
                         if (arr[0].Type == ValueType.Number && arr[1].Type == ValueType.Number &&
                             arr[2].Type == ValueType.Number &&
                             (arr.Count == 3 || arr[3].Type == ValueType.Number))

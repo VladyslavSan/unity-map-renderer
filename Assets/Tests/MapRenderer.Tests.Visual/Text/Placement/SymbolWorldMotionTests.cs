@@ -4,9 +4,9 @@
 // Contents:
 //   WorldSymbolAbRenderSnapshotTests  — Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 //   WorldSymbolMotionTests            — Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback.
-//   CurvedTextOnPathRenderTests       — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader.
+//   CurvedTextOnPathRenderTests       — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Update + the real Map/Symbol/TextWorld shader.
 //   SymbolTextColorRenderTests        — Unity EditMode only — render tests requiring a GPU context (VisualScene/SnapshotRenderer).
-//   MapPitchedWorldArcLayoutTests     — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Tick), mesh readback through the live camera.
+//   MapPitchedWorldArcLayoutTests     — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Update), mesh readback through the live camera.
 //   GeoJsonPointSymbolFixtureTests    — Unity EditMode only — the tilted point-symbol fixture.
 
 using System;
@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.Text.Placement
 {
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj. The GPU A/B equivalence tooth: the SAME real glyph through a real
-    // SymbolPlacementSystem.Tick and through a one-off WorldBillboardMeshBuilder mesh on Map/Symbol/TextWorld.
+    // SymbolPlacementSystem.Update and through a one-off WorldBillboardMeshBuilder mesh on Map/Symbol/TextWorld.
     //
     // Non-obvious why: the headless camera→RenderTexture readback is vertically mirrored for EVERY path, so
     // both readbacks go through the SAME `FlipRowsVertically` and must land upright and centred. A mirrored
@@ -116,16 +116,16 @@ namespace MapRenderer.Tests.Text.Placement
             Color32[] oldPixels;
             Color32[] newPixels;
 
-            // ── OLD arm: a real Tick, which gives a point symbol the WORLD path, so this is real Tick vs
+            // ── OLD arm: a real Update, which gives a point symbol the WORLD path, so this is real Update vs
             // scaffold. It needs its own world base material. ────────────────────────
             using (var system = new SymbolPlacementSystem(mapCamera,
                        worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld"))))
             using (var snapOld = new SnapshotRenderer(Size, Size))
             using (var plan = new TestSymbolPlan(mapCamera.Projection))
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the OLD path's label must not be culled.");
 
                 snapOld.Render(uCam);
@@ -631,7 +631,7 @@ namespace MapRenderer.Tests.Text.Placement
 namespace MapRenderer.Tests.Visual
 {
     // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-    // SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
+    // SymbolPlacementSystem.Update + the real Map/Symbol/TextWorld shader. NOT registered in
     // Tools/core-tests/core-tests.csproj (it renders).
     //
     // THE HEADLINE ARM: a curved road symbol's ink sits ON the road, at tilt 0.
@@ -890,9 +890,9 @@ namespace MapRenderer.Tests.Visual
             SnapshotRenderer snapshot, GlyphAtlasTexture atlas, in SceneFrame frame,
             SymbolTileBuffer buffer, string armName)
         {
-            // Duplicate Tick — the collision verdict is harvested one Tick late.
-            system.Tick(in frame, plan.Build(buffer), atlas);
-            system.Tick(in frame, plan.Build(buffer), atlas);
+            // Duplicate Update — the collision verdict is harvested one Update late.
+            system.Update(in frame, plan.Build(buffer), atlas);
+            system.Update(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
                 $"Curved-T4/T5 precondition ({armName}): the label must stage exactly one quad, got " +
                 $"{system.LastQuadCount}. A zero means it spilled its road (StageCurved's centerArc ± halfSpan " +
@@ -993,7 +993,8 @@ namespace MapRenderer.Tests.Visual
                 TestContext.WriteLine($"[SymbolTextColorRender] white ink centroid={centroid} count={inkCount}");
                 Assert.Greater(inkCount, 0, "the white arm must render some ink to locate the glyph from.");
 
-                int cx = (int)math.round(centroid.x), cy = (int)math.round(centroid.y);
+                int cx = (int)math.round(centroid.x);
+                int cy = (int)math.round(centroid.y);
                 box = (cx - SampleHalf, cx + SampleHalf + 1, cy - SampleHalf, cy + SampleHalf + 1);
 
                 whiteSample = SampleLinearBox(whiteFrame, box.x0, box.y0, box.x1, box.y1);
@@ -1050,7 +1051,7 @@ namespace MapRenderer.Tests.Visual
     }
 
     // Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real
-    // SymbolPlacementSystem.Tick), mesh readback through the live camera.
+    // SymbolPlacementSystem.Update), mesh readback through the live camera.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
     // The FIXTURE arm (Fixture-T1…Fixture-T5) over OffLookAtSymbolScene (read its header first). `text-size`
@@ -1341,7 +1342,9 @@ namespace MapRenderer.Tests.Visual
 
         // Tile-local, separated in LONGITUDE: at heading 0 east/west is iso-depth, so both glyphs share one
         // centroid bias (T-Pos). AssertMidTileFence asserts ≥25% clearance from every edge.
-        private const double PointAU = 0.30, PointBU = 0.70, PointV = 0.50;
+        private const double PointAU = 0.30;
+        private const double PointBU = 0.70;
+        private const double PointV = 0.50;
         private const double MidTileFenceMinFraction = 0.25;
 
         private const string FontName   = "Fixture Point Label Font";

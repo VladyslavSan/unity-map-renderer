@@ -125,7 +125,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             int totalBytes       = Marshal.SizeOf(type);
             int floatsPerInstance = totalBytes / 4;
 
-            int o2wFloatOffset = -1, w2oFloatOffset = -1;
+            int o2wFloatOffset = -1;
+            int w2oFloatOffset = -1;
             var entries = new List<InstancePropEntry>(fields.Length);
 
             foreach (FieldInfo field in fields)

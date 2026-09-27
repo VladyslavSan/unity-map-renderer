@@ -7,7 +7,7 @@ namespace MapRenderer.Unity.Interpolation
     /// An <see cref="IInterpolation{T}"/> for a scene writer outside the render layers (sun, sky, haze): owns
     /// the from/to endpoints and <see cref="Current"/>, the value the writer last wrote. Uses the same clock
     /// and smoothstep curve as <c>ZoomStyleApplier</c>: hold during the delay, then interpolate over the
-    /// duration. Holds no references, so a tick never allocates.
+    /// duration. Holds no references, so an update never allocates.
     /// </summary>
     internal struct Smoothstep<T> : IInterpolation<T> where T : struct, IInterpolatable<T>
     {

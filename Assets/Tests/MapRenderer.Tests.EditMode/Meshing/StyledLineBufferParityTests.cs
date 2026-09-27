@@ -201,7 +201,8 @@ namespace MapRenderer.Tests.Meshing
                 Assert.AreEqual(4, geometry.RingCount,
                     "precondition: 1 polygon ring + 1 line ring + (exterior + hole) = 4 rings in ONE buffer");
 
-                bool sawPolygon = false, sawLineString = false;
+                bool sawPolygon = false;
+                bool sawLineString = false;
                 for (int f = 0; f < geometry.FeatureCount; f++)
                 {
                     if (geometry.FeatureGeometryType[f] == TileGeometryType.Polygon)    sawPolygon = true;
@@ -543,14 +544,18 @@ namespace MapRenderer.Tests.Meshing
         }
         private static uint[] SquareRing(int x0, int y0, int size)
         {
-            var cmds = new List<uint>(); int cx = 0, cy = 0;
+            var cmds = new List<uint>();
+            int cx = 0;
+            int cy = 0;
             AppendMoveTo(cmds, ref cx, ref cy, x0, y0);
             AppendLineTo(cmds, ref cx, ref cy, (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size));
             return cmds.ToArray();
         }
         private static uint[] SquareWithHoleRing(int x0, int y0, int size, int holeX0, int holeY0, int holeSize)
         {
-            var cmds = new List<uint>(); int cx = 0, cy = 0;
+            var cmds = new List<uint>();
+            int cx = 0;
+            int cy = 0;
             AppendMoveTo(cmds, ref cx, ref cy, x0, y0);
             AppendLineTo(cmds, ref cx, ref cy, (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size));
             AppendMoveTo(cmds, ref cx, ref cy, holeX0, holeY0);
@@ -559,7 +564,9 @@ namespace MapRenderer.Tests.Meshing
         }
         private static uint[] TwoPointLine(int x0, int y0, int x1, int y1)
         {
-            var cmds = new List<uint>(); int cx = 0, cy = 0;
+            var cmds = new List<uint>();
+            int cx = 0;
+            int cy = 0;
             AppendMoveTo(cmds, ref cx, ref cy, x0, y0);
             AppendLineTo(cmds, ref cx, ref cy, (x1, y1));
             return cmds.ToArray();
@@ -767,7 +774,9 @@ namespace MapRenderer.Tests.Meshing
         /// chain's clip arm.</summary>
         private struct BuildCounts
         {
-            public int RoofVertexCount, WallVertexCount, WallIndexCount;
+            public int RoofVertexCount;
+            public int WallVertexCount;
+            public int WallIndexCount;
             public string WallsDigest;
         }
 
@@ -840,7 +849,12 @@ namespace MapRenderer.Tests.Meshing
 
         private struct WallGolden
         {
-            public uint[] PosHex, NormHex, ExtrudeHex, BakeHex, TanHex, ColorHex;
+            public uint[] PosHex;
+            public uint[] NormHex;
+            public uint[] ExtrudeHex;
+            public uint[] BakeHex;
+            public uint[] TanHex;
+            public uint[] ColorHex;
             public int[] Indices;
             public int VertexCount;
         }
@@ -899,7 +913,8 @@ namespace MapRenderer.Tests.Meshing
         private static ulong ToUlpOrder(uint bits) => (bits & 0x80000000U) != 0 ? ~bits : (bits | 0x80000000U);
         private static ulong UlpDistance(uint a, uint b)
         {
-            ulong oa = ToUlpOrder(a), ob = ToUlpOrder(b);
+            ulong oa = ToUlpOrder(a);
+            ulong ob = ToUlpOrder(b);
             return oa > ob ? oa - ob : ob - oa;
         }
     }

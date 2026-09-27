@@ -1393,10 +1393,12 @@ namespace MapRenderer.Tests.Style
         private static uint[] MultiPointGeometry(params double2[] tilePoints)
         {
             var stream = new List<uint> { 1u | ((uint)tilePoints.Length << 3) }; // MoveTo, count=N
-            long cursorX = 0, cursorY = 0;
+            long cursorX = 0;
+            long cursorY = 0;
             foreach (double2 p in tilePoints)
             {
-                long x = (long)p.x, y = (long)p.y;
+                long x = (long)p.x;
+                long y = (long)p.y;
                 stream.Add(ZigZagEncode(x - cursorX));
                 stream.Add(ZigZagEncode(y - cursorY));
                 cursorX = x;
@@ -1481,11 +1483,13 @@ namespace MapRenderer.Tests.Style
         private static uint[] PolygonGeometry(params double2[][] rings)
         {
             var stream = new List<uint>();
-            long cursorX = 0, cursorY = 0;
+            long cursorX = 0;
+            long cursorY = 0;
             foreach (double2[] ring in rings)
             {
                 stream.Add((1u << 3) | 1u); // MoveTo, count=1
-                long x0 = (long)ring[0].x, y0 = (long)ring[0].y;
+                long x0 = (long)ring[0].x;
+                long y0 = (long)ring[0].y;
                 stream.Add(ZigZagEncode(x0 - cursorX));
                 stream.Add(ZigZagEncode(y0 - cursorY));
                 cursorX = x0; cursorY = y0;
@@ -1493,7 +1497,8 @@ namespace MapRenderer.Tests.Style
                 stream.Add(((uint)(ring.Length - 1) << 3) | 2u); // LineTo, count=n-1
                 for (int i = 1; i < ring.Length; i++)
                 {
-                    long x = (long)ring[i].x, y = (long)ring[i].y;
+                    long x = (long)ring[i].x;
+                    long y = (long)ring[i].y;
                     stream.Add(ZigZagEncode(x - cursorX));
                     stream.Add(ZigZagEncode(y - cursorY));
                     cursorX = x; cursorY = y;

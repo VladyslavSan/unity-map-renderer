@@ -106,7 +106,15 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // The case matrix shared by the framing, consistency and ceiling tests.
-        private struct FrameCase { public double Lon, Lat, Zoom, HeadingDeg, Aspect; public string Name; }
+        private struct FrameCase
+        {
+            public double Lon;
+            public double Lat;
+            public double Zoom;
+            public double HeadingDeg;
+            public double Aspect;
+            public string Name;
+        }
 
         private static IEnumerable<FrameCase> FrameCases()
         {
@@ -233,7 +241,10 @@ namespace MapRenderer.Tests.Cameras
                 double mpp   = WebMercator.GroundResolution(cam.Zoom);
                 double halfV = RefH * mpp / 2.0;
                 double halfH = halfV * fc.Aspect;
-                double xMin = double.MaxValue, xMax = double.MinValue, yMin = double.MaxValue, yMax = double.MinValue;
+                double xMin = double.MaxValue;
+                double xMax = double.MinValue;
+                double yMin = double.MaxValue;
+                double yMax = double.MinValue;
                 foreach (var (sa, sb) in new[] { (-1, -1), (1, -1), (-1, 1), (1, 1) })
                 {
                     double2 f = MercToTileFrac(FramingGround(in cam, sa * halfH, sb * halfV), z);
@@ -559,7 +570,8 @@ namespace MapRenderer.Tests.Cameras
                 .SelectVisibleTiles(vc, lod);
 
             Assert.IsNotEmpty(lod);
-            int minZ = lod.Min(t => t.Z), maxZ = lod.Max(t => t.Z);
+            int minZ = lod.Min(t => t.Z);
+            int maxZ = lod.Max(t => t.Z);
             Assert.Less(minZ, maxZ, "LOD cover must be mixed-zoom — far tiles coarser than near.");
             Assert.AreEqual(cam.IntegerZoom, maxZ, "near-field detail is at the target (camera) zoom.");
             Assert.Less(lod.Count, flat.Count,
@@ -572,7 +584,8 @@ namespace MapRenderer.Tests.Cameras
                 {
                     long nn = 1L << t.Z;
                     double2 f = MercToTileFrac(merc, t.Z);
-                    int fx = (int)math.floor(f.x), fy = (int)math.floor(f.y);
+                    int fx = (int)math.floor(f.x);
+                    int fy = (int)math.floor(f.y);
                     if (fy < 0 || fy >= nn) continue;
                     if (fx == t.X && fy == t.Y) return true;
                 }
@@ -641,11 +654,18 @@ namespace MapRenderer.Tests.Cameras
             // Rebuild the frustum planes (same math as ViewFrustum.FromPose) and the render frame the selector used.
             double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
             CameraPoseMath.ComputeRelativePose(altitude, cam.Heading.Value, cam.Tilt.Value, out double3 pos, out double3 fwd, out double3 up);
-            double near = math.max(0.1, CameraPoseMath.NearClip(altitude)), aspect = vp.x / vp.y;
+            double near = math.max(0.1, CameraPoseMath.NearClip(altitude));
+            double aspect = vp.x / vp.y;
             double far = new GeometryAwareFarPlane().FarMetres(altitude, cam.Tilt.Value, cam.VerticalFovDeg, aspect);
-            double3 f = math.normalize(fwd), r = math.normalize(math.cross(f, up)), u = math.cross(r, f);
-            double hV = Angle.FromDegrees(cam.VerticalFovDeg * 0.5).Radians, sinV = math.sin(hV), cosV = math.cos(hV);
-            double hH = math.atan(math.tan(hV) * aspect), sinH = math.sin(hH), cosH = math.cos(hH);
+            double3 f = math.normalize(fwd);
+            double3 r = math.normalize(math.cross(f, up));
+            double3 u = math.cross(r, f);
+            double hV = Angle.FromDegrees(cam.VerticalFovDeg * 0.5).Radians;
+            double sinV = math.sin(hV);
+            double cosV = math.cos(hV);
+            double hH = math.atan(math.tan(hV) * aspect);
+            double sinH = math.sin(hH);
+            double cosH = math.cos(hH);
             var pn = new[] { f, new double3(-f.x, -f.y, -f.z), f*sinV - u*cosV, f*sinV + u*cosV, f*sinH - r*cosH, f*sinH + r*cosH };
             var pd = new[] { -math.dot(f, pos + near*f), -math.dot(new double3(-f.x,-f.y,-f.z), pos + far*f),
                              -math.dot(pn[2], pos), -math.dot(pn[3], pos), -math.dot(pn[4], pos), -math.dot(pn[5], pos) };
@@ -655,7 +675,9 @@ namespace MapRenderer.Tests.Cameras
             {
                 double2 ll = t.ToLonLat(px, py, 1.0);
                 double3 w = Proj.Project(new GeoCoordinate { Latitude = ll.y, Longitude = ll.x });
-                double rx = w.x-origin.x, ry = w.y-origin.y, rz = w.z-origin.z;
+                double rx = w.x-origin.x;
+                double ry = w.y-origin.y;
+                double rz = w.z-origin.z;
                 return new double3(basis.c0.x*rx+basis.c0.y*ry+basis.c0.z*rz, basis.c1.x*rx+basis.c1.y*ry+basis.c1.z*rz, basis.c2.x*rx+basis.c2.y*ry+basis.c2.z*rz);
             }
             bool QuadMeetsFrustum(TileId t)
@@ -666,8 +688,10 @@ namespace MapRenderer.Tests.Cameras
                     var clipped = new List<double3>();
                     for (int i = 0; i < poly.Count; i++)
                     {
-                        double3 a = poly[i], b = poly[(i + 1) % poly.Count];
-                        double da = math.dot(pn[p], a) + pd[p], db = math.dot(pn[p], b) + pd[p];
+                        double3 a = poly[i];
+                        double3 b = poly[(i + 1) % poly.Count];
+                        double da = math.dot(pn[p], a) + pd[p];
+                        double db = math.dot(pn[p], b) + pd[p];
                         if (da >= 0) clipped.Add(a);
                         if ((da >= 0) != (db >= 0)) clipped.Add(a + (b - a) * (da / (da - db)));
                     }
@@ -977,7 +1001,9 @@ namespace MapRenderer.Tests.Cameras
         {
             // The camera frames the LOGICAL viewport and AltitudeForZoom is linear in height: DPR=2 halves the
             // altitude, and DPR=1 is bit-identical to the physical altitude.
-            const double zoom = 6.0, fov = 60.0, vpH = 1080.0;
+            const double zoom = 6.0;
+            const double fov = 60.0;
+            const double vpH = 1080.0;
             double altPhysical = CameraPoseMath.AltitudeForZoom(zoom, vpH,       fov);
             double alt1        = CameraPoseMath.AltitudeForZoom(zoom, vpH / 1.0, fov);
             double alt2        = CameraPoseMath.AltitudeForZoom(zoom, vpH / 2.0, fov);
@@ -1004,7 +1030,8 @@ namespace MapRenderer.Tests.Cameras
         {
             // floor = log2(min(vp_logical) / tilePx) − margin: the world square is SMALLER than the shorter
             // viewport side by exactly 2^margin, so the whole world shows and nothing is cropped.
-            const double tile = WebMercator.TilePixelSize, margin = 0.5;
+            const double tile = WebMercator.TilePixelSize;
+            const double margin = 0.5;
             double2 vp    = new double2(1600, 1200); // logical px
             double  floor = CameraPoseMath.MinZoomToFit(vp.x, vp.y, tile, margin);
 

@@ -31,7 +31,8 @@ namespace MapRenderer.Core.Expressions.Ops
         public static Expression Binary(string op, Expression[] args)
             => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
-                double a = vals[0].AsNumber(), b = vals[1].AsNumber();
+                double a = vals[0].AsNumber();
+                double b = vals[1].AsNumber();
                 switch (op)
                 {
                     case "/": return Value.Number(a / b);

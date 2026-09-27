@@ -72,7 +72,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         }
 
         /// <summary>A constant <c>false</c>: the visibility fade (entering/leaving the zoom range) snaps
-        /// instead of easing (<see cref="RenderLayerSet.AdvanceFade"/> arms it Instant). A gradual fade
+        /// instead of easing (<see cref="RenderLayerSet.UpdateFade"/> arms it Instant). A gradual fade
         /// (<c>true</c>) would work under the always-blend contract but is not built.</summary>
         public bool FadesGradually => false;
 

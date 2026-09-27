@@ -15,7 +15,9 @@ namespace MapRenderer.Tests.TestSupport
     /// </summary>
     public static class MvtGeometry
     {
-        private const uint MoveTo = 1, LineTo = 2, ClosePath = 7;
+        private const uint MoveTo = 1;
+        private const uint LineTo = 2;
+        private const uint ClosePath = 7;
 
         public static List<List<double2>> Decode(uint[] g)
         {
@@ -23,7 +25,8 @@ namespace MapRenderer.Tests.TestSupport
             if (g == null || g.Length == 0) return paths;
 
             List<double2> current = null;
-            long x = 0, y = 0;
+            long x = 0;
+            long y = 0;
             int i = 0;
 
             while (i < g.Length)

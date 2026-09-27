@@ -70,7 +70,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             ]
         }");
 
-        /// <summary>Pumps Tick() until every loaded tile has settled or a spin budget is hit (real frames,
+        /// <summary>Pumps Update() until every loaded tile has settled or a spin budget is hit (real frames,
         /// so the ThreadPool mesh build actually progresses — mirrors
         /// <c>MapViewAsyncMeshBuildTests.PumpUntilSettled</c>).</summary>
         private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
@@ -490,7 +490,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         /// <summary>
         /// A CLEAN tick must not blank the readout. The tile loop returns early when the cover is unchanged, so
         /// a refresh inside that path would read zero when the camera goes still. The refresh therefore sits in
-        /// <c>Tick</c>, a shell around <c>TickCore</c> that the early return cannot skip.
+        /// <c>Update</c>, a shell around <c>UpdateCore</c> that the early return cannot skip.
         /// Limitation: a pull has no callback to count, so this test cannot observe that the refresh ran; it
         /// catches only a refresh that blanks the levels.
         /// </summary>
@@ -537,7 +537,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         {
             ref readonly TileTelemetrySnapshot live = ref view.View.TileManager.Telemetry;
             Assert.AreEqual(expectedVisible, live.VisibleTileCount,
-                $"clean tick {tickIndex} blanked or changed the cover level — a refresh reached from TickCore's " +
+                $"clean tick {tickIndex} blanked or changed the cover level — a refresh reached from UpdateCore's " +
                 "early-return path is how that happens, and it is a readout that dies when the map stills.");
         }
     }
@@ -573,7 +573,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         }");
 
         /// <summary>
-        /// Pumps Tick() until every loaded tile has settled or a spin budget is hit. Real frames give the
+        /// Pumps Update() until every loaded tile has settled or a spin budget is hit. Real frames give the
         /// ThreadPool mesh build wall-clock to progress (never Thread.Sleep).
         /// </summary>
         private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
@@ -590,7 +590,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         // ── Cover-key: TILT must trigger a cover recompute (frustum selector integration) ─────────
 
         /// <summary>
-        /// <c>FrustumTileSelector</c> makes the visible set depend on TILT, so <c>TileManager.Tick</c>'s
+        /// <c>FrustumTileSelector</c> makes the visible set depend on TILT, so <c>TileManager.Update</c>'s
         /// cover-recompute key must include tilt, or the far field toward the horizon goes stale. This drives
         /// the full TileManager path: a stub source serves every tile, so <c>LoadedTileCount == cover size</c>,
         /// and tilting from overhead to 60° with all else fixed must GROW the cover.
@@ -639,7 +639,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
         /// <summary>
         /// On the frame the fetch completes, the tile must NOT turn Built: the mesh build is deferred to a
-        /// later frame. The source returns synchronously, so the first Tick() both completes the fetch and
+        /// later frame. The source returns synchronously, so the first Update() both completes the fetch and
         /// kicks the build, and must not consume it.
         /// </summary>
         [UnityTest]
@@ -661,14 +661,14 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                // First Tick: the tile is requested and fetched, and its mesh build is kicked but not consumed.
+                // First Update: the tile is requested and fetched, and its mesh build is kicked but not consumed.
                 view.LateUpdate();
 
                 // The mesh build is still in flight, so nothing has settled yet.
                 Assert.IsFalse(view.AllTilesSettled(),
-                    "After the Tick that kicks mesh build, AllTilesSettled() must be false. "  +
+                    "After the Update that kicks mesh build, AllTilesSettled() must be false. "  +
                     "Mesh build must be deferred to a later frame (async Task.Run path), not consumed " +
-                    "synchronously in the same Tick() call that starts it.");
+                    "synchronously in the same Update() call that starts it.");
 
                 // Now let the async task complete and drain naturally.
                 yield return PumpUntilSettled(view, maxFrames: 2500);
@@ -795,10 +795,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // Load initial cover at lon=0, z=5: center tile is (5,16,16).
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
-                // First Tick: tiles are added to _loaded, fetch tasks kicked (FixtureSource is sync,
+                // First Update: tiles are added to _loaded, fetch tasks kicked (FixtureSource is sync,
                 // but TileScheduler's FetchAndCacheAsync has a Task.Run hop so they're not yet complete).
                 view.LateUpdate();
-                // Second Tick: fetch tasks are likely complete now; mesh build tasks are kicked.
+                // Second Update: fetch tasks are likely complete now; mesh build tasks are kicked.
                 yield return null; // ensure ThreadPool Task.Run hop completes
                 view.LateUpdate();
 

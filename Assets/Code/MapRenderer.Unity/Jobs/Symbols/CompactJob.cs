@@ -87,7 +87,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
                 }
 
                 StageOffset[r] = OutPoints.Length;
-                int ws = WorldStart[r], wc = WorldCount[r];
+                int ws = WorldStart[r];
+                int wc = WorldCount[r];
                 for (int v = 0; v < wc; v++)
                 {
                     OutPoints.Add(WorldPoints[ws + v]);

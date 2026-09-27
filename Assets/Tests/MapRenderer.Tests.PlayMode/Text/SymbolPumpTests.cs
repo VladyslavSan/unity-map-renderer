@@ -212,7 +212,8 @@ namespace MapRenderer.Tests.PlayMode.Text
 
             // Non-obvious why: the recorder ring wraps on a slow machine, and then `Count` is not a safe index
             // bound. Clamp to the capacity; both recorders sum the same marker, so the comparison holds.
-            long mainHits = 0, anyHits = 0;
+            long mainHits = 0;
+            long anyHits = 0;
             for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
             for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits += anyThread.GetSample(i).Count;
 

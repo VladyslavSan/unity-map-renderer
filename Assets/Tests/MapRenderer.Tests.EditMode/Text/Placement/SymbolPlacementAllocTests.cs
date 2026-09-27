@@ -3,8 +3,8 @@
 // Pair wiring and steady-state allocation first, then projection/screen-projection parity, then tile-block baking, the up-carrier chain, the zoom gate, then the two world-billboard fixtures.
 //
 // Contents:
-//   SymbolPairWiringTests             — Road-shields (docs/road-shields-design.md) — the Tick()-level wiring tooth for a centred icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE SymbolCandidate (LastCandidateCount) yet still place BOTH halves' quads (LastQuadCount)…
-//   SymbolPlacementAllocTests         — over a STABLE synthetic symbol set, a steady-state Tick (project → billboard-build → submit) allocates ZERO managed garbage.
+//   SymbolPairWiringTests             — Road-shields (docs/road-shields-design.md) — the Update()-level wiring tooth for a centred icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE SymbolCandidate (LastCandidateCount) yet still place BOTH halves' quads (LastQuadCount)…
+//   SymbolPlacementAllocTests         — over a STABLE synthetic symbol set, a steady-state Update (project → billboard-build → submit) allocates ZERO managed garbage.
 //   SymbolProjectionJobTests          — the parallel symbol-projection pass.
 //   SymbolScreenProjectionUnityTests  — Core-vs-real-camera pin: a synthetic world anchor's TryProjectAnchor pixel must MATCH the real WorldToScreenPoint pixel for the SAME (origin-relative) local position, and a behind-camera anchor must be culled by both.
 //   SymbolTileBlockBakerTests         — Bake against a REAL SymbolTileBlock — the native-lifetime half of the acceptance teeth (the dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live in…
@@ -175,10 +175,10 @@ namespace MapRenderer.Tests.Text.Placement
                 var pairBuffer = new SymbolTileBuffer();
                 AddPairSymbols(pairBuffer, frame.SceneOriginRender);
 
-                // Duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                // Duplicate — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 // TWO symbols (icon+text), ONE candidate: fewer sort/grid/fade operations than two candidates.
@@ -210,7 +210,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── At the Tick level: text-optional lets the ICON survive its text's collision loss ─────────────────
+        // ── At the Update level: text-optional lets the ICON survive its text's collision loss ─────────────────
         //    The two runs differ ONLY by the property; the blocker, translate and tile split stay constant.
         [Test]
         public void TextOptional_Tick_TextLosesCollision_IconMeshStillBuilds_TextMeshDoesNot(
@@ -254,11 +254,11 @@ namespace MapRenderer.Tests.Text.Placement
                     translatePx: new float2(TextOffsetPx, 0f),
                     translateAnchor: TextTranslateAnchor.Viewport);
 
-                // Two Ticks: the first schedules the collision, the second harvests its verdict — and,
+                // Two Updates: the first schedules the collision, the second harvests its verdict — and,
                 // for the optional case, seeds the per-half drop mask the emit loop reads.
-                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair (one candidate each)");
@@ -293,7 +293,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── At the Tick level: a real collision loss drops BOTH halves, not just the icon ────────────────────
+        // ── At the Update level: a real collision loss drops BOTH halves, not just the icon ────────────────────
         [Test]
         public void CentredPair_Tick_BlockedByHigherPrioritySymbol_BothHalvesDropTogether_NoBareNumber()
         {
@@ -328,9 +328,9 @@ namespace MapRenderer.Tests.Text.Placement
                     tileKey: 0L);
                 AddPairSymbols(mixedBuffer, frame.SceneOriginRender);
 
-                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(2, system.LastCandidateCount, "the blocker + the pair (one candidate each)");
@@ -354,11 +354,11 @@ namespace MapRenderer.Tests.Text.Placement
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // SymbolPlacementAllocTests — a steady-state Tick over a stable symbol set allocates zero garbage
+    // SymbolPlacementAllocTests — a steady-state Update over a stable symbol set allocates zero garbage
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Over a STABLE synthetic symbol set, a steady-state <see cref="SymbolPlacementSystem.Tick"/>
+    /// Over a STABLE synthetic symbol set, a steady-state <see cref="SymbolPlacementSystem.Update"/>
     /// (project → billboard-build → submit) allocates ZERO managed garbage.
     /// </summary>
     [TestFixture]
@@ -405,7 +405,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // AnchorRender is render-space PRE-RTC, so it is built from SceneOriginRender. A small local offset
-        // is culled, and the Tick would then measure the empty "nothing to place" branch.
+        // is culled, and the Update would then measure the empty "nothing to place" branch.
         private static SymbolTileBuffer BuildSymbols(int count, double3 sceneOriginRender, long tileKey = 0L, bool allowOverlap = false)
         {
             var quads = new List<SymbolQuad>
@@ -436,7 +436,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void Tick_SteadyState_AllocatesNoGCMemory()
+        public void Update_SteadyState_AllocatesNoGCMemory()
         {
             var camGo = Track(new GameObject("SymbolAlloc_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -457,26 +457,26 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
 
             // The plan is built ONCE, outside every measured region: TestSymbolPlan.Build allocates managed
-            // scratch, and the thing under measurement is Tick, not plan construction.
+            // scratch, and the thing under measurement is Update, not plan construction.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             SymbolGatherPlan builtPlan = plan.Build(buffer);
 
             // Warm-up ticks: first-frame NativeList growth + Mesh/Material creation is allowed to allocate.
             for (int i = 0; i < 3; i++)
             {
-                system.Tick(in frame, builtPlan, atlasTexture);
+                system.Update(in frame, builtPlan, atlasTexture);
             }
 
-            AllocationDiagnostics.AssertNotAllocating(() => system.Tick(in frame, builtPlan, atlasTexture),
-                "a steady-state Tick (same label count/shape as the warm-up) must allocate ZERO managed garbage");
+            AllocationDiagnostics.AssertNotAllocating(() => system.Update(in frame, builtPlan, atlasTexture),
+                "a steady-state Update (same label count/shape as the warm-up) must allocate ZERO managed garbage");
         }
 
         // ── The built+presented world path: TEXT slots build for real, and an Icon with no world material is
-        //    emitted but unrenderable every Tick. Non-obvious why: such a slot must not churn its Mesh,
+        //    emitted but unrenderable every Update. Non-obvious why: such a slot must not churn its Mesh,
         //    GameObject and NativeLists every IdleReclaimFrames (WorldSymbolRenderer.EndFrame's
         //    emittedThisFrame gate), so the measured run crosses the K=60 reclaim boundary. ──
         [Test]
-        public void Tick_SteadyState_WorldBuildAndPresent_AcrossReclaimBoundary_AllocatesNoGCMemory()
+        public void Update_SteadyState_WorldBuildAndPresent_AcrossReclaimBoundary_AllocatesNoGCMemory()
         {
             var camGo = Track(new GameObject("SymbolAllocWorld_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -493,7 +493,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var atlasTexture = BuildTinyAtlasTexture();
             long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5); // matches camera zoom (coverage-cull realism)
             // allowOverlap: the 20 symbols sit a few px apart, and without it collision would cull all but one;
-            // this tooth wants a stable, fully placed scene every Tick.
+            // this tooth wants a stable, fully placed scene every Update.
             SymbolTileBuffer buffer = BuildSymbols(20, frame.SceneOriginRender, tileKey, allowOverlap: true);
             int textCount = buffer.Symbols.Count;
 
@@ -507,7 +507,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
             TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, iconQuads, new float2(-8f, -8f), new float2(8f, 8f),
                 kind: SymbolKind.Icon, // no worldIconBase supplied below — this slot is emitted every
-                                      // Tick but never resolves a material (the scenario under test).
+                                      // Update but never resolves a material (the scenario under test).
                 paint: SymbolPaint.Default,
                 textSizePx: TextQuadLayout.OneEm,
                 allowOverlap: true,
@@ -516,36 +516,36 @@ namespace MapRenderer.Tests.Text.Placement
                 tileKey: tileKey,
                 // Non-obvious why: this anchor equals the first text symbol's, and PointFadeId hashes
                 // (AnchorRender, MaterialIndex, Text, IconImage), so a null IconImage would share its FadeId.
-                // AssertFadeIdsUnique would then log (and allocate) every Tick. No sprite lookup reads it here.
+                // AssertFadeIdsUnique would then log (and allocate) every Update. No sprite lookup reads it here.
                 iconImage: "steady-state-icon");
 
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
 
             // The plan is built ONCE, outside every measured region: TestSymbolPlan.Build allocates managed
-            // scratch, and the thing under measurement is Tick, not plan construction.
+            // scratch, and the thing under measurement is Update, not plan construction.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             SymbolGatherPlan builtPlan = plan.Build(buffer);
 
-            for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
+            for (int i = 0; i < 3; i++) system.Update(in frame, builtPlan, atlasTexture);
             Assert.AreEqual(buffer.Symbols.Count, system.LastQuadCount, "every label (incl. the unrenderable icon) must place — the icon is emitted regardless of a missing world material (precondition).");
             Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world TEXT slot must be built+presented after warm-up (the branch this tooth measures).");
             Assert.IsFalse(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Icon), "the world ICON slot has no material — it must stay hidden (not crash, not churn).");
 
             // 65 > IdleReclaimFrames (60): a system that rebuilt the never-presentable icon slot would churn
-            // a Mesh/GameObject/3x NativeList every 60th Tick.
+            // a Mesh/GameObject/3x NativeList every 60th Update.
             AllocationDiagnostics.AssertNotAllocating(() =>
                 {
-                    for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
+                    for (int i = 0; i < 65; i++) system.Update(in frame, builtPlan, atlasTexture);
                 },
-                "65 steady-state Ticks (crossing the K=60 idle-reclaim boundary) with a real world-built+presented " +
+                "65 steady-state Updates (crossing the K=60 idle-reclaim boundary) with a real world-built+presented " +
                 "TEXT slot AND an emitted-but-unrenderable ICON slot must allocate ZERO managed garbage.");
         }
 
         // ── A CURVED-emitting frame: curved shares the world sink with point/icon, and the curved arm of
         //    WorldSymbolRenderer.Emit must reuse the slot's NativeLists as point does, not allocate per glyph. ──
         [Test]
-        public void Tick_SteadyState_CurvedWorldEmit_AllocatesNoGCMemory()
+        public void Update_SteadyState_CurvedWorldEmit_AllocatesNoGCMemory()
         {
             var camGo = Track(new GameObject("SymbolAllocCurved_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -591,26 +591,26 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
 
             // The plan is built ONCE, outside every measured region: TestSymbolPlan.Build allocates managed
-            // scratch, and the thing under measurement is Tick, not plan construction.
+            // scratch, and the thing under measurement is Update, not plan construction.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             SymbolGatherPlan builtPlan = plan.Build(buffer);
 
-            for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
+            for (int i = 0; i < 3; i++) system.Update(in frame, builtPlan, atlasTexture);
             Assert.AreEqual(1, system.LastQuadCount, "the curved label's single glyph must place (precondition).");
             Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world TEXT slot must be built+presented (curved text routes there).");
 
             AllocationDiagnostics.AssertNotAllocating(() =>
                 {
-                    for (int i = 0; i < 5; i++) system.Tick(in frame, builtPlan, atlasTexture);
+                    for (int i = 0; i < 5; i++) system.Update(in frame, builtPlan, atlasTexture);
                 },
-                "steady-state Ticks over a curved-emitting scene must allocate ZERO managed garbage — the " +
+                "steady-state Updates over a curved-emitting scene must allocate ZERO managed garbage — the " +
                 "curved arm of WorldSymbolRenderer.Emit reuses the slot's NativeLists exactly like point.");
         }
 
-        // ── A centred icon+text pair's steady-state Tick allocates ZERO: the pair stages as ONE candidate, and
+        // ── A centred icon+text pair's steady-state Update allocates ZERO: the pair stages as ONE candidate, and
         //    AppendPointHalf reuses the existing emit NativeArray. ──
         [Test]
-        public void Tick_SteadyState_CentredPair_AllocatesNoGCMemory()
+        public void Update_SteadyState_CentredPair_AllocatesNoGCMemory()
         {
             var camGo = Track(new GameObject("SymbolAllocPair_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -673,7 +673,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             SymbolGatherPlan builtPlan = plan.Build(buffer);
 
-            for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
+            for (int i = 0; i < 3; i++) system.Update(in frame, builtPlan, atlasTexture);
             Assert.AreEqual(1, system.LastCandidateCount, "precondition: the pair must stage as ONE candidate.");
             Assert.AreEqual(2, system.LastQuadCount, "precondition: both halves' quads must place.");
             Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Icon), "precondition: the icon presenter must show.");
@@ -681,16 +681,16 @@ namespace MapRenderer.Tests.Text.Placement
 
             AllocationDiagnostics.AssertNotAllocating(() =>
                 {
-                    for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
+                    for (int i = 0; i < 65; i++) system.Update(in frame, builtPlan, atlasTexture);
                 },
-                "65 steady-state Ticks over a centred icon+text pair (crossing the K=60 idle-reclaim boundary) " +
+                "65 steady-state Updates over a centred icon+text pair (crossing the K=60 idle-reclaim boundary) " +
                 "must allocate ZERO managed garbage.");
         }
 
         // ── Zero alloc for a pair that places WITHOUT one half, which runs every optional-pair branch
         //    (collision write-back, dropped-halves map, stage-job probe, emit skip). ──
         [Test]
-        public void Tick_SteadyState_OptionalPairPlacingWithoutItsText_AllocatesNoGCMemory()
+        public void Update_SteadyState_OptionalPairPlacingWithoutItsText_AllocatesNoGCMemory()
         {
             var camGo = Track(new GameObject("SymbolAllocOptionalPair_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -749,7 +749,7 @@ namespace MapRenderer.Tests.Text.Placement
                 translatePx: new float2(TextOffsetPx, 0f),
                 translateAnchor: TextTranslateAnchor.Viewport);
 
-            // A higher-priority blocker over the text half's box only, so every steady Tick re-decides
+            // A higher-priority blocker over the text half's box only, so every steady Update re-decides
             // "place the icon, drop the text" and the dropped-halves map is written and read every frame.
             var blockerQuads = new List<SymbolQuad>
             {
@@ -776,7 +776,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             SymbolGatherPlan builtPlan = plan.Build(buffer);
 
-            for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
+            for (int i = 0; i < 3; i++) system.Update(in frame, builtPlan, atlasTexture);
             Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair.");
             Assert.AreEqual(2, system.LastQuadCount,
                 "precondition: the blocker's quad and the pair's ICON quad — the text half must be dropped, " +
@@ -784,9 +784,9 @@ namespace MapRenderer.Tests.Text.Placement
 
             AllocationDiagnostics.AssertNotAllocating(() =>
                 {
-                    for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
+                    for (int i = 0; i < 65; i++) system.Update(in frame, builtPlan, atlasTexture);
                 },
-                "65 steady-state Ticks over a text-optional pair placing WITHOUT its text must allocate ZERO " +
+                "65 steady-state Updates over a text-optional pair placing WITHOUT its text must allocate ZERO " +
                 "managed garbage.");
         }
 
@@ -870,7 +870,8 @@ namespace MapRenderer.Tests.Text.Placement
                     OutScreen = outScreen, OutDepth = outDepth, OutValid = outValid,
                 }.Schedule(n, 8).Complete();
 
-                bool anyValid = false, anyInvalid = false;
+                bool anyValid = false;
+                bool anyInvalid = false;
                 for (int i = 0; i < n; i++)
                 {
                     bool ok = SymbolScreenProjection.TryProjectPoint(points[i], origin, viewProj, viewport,
@@ -930,7 +931,8 @@ namespace MapRenderer.Tests.Text.Placement
                     OutScreen = outScreen, OutDepth = outDepth, OutValid = outValid,
                 }.Schedule(n, 8).Complete();
 
-                bool anyValid = false, anyInvalid = false;
+                bool anyValid = false;
+                bool anyInvalid = false;
                 for (int i = 0; i < n; i++)
                 {
                     bool ok = SymbolScreenProjection.TryProjectPoint(points[i], origin, viewProj, viewport,
@@ -957,7 +959,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── The index-mapping tooth: point, far-culled point, curved line, point. Points advance the flat cursor
         //    by 1, curves by N and culled symbols by 0; a drifted mapping moves the on-screen symbols off-screen.
-        //    Non-obvious why: the second Tick must be byte-identical, as distinct sort keys and the +inf deltaTime make
+        //    Non-obvious why: the second Update must be byte-identical, as distinct sort keys and the +inf deltaTime make
         //    incumbency and fade inert, so only a partial fill of the uninitialized buffers can change it. ──
         [Test]
         public void JobFill_OverInterleavedScene_PlacesGathered_ExcludesUngathered_AndIsStable()
@@ -973,7 +975,7 @@ namespace MapRenderer.Tests.Text.Placement
                 return buffer;
             }
 
-            // The verdict is harvested one Tick late, so tick twice; separate Scene() calls give the same FadeIds,
+            // The verdict is harvested one Update late, so tick twice; separate Scene() calls give the same FadeIds,
             // so the assertions read a settled state.
             h.System.TickSymbols(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
             h.System.TickSymbols(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
@@ -990,14 +992,14 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.GreaterOrEqual(h.System.LastCandidateCount, 2, "the two on-screen points must stage (mapping intact)");
             Assert.Greater(h.System.LastQuadCount, 0, "the on-screen labels must place (else the scene is vacuous / mapping broken)");
 
-            // Stability: an identical second Tick must reproduce the world mesh bit-for-bit (deterministic
+            // Stability: an identical second Update must reproduce the world mesh bit-for-bit (deterministic
             // fill over the UninitializedMemory buffers + a stable index mapping).
             h.System.TickSymbols(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
 
             Assert.IsTrue(h.System.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh worldMesh1), "the world text slot must still exist.");
             WorldMeshReadback.Read(worldMesh1, out WorldBillboardVertex[] secondWorldV, out float[] secondWorldOpacity);
-            Assert.AreEqual(firstWorldV, secondWorldV, "WORLD vertex data (AnchorLocal/ColorRGB/Uv/Page/Offset/AlignFlags) drifted across identical Ticks — the two point labels' index mapping is unstable.");
-            Assert.AreEqual(firstWorldOpacity, secondWorldOpacity, "WORLD opacity stream drifted across identical Ticks.");
+            Assert.AreEqual(firstWorldV, secondWorldV, "WORLD vertex data (AnchorLocal/ColorRGB/Uv/Page/Offset/AlignFlags) drifted across identical Updates — the two point labels' index mapping is unstable.");
+            Assert.AreEqual(firstWorldOpacity, secondWorldOpacity, "WORLD opacity stream drifted across identical Updates.");
         }
 
         // ── Harness: a MapCamera + tiny atlas + symbol builders (point + a curved line spanning the view). ──
@@ -1570,7 +1572,8 @@ namespace MapRenderer.Tests.Text.Placement
                 spriteAtlas: OneSpriteAtlas("marker"));
 
             Assert.AreEqual(2, symbols.Symbols.Count, "a feature resolving both icon and text emits a paired instance (icon then text)");
-            ShapedSymbol icon = symbols.Symbols[0], text = symbols.Symbols[1];
+            ShapedSymbol icon = symbols.Symbols[0];
+            ShapedSymbol text = symbols.Symbols[1];
             Assert.AreEqual(SymbolKind.Icon, icon.Kind); Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole);
             Assert.AreEqual(SymbolKind.Text, text.Kind); Assert.AreEqual(SymbolPairRole.Rider, text.PairRole);
 
@@ -1940,7 +1943,7 @@ namespace MapRenderer.Tests.Text.Placement
             return buffer;
         }
 
-        // Runs one real Tick of `buffer` under `projection` and returns the world mesh's stream-0 vertices.
+        // Runs one real Update of `buffer` under `projection` and returns the world mesh's stream-0 vertices.
         private WorldBillboardVertex[] RunPointTick(IProjection projection, SymbolTileBuffer buffer)
         {
             var camGo = Track(new GameObject("SurfaceUpPopulation_TestCamera"));
@@ -1957,7 +1960,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var atlasTexture = BuildTinyAtlasTexture();
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // Collision verdicts apply one Tick late — duplicate before reading placement.
+            // Collision verdicts apply one Update late — duplicate before reading placement.
             system.TickSymbols(in frame, buffer, atlasTexture, projection);
             system.TickSymbols(in frame, buffer, atlasTexture, projection);
             Assert.AreEqual(1, system.LastQuadCount, "precondition: the label must place (not cull).");
@@ -1974,8 +1977,10 @@ namespace MapRenderer.Tests.Text.Placement
             var projection = new SphericalProjection();
             double lambda = Anchor.Longitude * math.PI_DBL / 180.0;
             double phi    = Anchor.Latitude  * math.PI_DBL / 180.0;
-            double sinPhi = math.sin(phi), cosPhi = math.cos(phi);
-            double sinLam = math.sin(lambda), cosLam = math.cos(lambda);
+            double sinPhi = math.sin(phi);
+            double cosPhi = math.cos(phi);
+            double sinLam = math.sin(lambda);
+            double cosLam = math.cos(lambda);
             // Closed form written out here, not derived by calling ProjectPoint: render axes are (X,Z,Y) —
             // SphericalProjection.cs's own documented axis-swap — so Up.y carries sinφ.
             var expectedUp = new float3((float)(cosPhi * cosLam), (float)sinPhi, (float)(cosPhi * sinLam));
@@ -2025,8 +2030,10 @@ namespace MapRenderer.Tests.Text.Placement
             // agree well inside the 1e-4 tolerance.
             var geoA = new GeoCoordinate { Latitude = Anchor.Latitude, Longitude = Anchor.Longitude - 1.0 };
             var geoB = new GeoCoordinate { Latitude = Anchor.Latitude, Longitude = Anchor.Longitude + 1.0 };
-            double3 a = projection.Project(geoA), b = projection.Project(geoB);
-            double3 upA = projection.ProjectPoint(geoA).Up, upB = projection.ProjectPoint(geoB).Up;
+            double3 a = projection.Project(geoA);
+            double3 b = projection.Project(geoB);
+            double3 upA = projection.ProjectPoint(geoA).Up;
+            double3 upB = projection.ProjectPoint(geoB).Up;
             var path = new[] { a, b };
             var pathUps = new[] { upA, upB };
 

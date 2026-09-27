@@ -479,7 +479,8 @@ namespace MapRenderer.Tests.Globe
             // is a PREFIX of the banded run's output.
             for (int i = 0; i < reference.Vertices.Length; i++)
             {
-                GlobeFillVertex a = reference.Vertices[i], b = banded.Vertices[i];
+                GlobeFillVertex a = reference.Vertices[i];
+                GlobeFillVertex b = banded.Vertices[i];
                 Assert.AreEqual(a.Tile.x, b.Tile.x, 0.0, $"interior vertex {i}: Tile.x must be bit-identical");
                 Assert.AreEqual(a.Tile.y, b.Tile.y, 0.0, $"interior vertex {i}: Tile.y must be bit-identical");
                 Assert.AreEqual(a.World.x, b.World.x, 0.0, $"interior vertex {i}: World.x must be bit-identical");
@@ -543,7 +544,9 @@ namespace MapRenderer.Tests.Globe
                 var kept = new List<Vector3>(vertices.Length);
                 for (int t = 0; t + 2 < triangles.Length; t += 3)
                 {
-                    int a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
+                    int a = triangles[t];
+                    int b = triangles[t + 1];
+                    int c = triangles[t + 2];
                     if (band[a].z != 0f || band[b].z != 0f || band[c].z != 0f) continue;
                     kept.Add(vertices[a]); kept.Add(vertices[b]); kept.Add(vertices[c]);
                 }
@@ -883,13 +886,18 @@ namespace MapRenderer.Tests.Globe
             int[]     t = mesh.triangles;
             Assert.Greater(n.Length, 0, "mesh must carry surface normals");
 
-            int pos = 0, neg = 0;
+            int pos = 0;
+            int neg = 0;
             for (int i = 0; i + 2 < t.Length; i += 3)
             {
-                float3 va = v[t[i]], vb = v[t[i + 1]], vc = v[t[i + 2]]; // Vector3→float3 at the mesh boundary
+                // Vector3→float3 at the mesh boundary
+                float3 va = v[t[i]];
+                float3 vb = v[t[i + 1]];
+                float3 vc = v[t[i + 2]];
                 float3 g = math.cross(vb - va, vc - va);  // right-handed face normal
                 float3 nn = n[t[i]];
-                float gm = math.length(g), nm = math.length(nn);
+                float gm = math.length(g);
+                float nm = math.length(nn);
                 if (gm <= 0f || nm <= 0f) continue;
                 // Skip NEEDLE slivers (thinness gm/longestEdge² < 0.02): antimeridian earcut slivers have a noisy
                 // face normal that the |cos| gate misses. The 0.99 uniformity bar is unchanged.
@@ -1067,10 +1075,14 @@ namespace MapRenderer.Tests.Globe
             int[] t = mesh.triangles;
             Assert.AreEqual(p.Length, across.Count, "across stream must be present");
 
-            int pos = 0, neg = 0;
+            int pos = 0;
+            int neg = 0;
             for (int i = 0; i + 2 < t.Length; i += 3)
             {
-                float3 pa = p[t[i]], pb = p[t[i + 1]], pc = p[t[i + 2]]; // Vector3→float3 at the mesh boundary
+                // Vector3→float3 at the mesh boundary
+                float3 pa = p[t[i]];
+                float3 pb = p[t[i + 1]];
+                float3 pc = p[t[i + 2]];
                 // Local scale = longest centerline edge; w = 5% of it keeps the extruded ribbon thin (no fold).
                 float d = math.max(math.distance(pa, pb), math.max(math.distance(pb, pc), math.distance(pc, pa)));
                 if (d < 1e-4f) continue; // join/cap fan collapsed to one centerline point — ambiguous, skip
@@ -1080,7 +1092,8 @@ namespace MapRenderer.Tests.Globe
                 float3 ec = pc + (float3)across[t[i + 2]] * w;
                 float3 g   = math.cross(eb - ea, ec - ea);      // extruded face normal
                 float3 n   = nrm[t[i]];
-                float gm = math.length(g), nm = math.length(n);
+                float gm = math.length(g);
+                float nm = math.length(n);
                 if (gm <= 0f || nm <= 0f) continue;
                 float cos = math.dot(g, n) / (gm * nm);
                 if (math.abs(cos) < 0.5f) continue; // edge-on sliver
@@ -1295,11 +1308,15 @@ namespace MapRenderer.Tests.Globe
         {
             double lambda = geo.Longitude * math.PI_DBL / 180.0;
             double phi    = geo.Latitude  * math.PI_DBL / 180.0;
-            double cosPhi = math.cos(phi), sinPhi = math.sin(phi);
-            double cosLam = math.cos(lambda), sinLam = math.sin(lambda);
+            double cosPhi = math.cos(phi);
+            double sinPhi = math.sin(phi);
+            double cosLam = math.cos(lambda);
+            double sinLam = math.sin(lambda);
 
             // Radial normal (unit), and the surface point at Radius — NO axis swap (raw ECEF is render space).
-            double upX = cosPhi * cosLam, upY = cosPhi * sinLam, upZ = sinPhi;
+            double upX = cosPhi * cosLam;
+            double upY = cosPhi * sinLam;
+            double upZ = sinPhi;
             return new ProjectedPoint
             {
                 World = new double3(upX * Radius, upY * Radius, upZ * Radius),
@@ -1314,8 +1331,10 @@ namespace MapRenderer.Tests.Globe
         {
             double lambda = geo.Longitude * math.PI_DBL / 180.0;
             double phi    = geo.Latitude  * math.PI_DBL / 180.0;
-            double cosPhi = math.cos(phi), sinPhi = math.sin(phi);
-            double cosLam = math.cos(lambda), sinLam = math.sin(lambda);
+            double cosPhi = math.cos(phi);
+            double sinPhi = math.sin(phi);
+            double cosLam = math.cos(lambda);
+            double sinLam = math.sin(lambda);
             double3 up   = new double3(cosPhi * cosLam, cosPhi * sinLam, sinPhi);
             double3 east = new double3(-sinLam, cosLam, 0.0);
             double3 north = math.cross(up, east);

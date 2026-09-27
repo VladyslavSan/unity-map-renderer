@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// fetcher, scheduler or cache. The handle is eager, as in the MVT source: <see cref="GetTile"/> slices,
     /// then returns a <see cref="SharedDisposable{T}"/>, so a record that never kicks still frees its tile.
     /// Non-obvious why: the slice uses the MVT source's <see cref="TileDecodeDispatch.DecodeAsync"/>. Under
-    /// <see cref="ThreadPoolWorkScheduler"/> it hops to the pool, so no slice stalls <c>Tick</c>
+    /// <see cref="ThreadPoolWorkScheduler"/> it hops to the pool, so no slice stalls <c>Update</c>
     /// (<c>GeoJsonSourceTests.GetTile_SlicesOffTheMainThread</c>); under <see cref="InlineWorkScheduler"/>
     /// (WebGL) it runs inline.
     /// The shared dispatch passes a null <c>bytes</c>, which <see cref="ITileDecoder.Decode"/> documents.
@@ -68,7 +68,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             bool disjoint = _dataset.BboxMax.x < windowMin.x || _dataset.BboxMin.x > windowMax.x ||
                             _dataset.BboxMax.y < windowMin.y || _dataset.BboxMin.y > windowMax.y;
 
-            // The slice is the decode, and it runs on the pool — never inline in the caller's Tick.
+            // The slice is the decode, and it runs on the pool — never inline in the caller's Update.
             return disjoint ? null : await TileDecodeDispatch.DecodeAsync(id, null, _decoder, _scheduler);
         }
 

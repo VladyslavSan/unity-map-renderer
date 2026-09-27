@@ -24,16 +24,16 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
      SymbolTileBuffer ─▶ Bake ─▶ SymbolTileBlock ──▶ SymbolTileStore   (Unity/Text)
                  │  native per-tile SoA block; per-(source,tile) sets, collected-set Version
                  ▼
-      ┌── SymbolPlacementSystem.Tick(frame, plan, atlas, …)  (Unity/Text/Placement)  [PER FRAME, MAIN]
+      ┌── SymbolPlacementSystem.Update(frame, plan, atlas, …)  (Unity/Text/Placement)  [PER FRAME, MAIN]
       │      1. Gather            — mirror the winner plan into native buffers
       │                                                  (SymbolGatherJob, Jobs — .Run())
-      │      2. CollideHarvest    — complete LAST Tick's collision job
+      │      2. CollideHarvest    — complete LAST Update's collision job
       │      3. Project           — cull + compact world points, project to screen
       │                                                  (CullJob, CompactJob, SymbolProjectionJob, Jobs)
       │      4. Stage             — lay each glyph onto the projected curve, build collision boxes + quads
       │                                                  (StageJob, Jobs)
-      │      5. Emit              — A-4 fade + per-slot quad assembly, from LAST Tick's verdict
-      │      6. Collide           — schedule THIS Tick's greedy placement   (CollisionJob, Jobs)
+      │      5. Emit              — A-4 fade + per-slot quad assembly, from LAST Update's verdict
+      │      6. Collide           — schedule THIS Update's greedy placement   (CollisionJob, Jobs)
       │   then WorldSymbolRenderer.EndFrame — build + submit each slot's billboard mesh
       │                                                  (WorldBillboardMeshBuilder, Unity/Text/Placement)
       └──────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -74,7 +74,7 @@ The design docs own the measured costs and the open levers:
 that stay:
 
 1. **The per-frame pass runs on a still camera — an accepted cost.** The placement layer keeps state
-   across frames: a fade opacity per fade id (`_fadeOpacity`), and a collision verdict that one Tick
+   across frames: a fade opacity per fade id (`_fadeOpacity`), and a collision verdict that one Update
    schedules and the next harvests (`docs/labels-and-symbols-design.md` § "Track A — placement state
    machine"). A static-frame skip (B-1) is rejected, because it trades this cost for a motion-keyed cost
    cliff (`docs/symbol-label-perf-design.md` § "Constraints (non-negotiable)"). So an idle camera still runs
@@ -91,8 +91,8 @@ All under `ProfilerCategory.Scripts`, so a re-profile is self-serve:
 | Marker | Covers |
 |---|---|
 | `MapRenderer.Symbol.Gather` | mirror compaction (`SymbolGatherJob`); a same-version frame measures a memo hit |
-| `MapRenderer.Symbol.SymbolTick` | the rest of the per-frame placement Tick |
-| ` ├ MapRenderer.Symbol.CollideHarvest` | completing LAST Tick's scheduled collision job |
+| `MapRenderer.Symbol.SymbolUpdate` | the rest of the per-frame placement Update |
+| ` ├ MapRenderer.Symbol.CollideHarvest` | completing LAST Update's scheduled collision job |
 | ` ├ MapRenderer.Symbol.Project` | umbrella: point gather + projection + staging |
 | ` │  ├ MapRenderer.Symbol.GatherPoints` | the cull scan (`Gather.Cull`) and the compaction (`Gather.Compact`) |
 | ` │  ├ MapRenderer.Symbol.ProjectPositions` | `SymbolProjectionJob` |

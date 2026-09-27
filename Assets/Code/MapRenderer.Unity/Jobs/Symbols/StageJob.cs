@@ -26,12 +26,16 @@ namespace MapRenderer.Unity.Jobs.Symbols
 
         // ── point details ──
         public NativeArray<PointStageInput> Points;         // stable fields; dynamic patched per record below
-        public NativeArray<int> PointQuadStart, PointQuadCount;
+        public NativeArray<int> PointQuadStart;
+        public NativeArray<int> PointQuadCount;
 
         // ── curved details ──
         public NativeArray<CurvedStageInput> Curveds;
-        public NativeArray<int> CurvedGlyphStart, CurvedGlyphCount;
-        public NativeArray<int> CurvedAnchorStart, CurvedAnchorCount, CurvedAnchorFadeStart;
+        public NativeArray<int> CurvedGlyphStart;
+        public NativeArray<int> CurvedGlyphCount;
+        public NativeArray<int> CurvedAnchorStart;
+        public NativeArray<int> CurvedAnchorCount;
+        public NativeArray<int> CurvedAnchorFadeStart;
 
         // ── flat pools ──
         public NativeArray<SymbolQuad>  Quads;
@@ -55,7 +59,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
         public NativeArray<byte>   AnchorWasPlaced;
         public float   Bearing;
         public double2 Viewport;
-        // This frame's metres per LOGICAL screen pixel, already recombined by SymbolPlacementSystem.Tick
+        // This frame's metres per LOGICAL screen pixel, already recombined by SymbolPlacementSystem.Update
         // (MetresPerDevicePixel × DevicePixelRatio). Patched into each curved record below.
         public float   MetresPerLogicalPixel;
         // This frame's view transform, which projects render-space points for the map-pitched collision box.
@@ -95,7 +99,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
             for (int i = 0; i < AnchorWasPlaced.Length; i++)
                 AnchorWasPlaced[i] = (byte)(Placed.Contains(AnchorFadeIds[i]) ? 1 : 0);
 
-            int candidateCount = 0, boxCount = 0, quadCount = 0, emitCount = 0;
+            int candidateCount = 0;
+            int boxCount = 0;
+            int quadCount = 0;
+            int emitCount = 0;
             for (int r = 0; r < Count; r++)
             {
                 int off = PointOffset[r];

@@ -461,7 +461,8 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void SelectFeatures_ListOverload_MatchesManagedParity_ForEveryCoveredFilter_EveryLayer()
         {
-            int comparisons = 0, nonDegenerate = 0;
+            int comparisons = 0;
+            int nonDegenerate = 0;
             foreach (JsonValue filterJson in _parityFilters)
             {
                 foreach (MvtLayer layer in _tile.Layers)
@@ -873,7 +874,8 @@ namespace MapRenderer.Tests.Filters
         public void Vm_AgreesWithManagedCompiledFilter_ForEveryCoveredFilter_EveryFeature_EveryLayer()
         {
             int comparisons = 0;
-            int classNonNull = 0, brunnelNonNull = 0;
+            int classNonNull = 0;
+            int brunnelNonNull = 0;
             MvtTile[] tiles = { _tile, _croatiaTile }; // hoisted out of the per-filter loop (NIT, review)
 
             foreach (JsonValue filterJson in _coveredLibertyFilters)
@@ -1226,7 +1228,8 @@ namespace MapRenderer.Tests.Filters
                             numbers.Add(v.AsNumber());
                     if (numbers.Count < 2) continue;
 
-                    double min = numbers[0], max = numbers[0];
+                    double min = numbers[0];
+                    double max = numbers[0];
                     foreach (double n in numbers)
                     {
                         if (n < min) min = n;

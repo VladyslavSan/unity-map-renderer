@@ -41,7 +41,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// synchronous throw, so the coordinator observes every outcome in one place. A decode fault is a
         /// <c>TileDecodeException</c>, so it logs apart from a fetch error.</para>
         ///
-        /// <para><paramref name="ct"/> is contract-only: <c>TileManager.Tick</c>, the sole call site, passes
+        /// <para><paramref name="ct"/> is contract-only: <c>TileManager.Update</c>, the sole call site, passes
         /// none. An HTTP abort flows through <see cref="Release"/> into the scheduler's per-tile token. An
         /// implementation still honours <paramref name="ct"/>, so a caller that passes one cannot mint handles
         /// through a teardown.</para></summary>

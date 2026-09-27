@@ -834,8 +834,12 @@ namespace MapRenderer.Tests.Style
             => StyleParser.Parse(string.Format(SingleSymbolTemplate, textColorHex));
 
         // #996633 -> #2288DD: no shared channel, none at 0/1.
-        private const float OldR = 0x99 / 255f, OldG = 0x66 / 255f, OldB = 0x33 / 255f;
-        private const float NewR = 0x22 / 255f, NewG = 0x88 / 255f, NewB = 0xDD / 255f;
+        private const float OldR = 0x99 / 255f;
+        private const float OldG = 0x66 / 255f;
+        private const float OldB = 0x33 / 255f;
+        private const float NewR = 0x22 / 255f;
+        private const float NewG = 0x88 / 255f;
+        private const float NewB = 0xDD / 255f;
 
         /// <summary>
         /// A surviving symbol layer's <c>_TextColor</c> uniform must reach the NEW colour after
@@ -885,7 +889,8 @@ namespace MapRenderer.Tests.Style
 
                 void AssertStrictlyBetween(float value, float a, float b, string channel)
                 {
-                    float lo = Mathf.Min(a, b), hi = Mathf.Max(a, b);
+                    float lo = Mathf.Min(a, b);
+                    float hi = Mathf.Max(a, b);
                     Assert.Greater(value, lo, $"{channel} must be strictly above the lower endpoint mid-ease.");
                     Assert.Less(value, hi, $"{channel} must be strictly below the upper endpoint mid-ease.");
                 }

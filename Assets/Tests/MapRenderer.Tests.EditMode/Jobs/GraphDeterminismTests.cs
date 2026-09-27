@@ -158,7 +158,8 @@ namespace MapRenderer.Tests.Jobs
             // a raw threadpool thread, as the off-main line path needs.
             int mainTid = Thread.CurrentThread.ManagedThreadId;
 
-            int vc = -1, ic = -1;
+            int vc = -1;
+            int ic = -1;
             var result = RunOnWorker(() =>
             {
                 var pts   = new NativeArray<double3>(3, Allocator.Persistent);
@@ -462,7 +463,8 @@ namespace MapRenderer.Tests.Jobs
                 foreach (Type t in assembly.GetTypes())
                     foreach (MethodBase m in Methods(t))
                     {
-                        bool hasBuffer = false, hasTileId = false;
+                        bool hasBuffer = false;
+                        bool hasTileId = false;
                         foreach (ParameterInfo p in m.GetParameters())
                         {
                             Type pt = p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType;
@@ -876,8 +878,10 @@ namespace MapRenderer.Tests.Jobs
 
         // Two disjoint rectangles in tile-local units at the default extent, WEST first. The gap between them
         // is what makes "which ring is filed under which ordinal" answerable from the coordinates alone.
-        private const double WestMin = 512.0,  WestMax = 1536.0;
-        private const double EastMin = 2560.0, EastMax = 3584.0;
+        private const double WestMin = 512.0;
+        private const double WestMax = 1536.0;
+        private const double EastMin = 2560.0;
+        private const double EastMax = 3584.0;
 
         // The tile the clipping fixture slices, and the two z1 neighbours that hold the features it discards.
         private static readonly TileId SliceTile      = new TileId { Z = 1, X = 0, Y = 0 };
@@ -2075,7 +2079,8 @@ namespace MapRenderer.Tests.Jobs
         public static uint[] Feature(params IReadOnlyList<double2>[] rings)
         {
             var commands = new List<uint>();
-            long cursorX = 0, cursorY = 0;
+            long cursorX = 0;
+            long cursorY = 0;
 
             foreach (IReadOnlyList<double2> ring in rings)
             {
@@ -2837,7 +2842,8 @@ namespace MapRenderer.Tests.Jobs
         private static void AssertBitEqualDouble(
             double managed, double burst, string fixture, IProjection proj, int index, string label)
         {
-            ulong m = math.asulong(managed), b = math.asulong(burst);
+            ulong m = math.asulong(managed);
+            ulong b = math.asulong(burst);
             Assert.AreEqual(m, b,
                 $"{label}[{index}] diverges (expected bit-exact, per the design doc's table) — {fixture} ({proj.GetType().Name}): " +
                 $"managed=0x{m:X16} ({managed:R}) burst=0x{b:X16} ({burst:R})");
@@ -2854,7 +2860,8 @@ namespace MapRenderer.Tests.Jobs
 
         private static ulong UlpDistance(double a, double b)
         {
-            ulong oa = ToUlpOrder(a), ob = ToUlpOrder(b);
+            ulong oa = ToUlpOrder(a);
+            ulong ob = ToUlpOrder(b);
             return oa > ob ? oa - ob : ob - oa;
         }
 

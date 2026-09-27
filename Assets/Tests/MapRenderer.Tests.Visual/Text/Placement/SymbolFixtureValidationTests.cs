@@ -3,7 +3,7 @@
 //
 // Contents:
 //   TiltFixtureSelfTests         — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture), off-screen GPU render + CPU readback.
-//   OffLookAtSymbolFixtureTests  — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback.
+//   OffLookAtSymbolFixtureTests  — Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real SymbolPlacementSystem.Update), off-screen GPU render + CPU readback.
 
 using System.Collections.Generic;
 using System.IO;
@@ -544,8 +544,8 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        /// <summary>Renders the glyph 'A' through the REAL <c>SymbolPlacementSystem.Tick</c> (twice: the
-        /// collision verdict is harvested one Tick late) at the look-at, so both tilts put it at screen centre.
+        /// <summary>Renders the glyph 'A' through the REAL <c>SymbolPlacementSystem.Update</c> (twice: the
+        /// collision verdict is harvested one Update late) at the look-at, so both tilts put it at screen centre.
         /// With <paramref name="inkHeight0PxForMapExpectation"/> it also computes the MAP-aligned expectation:
         /// <c>GroundSegmentSpanPx</c> of a ground segment <c>inkHeight(0°) · mpp</c> metres long.</summary>
         private static SymbolArmResult RenderSymbolArm(
@@ -573,9 +573,9 @@ namespace MapRenderer.Tests.Visual
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(scene.MapCam.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
                 int quadCount = system.LastQuadCount;
 
                 scene.Render(snap);
@@ -655,7 +655,7 @@ namespace MapRenderer.Tests.Visual
     }
 
     // Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real
-    // SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback.
+    // SymbolPlacementSystem.Update), off-screen GPU render + CPU readback.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
     // The off-look-at fixture's OWN acceptance teeth (M1–M13); read OffLookAtSymbolScene's header first. They
@@ -721,7 +721,8 @@ namespace MapRenderer.Tests.Visual
             const double marginPx = 32.0;
             double2 nearPx = f.Measure(OffLookAtSymbolId.CrossNear).AnchorScreenPx;
             double2 farPx  = f.Measure(OffLookAtSymbolId.CrossFar).AnchorScreenPx;
-            double lo = marginPx, hi = f.Config.SizePx - marginPx;
+            double lo = marginPx;
+            double hi = f.Config.SizePx - marginPx;
 
             double worst = math.min(
                 math.min(math.min(nearPx.x - lo, hi - nearPx.x), math.min(nearPx.y - lo, hi - nearPx.y)),
@@ -1108,7 +1109,9 @@ namespace MapRenderer.Tests.Visual
 
         private static double RelativeDepthSpread(SymbolMeasurement m)
         {
-            double min = double.MaxValue, max = double.MinValue, sum = 0.0;
+            double min = double.MaxValue;
+            double max = double.MinValue;
+            double sum = 0.0;
             for (int g = 0; g < m.Glyphs.Length; g++)
             {
                 double w = m.Glyphs[g].ViewDepthMetres;
@@ -1121,7 +1124,8 @@ namespace MapRenderer.Tests.Visual
 
         private static double ScreenSpacingNonUniformity(SymbolMeasurement m)
         {
-            double min = double.MaxValue, max = double.MinValue;
+            double min = double.MaxValue;
+            double max = double.MinValue;
             for (int g = 0; g < m.ScreenSpacingPx.Length; g++)
             {
                 min = math.min(min, m.ScreenSpacingPx[g]);

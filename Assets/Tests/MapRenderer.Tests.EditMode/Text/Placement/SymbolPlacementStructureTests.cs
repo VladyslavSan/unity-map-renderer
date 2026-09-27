@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// symbols are the per-frame path, never the static tile path.
     /// (a) STRUCTURAL — a grep guard: nothing under the symbol-placement source tree calls
     ///     <c>ITileRenderBackend.AddTileLayer</c>.
-    /// (b) BEHAVIORAL — the billboard buffer is rebuilt from scratch every <see cref="SymbolPlacementSystem.Tick"/>,
+    /// (b) BEHAVIORAL — the billboard buffer is rebuilt from scratch every <see cref="SymbolPlacementSystem.Update"/>,
     ///     not cached/accumulated across calls.
     /// </summary>
     [TestFixture]
@@ -111,7 +111,7 @@ namespace MapRenderer.Tests.Text.Placement
                 string.Join("\n", offenders));
         }
 
-        // ── (b) Behavioral: rebuilt every Tick, never cached/accumulated ─────────────────────────
+        // ── (b) Behavioral: rebuilt every Update, never cached/accumulated ─────────────────────────
 
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
         {
@@ -159,7 +159,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void Tick_AdvancesTickCount_AndRebuildsQuadCountFromScratchEveryCall()
+        public void Update_AdvancesUpdateCount_AndRebuildsQuadCountFromScratchEveryCall()
         {
             var camGo = Track(new GameObject("SymbolStructure_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -181,35 +181,35 @@ namespace MapRenderer.Tests.Text.Placement
 
             using var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
-                Assert.AreEqual(0, system.TickCount, "TickCount starts at 0 before any Tick.");
+                Assert.AreEqual(0, system.UpdateCount, "UpdateCount starts at 0 before any Update.");
 
-                // A Tick's emit reads the collision verdict scheduled over the PREVIOUS Tick's candidates, so each
-                // step ticks twice before it asserts; TickCount therefore reads 2, 4, 6.
+                // An Update's emit reads the collision verdict scheduled over the PREVIOUS Update's candidates, so each
+                // step ticks twice before it asserts; UpdateCount therefore reads 2, 4, 6.
                 system.TickSymbols(in frame, twoSymbols, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, twoSymbols, atlasTexture, mapCamera.Projection);
-                Assert.AreEqual(2, system.TickCount);
+                Assert.AreEqual(2, system.UpdateCount);
                 Assert.AreEqual(2, system.LastQuadCount, "2 labels x 1 quad each = 2 placed quads.");
 
                 // Rebuilt from scratch, not accumulated: ticking with FEWER symbols must report FEWER quads,
-                // not the sum of every Tick so far (which would prove a cache/append bug).
+                // not the sum of every Update so far (which would prove a cache/append bug).
                 system.TickSymbols(in frame, oneSymbol, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, oneSymbol, atlasTexture, mapCamera.Projection);
-                Assert.AreEqual(4, system.TickCount);
+                Assert.AreEqual(4, system.UpdateCount);
                 Assert.AreEqual(1, system.LastQuadCount,
-                    "a Tick with 1 label must report 1 placed quad -- NOT 3 (2 from the prior Tick + 1), " +
-                    "which would mean the buffer is cached/appended instead of rebuilt every Tick.");
+                    "a Update with 1 label must report 1 placed quad -- NOT 3 (2 from the prior Update + 1), " +
+                    "which would mean the buffer is cached/appended instead of rebuilt every Update.");
 
                 system.TickSymbols(in frame, twoSymbols, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, twoSymbols, atlasTexture, mapCamera.Projection);
-                Assert.AreEqual(6, system.TickCount);
+                Assert.AreEqual(6, system.UpdateCount);
                 Assert.AreEqual(2, system.LastQuadCount);
             }
         }
 
         // ── text-translate shifts the placed billboard vertices: SymbolTranslateTests covers the delta math,
-        //    this proves Tick applies it. ──
+        //    this proves Update applies it. ──
         [Test]
-        public void Tick_TextTranslate_ShiftsEveryPlacedVertex_ByScreenDelta()
+        public void Update_TextTranslate_ShiftsEveryPlacedVertex_ByScreenDelta()
         {
             var camGo = Track(new GameObject("SymbolTranslate_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -235,8 +235,8 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
-                // The collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick —
-                // duplicate each candidate-set's Tick call before reading its placement.
+                // The collision verdict a Update's emit reads is harvested from the PREVIOUS Update —
+                // duplicate each candidate-set's Update call before reading its placement.
                 system.TickSymbols(in frame, baseline, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, baseline, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(1, system.LastQuadCount, "one label, one quad");
@@ -259,10 +259,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── text-rotation-alignment:map rotates the billboard with the map bearing: Tick threads the
+        // ── text-rotation-alignment:map rotates the billboard with the map bearing: Update threads the
         //    alignment and the bearing into BillboardMath, so a non-zero heading rotates the quad. ──
         [Test]
-        public void Tick_RotationAlignmentMap_RotatesBillboard_UnderBearing_ViewportStaysAxisAligned()
+        public void Update_RotationAlignmentMap_RotatesBillboard_UnderBearing_ViewportStaysAxisAligned()
         {
             var camGo = Track(new GameObject("SymbolRotation_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -288,7 +288,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
-                // Duplicate each candidate-set's Tick call — the verdict is harvested one Tick late.
+                // Duplicate each candidate-set's Update call — the verdict is harvested one Update late.
                 system.TickSymbols(in frame, viewportSymbols, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, viewportSymbols, atlasTexture, mapCamera.Projection);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh viewportMesh), "the world slot mesh must exist.");
@@ -352,7 +352,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void Tick_LineCenterPlacement_EmitsGlyphsDistributedAlongTheProjectedLine()
+        public void Update_LineCenterPlacement_EmitsGlyphsDistributedAlongTheProjectedLine()
         {
             var camGo = Track(new GameObject("LineText_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -385,7 +385,7 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             system.SymbolMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place symbols beyond the far plane without them being culled
             {
-                // Duplicate — the collision verdict is harvested one Tick late.
+                // Duplicate — the collision verdict is harvested one Update late.
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection);
 
@@ -397,7 +397,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                 // DISTRIBUTED, not stacked: the 3D spread of the corners' AnchorLocal exceeds a small threshold,
                 // whatever the line's world orientation.
-                float3 minA = new float3(float.MaxValue), maxA = new float3(float.MinValue);
+                float3 minA = new float3(float.MaxValue);
+                float3 maxA = new float3(float.MinValue);
                 foreach (WorldBillboardVertex vv in v)
                 {
                     minA = math.min(minA, vv.AnchorLocal);
@@ -411,7 +412,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── Over the SAME wide line, symbol-placement:line repeats the symbol while line-center places one, so
         //    the placement mode drives the repetition. allow-overlap isolates it from collision. ──
         [Test]
-        public void Tick_LinePlacement_RepeatsSymbolAlongLine_WhereLineCenterPlacesOne()
+        public void Update_LinePlacement_RepeatsSymbolAlongLine_WhereLineCenterPlacesOne()
         {
             var camGo = Track(new GameObject("LineRepeat_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -451,7 +452,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             system.SymbolMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place symbols beyond the far plane without them being culled
             {
-                // Duplicate each candidate-set's Tick call — the verdict is harvested one Tick late.
+                // Duplicate each candidate-set's Update call — the verdict is harvested one Update late.
                 var centerSymbols = Curved(SymbolPlacement.LineCenter);
                 system.TickSymbols(in frame, centerSymbols, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, centerSymbols, atlasTexture, mapCamera.Projection);
@@ -473,7 +474,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── The per-frame walk clamps its anchors to MaxAnchorsPerLine (256), on top of the build-time cap
         //    (LineAnchorPlacementTests): 300 fitting anchors with allow-overlap place 256, not 300. ──
         [Test]
-        public void Tick_LinePlacement_AnchorCount_IsHardCapped()
+        public void Update_LinePlacement_AnchorCount_IsHardCapped()
         {
             var camGo = Track(new GameObject("LineCap_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -502,7 +503,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             system.SymbolMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place symbols beyond the far plane without them being culled
             {
-                // Duplicate — the collision verdict is harvested one Tick late.
+                // Duplicate — the collision verdict is harvested one Update late.
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection);
                 // 300 fitting anchors are clamped to MaxAnchorsPerLine (256) → exactly 256 × 3 glyphs; without
@@ -514,7 +515,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── text-max-angle: the SAME sharp corner places a curved symbol at a permissive angle and drops it at
         //    a strict one. ──
         [Test]
-        public void Tick_TextMaxAngle_DropsSymbolBendingRoundASharpCorner()
+        public void Update_TextMaxAngle_DropsSymbolBendingRoundASharpCorner()
         {
             var camGo = Track(new GameObject("MaxAngle_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -549,7 +550,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             using var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
-                // Duplicate each candidate-set's Tick call — the verdict is harvested one Tick late.
+                // Duplicate each candidate-set's Update call — the verdict is harvested one Update late.
                 var permissive = Curved(170f);
                 system.TickSymbols(in frame, permissive, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, permissive, atlasTexture, mapCamera.Projection);
@@ -566,7 +567,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── #6: text-keep-upright changes how a right-to-left line symbol is laid out (reversed walk + glyph
         //    flip vs. following the raw line direction) — both place 3 glyphs, but the meshes differ. ──
         [Test]
-        public void Tick_TextKeepUpright_ChangesLayoutOfARightToLeftLine()
+        public void Update_TextKeepUpright_ChangesLayoutOfARightToLeftLine()
         {
             var camGo = Track(new GameObject("KeepUpright_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -601,7 +602,7 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             system.SymbolMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place symbols beyond the far plane without them being culled
             {
-                // Duplicate each candidate-set's Tick call — the verdict is harvested one Tick late.
+                // Duplicate each candidate-set's Update call — the verdict is harvested one Update late.
                 var uprightSymbols = Curved(true);
                 system.TickSymbols(in frame, uprightSymbols, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, uprightSymbols, atlasTexture, mapCamera.Projection);
@@ -629,9 +630,9 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Two OVERLAPPING curved symbols collide end-to-end (rotated-glyph box → CollisionJob → emit) and
-        //    only the lower sort key places. The other curved Tick tests are single-symbol or allow-overlap. ──
+        //    only the lower sort key places. The other curved Update tests are single-symbol or allow-overlap. ──
         [Test]
-        public void Tick_TwoOverlappingCurvedSymbols_OnlyLowerSortKeyPlaces()
+        public void Update_TwoOverlappingCurvedSymbols_OnlyLowerSortKeyPlaces()
         {
             var camGo = Track(new GameObject("CurvedCollide_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
@@ -661,7 +662,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             system.SymbolMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place symbols beyond the far plane without them being culled
             {
-                // Duplicate each candidate-set's Tick call — the verdict is harvested one Tick late.
+                // Duplicate each candidate-set's Update call — the verdict is harvested one Update late.
                 // Collision ON: the two coincident symbols fight → only the lower-key one survives (3 glyphs).
                 var collidingSymbols = new SymbolTileBuffer();
                 AddCurved(collidingSymbols, featureIndex: 0, sortKey: 20f, allowOverlap: false);
@@ -700,7 +701,9 @@ namespace MapRenderer.Tests.Text.Placement
 
         private struct Result
         {
-            public int Staged, BoxCount, QuadCount;
+            public int Staged;
+            public int BoxCount;
+            public int QuadCount;
             public SymbolBox[] Boxes; public PlacedQuad[] Quads; public SymbolCandidate[] Candidates;
         }
 
@@ -712,7 +715,9 @@ namespace MapRenderer.Tests.Text.Placement
             int maxBoxes = (anchors.Length + 1) * glyphs.Length + 1;
             var boxes = new SymbolBox[maxBoxes]; var quads = new PlacedQuad[maxBoxes];
             var cands = new SymbolCandidate[anchors.Length + 1]; var emit = new CandidateEmit[anchors.Length + 1];
-            int bc = 0, qc = 0, ec = 0;
+            int bc = 0;
+            int qc = 0;
+            int ec = 0;
             int staged = SymbolStagingMath.StageCurved(in s, screen, depth, valid, world, worldUps, glyphs, anchors, fadeIds, wasPlaced,
                 // `view` reaches both arms (Native assigns it to StageJob.View). The bend cases pass `default`;
                 // BurstStage_MatchesManaged_MapPitchedCurved passes a real one to cover the projected corners.

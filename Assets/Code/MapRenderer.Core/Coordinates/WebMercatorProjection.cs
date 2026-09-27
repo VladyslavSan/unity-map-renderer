@@ -143,8 +143,10 @@ namespace MapRenderer.Core.Geo
             double halfY = viewportPx.y * 0.5 * mpp;
             double ext   = WebMercator.WorldExtent; // ±ext square world (X and Y)
 
-            double loX = -ext + halfX, hiX = ext - halfX;
-            double loY = -ext + halfY, hiY = ext - halfY;
+            double loX = -ext + halfX;
+            double hiX = ext - halfX;
+            double loY = -ext + halfY;
+            double hiY = ext - halfY;
             // If the world is smaller than the viewport on an axis (at/past the fill floor), the range
             // collapses — lock that axis to world-centre rather than clamp against an inverted [lo,hi].
             double cx = loX <= hiX ? math.clamp(centreMerc.x, loX, hiX) : 0.0;

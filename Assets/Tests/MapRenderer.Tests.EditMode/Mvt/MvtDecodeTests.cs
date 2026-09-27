@@ -213,7 +213,8 @@ namespace MapRenderer.Tests.Mvt
         public void Countries_ValueTable_ContainsExpectedTypes()
         {
             var layer = LoadCountries();
-            int stringCount = 0, numberCount = 0;
+            int stringCount = 0;
+            int numberCount = 0;
             foreach (var v in layer.Values)
             {
                 if (v.Type == MapRenderer.Core.Expressions.ValueType.String) stringCount++;
@@ -274,7 +275,9 @@ namespace MapRenderer.Tests.Mvt
         public void Continent_FeatureCounts()
         {
             var layer = LoadCountries();
-            int africa = 0, europe = 0, asia = 0;
+            int africa = 0;
+            int europe = 0;
+            int asia = 0;
             foreach (var f in layer.Features)
             {
                 if (f.Properties.TryGetValue("CONTINENT", out var cv) &&

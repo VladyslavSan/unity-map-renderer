@@ -138,9 +138,9 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label's anchor must not be culled");
 
                 snap.Render(uCam);
@@ -162,7 +162,7 @@ namespace MapRenderer.Tests.Text.Placement
     //
     // Non-obvious why: the headless camera→RT readback lacks the on-screen backbuffer blit, so it is the
     // vertical MIRROR of what ships; the test un-mirrors it and never asserts absolute vertical position.
-    // Tick() binds a persistent scene MeshRenderer, so the test renders with no manual attach. Do NOT use
+    // Update() binds a persistent scene MeshRenderer, so the test renders with no manual attach. Do NOT use
     // Graphics.RenderMesh: an immediate-mode submission renders 0 px in headless EditMode.
 
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -249,15 +249,15 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     "DIAGNOSTIC precondition: the label's anchor must NOT be culled (LastQuadCount should be " +
                     "1, matching the single glyph quad) -- if this is 0, the failure is a projection/culling " +
                     "bug, not a rendering bug.");
 
-                // Tick() already bound the mesh to a persistent scene MeshRenderer, so render straight away;
+                // Update() already bound the mesh to a persistent scene MeshRenderer, so render straight away;
                 // a manual attach would double-blend the SDF ink.
                 snap.Render(uCam);
 
@@ -525,9 +525,9 @@ namespace MapRenderer.Tests.Text.Placement
             // (SymbolGatherParityTests covers the mixed case).
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                system.Update(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(buffer.Symbols.Count, plan.CollectedCount,
                     "precondition: the cross-tile dedup (fixed 4 m grid) must not merge any of these — a short " +
                     "count here would show up below as missing ink rather than as a placement bug.");
@@ -1065,10 +1065,10 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture,
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture,
+                system.Update(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     $"DIAGNOSTIC precondition ({lineAngleDeg} deg): the along-line icon must place exactly one quad.");
@@ -1164,10 +1164,10 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture,
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture,
+                system.Update(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     $"DIAGNOSTIC precondition (heading {headingDeg} deg, {rotationAlignment}): the point icon " +
@@ -1202,7 +1202,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // The minimum a Tick needs to stage anything at all (see the gate note above) — one real glyph
+        // The minimum a Update needs to stage anything at all (see the gate note above) — one real glyph
         // uploaded to a GlyphAtlasTexture. Nothing in the icon scene ever samples it.
         private static GlyphAtlasTexture BuildTinyGlyphAtlasTexture()
         {
@@ -1237,7 +1237,9 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < width * height; i++)
             {
                 Color32 c = rgba[i];
-                int r = c.r, g = c.g, bl = c.b;
+                int r = c.r;
+                int g = c.g;
+                int bl = c.b;
                 if (r > 230 && g > 230 && bl > 230) continue; // white background
                 if (r > 150 && g < 120 && bl < 120) red++;
                 else if (g > 140 && r < 130 && bl < 130) green++;
@@ -1255,7 +1257,8 @@ namespace MapRenderer.Tests.Text.Placement
             var rowHas = new bool[height];
             for (int r = 0; r < height; r++) { rowMin[r] = int.MaxValue; rowMax[r] = int.MinValue; }
 
-            int minRow = int.MaxValue, maxRow = int.MinValue;
+            int minRow = int.MaxValue;
+            int maxRow = int.MinValue;
             for (int row = 0; row < height; row++)
             {
                 for (int col = 0; col < width; col++)
@@ -1391,7 +1394,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                 // Ideal: the centroid advances by the phase shift (slope 1), compared against the ramp through
                 // the sweep's own mean, which removes the anchor's absolute position.
-                float meanCentroid = 0f, meanPhase = 0f;
+                float meanCentroid = 0f;
+                float meanPhase = 0f;
                 for (int i = 0; i < phasesPx.Length; i++) { meanCentroid += centroids[i]; meanPhase += phasesPx[i]; }
                 meanCentroid /= phasesPx.Length;
                 meanPhase /= phasesPx.Length;
@@ -1522,8 +1526,10 @@ namespace MapRenderer.Tests.Text.Placement
                     centroids[i] = RenderAndMeasureInkCentroidX(sheet, glyphAtlas, quad, "solid");
                 }
 
-                float smallestStep = float.MaxValue, largestStep = float.MinValue;
-                int smallestStepAt = 0, largestStepAt = 0;
+                float smallestStep = float.MaxValue;
+                float largestStep = float.MinValue;
+                int smallestStepAt = 0;
+                int largestStepAt = 0;
                 var report = new System.Text.StringBuilder();
                 for (int i = 0; i < phasesPx.Length; i++)
                 {
@@ -1638,7 +1644,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>
         /// A minimal one-glyph atlas. Required even though nothing here renders TEXT:
-        /// <c>SymbolPlacementSystem.TickCore</c> gates its whole placement pass on
+        /// <c>SymbolPlacementSystem.UpdateCore</c> gates its whole placement pass on
         /// <c>atlas?.Texture != null</c>, so a null glyph atlas silently places ZERO icons. An empty
         /// <see cref="GlyphAtlas"/> will not do either — <see cref="GlyphAtlasTexture.Upload"/> no-ops at
         /// <c>Size.y == 0</c> and leaves the texture null, which trips the same gate.
@@ -1800,7 +1806,8 @@ namespace MapRenderer.Tests.Text.Placement
         {
             Color32[] px = RenderIcon(sheet, glyphAtlas, quad, iconName, SymbolPaint.Default, Color.white, out int width);
 
-            double weighted = 0.0, total = 0.0;
+            double weighted = 0.0;
+            double total = 0.0;
             for (int p = 0; p < px.Length; p++)
             {
                 double ink = (255.0 - px[p].r) / 255.0; // black ink on white
@@ -1831,7 +1838,8 @@ namespace MapRenderer.Tests.Text.Placement
                 column[p % width] += ink;
             }
 
-            int first = -1, last = -1;
+            int first = -1;
+            int last = -1;
             for (int x = 0; x < width; x++)
             {
                 if (column[x] <= 0.0) continue;
@@ -1845,7 +1853,10 @@ namespace MapRenderer.Tests.Text.Placement
                 "precondition: the split column must fall in the transparent gutter BETWEEN the two bars — " +
                 "ink there means the bars merged and their centroids are no longer separable.");
 
-            double leftWeighted = 0.0, leftTotal = 0.0, rightWeighted = 0.0, rightTotal = 0.0;
+            double leftWeighted = 0.0;
+            double leftTotal = 0.0;
+            double rightWeighted = 0.0;
+            double rightTotal = 0.0;
             for (int x = 0; x < width; x++)
             {
                 if (column[x] <= 0.0) continue;
@@ -1920,10 +1931,10 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // The collision verdict is harvested one Tick late — hence the duplicate tick.
-                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
+                // The collision verdict is harvested one Update late — hence the duplicate tick.
+                system.Update(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
                     spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
                     spriteTexture: sheet.Texture);
                 Assert.AreEqual(1, system.LastQuadCount, "the single icon quad must place (not culled).");
 
@@ -2010,8 +2021,10 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int i = 0; i < phasesPx.Length; i++)
                     centroids[i] = RenderAndMeasureInkCentroidX(atlas, atlasTexture, phasesPx[i]);
 
-                float smallestStep = float.MaxValue, largestStep = float.MinValue;
-                int smallestStepAt = 0, largestStepAt = 0;
+                float smallestStep = float.MaxValue;
+                float largestStep = float.MinValue;
+                int smallestStepAt = 0;
+                int largestStepAt = 0;
                 var report = new System.Text.StringBuilder();
                 for (int i = 0; i < phasesPx.Length; i++)
                 {
@@ -2189,7 +2202,8 @@ namespace MapRenderer.Tests.Text.Placement
 
             Color32[] px = RenderText(atlasTexture, quads, bounds, out int width);
 
-            double weighted = 0.0, total = 0.0;
+            double weighted = 0.0;
+            double total = 0.0;
             for (int p = 0; p < px.Length; p++)
             {
                 double ink = (255.0 - px[p].r) / 255.0; // black ink on white
@@ -2253,9 +2267,9 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // The collision verdict is harvested one Tick late — hence the duplicate tick.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity);
+                // The collision verdict is harvested one Update late — hence the duplicate tick.
+                system.Update(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity);
+                system.Update(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity);
                 Assert.AreEqual(1, system.LastQuadCount, "the single glyph quad must place (not culled).");
 
                 snap.Render(uCam);

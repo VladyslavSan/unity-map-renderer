@@ -70,13 +70,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         private long _bytesHeld;
 
         // Non-obvious why: a heading/tilt change churns which tiles cover the view at a constant tile count,
-        // so a Tick puts Built tiles here. Reused nodes keep that Tick allocation-free, as the heading/tilt
+        // so an Update puts Built tiles here. Reused nodes keep that Update allocation-free, as the heading/tilt
         // case of MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory asserts.
         // The pool holds min(countCap, MaxPrewarmedNodes) nodes; a larger burst falls back to `new`.
         private const int MaxPrewarmedNodes = 1024;
         private readonly Stack<LinkedListNode<Entry>> _nodePool;
 
-        /// <summary>Test/telemetry observability — bumped by the caller (TileManager's Tick probe) at the
+        /// <summary>Test/telemetry observability — bumped by the caller (TileManager's Update probe) at the
         /// whole-tile granularity, not per layer here. Plain mutable fields (like <c>ReleasedMidFlightCount</c>'s
         /// sibling counters), never read from the live tile loop's own decisions.</summary>
         internal int Hits;

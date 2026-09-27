@@ -25,7 +25,8 @@ namespace MapRenderer.Unity.View
         {
             if (cover.Count == 0) return (0, 0, 0, 0);
 
-            int minZ = int.MaxValue, maxZ = int.MinValue;
+            int minZ = int.MaxValue;
+            int maxZ = int.MinValue;
             for (int i = 0; i < cover.Count; i++)
             {
                 int z = cover[i].Z;

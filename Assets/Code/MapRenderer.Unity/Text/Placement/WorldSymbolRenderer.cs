@@ -167,7 +167,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Brackets the whole EndFrame body (mesh rebuild + per-slot SetTexture/SetVector + _tree.Rebuild +
-        // idle reclaim) so its cost is visible in the Profiler rather than folded into SymbolTick's self-time.
+        // idle reclaim) so its cost is visible in the Profiler rather than folded into SymbolUpdate's self-time.
         private static readonly ProfilerMarker PmEndFrame =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.EndFrame);
 
@@ -190,7 +190,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// Non-obvious why: the whole symbol's halo then draws behind all of its text, however its glyphs overlap.
         /// </summary>
         /// <param name="haloDevicePixelRatio">Scales the halo width and blur from logical px into the device px
-        /// the SDF shader measures in; read per Tick, so a dpr change needs no re-bake.</param>
+        /// the SDF shader measures in; read per Update, so a dpr change needs no re-bake.</param>
         public int Emit(in CandidateEmit emit, NativeArray<PlacedQuad> quads, float fadeOpacity,
             float haloDevicePixelRatio)
         {

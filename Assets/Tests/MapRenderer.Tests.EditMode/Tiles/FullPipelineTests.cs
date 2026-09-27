@@ -259,7 +259,9 @@ namespace MapRenderer.Tests.Tiles
                 for (int i = 0; i < graphOutput.TriangleIndices.Length; i++)
                 {
                     int vi = graphOutput.TriangleIndices[i];
-                    double3 world = graphOutput.WorldPositions[vi], up = graphOutput.VertexUp[vi], east = graphOutput.VertexEast[vi];
+                    double3 world = graphOutput.WorldPositions[vi];
+                    double3 up = graphOutput.VertexUp[vi];
+                    double3 east = graphOutput.VertexEast[vi];
                     double2 tile  = graphOutput.TileVertices[vi];
                     vertBytes.AddRange(BitConverter.GetBytes(world.x)); vertBytes.AddRange(BitConverter.GetBytes(world.y)); vertBytes.AddRange(BitConverter.GetBytes(world.z));
                     vertBytes.AddRange(BitConverter.GetBytes(up.x));    vertBytes.AddRange(BitConverter.GetBytes(up.y));    vertBytes.AddRange(BitConverter.GetBytes(up.z));
@@ -569,7 +571,8 @@ namespace MapRenderer.Tests.Tiles
                     var mercatorInput = baseInput; mercatorInput.Projection = new WebMercatorProjection();
                     var sphericalInput = baseInput; sphericalInput.Projection = new SphericalProjection();
 
-                    FillGraphOutput mercatorOut = default, sphericalOut = default;
+                    FillGraphOutput mercatorOut = default;
+                    FillGraphOutput sphericalOut = default;
                     try
                     {
                         mercatorOut = FillMeshGraph.Schedule(mercatorInput);
@@ -615,7 +618,8 @@ namespace MapRenderer.Tests.Tiles
             var g = TileGeometryBuffers.Allocate(tile, extent: 4096.0, featureCount: 1, maxRings: 4, maxVertices: 16);
             g.FeatureGeometryType[0] = TileGeometryType.Polygon;
 
-            int vi = 0, ri = 0;
+            int vi = 0;
+            int ri = 0;
             void Ring(double2 a, double2 b, double2 c, double2 d)
             {
                 g.RingOffsets[ri] = vi;
@@ -1074,7 +1078,8 @@ namespace MapRenderer.Tests.Tiles
             // outer-vert-count restriction: the worst real case has a many-vert outer.
             double worstRatio = 0.0;
             EarcutJobGatherHarness.PolygonRun worstRun = default;
-            double worstExpected = 0.0, worstTri = 0.0;
+            double worstExpected = 0.0;
+            double worstTri = 0.0;
             bool found = false;
 
             foreach (var run in runs)
@@ -1689,7 +1694,7 @@ namespace MapRenderer.Tests.Tiles
                 SymbolSubsystem.ProfilerMarkerNames.BatchCollectDedup,
                 SymbolSubsystem.ProfilerMarkerNames.BatchSoA,
                 SymbolPlacementSystem.ProfilerMarkerNames.Gather,
-                SymbolPlacementSystem.ProfilerMarkerNames.Tick,
+                SymbolPlacementSystem.ProfilerMarkerNames.Update,
                 SymbolPlacementSystem.ProfilerMarkerNames.Project,
                 SymbolPlacementSystem.ProfilerMarkerNames.ProjectPositions,
                 SymbolPlacementSystem.ProfilerMarkerNames.Stage,
@@ -1704,7 +1709,7 @@ namespace MapRenderer.Tests.Tiles
                 LineRenderLayer.ProfilerMarkerNames.ApplyZoomLines,
                 LineRenderLayer.ProfilerMarkerNames.ApplyZoomLineDash,
                 MapView.ProfilerMarkerNames.InstancedRebuild,
-                MapView.ProfilerMarkerNames.ManagerTick,
+                MapView.ProfilerMarkerNames.ManagerUpdate,
                 TileManager.ProfilerMarkerNames.MeshDataAllocate,
                 TileManager.ProfilerMarkerNames.AddTileLayer,
                 EntitiesTileRenderer.ProfilerMarkerNames.AddLayerRoot,
@@ -2088,7 +2093,9 @@ namespace MapRenderer.Tests.Tiles
             var     proj = new WebMercatorProjection();
 
             // Selection zoom the pipeline uses (offset 0 under the 512 convention), clamped like the selector.
-            const int minZoom = 0, maxZoom = 14, onScreenTilePx = 512;
+            const int minZoom = 0;
+            const int maxZoom = 14;
+            const int onScreenTilePx = 512;
             int offset  = (int)math.round(math.log2(WebMercator.TilePixelSize / onScreenTilePx));
             int targetZ = math.clamp(cam.IntegerZoom + offset, minZoom, maxZoom);
 
@@ -2208,8 +2215,10 @@ namespace MapRenderer.Tests.Tiles
                         var clip = new List<Vector3>();
                         for (int i = 0; i < poly.Count; i++)
                         {
-                            Vector3 a = poly[i], b = poly[(i + 1) % poly.Count];
-                            float da = pl.GetDistanceToPoint(a), db = pl.GetDistanceToPoint(b);
+                            Vector3 a = poly[i];
+                            Vector3 b = poly[(i + 1) % poly.Count];
+                            float da = pl.GetDistanceToPoint(a);
+                            float db = pl.GetDistanceToPoint(b);
                             if (da >= 0) clip.Add(a);
                             if ((da >= 0) != (db >= 0)) clip.Add(Vector3.Lerp(a, b, da / (da - db)));
                         }
@@ -2337,7 +2346,8 @@ namespace MapRenderer.Tests.Tiles
         private static string Range(List<TileId> tiles, System.Func<TileId, int> sel)
         {
             if (tiles.Count == 0) return "empty";
-            int lo = int.MaxValue, hi = int.MinValue;
+            int lo = int.MaxValue;
+            int hi = int.MinValue;
             foreach (var t in tiles) { int v = sel(t); if (v < lo) lo = v; if (v > hi) hi = v; }
             return $"{lo}..{hi}";
         }
@@ -2451,7 +2461,8 @@ namespace MapRenderer.Tests.Tiles
     {
         internal static (int PolyCount, int HoleCount, List<uint[]> PolyGeometries) Compute(MvtFixtureStreams.Layer layer)
         {
-            int polyCount = 0, holeCount = 0;
+            int polyCount = 0;
+            int holeCount = 0;
             var polyGeoms = new List<uint[]>();
             for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {

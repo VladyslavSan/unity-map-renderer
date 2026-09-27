@@ -901,7 +901,8 @@ namespace MapRenderer.Tests.Visual
 
     public class GlobeLineSnapshotTests : BaseTestFixture
     {
-        private const int SnapW = 512, SnapH = 512;
+        private const int SnapW = 512;
+        private const int SnapH = 512;
         private static readonly Color OceanBg = new Color(0.04f, 0.09f, 0.18f, 1f);
 
         [Test]

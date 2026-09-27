@@ -66,7 +66,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             Applier    = applier;
             DrawIndex  = drawIndex;
             // Seed the pattern-scale zoom: TryCreate bypasses ApplyZoom, and a zoom of 0 gives WorldAbsolute a
-            // whole-world repeat count for a sprite that resolves before the first Tick.
+            // whole-world repeat count for a sprite that resolves before the first Update.
             _lastZoom  = initialZoom;
         }
 

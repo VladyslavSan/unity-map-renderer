@@ -183,8 +183,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             if (count == 0 || _cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance)
                 return new Bounds(Vector3.zero, Vector3.zero);
 
-            float minX = float.MaxValue, maxX = float.MinValue;
-            float minZ = float.MaxValue, maxZ = float.MinValue;
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float minZ = float.MaxValue;
+            float maxZ = float.MinValue;
 
             for (int si = 0; si < count; si++)
             {

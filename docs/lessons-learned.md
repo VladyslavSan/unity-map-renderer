@@ -260,7 +260,7 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   isolation.)
 
 - **A render backend that draws on instance/entity creation must POSITION it at creation — not next
-  frame.** `MapView.Tick` recomputes transforms (`InstancedRebuild`) *before* it consumes newly-built
+  frame.** `MapView.LateUpdate` recomputes transforms (`InstancedRebuild`) *before* it consumes newly-built
   tiles, so an entity created with `LocalToWorld.identity` renders at the world origin for one frame until
   the next Rebuild moves it — a visible blink during zoom. The GameObject backend never showed this (it
   sets the container transform at creation) and BRG never showed it (it defers all drawing to Rebuild, so
@@ -728,8 +728,8 @@ other, and the rule for guards applies: assert it was satisfiable.
     zero-alloc tooth uses) — it samples the `GC.Alloc` profiler recorder, so it sees transient churn and is
     immune to GC timing. Caveat: it reports a *count of allocation calls*, not a byte total (and its "But
     was:" actual prints blank here), so it answers "allocates: yes/no", not "how many bytes". For a byte
-    figure use `Unity.Profiling.ProfilerRecorder` ("GC Allocated In Frame"). Also: a **single** Tick can be
-    alloc-free while a **run of N** Ticks trips the recorder — EG allocates intermittently, so measure over
+    figure use `Unity.Profiling.ProfilerRecorder` ("GC Allocated In Frame"). Also: a **single** update can be
+    alloc-free while a **run of N** updates trips the recorder — EG allocates intermittently, so measure over
     many frames or you will under-report. (Beware the `Is` name collision: alias
     `using Is = UnityEngine.TestTools.Constraints.Is;` + `using NIs = NUnit.Framework.Is;`, or instantiate
     `new AllocatingGCMemoryConstraint()` and wrap in `NUnit.Framework.Constraints.NotConstraint`.)

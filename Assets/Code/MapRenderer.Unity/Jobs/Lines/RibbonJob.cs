@@ -130,7 +130,8 @@ namespace MapRenderer.Unity.Jobs.Lines
                 cumDist[i + 1] = cumDist[i] + len;
             }
 
-            int v = 0, idx = 0;
+            int v = 0;
+            int idx = 0;
 
             // Start cap — after this, verts[v-2]=left, verts[v-1]=right.
             EmitStartCap(pts[0], ups[0], along[0], cumDist[0], roundSegments, ref v, ref idx);
@@ -309,7 +310,9 @@ namespace MapRenderer.Unity.Jobs.Lines
             if (leftTurn)
             {
                 // Left turn ⇒ concave = left, convex = right.
-                int outerA = v, innerV = v + 1, outerB = v + 2;
+                int outerA = v;
+                int innerV = v + 1;
+                int outerB = v + 2;
                 AddVertex(ref v, MakeVertex(p, -n1,       up, dist, -1f));
                 AddVertex(ref v, MakeVertex(p,  innerN,   up, dist, +1f));
                 AddVertex(ref v, MakeVertex(p, -n2,       up, dist, -1f));
@@ -325,7 +328,9 @@ namespace MapRenderer.Unity.Jobs.Lines
             else
             {
                 // Right turn ⇒ concave = right, convex = left.
-                int innerV = v, outerA = v + 1, outerB = v + 2;
+                int innerV = v;
+                int outerA = v + 1;
+                int outerB = v + 2;
                 AddVertex(ref v, MakeVertex(p, -innerN,   up, dist, -1f));
                 AddVertex(ref v, MakeVertex(p,  n1,       up, dist, +1f));
                 AddVertex(ref v, MakeVertex(p,  n2,       up, dist, +1f));
@@ -476,7 +481,8 @@ namespace MapRenderer.Unity.Jobs.Lines
                 case CapType.Square:
                 {
                     // Forward half-tangent baked in (extends the ribbon forward).
-                    int lEnd = v, rEnd = v + 1;
+                    int lEnd = v;
+                    int rEnd = v + 1;
                     AddVertex(ref v, MakeVertex(p,  across + along, up, dist, +1f));
                     AddVertex(ref v, MakeVertex(p, -across + along, up, dist, -1f));
                     EmitQuad(ref idx, leftPrev, rightPrev, lEnd, rEnd);

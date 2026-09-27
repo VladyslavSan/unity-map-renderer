@@ -297,7 +297,7 @@ Ordered. First match wins. Read down until one fires.
 ## 6. What a test file may not do
 
 - **No `Thread.Sleep` to wait for anything.** Settle by driving the thing: `yield return null` in PlayMode,
-  an explicit drain or tick loop in EditMode. A sleeping thread does not advance the player loop, and the
+  an explicit drain or update loop in EditMode. A sleeping thread does not advance the player loop, and the
   test then races the machine it runs on.
   - Two exceptions exist and both sleep a **worker** thread that is itself under test, not the test
     thread waiting for a result: a background release timer in

@@ -90,12 +90,14 @@ namespace MapRenderer.Tests.Projection
         public void Parity_JobMatchesCore(TileId tile, double2[] testPoints, double tol)
         {
             var (bMin, _) = tile.MercatorBounds();
-            double originX = bMin.x, originY = bMin.y;
+            double originX = bMin.x;
+            double originY = bMin.y;
             double extent = 4096.0;
 
             foreach (double2 pt in testPoints)
             {
-                double px = pt.x, py = pt.y;
+                double px = pt.x;
+                double py = pt.y;
                 double2 mercRef = tile.ToMercator(px, py, extent);
                 double refDx = mercRef.x - originX;
                 double refDz = mercRef.y - originY;
@@ -127,7 +129,8 @@ namespace MapRenderer.Tests.Projection
 
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, bMax) = tileId.MercatorBounds();
-            double originX = bMin.x, originY = bMin.y;
+            double originX = bMin.x;
+            double originY = bMin.y;
             double extent = layer.Extent;
 
             // 5% margin for vertices at the tile boundary.
@@ -198,7 +201,8 @@ namespace MapRenderer.Tests.Projection
             // for x and z.
             var tile = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, bMax) = tile.MercatorBounds();
-            double originX = bMin.x, originY = bMin.y;
+            double originX = bMin.x;
+            double originY = bMin.y;
             double tileWidth = bMax.x - bMin.x;
             double tileHeight = bMax.y - bMin.y;
             double extent = 4096.0;

@@ -58,12 +58,21 @@ namespace MapRenderer.Tests.Visual
         private const float CamY  = 200f;
 
         // Central sample sub-rect (pixels), well inside the framed footprint, away from its edges.
-        private const int SX0 = 216, SY0 = 216, SX1 = 296, SY1 = 296;
+        private const int SX0 = 216;
+        private const int SY0 = 216;
+        private const int SX1 = 296;
+        private const int SY1 = 296;
 
         // Sample rects for the mid-stack tooth: the centre rect sits inside the centred fill quad, and the corner
         // rect sits outside it but inside the frustum and the covered background tile.
-        private const int FillCenterX0 = 236, FillCenterY0 = 236, FillCenterX1 = 276, FillCenterY1 = 276;
-        private const int CornerX0 = 20, CornerY0 = 20, CornerX1 = 60, CornerY1 = 60;
+        private const int FillCenterX0 = 236;
+        private const int FillCenterY0 = 236;
+        private const int FillCenterX1 = 276;
+        private const int FillCenterY1 = 276;
+        private const int CornerX0 = 20;
+        private const int CornerY0 = 20;
+        private const int CornerX1 = 60;
+        private const int CornerY1 = 60;
 
         // An INTERIOR look-at at a fixed zoom: lon=0/lat=0 sits on a 4-tile seam at every zoom ≥1, which would
         // put the samples on a sub-pixel gap between per-tile background quads.
@@ -490,7 +499,9 @@ namespace MapRenderer.Tests.Visual
                 for (int col = 0; col < frame.Width; col++)
                 {
                     Color32 px = frame[col, row];
-                    int dr = px.r - target.r, dg = px.g - target.g, db = px.b - target.b;
+                    int dr = px.r - target.r;
+                    int dg = px.g - target.g;
+                    int db = px.b - target.b;
                     int dist = dr * dr + dg * dg + db * db;
                     if (dist < best) { best = dist; x = col; y = row; }
                 }
@@ -548,9 +559,9 @@ namespace MapRenderer.Tests.Visual
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Update(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the single 'A' glyph must place (precondition, not the tooth itself).");
 
                 // 1. Solo render (no occluder yet) — find the sample point deep inside the glyph's ink.
@@ -637,19 +648,19 @@ namespace MapRenderer.Tests.Visual
                 AddCenteredSymbol(bothBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.9f, 0.15f, 0.1f, 1f), materialIndex: 0, allowOverlap: true);
                 AddCenteredSymbol(bothBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.1f, 0.2f, 0.9f, 1f), materialIndex: 1, allowOverlap: true);
 
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
+                // Duplicate Update — the collision verdict is harvested one Update late.
                 var layerAOnly = new List<SymbolRenderLayer> { layerA };
-                system.Tick(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
-                system.Tick(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Update(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Update(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
                 Assert.AreEqual(1, system.LastQuadCount, "label A alone must place (precondition).");
                 snap.Render(cam);
                 bool found = TryFindClosestPixel(snap.Pixels, redColor, out int ix, out int iy);
                 Assert.IsTrue(found, "solo label-A render must contain a pixel close to its ink colour — precondition for the sample point.");
 
                 // Both symbols, same anchor, AllowOverlap — collision keeps both (the tooth is DRAW order, not collision).
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Update(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(2, system.LastQuadCount, "both overlapping labels place (AllowOverlap — the tooth is draw order, not collision).");
 
                 snap.Render(cam);
@@ -660,10 +671,10 @@ namespace MapRenderer.Tests.Visual
                 // Swap declared order (mutate renderQueue in place — same materials, same presenters).
                 layerA.Material.renderQueue = LayerDrawOrder.TransparentQueue + 2;
                 layerB.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
-                // The WORLD path's queue lives on WorldTextMaterial, synced from Material.renderQueue at Tick, so
-                // a queue change needs a re-Tick (production Ticks before every Render).
-                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                // The WORLD path's queue lives on WorldTextMaterial, synced from Material.renderQueue at Update, so
+                // a queue change needs a re-Update (production Updates before every Render).
+                system.Update(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Update(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 snap.Render(cam);
                 double[] aFirst = SampleAround(snap.Pixels, ix, iy);
                 Assert.Greater(aFirst[0], aFirst[2],
@@ -718,31 +729,31 @@ namespace MapRenderer.Tests.Visual
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // SHOW half: Tick, then render TWICE with no Tick between; the persistent presenter is bound in
-                // Tick. The Tick is duplicated because the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                // SHOW half: Update, then render TWICE with no Update between; the persistent presenter is bound in
+                // Update. The Update is duplicated because the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Update(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the label must place (precondition).");
 
                 snap.Render(cam);
                 bool foundFirst = TryFindClosestPixel(snap.Pixels, inkColor, out int ix, out int iy);
-                Assert.IsTrue(foundFirst, "first render after Tick must show the label's ink (persistent MeshRenderer, no attach needed).");
+                Assert.IsTrue(foundFirst, "first render after Update must show the label's ink (persistent MeshRenderer, no attach needed).");
 
-                snap.Render(cam); // SAME camera, NO Tick between — proves the presenter persists across repaints
+                snap.Render(cam); // SAME camera, NO Update between — proves the presenter persists across repaints
                 double[] second = SampleAround(snap.Pixels, ix, iy);
                 Assert.Greater(second[0] + second[1] + second[2], 0.5,
-                    $"a SECOND render with no Tick between must STILL show ink at ({ix},{iy}) — sampled sum={second[0] + second[1] + second[2]:F3}. " +
-                    "0 ink means the symbols draw in immediate mode (Graphics.RenderMesh), which a repaint without a Tick does not re-submit: the Editor blink.");
+                    $"a SECOND render with no Update between must STILL show ink at ({ix},{iy}) — sampled sum={second[0] + second[1] + second[2]:F3}. " +
+                    "0 ink means the symbols draw in immediate mode (Graphics.RenderMesh), which a repaint without a Update does not re-submit: the Editor blink.");
 
-                // HIDE half (risk #1's mirror-image guard): Tick with an EMPTY set → the presenter must hide,
+                // HIDE half (risk #1's mirror-image guard): Update with an EMPTY set → the presenter must hide,
                 // not keep drawing last frame's symbol frozen on screen.
-                system.Tick(in frame, plan.Build(emptyBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                Assert.AreEqual(0, system.LastQuadCount, "the empty Tick must place nothing (precondition).");
+                system.Update(in frame, plan.Build(emptyBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                Assert.AreEqual(0, system.LastQuadCount, "the empty Update must place nothing (precondition).");
 
                 snap.Render(cam);
                 double[] empty = SampleAround(snap.Pixels, ix, iy);
                 Assert.Less(empty[0] + empty[1] + empty[2], 0.3,
-                    $"after an EMPTY Tick the presenter must be HIDDEN — sampled sum={empty[0] + empty[1] + empty[2]:F3} at the " +
+                    $"after an EMPTY Update the presenter must be HIDDEN — sampled sum={empty[0] + empty[1] + empty[2]:F3} at the " +
                     "label's old ink location should read background, not stale ink (the mirror image of the blink).");
             }
             finally
@@ -832,14 +843,14 @@ namespace MapRenderer.Tests.Visual
                     "precondition: both labels reach the placement path — they share an anchor, so a dedup " +
                     "merge here would silently turn the comparison into 1-vs-2 and read as a real divergence.");
 
-                // Duplicate both ticks: the verdict is harvested one Tick late, so one Tick gives 0 == 0 on both
+                // Duplicate both ticks: the verdict is harvested one Update late, so one Update gives 0 == 0 on both
                 // sides. The Assert.Greater lines below guard against that vacuous pass.
-                noLayersSystem.Tick(in frame, built, atlasTexture);
-                noLayersSystem.Tick(in frame, built, atlasTexture);
+                noLayersSystem.Update(in frame, built, atlasTexture);
+                noLayersSystem.Update(in frame, built, atlasTexture);
 
                 var symbolLayers = new List<SymbolRenderLayer> { renderLayer };
-                layeredSystem.Tick(in frame, built, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
-                layeredSystem.Tick(in frame, built, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
+                layeredSystem.Update(in frame, built, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
+                layeredSystem.Update(in frame, built, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
 
                 Assert.Greater(noLayersSystem.LastCandidateCount, 0, "sanity: candidates were actually staged.");
                 Assert.AreEqual(noLayersSystem.LastCandidateCount, layeredSystem.LastCandidateCount,

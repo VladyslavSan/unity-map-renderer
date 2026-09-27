@@ -16,12 +16,23 @@ namespace MapRenderer.Unity.View
     public readonly struct ViewFrustum
     {
         // Six planes: inside ⟺ dot(n_i, x) + d_i ≥ 0. Normals point inward, unit length.
-        private readonly double3 _n0, _n1, _n2, _n3, _n4, _n5;
-        private readonly double  _d0, _d1, _d2, _d3, _d4, _d5;
+        private readonly double3 _n0;
+        private readonly double3 _n1;
+        private readonly double3 _n2;
+        private readonly double3 _n3;
+        private readonly double3 _n4;
+        private readonly double3 _n5;
+        private readonly double _d0;
+        private readonly double _d1;
+        private readonly double _d2;
+        private readonly double _d3;
+        private readonly double _d4;
+        private readonly double _d5;
 
         // The frustum's AABB: a pre-cull that rejects a big box diagonally past a corner, which passes all 6
         // planes. Both bounds are supersets, so the pre-cull never drops a visible tile.
-        private readonly double3 _amin, _amax;
+        private readonly double3 _amin;
+        private readonly double3 _amax;
 
         private ViewFrustum(
             double3 n0, double d0, double3 n1, double d1, double3 n2, double d2,
@@ -48,9 +59,11 @@ namespace MapRenderer.Unity.View
             double3 u = math.cross(r, f);                  // true up (already unit)
 
             double halfV = Angle.FromDegrees(fovDegVertical * 0.5).Radians;
-            double sinV = math.sin(halfV), cosV = math.cos(halfV);
+            double sinV = math.sin(halfV);
+            double cosV = math.cos(halfV);
             double halfH = math.atan(math.tan(halfV) * aspect);
-            double sinH = math.sin(halfH), cosH = math.cos(halfH);
+            double sinH = math.sin(halfH);
+            double cosH = math.cos(halfH);
 
             // Near/far: normals ±f, through the clip points along the view axis.
             double3 nNear = f;                     double3 pNear = pos + near * f;
@@ -64,9 +77,14 @@ namespace MapRenderer.Unity.View
 
             // The eight frustum corners (near/far × top/bottom × right/left) → the frustum's own AABB, for the
             // reverse pre-cull. tanH = tan(halfH) = tan(halfV)·aspect (halfH = atan(tan(halfV)·aspect)).
-            double tanV = sinV / cosV, tanH = math.tan(halfH);
-            double3 nc = pNear, fc = pFar;
-            double nh = near * tanV, nw = near * tanH, fh = far * tanV, fw = far * tanH;
+            double tanV = sinV / cosV;
+            double tanH = math.tan(halfH);
+            double3 nc = pNear;
+            double3 fc = pFar;
+            double nh = near * tanV;
+            double nw = near * tanH;
+            double fh = far * tanV;
+            double fw = far * tanH;
             double3 amin = new double3(double.MaxValue, double.MaxValue, double.MaxValue);
             double3 amax = new double3(double.MinValue, double.MinValue, double.MinValue);
             for (int sf = 0; sf < 2; sf++)          // near / far

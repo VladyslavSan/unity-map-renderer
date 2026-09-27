@@ -97,7 +97,11 @@ namespace MapRenderer.Core.Text
         {
             uint id = 0;
             byte[] bitmap = null;
-            int width = 0, height = 0, left = 0, top = 0, advance = 0;
+            int width = 0;
+            int height = 0;
+            int left = 0;
+            int top = 0;
+            int advance = 0;
 
             while (r.HasMore)
             {

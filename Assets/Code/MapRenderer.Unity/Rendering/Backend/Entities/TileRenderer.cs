@@ -88,7 +88,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private World         _world;
         internal EntityManager _em;   // internal: the test-assembly observability extensions query through it
         private readonly World _prevDefaultWorld;
-        private ComponentSystemBase _initGroup, _simGroup, _presGroup;
+        private ComponentSystemBase _initGroup;
+        private ComponentSystemBase _simGroup;
+        private ComponentSystemBase _presGroup;
         private int  _nextHandle;
 
         /// <summary>Profiler marker name constants (SSOT) for the Entities backend — referenced by the
@@ -320,8 +322,10 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         {
             if (_items.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
 
-            float minX = float.MaxValue, maxX = float.MinValue;
-            float minZ = float.MaxValue, maxZ = float.MinValue;
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float minZ = float.MaxValue;
+            float maxZ = float.MinValue;
             foreach (var kv in _items)
             {
                 if (!_em.Exists(kv.Value.Entity)) continue;
@@ -332,7 +336,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 if (p.z + tileSizeWorld > maxZ) maxZ = p.z + tileSizeWorld;
             }
             if (minX == float.MaxValue) return new Bounds(Vector3.zero, Vector3.zero);
-            float cx = (minX + maxX) * 0.5f, cz = (minZ + maxZ) * 0.5f;
+            float cx = (minX + maxX) * 0.5f;
+            float cz = (minZ + maxZ) * 0.5f;
             return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
         }
 

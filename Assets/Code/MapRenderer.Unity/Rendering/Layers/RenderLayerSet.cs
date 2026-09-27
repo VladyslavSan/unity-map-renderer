@@ -120,7 +120,7 @@ namespace MapRenderer.Unity.Rendering.Layers
                 // The minzoom/maxzoom/visibility draw gate. The `is` test excludes a tombstone without a null
                 // check, and no real kind carries a null StyleLayer; Restyle moves StyleLayer forward.
                 if (_layers[i] is IFadeableRenderLayer fadeable)
-                    fadeable.SetFade(AdvanceFade(i, fadeable, inputs.Zoom, inputs.NowSeconds, inputs.Transition));
+                    fadeable.SetFade(UpdateFade(i, fadeable, inputs.Zoom, inputs.NowSeconds, inputs.Transition));
                 _layers[i].ApplyZoom(inputs);
             }
         }
@@ -138,7 +138,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <param name="nowSeconds">The live wall clock, for arming and advancing the ease.</param>
         /// <param name="transition">This frame's ease duration/delay, from <see cref="StyleFrameInputs.Transition"/>.</param>
         /// <returns>The fade amount to apply this frame, 0 to 1.</returns>
-        private float AdvanceFade(
+        private float UpdateFade(
             int index, IFadeableRenderLayer layer, double zoom, double nowSeconds, StyleTransition transition)
         {
             LayerFade f = _fades[index];

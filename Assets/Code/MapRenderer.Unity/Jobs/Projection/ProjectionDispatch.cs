@@ -30,7 +30,7 @@ namespace MapRenderer.Unity.Jobs.Projection
                 case null:
                     throw new NotSupportedException(
                         "ProjectionDispatch.Schedule received a null projection — the null-means-Mercator " +
-                        "default now lives ONE place (TileManager.TickCore), not here. A caller reaching this " +
+                        "default now lives ONE place (TileManager.UpdateCore), not here. A caller reaching this " +
                         "directly (a fixture, most likely) must pass a real IProjection.");
                 default:
                     throw new NotSupportedException(

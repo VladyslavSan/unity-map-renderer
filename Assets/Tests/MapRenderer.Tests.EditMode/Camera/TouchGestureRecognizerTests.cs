@@ -206,7 +206,8 @@ namespace MapRenderer.Tests.Cameras
                 "Row 2: pinch frame must emit Zoom or Heading");
 
             // Frames 3–5: strong parallel vertical centroid drift — TiltBy must NEVER appear.
-            double cx0 = f0.x - 40, cx1 = f1.x + 40;
+            double cx0 = f0.x - 40;
+            double cx1 = f1.x + 40;
             double cy = f0.y;
             for (int i = 0; i < 3; i++)
             {

@@ -10,7 +10,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// carry serialized Inspector fields) and handed — by reference — to the plain <see cref="MapView"/>.
     ///
     /// <para>Shared by reference: MapView reads live from this object, so Inspector tweaks during Play take
-    /// effect the same frame (the pre-decomposition "read every Tick, never snapshotted" contract).</para>
+    /// effect the same frame (the pre-decomposition "read every Update, never snapshotted" contract).</para>
     /// </summary>
     [Serializable]
     public sealed class MapViewConfig
@@ -34,13 +34,13 @@ namespace MapRenderer.Unity.Rendering.Map
 
         [Header("Performance Budgets")]
         [Tooltip("Per-frame MESH-upload count budget — max tile-layer meshes uploaded + registered per " +
-                 "Tick (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). This budget makes " +
+                 "Update (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). This budget makes " +
                  "consume MESH-by-mesh, so a single rich tile can span several frames. Pair with " +
                  "MaxVerticesPerTick (whichever binds first stops the frame). Raise for faster fill, lower " +
                  "for smoother FPS while loading. NOTE: 0 BLOCKS consume entirely (not 'uncapped').")]
         public int MaxConsumesPerTick = 4;
 
-        [Tooltip("Max tiles admitted per Tick (build throttle). " +
+        [Tooltip("Max tiles admitted per Update (build throttle). " +
                  "Caps how many tiles are newly started per frame. Default 2 — " +
                  "tuned against the live Profiler to spread decode/earcut cost across frames.")]
         public int MaxMeshBuildsPerTick = 2;
@@ -50,7 +50,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "then the rest defer to the next frame (one-mesh overshoot). 0 = uncapped.")]
         public int MaxVerticesPerTick = 50000;
 
-        [Tooltip("Stall #2: Per-frame budget of (tile, source) records fully RELEASED per Tick (backend " +
+        [Tooltip("Stall #2: Per-frame budget of (tile, source) records fully RELEASED per Update (backend " +
                  "removal + mesh destroy/transfer + scheduler release). A zoom-out/fast-pan otherwise frees " +
                  "the whole departing cover in one frame — the mirror image of the budgeted consume. Records " +
                  "queued for release linger (still pumped) a few frames until drained. Default 4. 0 = uncapped.")]
@@ -101,7 +101,7 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
                  "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +
                  "tilt-foreshortened horizon tile pile-up, whose labels are collision-discarded anyway. " +
-                 "Read live every Tick → tweak in Play to eyeball it. Default 0.05 (a tile must cover 5% of the " +
+                 "Read live every Update → tweak in Play to eyeball it. Default 0.05 (a tile must cover 5% of the " +
                  "screen to keep its labels). Raise to cull more aggressively; set <= 0 to DISABLE the cull.")]
         public double SymbolTileCoverageCull = 0.05;
 
@@ -110,7 +110,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "farther from the camera than this fraction × the far distance is skipped before project/collide/" +
                  "build (a previously-visible one fades out in place, same as every other cull). Distinct from the " +
                  "tile-coverage cull above: that drops a whole TILE by on-screen area, this tests each LABEL by " +
-                 "distance. Read live every Tick → tweak in Play to eyeball it. Default 1.0 (cull at the far plane " +
+                 "distance. Read live every Update → tweak in Play to eyeball it. Default 1.0 (cull at the far plane " +
                  "— near-inert, since tile selection already frustum-bounds tiles by the same far); lower it to " +
                  "pull distant labels in closer than the full frustum depth. 0 = OFF: the cull distance collapses " +
                  "to zero, which the cull reads as its non-positive disable and keeps ALL labels (so the slider " +
@@ -143,7 +143,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
     /// <summary>
     /// The frustum tile-selection + LOD + far-plane knobs, grouped into a nested <c>[Serializable]</c> class so
-    /// they render as one collapsible foldout in the Inspector. <see cref="MapView"/> reads them live every Tick.
+    /// they render as one collapsible foldout in the Inspector. <see cref="MapView"/> reads them live every Update.
     /// This is the static, Inspector-authored tuning, not the per-frame <c>TileManager.TileSelectionConfig</c>
     /// (viewport + projection + budgets) the selector consumes.
     /// </summary>

@@ -297,7 +297,9 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <param name="inputs">The live zoom, device-pixel ratio, and wall clock for this frame.</param>
         public void ApplyZoom(in StyleFrameInputs inputs)
         {
-            double zoom = inputs.Zoom, now = inputs.NowSeconds, dpr = inputs.DevicePixelRatio;
+            double zoom = inputs.Zoom;
+            double now = inputs.NowSeconds;
+            double dpr = inputs.DevicePixelRatio;
             bool fadeMoved = _fadeMoved;
             _fadeMoved = false;
 

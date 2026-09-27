@@ -413,7 +413,7 @@ managed allocation, pass, buffer or job.
 
 Pinned by `SymbolPairingTests` (in `Text/Placement/SymbolStagingMathTests.cs`; the `SymbolPairing`
 resolver, compiled by `Tools/core-tests` too), `SymbolPairWiringTests` (in
-`Text/Placement/SymbolPlacementAllocTests.cs`; the `[Unity]` Tick-level wiring check that a pair draws
+`Text/Placement/SymbolPlacementAllocTests.cs`; the `[Unity]` Update-level wiring check that a pair draws
 into both world meshes with one fewer candidate per pair), and
 `SymbolFeatureExtractorIconTests` (in `Style/StyleRestyleTests.cs`; the extractor's role stamping). Paths
 are under `Assets/Tests/MapRenderer.Tests.EditMode/`.

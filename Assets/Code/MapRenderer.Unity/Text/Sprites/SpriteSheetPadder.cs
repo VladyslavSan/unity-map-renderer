@@ -156,7 +156,10 @@ namespace MapRenderer.Unity.Text.Sprites
         /// <summary>Identity of a source rect — two names sharing one are the same sprite, drawn once.</summary>
         private readonly struct RectKey : IEquatable<RectKey>
         {
-            private readonly int _x, _y, _width, _height;
+            private readonly int _x;
+            private readonly int _y;
+            private readonly int _width;
+            private readonly int _height;
             private readonly float _pixelRatio;
             private readonly bool _sdf;
 

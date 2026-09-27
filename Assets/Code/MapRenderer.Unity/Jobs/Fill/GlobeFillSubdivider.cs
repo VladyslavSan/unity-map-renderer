@@ -31,11 +31,20 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// </summary>
     internal readonly struct GlobeFillVertexKey : IEquatable<GlobeFillVertexKey>
     {
-        private readonly ulong _worldX, _worldY, _worldZ;
-        private readonly ulong _upX, _upY, _upZ;
-        private readonly ulong _eastX, _eastY, _eastZ;
-        private readonly ulong _tileX, _tileY;
-        private readonly uint  _bandX, _bandY, _bandZ;
+        private readonly ulong _worldX;
+        private readonly ulong _worldY;
+        private readonly ulong _worldZ;
+        private readonly ulong _upX;
+        private readonly ulong _upY;
+        private readonly ulong _upZ;
+        private readonly ulong _eastX;
+        private readonly ulong _eastY;
+        private readonly ulong _eastZ;
+        private readonly ulong _tileX;
+        private readonly ulong _tileY;
+        private readonly uint _bandX;
+        private readonly uint _bandY;
+        private readonly uint _bandZ;
         private readonly int   _feature;
 
         public GlobeFillVertexKey(in GlobeFillVertex v)
@@ -92,15 +101,33 @@ namespace MapRenderer.Unity.Jobs.Fill
         [ReadOnly] public NativeArray<int>       VertexFeatureIdx;  // feature index per TileVert
         [ReadOnly] public NativeArray<float3>    VertexBand;        // boundary-band attribute per TileVert
         public TileId  Id;
-        public double  Extent, CosThresh;
+        public double Extent;
+        public double CosThresh;
         public double3 Origin;
-        public int     MaxDepth, InteriorBudget, TotalBudget;
+        public int MaxDepth;
+        public int InteriorBudget;
+        public int TotalBudget;
 
         public NativeList<GlobeFillVertex> OutVerts;
         public NativeList<int>             OutIndices;
 
-        private struct V   { public double3 World, Up, East; public float3 Band; public double2 Tile; }
-        private struct Tri { public V A, B, C; public int Depth, Feat; }
+        private struct V
+        {
+            public double3 World;
+            public double3 Up;
+            public double3 East;
+            public float3 Band;
+            public double2 Tile;
+        }
+
+        private struct Tri
+        {
+            public V A;
+            public V B;
+            public V C;
+            public int Depth;
+            public int Feat;
+        }
 
         /// <summary>The count rule: <see cref="TileVerts"/>/<see cref="TriangleIndices"/>'s own lengths are
         /// the valid lengths, always. The only caller is
@@ -119,7 +146,9 @@ namespace MapRenderer.Unity.Jobs.Fill
             var indexByVertex = new NativeHashMap<GlobeFillVertexKey, int>(srcIndexCount, Allocator.Temp);
             for (int t = 0; t + 2 < srcIndexCount; t += 3)
             {
-                int i0 = TriangleIndices[t], i1 = TriangleIndices[t + 1], i2 = TriangleIndices[t + 2];
+                int i0 = TriangleIndices[t];
+                int i1 = TriangleIndices[t + 1];
+                int i2 = TriangleIndices[t + 2];
                 int feat = i0 < srcVertCount ? VertexFeatureIdx[i0] : 0;
 
                 // A band quad's two triangles each carry at least one outer vertex (side 1); an interior
@@ -195,7 +224,11 @@ namespace MapRenderer.Unity.Jobs.Fill
                          // (shared by both marked edges); a0 = predecessor of apex, c0 = successor of apex
                          // in the A→B→C→A cycle.
                     {
-                        V apex, a0, c0, mVA0, mVC0;
+                        V apex;
+                        V a0;
+                        V c0;
+                        V mVA0;
+                        V mVC0;
                         if (!markAB)      { apex = w.C; a0 = w.B; c0 = w.A; mVA0 = mBC; mVC0 = mCA; } // unmarked=AB
                         else if (!markBC) { apex = w.A; a0 = w.C; c0 = w.B; mVA0 = mCA; mVC0 = mAB; } // unmarked=BC
                         else              { apex = w.B; a0 = w.A; c0 = w.C; mVA0 = mAB; mVC0 = mBC; } // unmarked=CA

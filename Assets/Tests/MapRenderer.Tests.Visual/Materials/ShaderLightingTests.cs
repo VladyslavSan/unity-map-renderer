@@ -92,7 +92,8 @@ namespace MapRenderer.Tests.Visual
 
 
                 Camera camera;
-                GameObject cameraGo, mapGo;
+                GameObject cameraGo;
+                GameObject mapGo;
                 (cameraGo, camera) = BuildCamera();
                 Track(cameraGo);
                 (mapGo, _)         = FillSceneHelper.BuildFillGo();

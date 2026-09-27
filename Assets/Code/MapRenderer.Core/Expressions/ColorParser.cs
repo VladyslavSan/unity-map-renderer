@@ -62,7 +62,10 @@ namespace MapRenderer.Core.Expressions
             // Read the hex digits in place, indexing past the leading '#' (offset +1) — the old
             // s.Substring(1) allocated a throwaway string on every colour parse.
             int n = s.Length - 1;
-            int r, g, b, a = 255;
+            int r;
+            int g;
+            int b;
+            int a = 255;
             try
             {
                 if (n == 3 || n == 4)
@@ -153,7 +156,9 @@ namespace MapRenderer.Core.Expressions
 
             // HSL -> sRGB (CSS Color 3 algorithm).
             h = ((h % 360.0) + 360.0) % 360.0 / 360.0;
-            double r, g, b;
+            double r;
+            double g;
+            double b;
             if (s == 0.0)
             {
                 r = g = b = l;

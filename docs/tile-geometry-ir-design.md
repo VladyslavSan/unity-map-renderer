@@ -94,7 +94,7 @@ both `ITileFeatureSource` implementations route through), and materialization ru
 The accepted price is **peak resident memory**. A decoded tile holds a median of **~552 KB** and a peak of
 **967 KB** of Waist-1 buffers across its **8–12** source-layers (measured 2026-08-09, same corpus). Nothing
 caps concurrent kicks: `MapViewConfig.MaxMeshBuildsPerTick` (default 2) rate-limits how many kicks *start*
-per tick, not how many are in flight, and a parked symbol build's reference can outlive the kick that
+per update, not how many are in flight, and a parked symbol build's reference can outlive the kick that
 created it. Residency is therefore self-limiting in practice and unbounded in principle — quantified, with
 the remedy named, in `docs/per-layer-tile-processing-design.md` §"Eager decode: peak resident decoded-tile
 memory".

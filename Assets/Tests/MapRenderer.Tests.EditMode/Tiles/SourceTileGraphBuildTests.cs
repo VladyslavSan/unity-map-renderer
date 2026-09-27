@@ -1717,7 +1717,8 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -1751,7 +1752,7 @@ namespace MapRenderer.Tests.Tiles
                     "the tile must not read settled while its measure step is genuinely held incomplete.");
 
                 // The tick floor is structural, not a timing bet: each pump arm `continue`s at most once
-                // per tile per Tick, so it holds at any completion latency.
+                // per tile per Update, so it holds at any completion latency.
                 gate[0] = 1;
 
                 int settleTick = -1;
@@ -1829,7 +1830,8 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -2449,11 +2451,11 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── Budget rule (job-scheduling-design.md): admission is tiles-per-Tick, and a step ─────────────
+        // ── Budget rule (job-scheduling-design.md): admission is tiles-per-Update, and a step ─────────────
         // transition of an already-admitted tile is uncharged ──────────────────────────────────────────
 
         /// <summary>
-        /// With <c>MaxMeshBuildsPerTick = 1</c> and a multi-tile cover, some Tick both completes a
+        /// With <c>MaxMeshBuildsPerTick = 1</c> and a multi-tile cover, some Update both completes a
         /// write-step transition for an admitted tile AND admits a fresh one. A budget that charged the
         /// transition would make that impossible: one unit, two claimants. Inline decode guarantees
         /// same-tick eligibility, so the scan measures budget behaviour, not decode-completion order.
@@ -2482,7 +2484,9 @@ namespace MapRenderer.Tests.Tiles
 
                 // Bounded scan. No DrainMeshBuilds/PumpUntilSettled: drain ignores every per-tick cap and
                 // would destroy the observation.
-                bool anyStarted = false, anyAllocated = false, conjunctionSeen = false;
+                bool anyStarted = false;
+                bool anyAllocated = false;
+                bool conjunctionSeen = false;
                 for (int t = 0; t < 200; t++)
                 {
                     view.AwaitInFlightMeshBuilds();
@@ -2490,7 +2494,7 @@ namespace MapRenderer.Tests.Tiles
                     int  started   = view.TileBuildsStartedLastTick();
                     long allocated = view.MeshDataArraysAllocatedLastKick();
                     Assert.LessOrEqual(started, 1,
-                        $"the cap must still bind at MaxMeshBuildsPerTick=1 on every scanned Tick (tick {t}).");
+                        $"the cap must still bind at MaxMeshBuildsPerTick=1 on every scanned Update (tick {t}).");
                     if (started   > 0) anyStarted   = true;
                     if (allocated > 0) anyAllocated = true;
                     if (started > 0 && allocated > 0) conjunctionSeen = true;
@@ -2499,12 +2503,12 @@ namespace MapRenderer.Tests.Tiles
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 3,
                     "non-vacuity: a 1- or 2-tile cover cannot produce the conjunction.");
                 Assert.IsTrue(anyStarted,
-                    "drive precondition: at least one scanned Tick must have started a tile, or this scan is dead.");
+                    "drive precondition: at least one scanned Update must have started a tile, or this scan is dead.");
                 Assert.IsTrue(anyAllocated,
-                    "drive precondition: at least one scanned Tick must have completed a write transition, or " +
+                    "drive precondition: at least one scanned Update must have completed a write transition, or " +
                     "this scan is dead.");
                 Assert.IsTrue(conjunctionSeen,
-                    "at least one Tick must both admit a fresh tile AND complete a write transition at cap=1 " +
+                    "at least one Update must both admit a fresh tile AND complete a write transition at cap=1 " +
                     "— impossible under the deleted two-units-per-tile rule, where a write kick and a fresh " +
                     "admission competed for the same single unit.");
 
@@ -2521,7 +2525,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// With <c>MaxMeshBuildsPerTick = 1</c>, one Tick can complete write-step transitions for TWO OR
+        /// With <c>MaxMeshBuildsPerTick = 1</c>, one Update can complete write-step transitions for TWO OR
         /// MORE admitted tiles. It holds three tiles in MEASURE, then completes them in one
         /// <see cref="MapViewTestExtensions.AwaitInFlightMeshBuilds"/> call, so one <c>LateUpdate</c>
         /// write-kicks them all. It reads <see cref="MapViewTestExtensions.MeshDataArraysAllocatedLastKick"/>,
@@ -2568,7 +2572,7 @@ namespace MapRenderer.Tests.Tiles
                     view.LateUpdate();
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 3,
                     "drive precondition: at least three tiles must be genuinely held in MEASURE before the " +
-                    "gate opens — reachable under both rules (admission is 1/Tick either way, and the " +
+                    "gate opens — reachable under both rules (admission is 1/Update either way, and the " +
                     "prologue hand-off is uncharged before and after), so a RED here is a property failure, " +
                     "never a precondition failure.");
 
@@ -2579,9 +2583,9 @@ namespace MapRenderer.Tests.Tiles
                 view.LateUpdate();
 
                 Assert.GreaterOrEqual(view.MeshDataArraysAllocatedLastKick(), 2,
-                    "at least TWO tiles must complete their write transition on this ONE Tick at cap=1 — " +
+                    "at least TWO tiles must complete their write transition on this ONE Update at cap=1 — " +
                     "impossible under the deleted rule, where one budget unit buys one charged write kick " +
-                    "per Tick.");
+                    "per Update.");
 
                 view.Teardown();
                 Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
@@ -2673,7 +2677,8 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: MixedStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                int kickTick = -1, tick = 0;
+                int kickTick = -1;
+                int tick = 0;
                 for (; tick < 3000 && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
@@ -3027,7 +3032,9 @@ namespace MapRenderer.Tests.Tiles
                 int edgesChecked = 0;
                 for (int t = 0; t + 2 < tris.Count; t += 3)
                 {
-                    int i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
+                    int i0 = tris[t];
+                    int i1 = tris[t + 1];
+                    int i2 = tris[t + 2];
                     AssertEdgeWithinThreshold(absolute[i0], absolute[i1], maxAllowedRad, ref edgesChecked);
                     AssertEdgeWithinThreshold(absolute[i1], absolute[i2], maxAllowedRad, ref edgesChecked);
                     AssertEdgeWithinThreshold(absolute[i2], absolute[i0], maxAllowedRad, ref edgesChecked);
@@ -3053,7 +3060,8 @@ namespace MapRenderer.Tests.Tiles
         /// vertex envelope and encapsulates every stored vertex.</summary>
         private static void AssertBoundsMatchesVertexEnvelope(Mesh mesh, List<Vector3> verts)
         {
-            Vector3 min = verts[0], max = verts[0];
+            Vector3 min = verts[0];
+            Vector3 max = verts[0];
             foreach (var v in verts) { min = Vector3.Min(min, v); max = Vector3.Max(max, v); }
             Vector3 expectedCenter = (min + max) * 0.5f;
             Vector3 expectedSize   = max - min;

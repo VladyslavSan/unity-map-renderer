@@ -125,11 +125,15 @@ namespace MapRenderer.Tests
         {
             Color32[] actual = frame.Pixels.Pixels;
             Color32[] refPixels = reference.Pixels;
-            int width = frame.Width, height = frame.Height;
+            int width = frame.Width;
+            int height = frame.Height;
             int totalPx = width * height;
 
             int differing = 0;
-            int minX = width, minY = height, maxX = -1, maxY = -1;
+            int minX = width;
+            int minY = height;
+            int maxX = -1;
+            int maxY = -1;
             var diff = new Color32[actual.Length];
 
             for (int y = 0; y < height; y++)
@@ -137,7 +141,8 @@ namespace MapRenderer.Tests
                 for (int x = 0; x < width; x++)
                 {
                     int i = y * width + x;
-                    Color32 a = actual[i], r = refPixels[i];
+                    Color32 a = actual[i];
+                    Color32 r = refPixels[i];
                     int dr = math.abs(a.r - r.r);
                     int dg = math.abs(a.g - r.g);
                     int db = math.abs(a.b - r.b);

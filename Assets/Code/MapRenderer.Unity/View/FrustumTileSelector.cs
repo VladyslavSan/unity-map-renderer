@@ -107,7 +107,8 @@ namespace MapRenderer.Unity.View
                 TileId t    = _stack[last];
                 _stack.RemoveAt(last);
 
-                double nearDist, onScreenPx;
+                double nearDist;
+                double onScreenPx;
                 // The whole-world tile is always partially visible, and (on a globe) its bounding sphere
                 // under-bounds it — so testing it can wrongly prune everything. Skip the test at z0.
                 if (t.Z == 0) { nearDist = 0.0; onScreenPx = 0.0; }
@@ -134,7 +135,9 @@ namespace MapRenderer.Unity.View
 
         private void PushChildren(TileId t)
         {
-            int cz = t.Z + 1, cx = t.X * 2, cy = t.Y * 2;
+            int cz = t.Z + 1;
+            int cx = t.X * 2;
+            int cy = t.Y * 2;
             _stack.Add(new TileId { Z = cz, X = cx,     Y = cy     });
             _stack.Add(new TileId { Z = cz, X = cx + 1, Y = cy     });
             _stack.Add(new TileId { Z = cz, X = cx,     Y = cy + 1 });
@@ -183,12 +186,18 @@ namespace MapRenderer.Unity.View
             }
 
             // Corner AABB (thin vertical slab so a flat y≈0 quad isn't degenerate).
-            double minX = c.x, minY = c.y, minZ = c.z, maxX = c.x, maxY = c.y, maxZ = c.z;
+            double minX = c.x;
+            double minY = c.y;
+            double minZ = c.z;
+            double maxX = c.x;
+            double maxY = c.y;
+            double maxZ = c.z;
             Grow(p0, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
             Grow(p1, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
             Grow(p2, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
             Grow(p3, ref minX, ref minY, ref minZ, ref maxX, ref maxY, ref maxZ);
-            double aMinY = minY - 2.0, aMaxY = maxY + 2.0;
+            double aMinY = minY - 2.0;
+            double aMaxY = maxY + 2.0;
 
             // Nearest distance from the camera to the AABB (0 on an axis the camera is already within).
             double nx = camPos.x < minX ? minX - camPos.x : (camPos.x > maxX ? camPos.x - maxX : 0.0);
@@ -204,7 +213,9 @@ namespace MapRenderer.Unity.View
         {
             double2 ll = t.ToLonLat(px, py, 1.0);
             double3 w  = proj.Project(new GeoCoordinate { Latitude = ll.y, Longitude = ll.x });
-            double rx = w.x - origin.x, ry = w.y - origin.y, rz = w.z - origin.z;
+            double rx = w.x - origin.x;
+            double ry = w.y - origin.y;
+            double rz = w.z - origin.z;
             return new double3(
                 basis.c0.x * rx + basis.c0.y * ry + basis.c0.z * rz,
                 basis.c1.x * rx + basis.c1.y * ry + basis.c1.z * rz,
@@ -221,7 +232,9 @@ namespace MapRenderer.Unity.View
 
         private static double Dist(double3 a, double3 b)
         {
-            double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+            double dx = a.x - b.x;
+            double dy = a.y - b.y;
+            double dz = a.z - b.z;
             return math.sqrt(dx * dx + dy * dy + dz * dz);
         }
 
@@ -249,8 +262,12 @@ namespace MapRenderer.Unity.View
         /// near plane so a point straddling the camera doesn't sign-flip into a near-zero or negative depth.</summary>
         private readonly struct PixelBasis
         {
-            private readonly double3 _pos, _forward, _right, _up;
-            private readonly double  _scale, _near;
+            private readonly double3 _pos;
+            private readonly double3 _forward;
+            private readonly double3 _right;
+            private readonly double3 _up;
+            private readonly double _scale;
+            private readonly double _near;
 
             public PixelBasis(double3 pos, double3 forward, double3 up, double scale, double near)
             {

@@ -100,8 +100,11 @@ namespace MapRenderer.App.View
 
             // Count active (non-Ended) fingers this frame.
             int effectiveCount = 0;
-            TouchSample f0 = default, f1 = default; // two lowest-id active fingers
-            bool        haveF0 = false, haveF1 = false;
+            // two lowest-id active fingers
+            TouchSample f0 = default;
+            TouchSample f1 = default;
+            bool haveF0 = false;
+            bool haveF1 = false;
 
             for (int i = 0; i < samples.Count; i++)
             {

@@ -181,7 +181,10 @@ namespace MapRenderer.Core.Text
             float globalX = blockWidth * (justifyFactor - hAlign) + offsetShift.x;
             float globalY = VerticalAnchorShiftPx(vertical, lineCount, lineHeightPx) + offsetShift.y;
 
-            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            float minX = float.MaxValue;
+            float minY = float.MaxValue;
+            float maxX = float.MinValue;
+            float maxY = float.MinValue;
             bool any = false;
 
             for (int k = 0; k < output.Count; k++)

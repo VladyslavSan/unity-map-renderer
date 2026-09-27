@@ -160,10 +160,10 @@ namespace MapRenderer.Tests.Text.Placement
                 var buffer = new SymbolTileBuffer();
                 AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchors);
 
-                // Duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                // Duplicate — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(anchors.Length, system.LastCandidateCount,
@@ -227,10 +227,10 @@ namespace MapRenderer.Tests.Text.Placement
                 AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchor);
                 AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 1, iconRotateRadians: math.PI, anchor);
 
-                // Duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
+                // Duplicate — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
+                system.Update(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Icon, out Mesh plainMesh),
@@ -313,32 +313,32 @@ namespace MapRenderer.Tests.Text.Placement
                 // ── 1. Icon-bearing batch ──────────────────────────────────────────────────────────────
                 // Icons draw through the WORLD path, so this reads the world slot, not the screen slot/presenter.
                 var iconBuffer = MakeIcon(frame.SceneOriginRender);
-                // Duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                // Duplicate — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Update(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
-                Assert.AreEqual(1, system.LastQuadCount, "LastQuadCount must include the icon quad (no text labels this Tick).");
+                Assert.AreEqual(1, system.LastQuadCount, "LastQuadCount must include the icon quad (no text labels this Update).");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Icon, out Mesh worldIconMesh),
                     "the world icon slot mesh must exist (created lazily on the icon's first Emit).");
                 Assert.Greater(worldIconMesh.vertexCount, 0, "the world icon slot mesh must have built non-zero vertices.");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon), "the world icon presenter must be showing after an icon Tick.");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon), "the world icon presenter must be showing after an icon Update.");
 
                 Assert.IsNotNull(renderLayer.WorldIconMaterial, "settings.SymbolIconWorld was assigned — WorldIconMaterial must be a clone, not null.");
                 Texture boundTexture = renderLayer.WorldIconMaterial.GetTexture("_MainTex");
                 Assert.AreSame(spriteTexture, boundTexture,
-                    "the world icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Tick.");
+                    "the world icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Update.");
 
                 // ── 2. Text-only batch (parity: the #1 rule) — world icon slot must go back to HIDDEN, text unaffected ──
                 var textBuffer = MakeText(frame.SceneOriginRender);
-                system.Tick(in frame, plan.Build(textBuffer), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(textBuffer), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Update(in frame, plan.Build(textBuffer), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Update(in frame, plan.Build(textBuffer), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
 
-                Assert.AreEqual(1, system.LastQuadCount, "the text-only Tick must place its one glyph quad (precondition).");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Text), "the world text presenter must still show on a text-only Tick.");
+                Assert.AreEqual(1, system.LastQuadCount, "the text-only Update must place its one glyph quad (precondition).");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Text), "the world text presenter must still show on a text-only Update.");
                 Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon),
-                    "the world icon presenter must be HIDDEN on a text-only Tick (spriteTexture omitted, no icon quads) — " +
+                    "the world icon presenter must be HIDDEN on a text-only Update (spriteTexture omitted, no icon quads) — " +
                     "the #1 rule: no sprite loaded ⇒ nothing icon-related builds/binds/presents.");
             }
             finally

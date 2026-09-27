@@ -99,7 +99,8 @@ namespace MapRenderer.Tests
             y0 = math.clamp(y0, 0, Height);
             y1 = math.clamp(y1, 0, Height);
 
-            double sumX = 0.0, sumY = 0.0;
+            double sumX = 0.0;
+            double sumY = 0.0;
             int count = 0;
             for (int y = y0; y < y1; y++)
             {

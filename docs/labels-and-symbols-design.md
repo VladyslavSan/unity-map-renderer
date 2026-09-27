@@ -29,7 +29,7 @@ the slow clock — and slow work out of the fast clock — is the spine of the w
 Driven by `TileManager`, which owns the loaded-tile set (`_loaded`):
 
 ```
-TileManager.Tick(cameraProperties, selectionConfig)          // once per frame, but mostly idle
+TileManager.Update(cameraProperties, selectionConfig)        // once per frame, but mostly idle
   ├─ CoverSelect      : pick the visible tile cover for this camera (z/x/y set)
   ├─ Request/Release  : fetch newly-covered tiles, release departed ones (kept-warm in a cache)
   └─ per-tile kick    : SymbolWorkerFactory.TryBeginBuild(source, tile)   ── kick ──►  SymbolSubsystem
@@ -101,14 +101,14 @@ is load-bearing:
 
 2. Layers.ApplyZoom(...)                        // zoom uniforms, px→device basis, before anything else moves
    TileManager.InstancedRebuild(sceneFrame)     // place tile meshes relative to the origin
-   TileManager.Tick(cameraProperties, ...)      // the slow clock (tile lifecycle) — cover select + request/release
+   TileManager.Update(cameraProperties, ...)    // the slow clock (tile lifecycle) — cover select + request/release
 
 3. if SymbolSubsystem.HasSymbolLayers:
      TileManager.CollectLoadedTileKeys(scratch)         // PULL the current loaded set
      SymbolSubsystem.ReconcileLoadedTiles(scratch, now) // release departed / restore cache-hit symbols
      SymbolSubsystem.PumpBuilds()                        // start ≤N queued builds, coalesce one atlas upload
      plan = SymbolSubsystem.CurrentBatch(sceneFrame, minCoverage, now)  // this frame's winner plan (+ coverage pre-cull)
-     SymbolPlacementSystem.Tick(sceneFrame, plan, atlas, dt, layerMaterials, iconTexture)
+     SymbolPlacementSystem.Update(sceneFrame, plan, atlas, dt, layerMaterials, iconTexture)
    else:
      nothing to place — a style with no symbol layers skips this step entirely.
 ```
@@ -134,16 +134,16 @@ Between the cross-tile dedup and the plan fill, `CurrentBatch` also runs the til
 The plan carries a **`WinnerSetVersion`**, bumped on every front-content change (reconcile swap / restyle /
 dispose); `SymbolPlacementSystem` mirrors it into native buffers only when the version changes.
 
-## 1.4 The per-frame placement loop — `SymbolPlacementSystem.Tick`
+## 1.4 The per-frame placement loop — `SymbolPlacementSystem.Update`
 
 Everything camera-dependent lives here, over reused buffers (no per-frame GC). Stages:
 
 ```
-Tick(sceneFrame, plan, atlas, dt, materials, spriteTexture)
+Update(sceneFrame, plan, atlas, dt, materials, spriteTexture)
  │
- ├─ PmGather        → GatherIntoMirror(plan)  : mirror the winner plan's native rows into per-Tick
+ ├─ PmGather        → GatherIntoMirror(plan)  : mirror the winner plan's native rows into per-Update
  │                                               buffers, memoized on WinnerSetVersion
- ├─ PmCollideHarvest → HarvestCollision()     : complete LAST Tick's scheduled collision job and re-key its
+ ├─ PmCollideHarvest → HarvestCollision()     : complete LAST Update's scheduled collision job and re-key its
  │                                               survivors by FadeId (B-4, Track B below)
  ├─ PmProject
  │   ├─ PmGatherPoints
@@ -155,15 +155,15 @@ Tick(sceneFrame, plan, atlas, dt, materials, spriteTexture)
  │   └─ PmStage
  │       └─ RunStageJob(...)        : Burst StageJob — collision boxes + rotated-glyph quads (skips any
  │                                    winner whose gather offset is -1)
- ├─ PmEmit  (reads LAST Tick's collision verdict — this Tick's is only scheduled below, not yet complete)
+ ├─ PmEmit  (reads LAST Update's collision verdict — this Update's is only scheduled below, not yet complete)
  │   ├─ PmEmitLoop  → A-4 fade + per-slot quad assembly : ease each candidate's opacity toward 1 (placed
- │   │                last Tick) / 0 (dropped/suppressed); emit its quads via WorldSymbolRenderer.Emit
- │   └─ PmEmitDecay → DecayUnseenFadeSymbols(...) : ease out any fade id absent from this Tick
- └─ PmCollide → ScheduleCollision(...)  : schedule THIS Tick's Burst CollisionJob (greedy, sort-key-driven,
-                                          uniform-grid) — its verdict is harvested next Tick's PmCollideHarvest
+ │   │                last Update) / 0 (dropped/suppressed); emit its quads via WorldSymbolRenderer.Emit
+ │   └─ PmEmitDecay → DecayUnseenFadeSymbols(...) : ease out any fade id absent from this Update
+ └─ PmCollide → ScheduleCollision(...)  : schedule THIS Update's Burst CollisionJob (greedy, sort-key-driven,
+                                          uniform-grid) — its verdict is harvested next Update's PmCollideHarvest
 
-then, every Tick regardless: WorldSymbolRenderer.EndFrame(...) builds + submits every non-empty material
-slot's mesh (Graphics.RenderMesh), hiding any slot left empty this Tick.
+then, every Update regardless: WorldSymbolRenderer.EndFrame(...) builds + submits every non-empty material
+slot's mesh (Graphics.RenderMesh), hiding any slot left empty this Update.
 ```
 
 Five fade-out triggers happen **before** any projection/staging/collision, classified by `GatherTrigger` in
@@ -180,7 +180,7 @@ Five fade-out triggers happen **before** any projection/staging/collision, class
 4. **S3 horizon cull** (`GatherTrigger.Horizon`): drop a symbol whose anchor is hidden behind the globe's own
    bulk (no-op under a planar projection).
 5. **B-3 distance cull** (`GatherTrigger.Distance`): drop an individual symbol beyond a threshold fraction of
-   the camera's far plane (`SymbolMaxDistanceFraction × CurrentFarMetres`, computed once per Tick).
+   the camera's far plane (`SymbolMaxDistanceFraction × CurrentFarMetres`, computed once per Update).
 
 A triggered winner is **not** hard-dropped while its fade is still alive: gather keeps STAGING it (re-projected
 to its live position) and forces its opacity toward 0 in emit — so it eases OUT in place instead of popping.
@@ -195,9 +195,9 @@ through `CollisionJob` — greedy, sort-key-driven, permutation-invariant select
 per-frame managed allocation). A non-finite `symbol-sort-key` becomes `float.MaxValue` (sorts last) at
 candidate build (`SymbolStagingMath.SanitizeSortKey`): with a NaN key (a style such as `["/", 0, 0]`) both
 `a < b` and `a > b` are false, the comparator is intransitive, and the survivor set becomes
-nondeterministic. This Tick's collision is *scheduled*, not run inline (see
-the pipeline above): the world emit reads the PREVIOUS Tick's already-harvested verdict, and the current
-Tick's own verdict is harvested at the START of the next one. A slot that produces no quads this Tick (no
+nondeterministic. This Update's collision is *scheduled*, not run inline (see
+the pipeline above): the world emit reads the PREVIOUS Update's already-harvested verdict, and the current
+Update's own verdict is harvested at the START of the next one. A slot that produces no quads this Update (no
 atlas, empty batch, everything culled/suppressed) is HIDDEN, not left drawing stale content;
 `WorldSymbolRenderer.EndFrame` owns this per-slot show/hide.
 
@@ -290,7 +290,7 @@ Culling ahead of the cross-tile dedup is rejected (it changes dedup winners — 
 → the `MapTelemetryPanel` (beside the
 distance cull), so the threshold is tunable by watching the live drop/fade counts. `viewProj` and the logical
 viewport are single shared definitions (`SymbolPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
-read by both `CurrentBatch` and `Tick`.
+read by both `CurrentBatch` and `Update`.
 
 ## 1.6 Retain-as-departing — fading a tile out when it leaves cover
 
@@ -379,11 +379,11 @@ true no-op — and the symbol count drops by the duplicate factor. Curved (line)
 keeps a per-anchor `LineFadeId`.
 
 **A-4 — Placement state machine + fade.** The placement layer holds a persistent opacity per fade id
-(`_fadeOpacity`, keyed by `FadeId`). Each `Tick` eases each staged candidate's opacity toward
+(`_fadeOpacity`, keyed by `FadeId`). Each `Update` eases each staged candidate's opacity toward
 `(placed && !Suppressed && !ForceFadeOut) ? 1 : 0` (collision-placed, in its live zoom range, and not
 fading out on a gather trigger) over a fixed **fade duration** (`FadeDurationSeconds`, 0.3 s;
 `symbol-fade-duration` is not wired), emits it while its opacity is above epsilon, and decays any id not
-staged this Tick toward 0, dropping it at epsilon. Fade state lives here, not in the tile-keyed store,
+staged this Update toward 0, dropping it at epsilon. Fade state lives here, not in the tile-keyed store,
 because the placement layer **owns the on-screen lifetime**; a label whose tile leaves cover keeps staging
 through retain-as-departing, so it fades at its live position. Cheap on the GPU: `PlacedQuad.Color.w` is the
 per-vertex alpha the shader emits — no shader/vertex-format cost. This also masks the idle blink: a
@@ -670,7 +670,7 @@ horizon-cull grazing margin.
 
 `MapRenderer.Unity/Text/`: `SymbolSubsystem` (queue/pump/store, + the pre-build tile-coverage cull in
 `CurrentBatch`), `SymbolTileStore` (active/cached/departing), `SymbolReconciler` (the off-main
-cross-tile dedup — `docs/labels-async-reconcile-design.md`), `Placement/SymbolPlacementSystem` (`Tick`),
+cross-tile dedup — `docs/labels-async-reconcile-design.md`), `Placement/SymbolPlacementSystem` (`Update`),
 `Placement/SymbolGatherPlan` (the per-frame winner plan), `SymbolFeatureExtractor` (`ProjectPath`,
 `LineAnchorPlacement.Compute`). `MapRenderer.Core/Text/`: `CodepointTextShaper`, `TextQuadLayout`,
 `CurvedTextLayout`, `Placement/SymbolStagingMath` (`StageCurved`, tangent), `Placement/PolylineArcMath`,
@@ -916,7 +916,7 @@ the sub-pixel phase sweeps in `SymbolIconResamplingTests`:
 | Draw (Unity) | `SymbolRenderLayer` + `SymbolTextWorld.shader` (SDF) | **`SymbolIconWorld.shader`** (RGBA) + a sprite-texture bind |
 
 The build-time half rides the same per-layer tile pipeline (`TileSymbolLayerProcessor`); the per-frame half is
-the same `SymbolPlacementSystem.Tick`. Collision is the same global grid — an icon is just another candidate box.
+the same `SymbolPlacementSystem.Update`. Collision is the same global grid — an icon is just another candidate box.
 
 ## 5.4 The load-bearing decision (I5): how icons ride `SymbolBatch`
 
@@ -1310,7 +1310,7 @@ Decisions worth keeping:
   an arm per carrier and carries the reasoning in its header; without it a future reader finds one
   rationale and "fixes" the other side to match.
 - **Width and blur stay LOGICAL px all the way to the emit**, where they take the logical→device conversion
-  together against the LIVE ratio. So a dpr change re-scales the halo on the next Tick with no re-bake, no
+  together against the LIVE ratio. So a dpr change re-scales the halo on the next Update with no re-bake, no
   change detection, and no frozen-zoom bookkeeping — `SymbolRenderLayer.ApplyZoom` has no halo work.
 - **The halo copy is the same quad**, not an inflated one. A halo wider than the glyph cell's SDF padding
   clips at the cell edge — as a one-fragment combine would too, so this is not a defect to chase.

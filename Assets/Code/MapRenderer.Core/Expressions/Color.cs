@@ -13,10 +13,19 @@ namespace MapRenderer.Core.Expressions
     /// </summary>
     public readonly struct Color : IEquatable<Color>
     {
-        /// <summary>sRGB red, green, blue, and alpha — each nominally in [0,1]. The producers enforce the range
-        /// (<see cref="ColorParser"/> clips, <see cref="Ops.ColorCtors"/> raises an error, <see cref="FromLab"/>
-        /// clamps); the constructor does not, so it can carry a color-space round-trip's intermediate values.</summary>
-        public readonly double R, G, B, A;
+        /// <summary>sRGB red, nominally in [0,1]. The producers enforce the range (<see cref="ColorParser"/>
+        /// clips, <see cref="Ops.ColorCtors"/> raises an error, <see cref="FromLab"/> clamps); the constructor
+        /// does not, so it can carry a color-space round-trip's intermediate values.</summary>
+        public readonly double R;
+
+        /// <summary>See <see cref="R"/> — same range and producer contract.</summary>
+        public readonly double G;
+
+        /// <summary>See <see cref="R"/> — same range and producer contract.</summary>
+        public readonly double B;
+
+        /// <summary>See <see cref="R"/> — same range and producer contract.</summary>
+        public readonly double A;
 
         public Color(double r, double g, double b, double a)
         {
@@ -66,7 +75,9 @@ namespace MapRenderer.Core.Expressions
 
         // ---- sRGB <-> CIE LAB (via linear RGB and XYZ, D65) ---------------------------------------
         // D65 reference white for sRGB.
-        private const double Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
+        private const double Xn = 0.95047;
+        private const double Yn = 1.0;
+        private const double Zn = 1.08883;
 
         private static double LabF(double t)
         {
@@ -87,14 +98,18 @@ namespace MapRenderer.Core.Expressions
         /// <summary>This color as CIELAB (L*, a*, b*) plus the (un-touched) alpha. sRGB→linear→XYZ→LAB.</summary>
         public (double L, double A, double B, double Alpha) ToLab()
         {
-            double rl = SrgbToLinear(R), gl = SrgbToLinear(G), bl = SrgbToLinear(B);
+            double rl = SrgbToLinear(R);
+            double gl = SrgbToLinear(G);
+            double bl = SrgbToLinear(B);
 
             // linear sRGB -> CIE XYZ (D65), sRGB primaries matrix.
             double x = rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375;
             double y = rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750;
             double z = rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041;
 
-            double fx = LabF(x / Xn), fy = LabF(y / Yn), fz = LabF(z / Zn);
+            double fx = LabF(x / Xn);
+            double fy = LabF(y / Yn);
+            double fz = LabF(z / Zn);
             double l = 116.0 * fy - 16.0;
             double a = 500.0 * (fx - fy);
             double b = 200.0 * (fy - fz);
@@ -162,7 +177,8 @@ namespace MapRenderer.Core.Expressions
             if (t <= 0.0) return a;
             if (t >= 1.0) return b;
 
-            double aA = a.A, bA = b.A;
+            double aA = a.A;
+            double bA = b.A;
             double aOut = Lin(aA, bA, t);
             if (aOut <= 0.0)
                 return new Color(0.0, 0.0, 0.0, 0.0);

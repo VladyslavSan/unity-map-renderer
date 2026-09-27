@@ -137,7 +137,8 @@ namespace MapRenderer.Tests.MapViews
                 // z2 set unchanged, so nothing loads.
                 Assert.AreEqual(16, view.LoadedTileCount(),
                     "precondition: the whole-world z2 set must already be all 16 tiles before the heading/tilt nudge.");
-                double nudgeHeading = 0.0, nudgeTilt = 0.0;
+                double nudgeHeading = 0.0;
+                double nudgeTilt = 0.0;
                 AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     // Alternate small nudges so every call — warm-up and measured — genuinely dirties the
@@ -157,7 +158,7 @@ namespace MapRenderer.Tests.MapViews
                 // design.md § 2); BRG staying clean over N=50 shows the churn is Entities-specific.
                 const int N = 50;
                 AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
-                    $"BRG.Tick must not allocate across {N} steady-state frames — proving the zero-alloc " +
+                    $"BRG.Update must not allocate across {N} steady-state frames — proving the zero-alloc " +
                     "contract holds at the scale where the Entities backend trips the recorder.");
             }
             finally

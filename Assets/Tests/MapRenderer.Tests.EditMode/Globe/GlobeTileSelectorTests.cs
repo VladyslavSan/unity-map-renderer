@@ -114,7 +114,8 @@ namespace MapRenderer.Tests.Globe
             Assert.IsNotEmpty(buf);
             int n = 1 << buf[0].Z;
             int yLookAt = n / 2; // lat 0 → the middle tile row
-            int minY = int.MaxValue, maxY = int.MinValue;
+            int minY = int.MaxValue;
+            int maxY = int.MinValue;
             foreach (var t in buf) { if (t.Y < minY) minY = t.Y; if (t.Y > maxY) maxY = t.Y; }
 
             int northReach = yLookAt - minY; // rows toward the view direction
@@ -136,7 +137,8 @@ namespace MapRenderer.Tests.Globe
         public void RaySphereFarPlane_TightAtHighZoom_OpensTowardLimbAtLowZoom()
         {
             var far = new RaySphereFarPlane(SphericalProjection.Radius);
-            const double fov = 60.0, aspect = 16.0 / 9.0;
+            const double fov = 60.0;
+            const double aspect = 16.0 / 9.0;
             Angle overhead = Angle.FromDegrees(0.0);
 
             // High zoom: the viewport corners hit local (near-flat) ground → far ≈ altitude, NOT the old ×4.

@@ -170,7 +170,13 @@ namespace MapRenderer.Unity.Text.Placement
         private static void Fill(SymbolTileBlock block, SymbolTileBuffer buffer, int rawCount, int slotCount,
             in double3 tileOriginRender)
         {
-            int pointIdx = 0, curvedIdx = 0, quadIdx = 0, glyphIdx = 0, anchorIdx = 0, anchorFadeIdx = 0, worldPointIdx = 0;
+            int pointIdx = 0;
+            int curvedIdx = 0;
+            int quadIdx = 0;
+            int glyphIdx = 0;
+            int anchorIdx = 0;
+            int anchorFadeIdx = 0;
+            int worldPointIdx = 0;
 
             for (int i = 0; i < rawCount; i++)
             {

@@ -469,7 +469,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>Removing a SYMBOL layer must REFUSE the in-place path.
         /// That arm skips the <c>_symbolRenderLayers</c> rebuild, so tombstoning a symbol slot leaves the
-        /// list handing <c>SymbolPlacementSystem.Tick</c> materials <c>SymbolRenderLayer.Dispose</c> has
+        /// list handing <c>SymbolPlacementSystem.Update</c> materials <c>SymbolRenderLayer.Dispose</c> has
         /// destroyed. Clause 2 pins WHERE the fence sits: a fence below the mutation pass still returns
         /// false, but leaves the lower-slotted fill b disposed and tombstoned.</summary>
         [Test]
@@ -612,7 +612,8 @@ namespace MapRenderer.Tests.Style
         public void DrawGateRestyle_SurvivesTheGate_EvenWithNoPaintBlock(
             string oldExtra, string newExtra, bool expectedSurvives)
         {
-            StyleDocument oldStyle = NoPaintStyle(oldExtra), newStyle = NoPaintStyle(newExtra);
+            StyleDocument oldStyle = NoPaintStyle(oldExtra);
+            StyleDocument newStyle = NoPaintStyle(newExtra);
             Assert.AreEqual(expectedSurvives, WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
                 expectedSurvives
                     ? "minzoom/maxzoom/layout.visibility are read per frame off IRenderLayer.StyleLayer, "
@@ -839,7 +840,8 @@ namespace MapRenderer.Tests.Style
                   TestName = "RootMatches_SkyPlusOtherRootKeyDifference_Refuses")]
         public void RootMatches_FreesOnlyLightAndSky(string oldRoot, string newRoot, bool survives)
         {
-            StyleDocument oldStyle = RootStyle(oldRoot), newStyle = RootStyle(newRoot);
+            StyleDocument oldStyle = RootStyle(oldRoot);
+            StyleDocument newStyle = RootStyle(newRoot);
             Assert.AreNotEqual(JsonCanonical.Write(oldStyle.Root), JsonCanonical.Write(newStyle.Root),
                 "fixture: the two roots must differ.");
             Assert.AreEqual(survives, SurvivingLayerGate.RootMatches(oldStyle, newStyle),
@@ -1041,7 +1043,9 @@ namespace MapRenderer.Tests.Style
                     FillLayer("both", $@"""minzoom"": {BoundedMin}, ""maxzoom"": {BoundedMax},")),
                 UnboundedZoom, MapMaterialSetTestUtil.Load());
 
-            const int unbounded = 0, lower = 1, both = 2;
+            const int unbounded = 0;
+            const int lower = 1;
+            const int both = 2;
             double insideBoth = (BoundedMin + BoundedMax) / 2.0;
 
             ApplySettled(set, UnboundedZoom);                       // below every bound
@@ -1107,7 +1111,8 @@ namespace MapRenderer.Tests.Style
                 LowerOnly + 1.0, MapMaterialSetTestUtil.Load());
 
             double d = StyleTransition.Default.DurationSeconds;
-            double inside = LowerOnly + 1.0, outside = LowerOnly - 1.0;
+            double inside = LowerOnly + 1.0;
+            double outside = LowerOnly - 1.0;
 
             set.ApplyZoom(new StyleFrameInputs(inside, 1.0, 0.0));
             Assert.AreEqual(AuthoredOpacity, OpacityOf(set, 0), 1e-6f, "precondition: settled and in range.");
@@ -1160,7 +1165,8 @@ namespace MapRenderer.Tests.Style
                 LowerOnly + 1.0, MapMaterialSetTestUtil.Load());
 
             double d = StyleTransition.Default.DurationSeconds;
-            double inside = LowerOnly + 1.0, outside = LowerOnly - 1.0;
+            double inside = LowerOnly + 1.0;
+            double outside = LowerOnly - 1.0;
             var fadeable = (IFadeableRenderLayer)set[0];
 
             set.ApplyZoom(new StyleFrameInputs(inside, 1.0, 0.0));
@@ -1335,7 +1341,8 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(ViewportAnchor, AnchorOf(set, 0), 1e-6f,
                 "precondition: the authored anchor reached the material at bind time.");
 
-            double d = StyleTransition.Default.DurationSeconds, outside = LowerOnly - 1.0;
+            double d = StyleTransition.Default.DurationSeconds;
+            double outside = LowerOnly - 1.0;
             set.ApplyZoom(new StyleFrameInputs(outside, 1.0, 0.0));        // arm the fade at t = 0
             set.ApplyZoom(new StyleFrameInputs(outside, 1.0, d / 2.0));    // half way through it
 

@@ -18,7 +18,9 @@ namespace MapRenderer.Core.Text.Placement
     {
         // Public so the Unity-side SymbolGatherPlan.Build can read a ClassifyActive decision
         // (decisions[i] == Drop / == Fade) without duplicating the encoding.
-        public const byte Keep = 0, Fade = 1, Drop = 2;
+        public const byte Keep = 0;
+        public const byte Fade = 1;
+        public const byte Drop = 2;
 
         /// <summary>
         /// Writes one Keep/Fade/Drop decision per record into <paramref name="decisions"/>, so the native gather

@@ -244,7 +244,7 @@ namespace MapRenderer.Tests.MapViews
                     }
                 },
                 "CaptureTelemetry (TileCoverStats' scratch reuse + the Pending/ConsumeBacklog pass) must not " +
-                "allocate across a RUN of Ticks — a single call can read clean while a loop of N trips the " +
+                "allocate across a RUN of Updates — a single call can read clean while a loop of N trips the " +
                 "recorder. A LINQ-based impl, or one that news a List/HashSet per " +
                 "capture, fails this.");
             }
@@ -454,7 +454,7 @@ namespace MapRenderer.Tests.MapViews
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                // Drive the async tile load. PumpUntilSettled calls Tick() repeatedly on the main thread.
+                // Drive the async tile load. PumpUntilSettled calls Update() repeatedly on the main thread.
                 // Mesh build runs on a background Task.Run thread; UploadMesh runs on this (main) thread.
                 PumpUntilSettled(view);
 
@@ -490,7 +490,7 @@ namespace MapRenderer.Tests.MapViews
                     $"on the main thread — expected 0. "                                                +
                     "Baseline: ≥1 main-thread hit per tile (sync BuildMesh path). "                 +
                     "Async path: BuildMeshData runs in Task.Run (off main thread), so "             +
-                    "PmBuildMesh must NEVER fire on the main thread during Tick. "                      +
+                    "PmBuildMesh must NEVER fire on the main thread during Update. "                      +
                     "If non-zero, mesh build is still synchronous on the main thread (regressed). " +
                     $"Upload hits (positive control) = {uploadMainHits}.");
             }
@@ -523,7 +523,7 @@ namespace MapRenderer.Tests.MapViews
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                // First Tick: kicks fetch (sync) and mesh build Task.
+                // First Update: kicks fetch (sync) and mesh build Task.
                 view.LateUpdate();
 
                 // DrainMeshBuilds: blocks until tasks finish, then consumes them.

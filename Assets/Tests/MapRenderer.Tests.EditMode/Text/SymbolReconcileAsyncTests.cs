@@ -274,7 +274,8 @@ namespace MapRenderer.Tests.Text
             // A page just wide/tall enough for ONE glyph's cell — the second appended glyph overflows to page 1.
             SdfGlyph a = stack.Glyphs[65u]; // 'A'
             SdfGlyph b = stack.Glyphs[66u]; // 'B'
-            int2 cellA = a.CellSize, cellB = b.CellSize;
+            int2 cellA = a.CellSize;
+            int2 cellB = b.CellSize;
             int pageWidth = math.max(cellA.x, cellB.x);
             int pageHeight = math.max(cellA.y, cellB.y);
             var atlas = new GlyphAtlas(width: pageWidth, fixedHeight: pageHeight);
@@ -801,7 +802,10 @@ namespace MapRenderer.Tests.Text
         public void SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle()
         {
             var kindsSeen = new HashSet<TileGeometryType>();
-            int sawLengthOne = 0, sawMultiPathFeature = 0, totalPoints = 0, totalEntries = 0;
+            int sawLengthOne = 0;
+            int sawMultiPathFeature = 0;
+            int totalPoints = 0;
+            int totalEntries = 0;
             bool anyNonZeroFeatureIdx = false;
 
             foreach (string sourceLayer in new[] { "centroids", "geolines" })
@@ -1254,10 +1258,12 @@ namespace MapRenderer.Tests.Text
         private static uint[] MultiPointGeometry(params double2[] tilePoints)
         {
             var stream = new List<uint> { 1u | ((uint)tilePoints.Length << 3) }; // MoveTo, count=N
-            long cursorX = 0, cursorY = 0;
+            long cursorX = 0;
+            long cursorY = 0;
             foreach (double2 p in tilePoints)
             {
-                long x = (long)p.x, y = (long)p.y;
+                long x = (long)p.x;
+                long y = (long)p.y;
                 stream.Add(ZigZagEncode(x - cursorX));
                 stream.Add(ZigZagEncode(y - cursorY));
                 cursorX = x;
@@ -1270,10 +1276,12 @@ namespace MapRenderer.Tests.Text
         private static uint[] MultiPointRing(params double2[] tilePoints)
         {
             var stream = new List<uint> { 1u | (1u << 3) }; // MoveTo, count=1
-            long cursorX = 0, cursorY = 0;
+            long cursorX = 0;
+            long cursorY = 0;
             void Append(double2 p)
             {
-                long x = (long)p.x, y = (long)p.y;
+                long x = (long)p.x;
+                long y = (long)p.y;
                 stream.Add(ZigZagEncode(x - cursorX));
                 stream.Add(ZigZagEncode(y - cursorY));
                 cursorX = x;
@@ -1381,7 +1389,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(3, baseline.BlockId.Count, "sanity: co-located pair merges, 8 m pair splits → 3 winners");
             Assert.AreEqual(3, baseline.ActiveCount, "…all active");
             // Exactly one of the two Co copies wins: (block1, localIndex 0) XOR (block2, localIndex 0).
-            bool baselineHasCo1 = false, baselineHasCo2 = false;
+            bool baselineHasCo1 = false;
+            bool baselineHasCo2 = false;
             for (int i = 0; i < baseline.BlockId.Count; i++)
             {
                 if (baseline.BlockId[i] == 0 && baseline.LocalIndex[i] == 0) baselineHasCo1 = true;
@@ -1389,7 +1398,8 @@ namespace MapRenderer.Tests.Text
             }
             Assert.IsTrue(baselineHasCo1 ^ baselineHasCo2, "exactly one Co copy wins the merge");
             // splitA (block0, local1) and splitB (block0, local2) both present — not merged.
-            bool hasSplitA = false, hasSplitB = false;
+            bool hasSplitA = false;
+            bool hasSplitB = false;
             for (int i = 0; i < baseline.BlockId.Count; i++)
             {
                 if (baseline.BlockId[i] == 0 && baseline.LocalIndex[i] == 1) hasSplitA = true;
@@ -1871,7 +1881,8 @@ namespace MapRenderer.Tests.Text
 
             // f==0: A leaves cover (the gated reconcile captures A-DEPARTING); f==5: A re-enters, so that snapshot
             // is STALE. The held FRONT keeps its per-record identity throughout; exactly ONE reconcile is scheduled.
-            int[] idBlock = null, idLocal = null; byte[] idDep = null;
+            int[] idBlock = null;
+            int[] idLocal = null; byte[] idDep = null;
             for (int f = 0; f < 12; f++)
             {
                 if (f == 0) _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);        // event 1: A departs
@@ -2244,7 +2255,8 @@ namespace MapRenderer.Tests.Text
 
                 // (b) poll until the pickup swap lands: the mirror stays flat while the reconcile is in flight
                 // and rebuilds on the swap frame itself.
-                bool sawInFlight = false, swappedThisFrame = false;
+                bool sawInFlight = false;
+                bool swappedThisFrame = false;
                 for (int f = 0; f < 400 && !swappedThisFrame; f++)
                 {
                     _subsystem.ReconcileLoadedTiles(loaded);
@@ -3367,7 +3379,8 @@ namespace MapRenderer.Tests.Text
             Assert.Greater(committed, 0, "the SAME tile's labels must eventually commit once the sprite settles");
 
             SymbolTileBlock block = Block();
-            bool anyIcon = false, anyText = false;
+            bool anyIcon = false;
+            bool anyText = false;
             foreach (PointStageInput p in block.Points)
             {
                 if (p.AtlasKind == SymbolKind.Icon) anyIcon = true;
@@ -3411,7 +3424,8 @@ namespace MapRenderer.Tests.Text
             Assert.Greater(committed, 0, "an absent sprite sheet must NOT stall the parked build forever — its text labels must still commit");
 
             SymbolTileBlock block = Block();
-            bool anyText = false, anyIcon = false;
+            bool anyText = false;
+            bool anyIcon = false;
             foreach (PointStageInput p in block.Points)
             {
                 if (p.AtlasKind == SymbolKind.Text) anyText = true;
@@ -3463,7 +3477,8 @@ namespace MapRenderer.Tests.Text
                 "through while the backlog keeps growing");
 
             SymbolTileBlock block = Block();
-            bool anyText = false, anyIcon = false;
+            bool anyText = false;
+            bool anyIcon = false;
             foreach (PointStageInput p in block.Points)
             {
                 if (p.AtlasKind == SymbolKind.Text) anyText = true;

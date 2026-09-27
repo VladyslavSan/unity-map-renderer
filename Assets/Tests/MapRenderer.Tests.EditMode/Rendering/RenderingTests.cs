@@ -1513,7 +1513,7 @@ namespace MapRenderer.Tests.Rendering
         }
 
         // Two symbol layers at distinct draw indices: BOTH world materials carry their queue from Build
-        // time, with NO Tick.
+        // time, with NO Update.
         private const string TwoSymbolLayersStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1546,10 +1546,10 @@ namespace MapRenderer.Tests.Rendering
 
                 Assert.AreEqual(bandBase, iconQueue,
                     $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create, " +
-                    "with NO Tick, at its own layer's Base sub-slot.");
+                    "with NO Update, at its own layer's Base sub-slot.");
                 Assert.AreEqual(LayerDrawOrder.QueueFor(i, LayerSubSlot.Above), textQueue,
                     $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material), " +
-                    "with NO Tick, at its own layer's Above sub-slot.");
+                    "with NO Update, at its own layer's Above sub-slot.");
 
                 // The tooth a re-bake cannot fake: icon strictly below its own layer's text.
                 Assert.Less(iconQueue, textQueue,

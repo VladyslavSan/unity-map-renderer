@@ -181,24 +181,24 @@ namespace MapRenderer.Tests
         public static int ReleasedMidFetchCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
 
         /// <summary>Number of times the FULL cover recompute (select descent + request/release diff) ran in
-        /// the most recent Tick — 0 on an early-out Tick, else 1. Sum across N sub-tile camera nudges to
+        /// the most recent Update — 0 on an early-out Update, else 1. Sum across N sub-tile camera nudges to
         /// discriminate "recomputed every dirty tick" from a throttle.</summary>
         public static int CoverRecomputesLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.CoverRecomputesLastTick : 0;
 
-        /// <summary>Tiles newly started (first kicked) in the most recent Tick — once per tile, the quantity
+        /// <summary>Tiles newly started (first kicked) in the most recent Update — once per tile, the quantity
         /// <c>MaxMeshBuildsPerTick</c> bounds.</summary>
         public static int TileBuildsStartedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TileBuildsStartedLastTick : 0;
         /// <summary>Mesh.MeshDataArrays allocated by the graph arm's write step in the most recent
-        /// Tick.</summary>
+        /// Update.</summary>
         public static long MeshDataArraysAllocatedLastKick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshDataArraysAllocatedLastKick : 0;
-        /// <summary>Sum of vertex counts consumed in the most recent Tick.</summary>
+        /// <summary>Sum of vertex counts consumed in the most recent Update.</summary>
         public static int VerticesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
-        /// <summary>Number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
+        /// <summary>Number of tiles that reached Built (fully consumed) in the most recent Update.</summary>
         public static int TilesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
-        /// <summary>Number of layer MESHES uploaded + registered in the most recent Tick — the per-frame mesh-count budget observable.</summary>
+        /// <summary>Number of layer MESHES uploaded + registered in the most recent Update — the per-frame mesh-count budget observable.</summary>
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
 
-        /// <summary>(tile, source) records fully released in the most recent Tick's DrainReleaseQueue.</summary>
+        /// <summary>(tile, source) records fully released in the most recent Update's DrainReleaseQueue.</summary>
         public static int TilesReleasedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesReleasedLastTick : 0;
         /// <summary>Current deferred-release backlog depth (records that left cover and await drain).</summary>
         public static int ReleaseQueueDepth(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleaseQueueDepth : 0;

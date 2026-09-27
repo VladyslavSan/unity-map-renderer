@@ -277,12 +277,16 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_FillOverLine_DrawOrderFlips()
         {
-            const int SnapW = 512, SnapH = 512;
+            const int SnapW = 512;
+            const int SnapH = 512;
             var bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
 
             // Mean colour over most of the frame (a 32 px border skips edge artifacts); the R/B flip across the
             // two styles is the proof.
-            const int SX0 = 32, SY0 = 32, SX1 = 480, SY1 = 480;
+            const int SX0 = 32;
+            const int SY0 = 32;
+            const int SX1 = 480;
+            const int SY1 = 480;
 
             using var cameraBag = new ObjectDisposalBag();
             var lightGo = cameraBag.Track(new GameObject("BrgOrderTestLight"));
@@ -308,8 +312,10 @@ namespace MapRenderer.Tests.Visual
             camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             camera.orthographicSize   = 300_000f;
 
-            double[] meanA = null, meanB = null;
-            int cullingA = 0, cullingB = 0;
+            double[] meanA = null;
+            double[] meanB = null;
+            int cullingA = 0;
+            int cullingB = 0;
 
             using var snapA = new SnapshotRenderer(SnapW, SnapH);
             using var snapB = new SnapshotRenderer(SnapW, SnapH);
@@ -338,7 +344,7 @@ namespace MapRenderer.Tests.Visual
                             "Style A: BRG must load and settle tiles.");
 
                         // Frame the camera on the actual BRG scene bounds (same for both styles).
-                        // Must be computed here (after tiles settle + Rebuild runs in Tick).
+                        // Must be computed here (after tiles settle + Rebuild runs in Update).
                         float tileSize3 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
                         var brgA = view.BrgRenderer();
                         Assert.IsNotNull(brgA, "BRG renderer must be present on BRG path (Style A).");
@@ -703,14 +709,19 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_RendersNonBlankFill_OnRealPixels()
         {
-            const int SnapW = 512, SnapH = 512;
+            const int SnapW = 512;
+            const int SnapH = 512;
             var bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
             var bg32 = new Color32(26, 28, 38, 255);
-            const float MinFill = 0.05f, MaxFill = 0.95f;
+            const float MinFill = 0.05f;
+            const float MaxFill = 0.95f;
             const int   MinBuckets = 4;
 
             // Sample rect for color-channel mean: central 80% of the frame, avoiding edge artifacts.
-            const int ColorSX0 = 50, ColorSY0 = 50, ColorSX1 = 462, ColorSY1 = 462;
+            const int ColorSX0 = 50;
+            const int ColorSY0 = 50;
+            const int ColorSX1 = 462;
+            const int ColorSY1 = 462;
 
             using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var mapGo = Track(new GameObject("MapView_BrgPixel"));
@@ -752,7 +763,7 @@ namespace MapRenderer.Tests.Visual
                     "BRG path must load + settle tiles.");
 
                 // Non-local invariant: BrgRebuild runs BEFORE TileManager consumes the last tile, so _sortedItems
-                // lags _items by one frame when the settle loop exits. One more Tick rebuilds it.
+                // lags _items by one frame when the settle loop exits. One more Update rebuilds it.
                 view.LateUpdate();
 
                 // BRG has no child MeshRenderers, so frame the camera on ComputeSceneBounds with the z=3 tile
@@ -848,7 +859,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_ZoomDependentLineWidth_RendersOnBrgPixels()
         {
-            const int SnapW = 512, SnapH = 512;
+            const int SnapW = 512;
+            const int SnapH = 512;
             var bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
             var bg32 = new Color32(26, 28, 38, 255);
 
@@ -875,8 +887,10 @@ namespace MapRenderer.Tests.Visual
             // Camera position/orthoSize will be set after zoom=1 tiles settle (ComputeSceneBounds).
             camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 
-            float filledLowZoom = 0f, filledHighZoom = 0f;
-            int cullingLow = 0, cullingHigh = 0;
+            float filledLowZoom = 0f;
+            float filledHighZoom = 0f;
+            int cullingLow = 0;
+            int cullingHigh = 0;
 
             using var snapLow  = new SnapshotRenderer(SnapW, SnapH);
             using var snapHigh = new SnapshotRenderer(SnapW, SnapH);
@@ -1029,7 +1043,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_LineParity_MatchesEntities()
         {
-            const int SnapW = 512, SnapH = 512;
+            const int SnapW = 512;
+            const int SnapH = 512;
             var bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
             var bg32 = new Color32(26, 28, 38, 255);
 
@@ -1057,7 +1072,8 @@ namespace MapRenderer.Tests.Visual
             camera.farClipPlane    = 1e9f;
             camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
 
-            float filledEntities = 0f, filledBrg = 0f;
+            float filledEntities = 0f;
+            float filledBrg = 0f;
 
             using var snapEntities = new SnapshotRenderer(SnapW, SnapH);
             using var snapBrg      = new SnapshotRenderer(SnapW, SnapH);
@@ -1648,10 +1664,12 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void EntitiesBackend_RendersFill_ThroughMapView()
         {
-            const int SnapW = 512, SnapH = 512;
+            const int SnapW = 512;
+            const int SnapH = 512;
             var  bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
             var bg32 = new Color32(26, 28, 38, 255);
-            const float MinFill = 0.05f, MaxFill = 0.95f;
+            const float MinFill = 0.05f;
+            const float MaxFill = 0.95f;
 
             using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var mapGo = Track(new GameObject("MapView_EntPixel"));

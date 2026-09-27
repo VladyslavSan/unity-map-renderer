@@ -32,11 +32,15 @@ namespace MapRenderer.Core.Geo
             double lambda = geo.Longitude * math.PI_DBL / 180.0; // longitude, radians
             double phi    = geo.Latitude  * math.PI_DBL / 180.0; // latitude, radians
 
-            double sinPhi = math.sin(phi), cosPhi = math.cos(phi);
-            double sinLam = math.sin(lambda), cosLam = math.cos(lambda);
+            double sinPhi = math.sin(phi);
+            double cosPhi = math.cos(phi);
+            double sinLam = math.sin(lambda);
+            double cosLam = math.cos(lambda);
 
             // Radial (geodetic) normal in ECEF — already unit length (sin²+cos²=1), no normalize needed.
-            double upX = cosPhi * cosLam, upY = cosPhi * sinLam, upZ = sinPhi;
+            double upX = cosPhi * cosLam;
+            double upY = cosPhi * sinLam;
+            double upZ = sinPhi;
             double rr  = Radius; // surface point (no elevation)
 
             // Axis-swap ECEF (X,Y,Z) → render (X,Z,Y), matching Ecef.Forward. Built via the double3
@@ -108,7 +112,10 @@ namespace MapRenderer.Core.Geo
             // Render-ECEF ENU basis at the look-at (double precision; axis-swap (X,Z,Y) matching ProjectPoint).
             double lam  = cam.LookAt.Longitude * math.PI_DBL / 180.0;
             double phi  = cam.LookAt.Latitude  * math.PI_DBL / 180.0;
-            double sinP = math.sin(phi), cosP = math.cos(phi), sinL = math.sin(lam), cosL = math.cos(lam);
+            double sinP = math.sin(phi);
+            double cosP = math.cos(phi);
+            double sinL = math.sin(lam);
+            double cosL = math.cos(lam);
             double3 upE   = new double3(cosP * cosL, cosP * sinL, sinP);
             double3 eastE = new double3(-sinL, cosL, 0.0);
             double3 northE = math.cross(upE, eastE);

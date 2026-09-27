@@ -19,7 +19,7 @@ off-main), `docs/async-architecture.md` §"Disposal & cancellation contract" (th
 A library of Burst jobs is not a pipeline. A job dispatched through `.Run()` executes on the calling thread,
 so a chain of ten of them is a synchronous function call wearing job structs. What makes such a chain
 synchronous is the read-back between the stages, not any stage's nature. One thing turns the library into a
-pipeline: **holding an uncompleted `JobHandle` across a Tick.**
+pipeline: **holding an uncompleted `JobHandle` across a Update.**
 
 The web target makes that structural rather than cosmetic. Its only execution resources are the main thread
 and Burst workers; every managed offload mechanism is inert there, while a scheduled Burst chain does reach
@@ -37,7 +37,7 @@ with the workers idle. Two independent consequences follow:
 | how a chain is expressed | as `JobHandle` edges: every stage takes `deps` and returns a handle; a per-layer graph builder returns `(outputs, terminal handle)` as one struct; per-layer graphs fan in through `JobHandle.CombineDependencies` to one per-tile handle. There is no bespoke DAG type — `JobHandle` **is** the declaration. |
 | who owns handles and buffers | the struct that owns the output buffers owns the terminal handle, indivisibly (`FillGraphOutput.Handle`, `LineGraphOutput.Handle`). Intermediate scratch is freed by `Dispose(JobHandle)` nodes inside the graph, so the caller sees outputs plus one handle. |
 | where a graph is scheduled | on the main thread, at the tile pump — the job system's contract. Off-main managed code never schedules; it produces native inputs the main thread schedules over. |
-| how completion reaches the consumer | polled once per Tick on `JobHandle.IsCompleted`, at the pump that already polls `WorkHandle.IsCompleted`. No callback, no UniTask hop. `Complete()` runs before any output is read. |
+| how completion reaches the consumer | polled once per Update on `JobHandle.IsCompleted`, at the pump that already polls `WorkHandle.IsCompleted`. No callback, no UniTask hop. `Complete()` runs before any output is read. |
 | the tile build's shape | three polled steps per tile: **prologue** (managed, `IWorkScheduler`, shrinking) → **measure graph** (Burst; all geometry) → **write graph** (main allocates one exact-size `MeshData` per layer, Burst streams into it). |
 | `.Run()` vs `.Schedule()` | the ordered discriminator in § "The dispatch discriminator — `.Run()` or `.Schedule()`" — call-site placement first, then latency tolerance, then span. Never a per-site judgement call. |
 | `IWorkScheduler` | survives, shrunk to the bodies that are still managed, and is deleted per site as each body becomes a job. It never wraps a job. |
@@ -77,7 +77,7 @@ over its outputs. And the `MeshData` stream views a write job fills exist only a
 `AllocateWritableMeshData(1)` and `SetVertexBufferParams(count)`, while the layer's exact vertex count is a
 measure-graph output. Allocation and sizing therefore sit on the main thread *between* two graphs.
 
-**What it costs.** Up to two extra Ticks of latency per tile: the prologue completes on Tick N, measure is
+**What it costs.** Up to two extra Updates of latency per tile: the prologue completes on Update N, measure is
 scheduled on N and observed on N+1, write is scheduled on N+1 and consumed on N+2. This is a standing
 accepted cost. It is invisible against network fetch and is the same order as the one-frame deferral the
 symbol collision already accepts. The uniform three-step path holds for every tile; a small-tile fast path
@@ -103,7 +103,7 @@ work, not the prologue, so the prologue's nativization is where the rest of the 
 `ReleaseTile` removes a tile from `_loaded` at once, and `PumpPending`/`DrainMeshBuilds` iterate `_loaded`,
 so a released tile is never visited again and never has its build consumed.
 
-`MaxMeshBuildsPerTick` counts **tiles admitted** per Tick. A step transition of an already-admitted tile is
+`MaxMeshBuildsPerTick` counts **tiles admitted** per Update. A step transition of an already-admitted tile is
 uncharged: the three main-thread costs per tile (prologue kick, measure schedule, write kick) are unequal, so
 charging some of them measures nothing physical.
 
@@ -221,7 +221,7 @@ registration on the containers' safety handles — `Complete()` does.** Every st
 `IsCompleted` → `Complete()` (wait-free at that point) → read outputs, allocate `MeshData`, upload. A read
 before `Complete()` throws in the Editor and is undefined in a player.
 
-**`ScheduleBatchedJobs()` once per Tick.** A job scheduled from the main thread is not handed to workers
+**`ScheduleBatchedJobs()` once per Update.** A job scheduled from the main thread is not handed to workers
 until the batch is flushed or an implicit sync point arrives. Both the measure kick and the measure→write
 transition schedule from the same pump pass, so the flush is one call at the end of that pass, never one
 per tile.
@@ -244,7 +244,7 @@ in order and stop at the first answer.
    cheapest thing a worker can do. This is a property of where the code sits, so it answers the same on every
    platform: under `InlineWorkScheduler` the body happens to be on main, and `.Run()` is still the only
    correct dispatch there. This branch empties as bodies become jobs and their call sites move to the pump.
-2. **Can the consumer tolerate seeing this output on a later Tick?** — it is already a polled state, or it
+2. **Can the consumer tolerate seeing this output on a later Update?** — it is already a polled state, or it
    could become one. → **`Schedule(deps)`.** The handle joins the owner that polls it, and `Complete()` runs
    only after `IsCompleted` is true or inside a bounded drain.
 3. Otherwise the call is frame-synchronous on the main thread. **Is it an `IJobParallelFor` whose measured
@@ -309,7 +309,7 @@ The four exits:
 | exit | what happens |
 |---|---|
 | **consumed** | `IsCompleted` at the pump → `Complete()` → upload each layer's mesh → `TileBuildGraph.Dispose()`, which frees the buffers and releases the decode reference. Never a read before `Complete()`. |
-| **released in flight** | the graph moves to `PendingDisposalQueue`'s graph pen; the pen polls `IsCompleted` per Tick, then `Complete()`s and disposes. |
+| **released in flight** | the graph moves to `PendingDisposalQueue`'s graph pen; the pen polls `IsCompleted` per Update, then `Complete()`s and disposes. |
 | **cancelled mid-work** | **there is no in-job cancellation.** A scheduled job is finite and not interruptible, so there is nothing to interrupt. The token gates the *next main-thread step*: the pump does not schedule measure after a cancelled prologue, does not allocate or schedule write after a cancelled measure, and does not upload after a cancelled write. The unit then goes to the pen. |
 | **teardown** | cancel (which gates future steps), then `Complete()` every pen entry and dispose. Bounded by in-flight CPU, so no timeout. Order unchanged: destroy meshes → dispose backend. |
 
@@ -479,7 +479,7 @@ bytes, and splitting a layer would multiply that cost while spending the whole c
 | `ILayerGeometry` replacing `IRenderLayer.WriteInto` — a managed measure/write mesher interface (§ "The build seam this design hands over") | **superseded** | the graph builder plus the stream-write job *are* the measure/write split. There is no managed mesher interface in the middle, and `WriteInto` is gone. |
 | exact-size allocation (§ "The build seam this design hands over"); the allocation counter (`MeshDataArraysAllocatedLastKick`, not described there); consume and backend unchanged | **this design** | one `MeshDataArray` per non-empty layer, sized to that layer's measured count |
 | `PreparedTileCache` value `Mesh` → `Mesh[]` (§ "Rejected alternatives") | **moot** | it existed only because one layer could become K > 1 meshes. One mesh per layer keeps the current value shape correct, and the cache is untouched by this design. |
-| a consume-overshoot tooth (`docs/tile-pipeline-design.md` does not describe it) | **moot** | it asserted a per-Tick consume bound *and* "the layer produces ≥ 3 meshes"; the second half is false once a layer is one mesh |
+| a consume-overshoot tooth (`docs/tile-pipeline-design.md` does not describe it) | **moot** | it asserted a per-Update consume bound *and* "the layer produces ≥ 3 meshes"; the second half is false once a layer is one mesh |
 | the chunk target constant (§ "Rejected alternatives", the per-layer vertex cap) | **moot** | nothing reads it once chunking is gone |
 
 What that seam delivers here is the blind-allocation stall, which falls out of exact sizing. The consume stall

@@ -570,7 +570,8 @@ namespace MapRenderer.Tests.Meshing
             var (jv, _) = RunJob(pts, JoinType.Bevel, CapType.Butt, 2.0, 4);
 
             double3 corner = new double3(10, 0, 0);
-            int found = -1, count = 0;
+            int found = -1;
+            int count = 0;
             for (int i = 0; i < jv.Length; i++)
             {
                 double3 pos = jv[i].Position;
@@ -1226,7 +1227,8 @@ namespace MapRenderer.Tests.Meshing
         private static int FindInnerVertexIndex(LineRibbonVertex[] verts, double2 corner, bool leftTurn)
         {
             float expectedSide = leftTurn ? +1f : -1f;
-            int found = -1, count = 0;
+            int found = -1;
+            int count = 0;
             for (int i = 0; i < verts.Length; i++)
             {
                 double2 pos = Pos2(verts[i]);
@@ -1468,7 +1470,8 @@ namespace MapRenderer.Tests.Meshing
             var (v, _) = Build(pts, joinType, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
             var mu = new double2(-0.7071067811865476, 0.7071067811865476);
 
-            int asserted = 0, ambiguous = 0;
+            int asserted = 0;
+            int ambiguous = 0;
             for (int i = 0; i < v.Length; i++)
             {
                 double2 pos = Pos2(v[i]);
@@ -1713,7 +1716,9 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(0, indices.Length % 3, $"{label}: index count must be multiple of 3.");
 
             int triCount = indices.Length / 3;
-            int posCount = 0, negCount = 0, zeroCount = 0;
+            int posCount = 0;
+            int negCount = 0;
+            int zeroCount = 0;
             var dupList = new List<string>();
 
             for (int t = 0; t < triCount; t++)
@@ -1769,7 +1774,9 @@ namespace MapRenderer.Tests.Meshing
 
         private static IEnumerable<TestCaseData> ShapeCases()
         {
-            double2 east = new double2(1, 0), north = new double2(0, 1), south = new double2(0, -1);
+            double2 east = new double2(1, 0);
+            double2 north = new double2(0, 1);
+            double2 south = new double2(0, -1);
 
             yield return new TestCaseData("hline", new[] { LineStart, LineEnd }, LineStart, LineTangent, LineEnd, LineTangent)
                 .SetName("AllJoinCapCombinations_PositiveWindingNoDegenerate(HLine)");
@@ -2117,7 +2124,8 @@ namespace MapRenderer.Tests.Meshing
         private static uint[] SquareRing(int x0, int y0, int size)
         {
             var cmds = new List<uint>();
-            int cx = 0, cy = 0;
+            int cx = 0;
+            int cy = 0;
             AppendMoveTo(cmds, ref cx, ref cy, x0, y0);
             AppendLineTo(cmds, ref cx, ref cy, (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size));
             return cmds.ToArray();
@@ -2128,7 +2136,8 @@ namespace MapRenderer.Tests.Meshing
         private static uint[] SquareWithHoleRing(int x0, int y0, int size, int holeX0, int holeY0, int holeSize)
         {
             var cmds = new List<uint>();
-            int cx = 0, cy = 0;
+            int cx = 0;
+            int cy = 0;
             AppendMoveTo(cmds, ref cx, ref cy, x0, y0);
             AppendLineTo(cmds, ref cx, ref cy, (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size));
             AppendMoveTo(cmds, ref cx, ref cy, holeX0, holeY0);
@@ -2284,7 +2293,8 @@ namespace MapRenderer.Tests.Meshing
                 for (int i = 0; i < bi.Length; i++)
                 {
                     int vi = bi[i];
-                    Vector3 p = b0[vi].Position, n = b0[vi].Normal;
+                    Vector3 p = b0[vi].Position;
+                    Vector3 n = b0[vi].Normal;
                     Vector4 tan = b2[vi];
                     Vector4 eut = b1[vi].ExtrudeUpAndT; Vector2 bbh = b1[vi].BakedBaseHeight;
                     s0.AddRange(BitConverter.GetBytes(p.x)); s0.AddRange(BitConverter.GetBytes(p.y)); s0.AddRange(BitConverter.GetBytes(p.z));
@@ -2452,7 +2462,8 @@ namespace MapRenderer.Tests.Meshing
                 for (int i = 0; i < graphWrite.VertexCount; i++)
                 {
                     bool roof = i < roofVertexCount;
-                    Vector3 p = b0[i].Position, n = b0[i].Normal;
+                    Vector3 p = b0[i].Position;
+                    Vector3 n = b0[i].Normal;
                     Vector4 tan = b2[i];
 
                     // Position is BIT-EXACT everywhere: the (float3) narrowing erases the double divergence at
@@ -2556,7 +2567,8 @@ namespace MapRenderer.Tests.Meshing
 
         private static ulong UlpDistance(uint a, uint b)
         {
-            ulong oa = ToUlpOrder(a), ob = ToUlpOrder(b);
+            ulong oa = ToUlpOrder(a);
+            ulong ob = ToUlpOrder(b);
             return oa > ob ? oa - ob : ob - oa;
         }
     }
@@ -2617,10 +2629,14 @@ namespace MapRenderer.Tests.Meshing
             for (int edge = 0; edge < 4; edge++)
             {
                 int b = wallStart + edge * 4; // floorA, floorB, roofB, roofA
-                Vector3 floorA = positions[b + 0], floorB = positions[b + 1];
-                Vector3 roofB  = positions[b + 2], roofA  = positions[b + 3];
-                float tFloorA = extrudeUpAndT[b + 0].w, tFloorB = extrudeUpAndT[b + 1].w;
-                float tRoofB  = extrudeUpAndT[b + 2].w, tRoofA  = extrudeUpAndT[b + 3].w;
+                Vector3 floorA = positions[b + 0];
+                Vector3 floorB = positions[b + 1];
+                Vector3 roofB  = positions[b + 2];
+                Vector3 roofA  = positions[b + 3];
+                float tFloorA = extrudeUpAndT[b + 0].w;
+                float tFloorB = extrudeUpAndT[b + 1].w;
+                float tRoofB  = extrudeUpAndT[b + 2].w;
+                float tRoofA  = extrudeUpAndT[b + 3].w;
 
                 Assert.AreEqual(0f, tFloorA, 1e-6f); Assert.AreEqual(0f, tFloorB, 1e-6f);
                 Assert.AreEqual(1f, tRoofB,  1e-6f); Assert.AreEqual(1f, tRoofA,  1e-6f);
@@ -2632,8 +2648,10 @@ namespace MapRenderer.Tests.Meshing
                 Assert.AreEqual(floorB, roofB,
                     $"edge {edge}: floorB and roofB must coincide in position (height-agnostic footprint).");
 
-                Vector4 upA0 = extrudeUpAndT[b + 0], upA1 = extrudeUpAndT[b + 3];
-                Vector4 upB0 = extrudeUpAndT[b + 1], upB1 = extrudeUpAndT[b + 2];
+                Vector4 upA0 = extrudeUpAndT[b + 0];
+                Vector4 upA1 = extrudeUpAndT[b + 3];
+                Vector4 upB0 = extrudeUpAndT[b + 1];
+                Vector4 upB1 = extrudeUpAndT[b + 2];
                 Assert.AreEqual(new Vector3(upA0.x, upA0.y, upA0.z), new Vector3(upA1.x, upA1.y, upA1.z),
                     $"edge {edge}: extrude-up must be identical for the floor/roof pair at A.");
                 Assert.AreEqual(new Vector3(upB0.x, upB0.y, upB0.z), new Vector3(upB1.x, upB1.y, upB1.z),
@@ -2763,14 +2781,18 @@ namespace MapRenderer.Tests.Meshing
                 Vector4 e = uv3[j];
                 v[j] = raw[j] + new Vector3(e.x, e.y, e.z) * e.w;
             }
-            int pos = 0, neg = 0;
+            int pos = 0;
+            int neg = 0;
             for (int i = 0; i + 2 < t.Length; i += 3)
             {
                 if (t[i] < minVertex || t[i] >= maxVertexExclusive) continue;
-                float3 va = v[t[i]], vb = v[t[i + 1]], vc = v[t[i + 2]];
+                float3 va = v[t[i]];
+                float3 vb = v[t[i + 1]];
+                float3 vc = v[t[i + 2]];
                 float3 g = math.cross(vb - va, vc - va);
                 float3 nn = n[t[i]];
-                float gm = math.length(g), nm = math.length(nn);
+                float gm = math.length(g);
+                float nm = math.length(nn);
                 if (gm <= 1e-12f || nm <= 1e-12f) continue;
                 float cos = math.dot(g, nn) / (gm * nm);
                 if (math.abs(cos) < 0.3f) continue; // near edge-on — skip as noise

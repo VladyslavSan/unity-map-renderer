@@ -217,7 +217,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                     // Data-driven base/height: bake the EVALUATED value; constant/zoom stays at 0 here (the
                     // uniform carries it — see BindFillExtrusionPaintToApplier and ExtrudeAndBake's doc).
-                    float bakedBase = 0f, bakedHeight = 0f;
+                    float bakedBase = 0f;
+                    float bakedHeight = 0f;
                     if (paint.Base.DependsOnFeature && paint.Base.TryEvaluate(zoom, feature, out float b))
                         bakedBase = b;
                     if (paint.Height.DependsOnFeature && paint.Height.TryEvaluate(zoom, feature, out float h))

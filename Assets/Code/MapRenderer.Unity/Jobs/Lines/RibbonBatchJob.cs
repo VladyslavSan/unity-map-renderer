@@ -38,8 +38,10 @@ namespace MapRenderer.Unity.Jobs.Lines
 
             NativeArray<int> ringVertexOffsets = Buffers.RingVertexOffsets.AsArray();
             NativeArray<int> ringIndexOffsets  = Buffers.RingIndexOffsets.AsArray();
-            int vOff = ringVertexOffsets[r], vLen = ringVertexOffsets[r + 1] - vOff;
-            int iOff = ringIndexOffsets[r],  iLen = ringIndexOffsets[r + 1] - iOff;
+            int vOff = ringVertexOffsets[r];
+            int vLen = ringVertexOffsets[r + 1] - vOff;
+            int iOff = ringIndexOffsets[r];
+            int iLen = ringIndexOffsets[r + 1] - iOff;
 
             NativeArray<LineRibbonVertex> flatVertices = Buffers.FlatVertices.AsArray();
             NativeArray<int>              flatIndices  = Buffers.FlatIndices.AsArray();

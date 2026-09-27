@@ -95,7 +95,8 @@ namespace MapRenderer.Tests.Geometry
         private static Dictionary<int, List<double2>> RunJob(
             List<List<double2>> corpus, double2 clipMin, double2 clipMax)
         {
-            int total = 0, longest = 0;
+            int total = 0;
+            int longest = 0;
             foreach (List<double2> ring in corpus)
             {
                 total += ring.Count;

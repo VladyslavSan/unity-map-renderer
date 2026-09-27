@@ -20,17 +20,17 @@ namespace MapRenderer.Unity.Text.Placement
         private const int BreakdownBandCount = 10;
 
         /// <summary>Set by <see cref="RequestSymbolBreakdown"/>, consumed (and cleared) by the next placement
-        /// Tick's <see cref="CaptureSymbolBreakdown"/>.</summary>
+        /// Update's <see cref="CaptureSymbolBreakdown"/>.</summary>
         private bool _breakdownRequested;
 
-        /// <summary>Arm a one-shot symbol-breakdown capture: the next placement Tick logs a per-layer +
+        /// <summary>Arm a one-shot symbol-breakdown capture: the next placement Update logs a per-layer +
         /// per-screen-band tally of this frame's input records to the Console. Idempotent — re-arming before
         /// the capture runs is a no-op. Called from the dev overlay button (<c>SymbolBreakdownOverlay</c>).</summary>
         internal void RequestSymbolBreakdown() => _breakdownRequested = true;
 
         /// <summary>Resolve a record's material slot to a readable style-layer id, falling back to the raw slot
         /// index when no layer list is supplied (the demo/single-material path) or the slot is out of range.</summary>
-        /// <param name="symbolLayers">The per-slot render layers this Tick was handed (may be null).</param>
+        /// <param name="symbolLayers">The per-slot render layers this Update was handed (may be null).</param>
         /// <param name="slot">The record's pre-clamped material/mesh slot.</param>
         private static string ResolveLayerName(IReadOnlyList<SymbolRenderLayer> symbolLayers, int slot)
         {
@@ -57,7 +57,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// <summary>One-shot: bucket this frame's input records by style layer and by vertical screen band and
         /// log the result. Runs only on an armed frame, AFTER projection (reads <see cref="_symbolScreen"/> /
         /// <see cref="_symbolValid"/> / <see cref="_stagePointOffset"/> and the native mirror), so the numbers
-        /// are this Tick's. Clears the arm flag first so a mid-capture re-arm is honored next frame, not this one.</summary>
+        /// are this Update's. Clears the arm flag first so a mid-capture re-arm is honored next frame, not this one.</summary>
         /// <param name="symbolLayers">The per-slot render layers, for slot→layer-id resolution (may be null).</param>
         /// <param name="viewportLogicalPx">This frame's logical viewport size — the band denominator.</param>
         private void CaptureSymbolBreakdown(IReadOnlyList<SymbolRenderLayer> symbolLayers, double2 viewportLogicalPx)
@@ -67,7 +67,11 @@ namespace MapRenderer.Unity.Text.Placement
             double viewportH = viewportLogicalPx.y > 0.0 ? viewportLogicalPx.y : 1.0;
             var perLayer = new Dictionary<string, LayerTally>();
             var bandOnScreen = new int[BreakdownBandCount];
-            int input = 0, projected = 0, onScreen = 0, behind = 0, culled = 0;
+            int input = 0;
+            int projected = 0;
+            int onScreen = 0;
+            int behind = 0;
+            int culled = 0;
 
             for (int r = 0; r < _mirrorCount; r++)
             {
@@ -164,7 +168,8 @@ namespace MapRenderer.Unity.Text.Placement
             sb.AppendLine("--- by screen band (on-screen records, top→bottom) ---");
             for (int i = 0; i < bandOnScreen.Length; i++)
             {
-                int hiPct = 100 - i * 10, loPct = 90 - i * 10;
+                int hiPct = 100 - i * 10;
+                int loPct = 90 - i * 10;
                 string tag = i == 0 ? " (top)" : i == bandOnScreen.Length - 1 ? " (bottom)" : "";
                 sb.AppendLine($"band {i}  {loPct,3}-{hiPct,3}%{tag,-9} {bandOnScreen[i],8}   {Bar(bandOnScreen[i], maxBand, 32)}");
             }

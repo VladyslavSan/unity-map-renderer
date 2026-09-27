@@ -26,10 +26,32 @@ namespace MapRenderer.Tests.Text.Placement
         /// <c>TextIds</c>/<c>IconImageIds</c> are absent — see the type doc.</summary>
         internal readonly struct ColumnHashes
         {
-            internal readonly int Kinds, Detail, WorldStart, WorldCount, RepAnchor, MaterialIndexes,
-                PairRoles, Points, PointQuadStart, PointQuadCount, Curveds, CurvedGlyphStart, CurvedGlyphCount,
-                CurvedAnchorStart, CurvedAnchorCount, CurvedAnchorFadeStart, Quads, Glyphs, Anchors, WorldPoints,
-                WorldUps, AnchorFadeIds, MaxBoxes, MaxQuads, MaxCandidates, TileKey;
+            internal readonly int Kinds;
+            internal readonly int Detail;
+            internal readonly int WorldStart;
+            internal readonly int WorldCount;
+            internal readonly int RepAnchor;
+            internal readonly int MaterialIndexes;
+            internal readonly int PairRoles;
+            internal readonly int Points;
+            internal readonly int PointQuadStart;
+            internal readonly int PointQuadCount;
+            internal readonly int Curveds;
+            internal readonly int CurvedGlyphStart;
+            internal readonly int CurvedGlyphCount;
+            internal readonly int CurvedAnchorStart;
+            internal readonly int CurvedAnchorCount;
+            internal readonly int CurvedAnchorFadeStart;
+            internal readonly int Quads;
+            internal readonly int Glyphs;
+            internal readonly int Anchors;
+            internal readonly int WorldPoints;
+            internal readonly int WorldUps;
+            internal readonly int AnchorFadeIds;
+            internal readonly int MaxBoxes;
+            internal readonly int MaxQuads;
+            internal readonly int MaxCandidates;
+            internal readonly int TileKey;
 
             internal ColumnHashes(
                 int kinds, int detail, int worldStart, int worldCount, int repAnchor, int materialIndexes,

@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                     "Positive control: at least one tile must be released while its FETCH is in-flight. " +
                     "If 0, the race did not occur and the unobserved-exception assertion is vacuous.");
 
-                // Let the cancelled fetches fault on the ThreadPool, and Tick so PendingDisposalQueue.DrainCompleted
+                // Let the cancelled fetches fault on the ThreadPool, and Update so PendingDisposalQueue.DrainCompleted
                 // observes them. Without the fix, the dropped faulted tasks would go unobserved.
                 for (int f = 0; f < 300; f++)
                 {

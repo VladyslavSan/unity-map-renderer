@@ -326,7 +326,7 @@ namespace MapRenderer.Tests.Tiles
             {
                 LoadStyleWithSource(view, fake, Cam(0, 0, CoverZoom));
 
-                // Tick until the whole cover exists (the gate holds every fetch, so no decode races these ticks);
+                // Update until the whole cover exists (the gate holds every fetch, so no decode races these ticks);
                 // a partial cover would request later tiles AFTER the pan and shrink the measured set.
                 int loaded = 0;
                 for (int f = 0; f < 60; f++)
@@ -368,7 +368,7 @@ namespace MapRenderer.Tests.Tiles
                     $"have decoded before the balance is asserted ({fake.Probe.DecodeCount} did). If they did " +
                     "not, nothing was ever at risk and UnbalancedCount is trivially zero.");
 
-                // PendingDisposalQueue.DrainCompleted runs once per Tick and routes each completed task through the
+                // PendingDisposalQueue.DrainCompleted runs once per Update and routes each completed task through the
                 // single abandonment funnel. Driven against the FIXED count, not the moving DecodeCount.
                 for (int f = 0; f < 600 && fake.Probe.DisposedCount < abandoned; f++)
                 {

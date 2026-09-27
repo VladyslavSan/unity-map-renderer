@@ -24,8 +24,12 @@ namespace MapRenderer.Core.Text.Placement
         /// Written, but not yet consumed by any placement math.</summary>
         public float3 SurfaceUp;
 
-        public float2 BoundsMin, BoundsMax;         // block bbox (baked-px, anchor-relative)
-        public float  TextSizePx, PaddingPx, SortKey;
+        // block bbox (baked-px, anchor-relative)
+        public float2 BoundsMin;
+        public float2 BoundsMax;
+        public float TextSizePx;
+        public float PaddingPx;
+        public float SortKey;
         public int    FeatureIndex;
         public long   TileKey;
         public int    Slot;                         // pre-clamped material/mesh slot
@@ -43,7 +47,8 @@ namespace MapRenderer.Core.Text.Placement
         /// to <see cref="CandidateEmit.TileOriginRender"/> so the world renderer can place its presenter
         /// without indexing a batch tile array.</summary>
         public double3 TileOriginRender;
-        public bool   AllowOverlap, IgnorePlacement;
+        public bool AllowOverlap;
+        public bool IgnorePlacement;
         public float2 TranslatePx;
         public TextTranslateAnchor TranslateAnchor;
         public AlignmentMode       RotationAlignment;
@@ -89,11 +94,14 @@ namespace MapRenderer.Core.Text.Placement
     /// </summary>
     public struct CurvedStageInput
     {
-        public float  TextSizePx, PaddingPx, SortKey;
+        public float TextSizePx;
+        public float PaddingPx;
+        public float SortKey;
         public int    FeatureIndex;
         public long   TileKey;
         public int    Slot;                         // pre-clamped material/mesh slot
-        public bool   AllowOverlap, IgnorePlacement;
+        public bool AllowOverlap;
+        public bool IgnorePlacement;
         public float2 TranslatePx;
         public TextTranslateAnchor TranslateAnchor;
         public float  MaxAngleDeg;                  // text-max-angle
@@ -134,7 +142,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// This frame's world ruler: METRES per LOGICAL screen pixel at the camera's reference depth
         /// (<c>MapCamera.MetresPerDevicePixel × MapCamera.DevicePixelRatio</c>, combined once in
-        /// <c>SymbolPlacementSystem.Tick</c>), because screen positions, <see cref="TextSizePx"/> and
+        /// <c>SymbolPlacementSystem.Update</c>), because screen positions, <see cref="TextSizePx"/> and
         /// <see cref="CurvedGlyph.ArcCenter"/> are logical px. <c>StageJob</c> patches it per frame; only
         /// the <see cref="AlignmentMode.Map"/> branch reads it, and 0 degrades that branch to the screen walk.
         /// </summary>

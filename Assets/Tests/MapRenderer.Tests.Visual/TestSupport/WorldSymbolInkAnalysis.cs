@@ -48,7 +48,8 @@ namespace MapRenderer.Tests
             minRow = int.MaxValue; maxRow = int.MinValue;
             minCol = int.MaxValue; maxCol = int.MinValue;
             inkCount = 0;
-            double sumRow = 0.0, sumCol = 0.0;
+            double sumRow = 0.0;
+            double sumCol = 0.0;
 
             int firstRow = math.max(0, rowFrom);
             int lastRow  = math.min(height - 1, rowTo);
@@ -103,7 +104,8 @@ namespace MapRenderer.Tests
             int count = 0;
             for (int row = startRow; row <= endRow && row < height; row++)
             {
-                int rowMinCol = int.MaxValue, rowMaxCol = int.MinValue;
+                int rowMinCol = int.MaxValue;
+                int rowMaxCol = int.MinValue;
                 for (int col = 0; col < width; col++)
                 {
                     if (pixels[row * width + col].r >= InkThreshold) continue;

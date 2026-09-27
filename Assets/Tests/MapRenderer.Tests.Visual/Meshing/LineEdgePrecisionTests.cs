@@ -327,7 +327,8 @@ namespace MapRenderer.Tests.Visual
 
                 string dump = FormatProfile(profile, from);
 
-                int firstFull = -1, lastFull = -1;
+                int firstFull = -1;
+                int lastFull = -1;
                 for (int i = 0; i < profile.Length; i++)
                 {
                     if (profile[i] < 0.95f) continue;
@@ -337,7 +338,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(firstFull, Is.GreaterThanOrEqualTo(0),
                     $"The cut never reaches full coverage — the ribbon is missing or mis-placed. {dump}");
 
-                int leftPartial = 0, rightPartial = 0;
+                int leftPartial = 0;
+                int rightPartial = 0;
                 for (int i = 0; i < firstFull; i++)
                     if (profile[i] > 0.05f && profile[i] < 0.95f) leftPartial++;
                 for (int i = lastFull + 1; i < profile.Length; i++)
@@ -877,7 +879,8 @@ namespace MapRenderer.Tests.Visual
                         float dirX  = outward * math.cos(angle);
                         float dirY  = math.sin(angle);
 
-                        float innermost = 0f, outermost = 1f;
+                        float innermost = 0f;
+                        float outermost = 1f;
                         bool  softEdgeFound = false;
                         var   profile = new System.Text.StringBuilder();
 
@@ -956,7 +959,8 @@ namespace MapRenderer.Tests.Visual
                         float dirX  = outward * math.cos(angle);
                         float dirY  = math.sin(angle);
 
-                        float innermost = 0f, outermost = 1f;
+                        float innermost = 0f;
+                        float outermost = 1f;
                         var   profile   = new System.Text.StringBuilder();
 
                         // Radial sanity sweep: ±3 px around the rim brackets the chorded silhouette, which
@@ -1160,7 +1164,10 @@ namespace MapRenderer.Tests.Visual
                 }
 
                 float worst = 1f;
-                int   worstColumn = -1, worstRow = -1, measured = 0, deficient = 0;
+                int worstColumn = -1;
+                int worstRow = -1;
+                int measured = 0;
+                int deficient = 0;
                 for (int row = (int)centreY - 40; row <= (int)centreY + 40; row++)
                 for (int column = (int)centreX - 10; column <= (int)centreX + (int)armPx; column++)
                 {
@@ -1267,7 +1274,9 @@ namespace MapRenderer.Tests.Visual
                 // The 45° band is centred on row == column. Average several columns; on a slope-1 line the
                 // sub-pixel phase is the same in every column, so the spread reports sampling noise only.
                 const float sqrt2 = 1.41421356f;
-                float diagonalSum = 0f, worstLo = 99f, worstHi = 0f;
+                float diagonalSum = 0f;
+                float worstLo = 99f;
+                float worstHi = 0f;
                 int   columns = 0;
                 for (int column = 240; column <= 272; column++)
                 {
@@ -1374,7 +1383,8 @@ namespace MapRenderer.Tests.Visual
                 float3 plateau    = SampleLinearBox(pixels, CutColumn, ReferenceRow, 2);
                 AssertPlateauDistinct(background, plateau);
 
-                float lo = 2f, hi = 0f;
+                float lo = 2f;
+                float hi = 0f;
                 var report = new System.Text.StringBuilder();
                 for (int i = 0; i < HairlinePhases.Length; i++)
                 {
@@ -1669,7 +1679,8 @@ namespace MapRenderer.Tests.Visual
                 float3 plateau    = SampleLinearBox(pixels, CutColumn, ReferenceRow, 2);
                 AssertPlateauDistinct(background, plateau);
 
-                float lo = 2f, hi = 0f;
+                float lo = 2f;
+                float hi = 0f;
                 var report = new System.Text.StringBuilder();
                 for (int i = 0; i < HairlinePhases.Length; i++)
                 {
@@ -2203,14 +2214,16 @@ namespace MapRenderer.Tests.Visual
 
                 // Walk up the frame. The hairline is right of centre, the wide companion left of it; they
                 // converge toward the vanishing point but never cross.
-                float lo = 2f, hi = 0f; int rowsMeasured = 0;
+                float lo = 2f;
+                float hi = 0f; int rowsMeasured = 0;
                 var ratios = new List<float>();
                 var report = new System.Text.StringBuilder();
                 for (int row = 150; row <= 330; row += 30)
                 {
                     // RAW, unsaturated: the same-depth ratio cancels shading and calibration only while
                     // neither term has clamped.
-                    float hair = 0f, wide = 0f;
+                    float hair = 0f;
+                    float wide = 0f;
                     for (int column = SnapW / 2; column < SnapW; column++)
                         hair = math.max(hair, RawProjection(pixels, column, row, background, plateau));
                     for (int column = 0; column < SnapW / 2; column++)
@@ -2223,7 +2236,8 @@ namespace MapRenderer.Tests.Visual
                     rowsMeasured++;
                 }
 
-                float maxRise = 0f, maxStep = 0f;
+                float maxRise = 0f;
+                float maxStep = 0f;
                 for (int i = 1; i < ratios.Count; i++)
                 {
                     float delta = ratios[i] - ratios[i - 1];   // rows ascend ⇒ depth increases
@@ -2311,10 +2325,14 @@ namespace MapRenderer.Tests.Visual
 
         // Seam and reference strips at the T3 framing: the seam strip sits inside the 128 px band, and the rows
         // are interior to BOTH tiles.
-        private const int BandStripX0 = 236, BandStripX1 = 276;
-        private const int LeftRefX0   =  40, LeftRefX1   = 120;
-        private const int RightRefX0  = 392, RightRefX1  = 472;
-        private const int SlabY0      = 200, SlabY1      = 312;
+        private const int BandStripX0 = 236;
+        private const int BandStripX1 = 276;
+        private const int LeftRefX0   =  40;
+        private const int LeftRefX1   = 120;
+        private const int RightRefX0  = 392;
+        private const int RightRefX1  = 472;
+        private const int SlabY0      = 200;
+        private const int SlabY1      = 312;
 
         // Half-width of the T3 view in world metres. The b=64 overlap strip is 2 × 64/4096 × tileSpan ≈
         // 626 km wide, which lands ~128 px across at this framing.
@@ -2369,7 +2387,8 @@ namespace MapRenderer.Tests.Visual
 
         // World x = 0 lands on the boundary between columns 255 and 256, so these two columns are exactly the
         // pixels a one-device-pixel band from each neighbour would reach into.
-        private const int SeamRimX0 = 255, SeamRimX1 = 257;
+        private const int SeamRimX0 = 255;
+        private const int SeamRimX1 = 257;
 
         // Non-obvious why: clipped neighbours ABUT, so an outward band along the cut is ink over existing fill,
         // f(1-f) relative and worst on translucent layers, hence alpha 0.3. An unsuppressed band reads two
@@ -2427,7 +2446,8 @@ namespace MapRenderer.Tests.Visual
 
         // Columns scanned for a background-coloured gap, centred on the seam (world x = 0 projects to the
         // middle column at both framings below).
-        private const int CrackScanX0 = 246, CrackScanX1 = 266;
+        private const int CrackScanX0 = 246;
+        private const int CrackScanX1 = 266;
 
         [Test]
         public void TwoNeighbours_OpaqueFill_ClippedAtTheTileBoundary_LeaveNoCrack()

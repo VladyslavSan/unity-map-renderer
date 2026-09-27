@@ -56,7 +56,8 @@ namespace MapRenderer.Tests.DataSources
 
         private static int CountOccurrences(string haystack, string needle)
         {
-            int count = 0, index = 0;
+            int count = 0;
+            int index = 0;
             while ((index = haystack.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
             {
                 count++;

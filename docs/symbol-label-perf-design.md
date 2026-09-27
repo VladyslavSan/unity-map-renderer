@@ -80,7 +80,7 @@ often that key changes under motion.
 ## 10. The residual: what stays expensive after the reconcile
 
 The async reconcile (`labels-async-reconcile-design.md`) removes the per-frame dedup. What remains is a
-smaller set of per-frame costs downstream of it, inside `SymbolPlacementSystem`'s per-frame tick:
+smaller set of per-frame costs downstream of it, inside `SymbolPlacementSystem`'s per-frame update:
 compacting the deduped winner set into the native render mirror (the *gather*), projecting and staging
 labels on screen, running collision, and emitting quads. Each subsection below is a self-contained
 mechanism; the collision-setup lever is the only one still open.
@@ -117,7 +117,7 @@ at the swap, so a `CollectGeneration`-keyed memo would keep hitting straight thr
 serve a stale mirror. The version must be bumped at the swap, not at the event.
 
 **Cross-overload invalidation is bidirectional.** One `_mirrorSource`(object)/`_mirrorVersion`(long) pair
-covers both the demo `Tick(batch)` path and the production plan path, so a demo tick between two
+covers both the demo `Update(batch)` path and the production plan path, so a demo update between two
 production gathers invalidates the production memo and vice versa — one `ReferenceEquals`-and-version
 comparison rather than two parallel sentinels.
 
@@ -131,7 +131,7 @@ backstop engages.
 not camera stillness. Cost is O(set delta), always applied, identical whether the camera is still or
 moving — there is no camera-state predicate and no "skip when nothing changed" branch.
 
-GPU snapshots do not exercise this memo — every snapshot fixture drives the demo `Tick(batch)` overload,
+GPU snapshots do not exercise this memo — every snapshot fixture drives the demo `Update(batch)` overload,
 never the production plan path. Whether the memo actually hits is not headless-observable; it is a
 Play-mode profiling question ("The memo is structurally dead under continuous motion").
 
@@ -205,7 +205,7 @@ later; the trade reverses only if a profile shows the synchronous gather itself 
 
 `SymbolGatherJob` (`Assets/Code/MapRenderer.Unity/Jobs/Symbols/SymbolGatherJob.cs`) is the compaction: one
 `[BurstCompile(CompileSynchronously = true)] IJob`, run synchronously (`.Run()`) inside the frame's gather
-step, strictly before the rest of the tick. It is one job, not two passes: pass 1 totals the per-pool
+step, strictly before the rest of the update. It is one job, not two passes: pass 1 totals the per-pool
 sizes, pass 2 resizes the output `NativeList<T>`s once and fills them.
 
 **Storage: a per-frame view table over unchanged block storage.** `SymbolTileBlock` keeps its
@@ -274,15 +274,15 @@ Play-mode profile shows it).
 ### 10.8 Carrying the previous frame's winners forward as incumbents converges after one step
 
 Deferring the collision verdict by a frame ("The collision verdict applies one frame late") means a
-later tick stages with a non-empty `_placedLastFrame`, so the A-5 incumbency term enters
-`ComparePlacementOrder` on every tick after the first. This is safe because incumbency-carry-forward has a
+later update stages with a non-empty `_placedLastFrame`, so the A-5 incumbency term enters
+`ComparePlacementOrder` on every update after the first. This is safe because incumbency-carry-forward has a
 measured one-step fixed point: feeding a generation's collision survivors forward as the next generation's incumbents, repeatedly, converges to
 the same winner set at every subsequent generation — it does not oscillate. Inverting the incumbency term
 (sorting incumbents last) does make the winner set churn hard, which confirms the fixed point is a real
 property of the algorithm and not an artifact of a test that cannot fail.
 
 This settles only whether repeated incumbency-carry changes *which* labels win — it says nothing about
-latency: a later tick can still see a different candidate set than the tick before it, which is a
+latency: a later update can still see a different candidate set than the update before it, which is a
 runtime trade (next section), not a correctness question.
 
 ### 10.9 The collision verdict applies one frame late (B-4b)
@@ -303,7 +303,7 @@ under motion. Only the collision verdict itself is a frame late.
    order rather than placement order. That sets the blend order of overlapping transparent quads during a
    fade transition — an effect confined to a dying label overlapping a live one, not a change to which
    labels are visible.
-2. **No double-buffering.** One `Complete` per tick dominates every code path into it; nothing else
+2. **No double-buffering.** One `Complete` per update dominates every code path into it; nothing else
    touches the job-held buffers in between.
 3. **`_placedLastFrame` is refilled at harvest** — literally the current frame's survivor set, filtered by
    whether a candidate actually placed and is not force-faded-out. There is one incumbency set, not two;
@@ -311,7 +311,7 @@ under motion. Only the collision verdict itself is a frame late.
 
 **This is not byte-identical to a same-frame verdict, and must not be described as one.** What is
 preserved: which labels win on a settled scene (the one-step fixed point, previous section). What differs:
-a one-frame verdict latency under camera motion, no survivors on the very first tick, the emit order
+a one-frame verdict latency under camera motion, no survivors on the very first update, the emit order
 above, and `LastSurvivorCount` describing the previous frame rather than the current one. A camera jump is
 not special-cased: the first frame after it applies the verdict computed for the previous view, and the
 A-4 fade absorbs the difference.
@@ -323,7 +323,7 @@ across frames, and no cross-frame check exists for that, because stable cross-fr
 behaviour and there is no separate invariant to assert there.
 
 **No headless assertion can distinguish a genuinely deferred verdict from one that completes eagerly and
-only reports as deferred** — the harvest branches on a once-per-tick handle check, and `JobHandle.Complete`
+only reports as deferred** — the harvest branches on a once-per-update handle check, and `JobHandle.Complete`
 is idempotent, so forcing the job to finish early changes *when* the work happens without changing when
 its result is applied. Confirming the deferral is real requires a Play-mode profile showing both halves
 move together: the wait drops out of the collision marker, and the harvest cost stays near zero.
@@ -362,7 +362,7 @@ expose, and lets the map grow without bound while the counter still reads a smal
 **Emit does not re-derive a placement bool it already has.** `StageJob` resolves `Placed.Contains(FadeId)`
 in Burst and carries the result on the candidate as `WasPlacedLastFrame` (see "A container moves to native
 storage only together with its Burst consumer"), and the sole writer of `_placedLastFrame`
-runs before staging in the same tick, so the two cannot disagree. The emit loop does not read
+runs before staging in the same update, so the two cannot disagree. The emit loop does not read
 `_placedLastFrame` again for the same fact. The curved arm's `WasPlacedLastFrame` comes from a sliced
 array with a trailing centred-fallback slot — a layout prone to off-by-one errors — so a change here needs
 to be checked against the curved arm specifically, not only against the aggregate test suite: a global

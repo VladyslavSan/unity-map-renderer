@@ -142,9 +142,9 @@ disposal at all four exits: (1) **consumed** → dispose after main-thread uploa
 → the discard path must `Dispose()` the result, not drop it (the release-time holding pens complete it, then
 dispose it — `docs/tile-pipeline-design.md` § "Release-time holding pens"); (3) **cancelled mid-work**
 → off-thread `try/finally` frees what was allocated; (4) **teardown** (`OnDestroy`) → await outstanding, then
-dispose all pending data + destroy all Meshes/GameObjects + dispose Materials. `TileManager.Tick`, on the main
+dispose all pending data + destroy all Meshes/GameObjects + dispose Materials. `TileManager.Update`, on the main
 thread, owns the upload-vs-dispose branch: `PumpPending` uploads a live record's build, and
-`RenderTeardownRecord` puts an abandoned one in the pens that `Tick` drains.
+`RenderTeardownRecord` puts an abandoned one in the pens that `Update` drains.
 
 **Leak-guard test (teeth):** drive N tiles through load→release including the race (release a tile whose
 mesh build result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity

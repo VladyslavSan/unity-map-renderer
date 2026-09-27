@@ -36,7 +36,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>The maximum stream-1 Opacity value across every vertex. 0 for a null/empty mesh (no live
-        /// slot, or nothing built this Tick).</summary>
+        /// slot, or nothing built this Update).</summary>
         public static float MaxOpacity(Mesh mesh)
         {
             Read(mesh, out _, out float[] opacity);

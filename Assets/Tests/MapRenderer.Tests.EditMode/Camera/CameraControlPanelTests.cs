@@ -42,13 +42,13 @@ namespace MapRenderer.Tests.Cameras
             panel.Map = view;
 
             // Frame 1: seeds the baseline from the camera and pulls the sliders to it (no edit yet).
-            panel.Tick();
+            panel.Update();
             Assert.That(view.Camera.CurrentProperties.Heading.Degrees, Is.EqualTo(0.0).Within(1e-6),
                 "seeding frame must not move the camera");
 
-            // The user drags Heading to 90; next Tick must push it through to the live camera.
+            // The user drags Heading to 90; next Update must push it through to the live camera.
             panel.Heading = 90f;
-            panel.Tick();
+            panel.Update();
             Assert.That(view.Camera.CurrentProperties.Heading.Degrees, Is.EqualTo(90.0).Within(1e-3),
                 "a Heading slider edit must reach the live camera via the write seam");
         }
@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Cameras
             Track(camGo);
             var panel = rootGo.AddComponent<CameraControlPanel>();
             panel.Map = view;
-            panel.Tick();
+            panel.Update();
 
             double expectedMetres = MapRenderer.Core.Geo.CameraPoseMath.AltitudeForZoom(
                 10.0, view.Camera.ViewportPx.y, view.Camera.CurrentProperties.VerticalFovDeg);
@@ -79,8 +79,8 @@ namespace MapRenderer.Tests.Cameras
         {
             var rootGo = Track(new GameObject("Panel_Test"));
             var panel = rootGo.AddComponent<CameraControlPanel>();
-            // Map is null (edit-mode / pre-wire): Tick must not throw.
-            Assert.DoesNotThrow(() => panel.Tick());
+            // Map is null (edit-mode / pre-wire): Update must not throw.
+            Assert.DoesNotThrow(() => panel.Update());
         }
     }
 }

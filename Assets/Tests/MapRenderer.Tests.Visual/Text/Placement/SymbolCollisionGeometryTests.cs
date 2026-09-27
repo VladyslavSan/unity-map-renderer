@@ -1,8 +1,8 @@
 // Pitched-camera symbol collision-box and corner geometry GPU/visual acceptance tests.
 //
 // Contents:
-//   MapPitchedCollisionBoxTests  — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader.
-//   MapPitchedCornerUnitTests    — Unity EditMode only — real TiltedGroundScene + a REAL SymbolPlacementSystem.Tick, read back off the built slot mesh.
+//   MapPitchedCollisionBoxTests  — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Update + the real Map/Symbol/TextWorld shader.
+//   MapPitchedCornerUnitTests    — Unity EditMode only — real TiltedGroundScene + a REAL SymbolPlacementSystem.Update, read back off the built slot mesh.
 
 using System.Collections.Generic;
 using System.Globalization;
@@ -21,7 +21,7 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Visual
 {
     // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-    // SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
+    // SymbolPlacementSystem.Update + the real Map/Symbol/TextWorld shader. NOT registered in
     // Tools/core-tests/core-tests.csproj (it renders).
     //
     // THE RENDERED ARM of the projected-world-corner collision box (T1, T2, T3).
@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.Visual
                 f.RenderIsolated(id, out SymbolBox[] boxes, out WorldBillboardVertex[] vertices,
                     out Transform slot);
                 Assert.That(boxes.Length, Is.EqualTo(f.Config.GlyphCount),
-                    $"W3-T1 precondition ({id}): the isolated Tick must stage exactly {f.Config.GlyphCount} " +
+                    $"W3-T1 precondition ({id}): the isolated Update must stage exactly {f.Config.GlyphCount} " +
                     $"boxes, got {boxes.Length} — the box↔quad pairing this tooth reads would be undefined.");
                 Assert.That(vertices.Length, Is.EqualTo(4 * f.Config.GlyphCount),
                     $"W3-T1 precondition ({id}): the slot mesh must carry 4 vertices per glyph, got " +
@@ -108,8 +108,10 @@ namespace MapRenderer.Tests.Visual
                     QuadScreenAabb(cam, slot, vertices, g, out double2 quadMin, out double2 quadMax);
                     SymbolBox b = boxes[g];
 
-                    double dMinX = b.Min.x - quadMin.x, dMinY = b.Min.y - quadMin.y;
-                    double dMaxX = b.Max.x - quadMax.x, dMaxY = b.Max.y - quadMax.y;
+                    double dMinX = b.Min.x - quadMin.x;
+                    double dMinY = b.Min.y - quadMin.y;
+                    double dMaxX = b.Max.x - quadMax.x;
+                    double dMaxY = b.Max.y - quadMax.y;
                     worstResidualPx = math.max(worstResidualPx, math.max(
                         math.max(math.abs(dMinX), math.abs(dMinY)),
                         math.max(math.abs(dMaxX), math.abs(dMaxY))));
@@ -235,7 +237,8 @@ namespace MapRenderer.Tests.Visual
                 for (int i = 0; i < runs.Length; i++)
                 {
                     SymbolBox b = boxes[order[i]];
-                    double boxRowMin = size - 1 - b.Max.y, boxRowMax = size - 1 - b.Min.y;
+                    double boxRowMin = size - 1 - b.Max.y;
+                    double boxRowMax = size - 1 - b.Min.y;
                     InkColumnExtent(pixels, size, runs[i], colFrom, colTo, out int inkColMin, out int inkColMax);
 
                     TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
@@ -453,9 +456,9 @@ namespace MapRenderer.Tests.Visual
                 featureIndex: 0,
                 tileKey: tileKey);
 
-            // Duplicate Tick — the collision verdict is harvested one Tick late.
-            system.Tick(in frame, plan.Build(buffer), atlas);
-            system.Tick(in frame, plan.Build(buffer), atlas);
+            // Duplicate Update — the collision verdict is harvested one Update late.
+            system.Update(in frame, plan.Build(buffer), atlas);
+            system.Update(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
                 $"W3-T3 precondition ({armName}): the label must stage exactly one quad, got " +
                 $"{system.LastQuadCount}. A zero means it spilled its road or was culled.");
@@ -496,7 +499,7 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — real TiltedGroundScene + a REAL SymbolPlacementSystem.Tick, read back off the built
+    // Unity EditMode only — real TiltedGroundScene + a REAL SymbolPlacementSystem.Update, read back off the built
     // slot mesh. NOT registered in Tools/core-tests/core-tests.csproj.
     //
     // The CORNER-UNIT teeth that need the RENDERER (T7, T8).
@@ -691,9 +694,9 @@ namespace MapRenderer.Tests.Visual
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
 
-                // Duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(buffer), atlas);
-                system.Tick(in frame, plan.Build(buffer), atlas);
+                // Duplicate Update — the collision verdict is harvested one Update late.
+                system.Update(in frame, plan.Build(buffer), atlas);
+                system.Update(in frame, plan.Build(buffer), atlas);
                 Assert.That(system.LastQuadCount, Is.EqualTo(1),
                     $"W2-T7/T8 precondition ({pitch}): the label must stage exactly one quad, got " +
                     $"{system.LastQuadCount}.");
@@ -718,7 +721,8 @@ namespace MapRenderer.Tests.Visual
         /// "bit-for-bit unchanged" rather than "close".</summary>
         private static void AssertBitwise(float expected, float actual, string what)
         {
-            uint e = math.asuint(expected), a = math.asuint(actual);
+            uint e = math.asuint(expected);
+            uint a = math.asuint(actual);
             Assert.That(a, Is.EqualTo(e),
                 $"{what}: 0x{a:X8} against 0x{e:X8} ({actual} vs {expected}). W2's invariant is that the " +
                 "non-map path is BIT-identical to the pre-W2 one — cornerScale is the literal 1f there and " +

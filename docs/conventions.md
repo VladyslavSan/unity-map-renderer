@@ -138,6 +138,29 @@ math, not camera-orientation angles, and are not required to wrap in `Angle`.
 
 ## Types & data modeling
 
+### One declaration per line
+
+A declaration statement names exactly one thing. `private float _h, _s, _v;` becomes three field
+declarations, one per line; a local like `double a, b;` splits the same way. The only exception is a
+`for` loop header — `for (int i = 0, j = n; …)` — where the counters share one statement and splitting
+them would not help a reader.
+
+A group of values held as **state** and **one concept** — three components of a single vector, a
+tuple of values that only ever change together — becomes a **named struct nested in the owning type**, or
+an existing math type where one fits (three `double` components of a position → `double3`). Fold only when
+every one of these holds: it is one concept, a fitting type or an obvious nested struct exists, every use
+sits inside the owning file, and the fields are not serialized (a `[SerializeField]` or a public field on a
+`MonoBehaviour`/`ScriptableObject` would lose its baked scene value under a rename). Check the element type
+first — some groups have no fitting math type (three `ulong` components, for instance: `Unity.Mathematics`
+has no `ulong3`). Outside that gate, a local variable group always just splits into separate lines; grouping
+locals into a throwaway type is not this rule's intent.
+
+**Why:** a joint declaration hides that two names are independent facts behind one semicolon — a reader
+skimming for `_s` has to parse the whole line to find it, and a diff that touches only `_v` shows `_h`
+and `_s` as changed lines too. Splitting costs nothing at the call site.
+
+*(Established 2026-09-28.)*
+
 ### Pass large read-only structs by `in`
 
 When a method only **reads** a struct parameter and that struct is larger than a couple of machine words
@@ -604,6 +627,10 @@ misled every later reader about what may touch it.
 across every polygon of the layer and indexed by an offset table. `FlatScratchWorkVerts` adds nothing with
 `Scratch`. Ask of each word: if I deleted it, would the name become ambiguous? If not, it is filler.
 
+**A type name does not repeat its namespace.** A member is already qualified by the type that holds it, so
+restating that type's name inside the member's own name adds nothing at any call site —
+`Interpolation.Smoothstep<T>`, not `Interpolation.SmoothstepInterpolation<T>`.
+
 **This rule is NOT yet enforced across the codebase — read it as what new and touched code is held to.**
 As of 2026-09-03 the fill-graph path has been swept, and `Scratch` alone still appears about 160 times
 elsewhere (symbols, `TileManager`, placement, `TileBuildScratch`/`TileBuildScratchPool`), alongside live
@@ -675,6 +702,18 @@ the umbrella.
 Applied in full on 2026-08-24; this is the rule new code is held to, not a migration still to run. Some
 occurrences are legitimate and are not violations: Unity's own `GUI.Label`, style-layer data strings, and
 `LiteralLabel`.
+
+
+### A per-frame method is named `Update`
+
+A method a driver calls once per frame is named `Update`, never `Tick`, `Advance`, or `Step`. One verb for
+one recurring role means a reader does not have to learn which synonym a given subsystem picked, and a grep
+for the role finds every caller. In a MonoBehaviour, the per-frame work lives in Unity's own `Update()`,
+with no separate `Tick` behind it. Unity calls `Update()` whatever its access modifier, so a test can call
+an `internal Update()` directly. If a test must supply a value, add an `internal Update(float)` overload
+and make the parameterless `Update()` forward to it.
+
+*(Established 2026-09-28.)*
 
 
 ## Documentation & tests

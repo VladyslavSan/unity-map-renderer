@@ -10,7 +10,7 @@ namespace MapRenderer.Unity.Rendering.Layers
     {
         /// <summary>
         /// Whether the VISIBILITY fade (entering/leaving the zoom range) may take intermediate values.
-        /// <c>false</c> means <see cref="RenderLayerSet.AdvanceFade"/> arms it Instant, so the layer snaps —
+        /// <c>false</c> means <see cref="RenderLayerSet.UpdateFade"/> arms it Instant, so the layer snaps —
         /// <c>fill-extrusion</c> declares <c>false</c> for every one of its layers. A per-KIND constant,
         /// never per-instance or per-style.
         /// </summary>

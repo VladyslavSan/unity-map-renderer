@@ -23,7 +23,11 @@ namespace MapRenderer.Tests.Meshing
     {
         internal struct GatherState
         {
-            public NativeArray<int> PolyOuterIdx, PolyHoleStart, PolyHoleCount, HoleRingIdxs, PolyCountArr;
+            public NativeArray<int> PolyOuterIdx;
+            public NativeArray<int> PolyHoleStart;
+            public NativeArray<int> PolyHoleCount;
+            public NativeArray<int> HoleRingIdxs;
+            public NativeArray<int> PolyCountArr;
             public int PolyCount;
             public TriangulationBuffers Buffers;
 
@@ -215,11 +219,13 @@ namespace MapRenderer.Tests.Meshing
             in GatherState s, NativeArray<double2> flatVertsArr, NativeArray<int> flatHoleArr, int pi,
             bool forceLinearEarScan, List<PolygonRun> results)
         {
-            int vOff = s.Buffers.VertexOffsets[pi], vLen = s.Buffers.VertexOffsets[pi + 1] - vOff;
+            int vOff = s.Buffers.VertexOffsets[pi];
+            int vLen = s.Buffers.VertexOffsets[pi + 1] - vOff;
             int outerCount = s.Buffers.PerPolyOuterCount[pi];
             // HoleCountOffsets holds CAPACITY (SizingJob pads a zero-hole slot to 1 for EarcutJob); read the
             // REAL count from PolyHoleCount, or every zero-hole polygon gains a phantom empty hole.
-            int hOff = s.Buffers.HoleCountOffsets[pi], hCap = s.Buffers.HoleCountOffsets[pi + 1] - hOff;
+            int hOff = s.Buffers.HoleCountOffsets[pi];
+            int hCap = s.Buffers.HoleCountOffsets[pi + 1] - hOff;
             int holeCount = s.PolyHoleCount[pi];
 
             var inputOuter = new List<double2>(outerCount);
@@ -236,8 +242,10 @@ namespace MapRenderer.Tests.Meshing
                 vCursor += holeLen;
             }
 
-            int sOff = s.Buffers.WorkOffsets[pi], sLen = s.Buffers.WorkOffsets[pi + 1] - sOff;
-            int idxOff = s.Buffers.IndexOffsets[pi], idxCap = s.Buffers.IndexOffsets[pi + 1] - idxOff;
+            int sOff = s.Buffers.WorkOffsets[pi];
+            int sLen = s.Buffers.WorkOffsets[pi + 1] - sOff;
+            int idxOff = s.Buffers.IndexOffsets[pi];
+            int idxCap = s.Buffers.IndexOffsets[pi + 1] - idxOff;
 
             var outIdx = new NativeArray<int>(idxCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var outIndexCount = new NativeArray<int>(1, Allocator.Persistent);

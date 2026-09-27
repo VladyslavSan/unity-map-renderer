@@ -378,8 +378,10 @@ namespace MapRenderer.Unity.Jobs.Mvt
         {
             TileGeometryType kind = default; // MVT type 0 = UNKNOWN — the default when field 3 is absent.
             Value id = Value.Null;
-            int tagStart = 0, tagEnd = 0;
-            int geomStart = 0, geomEnd = 0;
+            int tagStart = 0;
+            int tagEnd = 0;
+            int geomStart = 0;
+            int geomEnd = 0;
             while (r.HasMore)
             {
                 uint tag = r.ReadTag();
@@ -418,7 +420,9 @@ namespace MapRenderer.Unity.Jobs.Mvt
         private static (int features, int keys, int values) CountLayerElements(ProtobufReader r)
         {
             var counter = r;                       // struct copy — independent cursor over the same [s,e] slice
-            int features = 0, keys = 0, values = 0;
+            int features = 0;
+            int keys = 0;
+            int values = 0;
             while (counter.HasMore)
             {
                 uint tag = counter.ReadTag();

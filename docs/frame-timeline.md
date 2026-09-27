@@ -36,9 +36,9 @@ GPU:                                      [draw N]        [present N @ vblank]
    driver. Runs *while the main thread is already working on the next frame*. **[MODEL]**
 3. **GPU** — executes; the result is shown at the next presentation point.
 
-In this project the per-frame map work (`TileManager.Tick`, incl. the mesh build **kick** that calls
+In this project the per-frame map work (`TileManager.Update`, incl. the mesh build **kick** that calls
 `AllocateWritableMeshData`) runs inside MonoBehaviour **`Update`** — i.e. in the main-thread box *before*
-render submission (`MapViewComponent.Update → MapView.Tick`; camera commit is in `LateUpdate`, just before
+render submission (`MapViewComponent.Update → MapView.LateUpdate`, which also commits the camera, just before
 culling).
 
 ## 2. The invariant — slack exists when the main thread is NOT the bottleneck (vsync is incidental)
