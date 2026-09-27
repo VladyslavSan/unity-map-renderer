@@ -69,6 +69,12 @@ namespace MapRenderer.Unity.Style
         /// </summary>
         public JsonValue Data;
 
+        /// <summary>Style Spec <c>buffer</c> (geojson only), clamped to [0, 512] (512 = one tile width).
+        /// Null for a non-geojson source, an absent key, or a non-number — an AUTHORED value only:
+        /// <c>MapView.BuildSourceSpecs</c> then keeps <c>GeoJsonSliceOptions.DefaultBufferAtReferenceExtent</c>
+        /// rather than the spec's 128 default.</summary>
+        public double? Buffer;
+
         /// <summary>The full original source JSON object (preserves any unknown/forward-compat keys).</summary>
         public JsonValue Raw;
     }

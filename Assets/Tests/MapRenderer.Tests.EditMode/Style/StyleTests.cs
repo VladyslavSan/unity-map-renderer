@@ -344,6 +344,37 @@ namespace MapRenderer.Tests.Style
                 "a vector source's absent maxzoom must stay the vector default (22), unaffected by the " +
                 "geojson-specific default");
         }
+
+        // =========================================================================================
+        // 8. geojson `buffer`: an AUTHORED value only, clamped to [0, 512]; absent/non-number is null.
+        // =========================================================================================
+        [Test]
+        public void BufferParsing_ClampsToSpecRange_AndIsNullWhenAbsentOrNotANumber()
+        {
+            SourceDefinition GeoJsonWithBuffer(string bufferJson) => StyleParser.Parse($@"{{
+                ""sources"": {{ ""g"": {{ ""type"": ""geojson"", ""data"": {{ ""type"": ""FeatureCollection"",
+                    ""features"": [] }}, ""buffer"": {bufferJson} }} }}
+            }}").Sources["g"];
+
+            Assert.AreEqual(0.0, GeoJsonWithBuffer("-5").Buffer, "a negative buffer clamps to 0");
+            Assert.AreEqual(512.0, GeoJsonWithBuffer("9999").Buffer, "a buffer above 512 clamps to the spec ceiling");
+            Assert.AreEqual(128.0, GeoJsonWithBuffer("128").Buffer, "an in-range value is read as-is");
+            Assert.IsNull(GeoJsonWithBuffer(@"""x""").Buffer,
+                "a non-number value falls back to null (the same as an absent key), not a thrown parse or a coerced 0");
+
+            SourceDefinition absent = StyleParser.Parse(@"{
+                ""sources"": { ""g"": { ""type"": ""geojson"", ""data"": { ""type"": ""FeatureCollection"",
+                    ""features"": [] } } }
+            }").Sources["g"];
+            Assert.IsNull(absent.Buffer, "an absent buffer key is null — an AUTHORED value only");
+
+            SourceDefinition vector = StyleParser.Parse(@"{
+                ""sources"": { ""v"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""],
+                    ""buffer"": 64 } }
+            }").Sources["v"];
+            Assert.IsNull(vector.Buffer,
+                "`buffer` is a geojson-only key — a vector source's value must not be read at all");
+        }
     }
 
 

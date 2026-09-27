@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 53 supported, 57 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 53 supported, 58 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -137,7 +137,8 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 |---|---|---|
 | `data` | `partial` | An inline object only. A URL string skips the source with a warning. |
 | `maxzoom` | `partial` | Defaults to 18 (the spec value) when absent. A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom — the same per-source-overzoom limit as the vector row. |
-| `buffer` / `tolerance` | `not supported` | The slicer uses fixed defaults (`GeoJsonSliceOptions.Default`). |
+| `buffer` | `partial` | An authored value is honoured (×8 to reference units, clamped to [0, 512]). An absent key keeps the slicer's own 64-reference-unit default, not the spec's 128. |
+| `tolerance` | `not supported` | Not read. The slicer runs at tolerance 0 (`GeoJsonSliceOptions.SimplifyTolerance` accepts no other value). |
 | `cluster`, `clusterRadius`, `clusterMaxZoom`, `clusterMinPoints`, `clusterProperties` | `not supported` | No clustering. |
 | `lineMetrics` | `not supported` | `line-gradient` is not built. |
 | `generateId` / `promoteId` | `not supported` | Not read. |

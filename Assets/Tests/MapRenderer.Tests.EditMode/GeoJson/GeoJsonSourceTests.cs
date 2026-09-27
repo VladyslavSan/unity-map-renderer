@@ -63,10 +63,12 @@ namespace MapRenderer.Tests.GeoJsons
 
         /// <summary>A one-source, one-fill-layer style over inline geojson. The style layer declares NO
         /// <c>source-layer</c> — that is what the Style Spec says for a geojson source. A wrong
-        /// source-layer resolution selects zero features here.</summary>
-        private static string StyleWithInlineData(string dataJson) => $@"{{
+        /// source-layer resolution selects zero features here. <paramref name="bufferJson"/>, when given,
+        /// is an authored `buffer` key on the source.</summary>
+        private static string StyleWithInlineData(string dataJson, string bufferJson = null) => $@"{{
             ""version"": 8,
-            ""sources"": {{ ""geo"": {{ ""type"": ""geojson"", ""data"": {dataJson} }} }},
+            ""sources"": {{ ""geo"": {{ ""type"": ""geojson"", ""data"": {dataJson}
+                {(bufferJson == null ? "" : $@", ""buffer"": {bufferJson}")} }} }},
             ""layers"": [
                 {{ ""id"": ""geo-fill"", ""type"": ""fill"", ""source"": ""geo"",
                    ""paint"": {{ ""fill-color"": ""#ff0000"" }} }}
@@ -394,8 +396,8 @@ namespace MapRenderer.Tests.GeoJsons
 
         // ── SourceKey carries the inline-data identity ────────────────────────────────────────────────
 
-        private static SourceDefinition GeoJsonDef(string dataJson)
-            => StyleParser.Parse(StyleWithInlineData(dataJson)).GetSource("geo");
+        private static SourceDefinition GeoJsonDef(string dataJson, string bufferJson = null)
+            => StyleParser.Parse(StyleWithInlineData(dataJson, bufferJson)).GetSource("geo");
 
         /// <summary><b>Different data (unit)</b> — two definitions identical except for the inline <c>data</c>
         /// produce DIFFERENT keys. Without the field they are value-equal on all six other fields (an inline
@@ -606,6 +608,52 @@ namespace MapRenderer.Tests.GeoJsons
                 Assert.AreEqual(2, created,
                     "a restyle to DIFFERENT inline data must REBUILD the pipeline. Keeping it is the recorded " +
                     "bug: the second style's tiles would be served from the first dataset.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>
+        /// The same claim, varying ONLY <c>buffer</c> (same data throughout): the restyle diff must REBUILD
+        /// the pipeline when the authored margin changes, or a restyle from <c>buffer: 0</c> to <c>buffer:
+        /// 512</c> keeps serving tiles sliced at the OLD margin.
+        /// </summary>
+        [Test]
+        public void TheRestyleDiff_RebuildsWhenOnlyBufferChanged()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax), "0"));
+                view.View.Layers.Build(style, 0.0, view.Config.MaterialSet);
+
+                int created = 0;
+
+                void Apply(SourceDefinition def)
+                {
+                    var specs = new List<TileManager.SourceSpec>
+                    {
+                        new TileManager.SourceSpec("geo", TileManager.SourceKey.From(def), 0, 22, () =>
+                        {
+                            created++;
+                            return new GeoJsonTileFeatureSource(
+                                GeoJsonParser.Parse(def.Data), GeoJsonSliceOptions.Default, Scheduler);
+                        }),
+                    };
+                    view.View.TileManager.SetSources(specs, view.Config.Backend);
+                }
+
+                Apply(GeoJsonDef(RectangleAt(RectMin, RectMax), "0"));
+                Assert.AreEqual(1, created, "precondition: the first application builds the pipeline");
+
+                Apply(GeoJsonDef(RectangleAt(RectMin, RectMax), "0"));
+                Assert.AreEqual(1, created,
+                    "a restyle to the SAME buffer (and data) must KEEP the pipeline");
+
+                Apply(GeoJsonDef(RectangleAt(RectMin, RectMax), "512"));
+                Assert.AreEqual(2, created,
+                    "a restyle that changes ONLY `buffer` must REBUILD the pipeline — keeping it serves " +
+                    "tiles sliced at the OLD margin under the NEW style");
             }
             finally { view.Teardown(); }
         }
@@ -909,6 +957,135 @@ namespace MapRenderer.Tests.GeoJsons
             SharedDisposable<IDecodedTile> handle = await source.GetTile(WorldTile);
             Assert.AreEqual(0, source.InFlightCount);
             handle?.Release();
+        }
+
+        // ── An authored `buffer` overrides the slicer margin ─────────────────────────────────────────
+
+        // Away from the world tile, the poles and the antimeridian, so a negative tile-local offset still
+        // lands at a valid, in-range lon/lat rather than wrapping or clamping.
+        private static readonly TileId MidTile = new TileId { Z = 4, X = 8, Y = 8 };
+
+        private static string PointAt(TileId tile, double px, double py)
+        {
+            double2 lonLat = tile.ToLonLat(px, py, GeoJsonSliceOptions.DefaultExtent);
+            return GeoJsonTestFixtures.Collection(GeoJsonTestFixtures.Feature(
+                "Point", GeoJsonTestFixtures.Position(lonLat.x, lonLat.y)));
+        }
+
+        /// <summary>Builds the geojson source through the REAL <c>MapView.BuildSourceSpecs</c> — the ONE
+        /// place `buffer` is converted — rather than duplicating the conversion in the test. Blocks
+        /// synchronously ON THE CALLING (main) THREAD: an `async Task` test resumes wherever its awaited
+        /// UniTask's continuation lands, which <see cref="GetTileSync"/>'s off-main slice would break, and
+        /// the <c>view.Teardown()</c> every caller runs afterward needs the main thread.</summary>
+        private static ITileFeatureSource WiredGeoJsonSource(
+            MapView view, string dataJson, string bufferJson = null)
+        {
+            var style = StyleParser.Parse(StyleWithInlineData(dataJson, bufferJson));
+            UniTask<List<TileManager.SourceSpec>> task =
+                view.View.BuildSourceSpecs(style, CancellationToken.None).Preserve();
+            Assert.IsTrue(task.WaitOffPlayerLoop(10000), "BuildSourceSpecs must complete within the timeout");
+            List<TileManager.SourceSpec> specs = task.GetAwaiter().GetResult();
+            Assert.AreEqual(1, specs.Count, "precondition: exactly one geojson source spec was built");
+            return specs[0].CreateSource();
+        }
+
+        /// <summary>Blocks synchronously on the calling thread, for the same reason as
+        /// <see cref="WiredGeoJsonSource"/>: <c>GetTile</c> slices OFF the main thread, so an `await` here
+        /// would resume the test method itself off-thread, ahead of a `view.Teardown()` that needs it.</summary>
+        private static SharedDisposable<IDecodedTile> GetTileSync(ITileFeatureSource source, TileId tile)
+        {
+            UniTask<SharedDisposable<IDecodedTile>> task = source.GetTile(tile).Preserve();
+            Assert.IsTrue(task.WaitOffPlayerLoop(10000), "GetTile must complete within the timeout");
+            return task.GetAwaiter().GetResult();
+        }
+
+        /// <summary>An authored `buffer: 8` must convert to 64 reference units (x8), not 8 (1:1). A
+        /// point 60 units past the tile edge sits inside the correct 64-unit margin but outside a bogus
+        /// 8-unit one, so a 1:1 mapping fails this while the x8 conversion passes it.</summary>
+        [Test]
+        public void AuthoredBuffer_ConvertsToReferenceUnits_ByFactorOf8()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                using ITileFeatureSource source = WiredGeoJsonSource(view, PointAt(MidTile, -60.0, 2048.0), "8");
+
+                SharedDisposable<IDecodedTile> handle = null;
+                try
+                {
+                    handle = GetTileSync(source, MidTile);
+                    Assert.IsNotNull(handle,
+                        "buffer: 8 must reach the slicer as 64 reference units; a point 60 units past the edge " +
+                        "is inside that margin, so it must still be captured");
+                }
+                finally { handle?.Release(); }
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>`buffer: 0` cuts exactly at the tile edge. A point 10 units past it is absent.</summary>
+        [Test]
+        public void ZeroBuffer_ExcludesAPointPastTheTileEdge()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                using ITileFeatureSource source = WiredGeoJsonSource(view, PointAt(MidTile, -10.0, 2048.0), "0");
+
+                SharedDisposable<IDecodedTile> handle = GetTileSync(source, MidTile);
+                Assert.IsNull(handle,
+                    "buffer: 0 must cut at the tile boundary — a point 10 units past the edge must be absent");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>`buffer: 512` (one tile width, the Style Spec ceiling) reaches a point 0.9 tile
+        /// widths past the edge.</summary>
+        [Test]
+        public void MaxBuffer_ReachesAPointNearlyAWholeTileWidthPastTheEdge()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                double pastEdge = 0.9 * GeoJsonSliceOptions.DefaultExtent;
+                using ITileFeatureSource source = WiredGeoJsonSource(
+                    view, PointAt(MidTile, -pastEdge, 2048.0), "512");
+
+                SharedDisposable<IDecodedTile> handle = null;
+                try
+                {
+                    handle = GetTileSync(source, MidTile);
+                    Assert.IsNotNull(handle,
+                        "buffer: 512 must reach a full tile width (4096 reference units) past the edge, which " +
+                        "covers a point 0.9 tile widths out");
+                }
+                finally { handle?.Release(); }
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>An ABSENT `buffer` key keeps <see cref="GeoJsonSliceOptions.DefaultBufferAtReferenceExtent"/>
+        /// rather than the spec's 128 default — a point 100 units past the edge (inside the spec default,
+        /// outside the kept one) must stay absent.</summary>
+        [Test]
+        public void AbsentBuffer_KeepsTheSlicerDefaultMargin_NotTheSpecDefault()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                using ITileFeatureSource source = WiredGeoJsonSource(
+                    view, PointAt(MidTile, -100.0, 2048.0)); // no bufferJson: key absent
+
+                SharedDisposable<IDecodedTile> handle = GetTileSync(source, MidTile);
+                Assert.IsNull(handle,
+                    "an absent buffer key must keep the slicer's existing 64-unit margin, not the spec's " +
+                    "128 default (which x8 to 1024 reference units would have reached this point)");
+            }
+            finally { view.Teardown(); }
         }
     }
 }

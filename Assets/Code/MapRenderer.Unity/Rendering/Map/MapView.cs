@@ -505,9 +505,17 @@ namespace MapRenderer.Unity.Rendering.Map
                         continue;
                     }
 
-                    // Slice options are per-source by design; v1 has no style key for them, so the default is
-                    // supplied HERE, at the wiring site, and the source keeps taking them as a parameter.
-                    var geoJsonOptions = GeoJson.GeoJsonSliceOptions.Default;
+                    // Slice options are per-source, supplied HERE at the wiring site. An authored `buffer`
+                    // (Style Spec [0, 512], 512 = one tile width = 4096 reference units, hence x8) overrides
+                    // the margin; absent (def.Buffer null) keeps GeoJsonSliceOptions.Default's margin.
+                    var geoJsonOptions = def.Buffer is double buffer
+                        ? new GeoJson.GeoJsonSliceOptions
+                        {
+                            Extent                  = GeoJson.GeoJsonSliceOptions.DefaultExtent,
+                            BufferAtReferenceExtent = buffer * (TileBufferClip.ReferenceExtent / 512.0),
+                            SimplifyTolerance       = 0.0,
+                        }
+                        : GeoJson.GeoJsonSliceOptions.Default;
                     specs.Add(new Tile.TileManager.SourceSpec(
                         sid, Tile.TileManager.SourceKey.From(def), def.MinZoom, def.MaxZoom,
                         () => new Tile.Processing.GeoJsonTileFeatureSource(parsed, geoJsonOptions, scheduler)));

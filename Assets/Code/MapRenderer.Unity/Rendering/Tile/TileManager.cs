@@ -157,7 +157,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Value-equality identity of a resolved source definition — the restyle diff key. Two
         /// sources are "the same" (keep the pipeline, reuse cached bytes) iff their resolved
-        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c>/<c>type</c> match.
+        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c>/<c>buffer</c>/<c>type</c> match.
         /// Non-obvious why: an inline source has no <c>url</c>/<c>tiles[]</c>, so without <c>data</c> a restyle to
         /// another dataset keeps the first pipeline. <c>type</c> selects the factory (byte fetcher or local slicer),
         /// so without it a switch between MVT and inline GeoJSON also keeps the wrong pipeline. That repro is
@@ -171,12 +171,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             public readonly string Scheme;
             public readonly string Bounds; // the VALIDATED GeoBounds joined with ',' — null when no gate
             public readonly string Data;   // canonical `data` text — null when the key is absent
+            public readonly string Buffer; // round-trip invariant `buffer` text — null when absent (geojson only)
             public readonly SourceType Type; // the discriminator that selects the factory — see the type doc
 
             /// <summary>Private, with every parameter required, so <see cref="From"/> is the only way to
             /// mint a key — a defaulted <c>type</c>/<c>data</c> would silently compare equal across the field the diff branches on.</summary>
             private SourceKey(string url, string tiles, int minZoom, int maxZoom, string scheme, string bounds,
-                string data, SourceType type)
+                string data, string buffer, SourceType type)
             {
                 Type    = type;
                 Url     = url;
@@ -186,6 +187,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 Scheme  = scheme;
                 Bounds  = bounds;
                 Data    = data;
+                Buffer  = buffer;
             }
 
             /// <summary>Builds the key from a resolved <see cref="SourceDefinition"/> and its VALIDATED
@@ -197,7 +199,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                 string tiles      = def.Tiles != null ? string.Join("\n", def.Tiles) : null;
                 string boundsText = bounds.HasBounds ? JoinInvariant(bounds) : null;
                 string data       = def.Data  != null ? JsonCanonical.Write(def.Data) : null;
-                return new SourceKey(def.Url, tiles, def.MinZoom, def.MaxZoom, def.Scheme, boundsText, data, def.Type);
+                string buffer     = def.Buffer.HasValue
+                    ? def.Buffer.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                    : null;
+                return new SourceKey(
+                    def.Url, tiles, def.MinZoom, def.MaxZoom, def.Scheme, boundsText, data, buffer, def.Type);
             }
 
             /// <summary>Joins the four bounds fields with a comma, each formatted round-trip ("R") and
@@ -213,7 +219,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             public bool Equals(SourceKey o)
                 => Type       == o.Type    && Url    == o.Url    && Tiles   == o.Tiles
                    && MinZoom == o.MinZoom && MaxZoom == o.MaxZoom && Scheme == o.Scheme
-                   && Bounds  == o.Bounds  && Data   == o.Data;
+                   && Bounds  == o.Bounds  && Data   == o.Data    && Buffer == o.Buffer;
 
             public override bool Equals(object obj) => obj is SourceKey o && Equals(o);
 
@@ -229,6 +235,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     h = h * 31 + (Scheme ?? string.Empty).GetHashCode();
                     h = h * 31 + (Bounds ?? string.Empty).GetHashCode();
                     h = h * 31 + (Data   ?? string.Empty).GetHashCode();
+                    h = h * 31 + (Buffer ?? string.Empty).GetHashCode();
                     h = h * 31 + (int)Type;
                     return h;
                 }
@@ -239,7 +246,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// TileJSON that resolves differently under an otherwise-unchanged style busts the prepared-tile
             /// cache, whose own key carries no source identity).</summary>
             public override string ToString()
-                => $"{Type}|{Url}|{Tiles}|{MinZoom}|{MaxZoom}|{Scheme}|{Bounds}|{Data}";
+                => $"{Type}|{Url}|{Tiles}|{MinZoom}|{MaxZoom}|{Scheme}|{Bounds}|{Data}|{Buffer}";
         }
 
         /// <summary>The caller's recipe for one source pipeline — a <see cref="CreateSource"/> thunk lets <see cref="SetSources"/> build only new/changed pipelines.</summary>

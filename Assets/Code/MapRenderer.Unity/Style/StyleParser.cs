@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MapRenderer.Core.Json;
+using Unity.Mathematics;
 
 namespace MapRenderer.Unity.Style
 {
@@ -70,6 +71,10 @@ namespace MapRenderer.Unity.Style
             src.Tiles = ParseStringArray(json.Get("tiles"));
             // geojson `data`: retained verbatim, because the spec allows an inline object OR a URL string.
             src.Data = json.Get("data");
+            // `buffer` (geojson only, per the spec) is an AUTHORED value only — a non-geojson source, an
+            // absent key, or a non-number stays null, so MapView keeps GeoJsonSliceOptions.DefaultBufferAtReferenceExtent.
+            double? rawBuffer = src.Type == SourceType.GeoJson ? json.GetNullableDouble("buffer") : null;
+            src.Buffer = rawBuffer.HasValue ? math.clamp(rawBuffer.Value, 0.0, 512.0) : (double?)null;
 
             // Vector-source defaults. (Other source types carry these keys too; applying the vector
             // defaults is harmless for them and the raw object is always retained for later stages.)
