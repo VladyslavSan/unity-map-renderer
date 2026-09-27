@@ -22,9 +22,6 @@ namespace MapRenderer.Unity.Style.Background
         /// completeness, but no renderer reads it: background-pattern is not implemented.</summary>
         public string PatternName { get; init; }
 
-        /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
-        public bool IsInertFallback { get; init; }
-
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private PaintProperties() { }
 
@@ -34,33 +31,27 @@ namespace MapRenderer.Unity.Style.Background
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static PaintProperties Parse(JsonValue paint)
         {
-            bool anyPresent = false;
-
             // background-color: default rgba(0,0,0,1)
             JsonValue colorJson = paint?.Get(PropertyNames.BackgroundColor);
-            if (colorJson != null) anyPresent = true;
             StyleProperty<Color> color = colorJson != null
                 ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
                 : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
 
             // background-opacity: default 1.0
             JsonValue opacityJson = paint?.Get(PropertyNames.BackgroundOpacity);
-            if (opacityJson != null) anyPresent = true;
             StyleProperty<float> opacity = opacityJson != null
                 ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
 
             // background-pattern
             JsonValue patternJson = paint?.Get(PropertyNames.BackgroundPattern);
-            if (patternJson != null) anyPresent = true;
             string patternName = patternJson?.AsString(null);
 
             return new PaintProperties
             {
-                Color           = color,
-                Opacity         = opacity,
-                PatternName     = patternName,
-                IsInertFallback = !anyPresent,
+                Color       = color,
+                Opacity     = opacity,
+                PatternName = patternName,
             };
         }
     }

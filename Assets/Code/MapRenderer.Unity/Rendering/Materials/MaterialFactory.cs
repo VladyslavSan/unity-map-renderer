@@ -59,8 +59,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             else
                 applier.BindOpacity(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
-            // fill-outline-color: bind only when explicitly set (not a fallback) and non-data-driven.
-            if (!paint.OutlineColorIsFallback && !paint.OutlineColor.DependsOnFeature)
+            // fill-outline-color: bind only when explicitly set (non-null) and non-data-driven.
+            if (paint.OutlineColor != null && !paint.OutlineColor.DependsOnFeature)
                 applier.BindColor(paint.OutlineColor, ShaderProperties.Fill.PropertyId.FillOutlineColor);
 
             // fill-antialias is NOT bound: no pass reads _FillAntialias (docs/fill-parity-design.md). The

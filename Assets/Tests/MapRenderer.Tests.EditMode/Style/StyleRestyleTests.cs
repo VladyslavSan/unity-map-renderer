@@ -1490,12 +1490,10 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer("{\"fill-color\":[\"rgba\",255,0,0,1]}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.ColorKind,
+            Assert.AreEqual(ExpressionKind.Constant, fp.Color.Kind,
                 "An rgba(...) literal must classify as Constant.");
             Assert.IsFalse(fp.Color.DependsOnFeature,
                 "Constant color must not depend on feature.");
-            Assert.IsFalse(fp.IsInertFallback,
-                "A layer with fill-color set is not inert.");
 
             var c = fp.Color.Evaluate(0.0);
             Assert.AreEqual(1.0, c.R, 1e-4, "Red channel must be 1.0 for rgba(255,0,0,1).");
@@ -1513,7 +1511,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, fp.OpacityKind,
+            Assert.AreEqual(ExpressionKind.Zoom, fp.Opacity.Kind,
                 "A zoom-interpolate expression must classify as Zoom.");
 
             float v0 = fp.Opacity.Evaluate(0.0);
@@ -1535,11 +1533,10 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, fp.ColorKind,
+            Assert.AreEqual(ExpressionKind.Feature, fp.Color.Kind,
                 "A [\"get\",...] match expression must classify as Feature.");
             Assert.IsTrue(fp.Color.DependsOnFeature,
                 "Data-driven color must DependsOnFeature.");
-            Assert.IsFalse(fp.IsInertFallback);
         }
 
         // ── #1d: Absent fill-color → Constant kind (spec default #000000) ───────
@@ -1550,7 +1547,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer("{}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.ColorKind,
+            Assert.AreEqual(ExpressionKind.Constant, fp.Color.Kind,
                 "Absent fill-color must use spec default (Constant kind).");
             Assert.IsFalse(fp.Color.DependsOnFeature);
 
@@ -1558,9 +1555,6 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0.0, c.R, 1e-4, "Default fill-color R must be 0 (black).");
             Assert.AreEqual(0.0, c.G, 1e-4, "Default fill-color G must be 0 (black).");
             Assert.AreEqual(0.0, c.B, 1e-4, "Default fill-color B must be 0 (black).");
-
-            Assert.IsTrue(fp.IsInertFallback,
-                "A layer with no paint properties set must be flagged IsInertFallback.");
         }
 
         // ── #1e: Absent fill-opacity → Constant 1.0 ─────────────────────────────
@@ -1571,7 +1565,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer("{}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.OpacityKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Opacity.Kind);
             float v = fp.Opacity.Evaluate(0.0);
             Assert.AreEqual(1.0f, v, 1e-6f, "Default fill-opacity must be 1.0.");
         }
@@ -1584,7 +1578,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer("{\"fill-translate-anchor\":\"viewport\"}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.TranslateAnchorKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.TranslateAnchor.Kind);
             float v = fp.TranslateAnchor.Evaluate(0.0);
             Assert.AreEqual(1.0f, v, 1e-6f, "fill-translate-anchor 'viewport' must encode as 1.0.");
         }
@@ -1609,41 +1603,33 @@ namespace MapRenderer.Tests.Style
             var layer = MakeFillLayer("{\"fill-translate\":[16,-8]}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind);
             var t = fp.Translate.Evaluate(0.0);
             Assert.AreEqual(16.0, t.x, 1e-6, "fill-translate x must be 16.");
             Assert.AreEqual(-8.0, t.y, 1e-6, "fill-translate y must be -8.");
         }
 
-        // ── #1i: fill-outline-color absent → IsFallback=true, falls back to fill-color ──
+        // ── #1i: fill-outline-color absent → null ────────────────────────────────
 
         [Test]
-        public void FillPaint_AbsentOutlineColor_FallsBackToFillColor()
+        public void FillPaint_AbsentOutlineColor_IsNull()
         {
             var layer = MakeFillLayer("{\"fill-color\":[\"rgba\",0,0,255,1]}");
             var fp    = layer.Paint;
 
-            Assert.IsTrue(fp.OutlineColorIsFallback,
-                "Absent fill-outline-color must set OutlineColorIsFallback=true.");
-
-            var c = fp.OutlineColor.Evaluate(0.0);
-            Assert.AreEqual(0.0, c.R, 1e-4, "Fallback outline R must match fill-color R=0.");
-            Assert.AreEqual(0.0, c.G, 1e-4, "Fallback outline G must match fill-color G=0.");
-            Assert.AreEqual(1.0, c.B, 1e-4, "Fallback outline B must match fill-color B=1.");
+            Assert.IsNull(fp.OutlineColor,
+                "absent fill-outline-color must be null, so MaterialFactory skips binding it.");
         }
 
-        // ── #1j: fill-outline-color present → not a fallback ────────────────────
+        // ── #1j: fill-outline-color present → parsed, not null ──────────────────
 
         [Test]
-        public void FillPaint_PresentOutlineColor_NotFallback()
+        public void FillPaint_PresentOutlineColor_IsParsed()
         {
             var layer = MakeFillLayer("{\"fill-outline-color\":[\"rgba\",0,255,0,1]}");
             var fp    = layer.Paint;
 
-            Assert.IsFalse(fp.OutlineColorIsFallback,
-                "Present fill-outline-color must not be flagged as fallback.");
-            Assert.IsFalse(fp.IsInertFallback,
-                "A layer with fill-outline-color set is not inert.");
+            Assert.IsNotNull(fp.OutlineColor, "an explicit fill-outline-color must not be null.");
 
             var c = fp.OutlineColor.Evaluate(0.0);
             Assert.AreEqual(0.0, c.R, 1e-4, "Outline R must be 0 for rgba(0,255,0,1).");
@@ -1660,18 +1646,6 @@ namespace MapRenderer.Tests.Style
             var fp    = layer.Paint;
 
             Assert.AreEqual("grass", fp.PatternName, "fill-pattern must be read as PatternName.");
-            Assert.IsFalse(fp.IsInertFallback);
-        }
-
-        // ── #1l: null paint → IsInertFallback ────────────────────────────────────
-
-        [Test]
-        public void FillPaint_NullPaint_IsInertFallback()
-        {
-            var layer = MakeFillLayer(null);
-            var fp    = layer.Paint;
-
-            Assert.IsTrue(fp.IsInertFallback, "A layer with null Paint must be IsInertFallback.");
         }
 
         // ── #2: CPU gamma formula — sRGB→linear approximation ────────────────────
@@ -1723,7 +1697,7 @@ namespace MapRenderer.Tests.Style
             var layer    = MakeFillLayer(paintJson);
             var fp       = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, fp.OpacityKind,
+            Assert.AreEqual(ExpressionKind.Feature, fp.Opacity.Kind,
                 "Data-driven opacity must classify as Feature.");
 
             var mvtLayer = LoadCountries();

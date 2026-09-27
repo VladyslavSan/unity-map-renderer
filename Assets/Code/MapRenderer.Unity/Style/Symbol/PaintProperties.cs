@@ -44,9 +44,6 @@ namespace MapRenderer.Unity.Style.Symbol
         /// <summary>icon-opacity: icon alpha multiplier [0,1]. Default 1.0. Zoom-capable.</summary>
         public StyleProperty<float> IconOpacity { get; init; }
 
-        /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
-        public bool IsInertFallback { get; init; }
-
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private PaintProperties() { }
 
@@ -55,39 +52,32 @@ namespace MapRenderer.Unity.Style.Symbol
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static PaintProperties Parse(JsonValue paint)
         {
-            bool anyPresent = false;
-
             // text-color: default rgba(0,0,0,1)
             JsonValue colorJson = paint?.Get(PropertyNames.TextColor);
-            if (colorJson != null) anyPresent = true;
             StyleProperty<Color> color = colorJson != null
                 ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
                 : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
 
             // text-opacity: default 1.0
             JsonValue opacityJson = paint?.Get(PropertyNames.TextOpacity);
-            if (opacityJson != null) anyPresent = true;
             StyleProperty<float> opacity = opacityJson != null
                 ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
 
             // text-halo-color: default rgba(0,0,0,0)
             JsonValue haloColorJson = paint?.Get(PropertyNames.TextHaloColor);
-            if (haloColorJson != null) anyPresent = true;
             StyleProperty<Color> haloColor = haloColorJson != null
                 ? new StyleProperty<Color>(haloColorJson, new Color(0f, 0f, 0f, 0f), v => v.AsColorCoerced())
                 : new StyleProperty<Color>(new Color(0f, 0f, 0f, 0f));
 
             // text-halo-width: default 0
             JsonValue haloWidthJson = paint?.Get(PropertyNames.TextHaloWidth);
-            if (haloWidthJson != null) anyPresent = true;
             StyleProperty<float> haloWidth = haloWidthJson != null
                 ? new StyleProperty<float>(haloWidthJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
             // text-halo-blur: default 0
             JsonValue haloBlurJson = paint?.Get(PropertyNames.TextHaloBlur);
-            if (haloBlurJson != null) anyPresent = true;
             StyleProperty<float> haloBlur = haloBlurJson != null
                 ? new StyleProperty<float>(haloBlurJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
@@ -95,7 +85,6 @@ namespace MapRenderer.Unity.Style.Symbol
             // text-translate: [x, y] in pixels (constant — the components are scalars, not expressions).
             // Narrow to float at the JSON boundary (px offsets are small; double is pointless here).
             JsonValue translateJson = paint?.Get(PropertyNames.TextTranslate);
-            if (translateJson != null) anyPresent = true;
             float tx = 0f, ty = 0f;
             if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
             {
@@ -106,14 +95,12 @@ namespace MapRenderer.Unity.Style.Symbol
 
             // text-translate-anchor: "viewport" → Viewport, else map (default/unrecognized).
             JsonValue translateAnchorJson = paint?.Get(PropertyNames.TextTranslateAnchor);
-            if (translateAnchorJson != null) anyPresent = true;
             TextTranslateAnchor translateAnchor = translateAnchorJson?.AsString(null) == PropertyNames.TranslateAnchorViewport
                 ? TextTranslateAnchor.Viewport
                 : TextTranslateAnchor.Map;
 
             // icon-opacity: default 1.0
             JsonValue iconOpacityJson = paint?.Get(PropertyNames.IconOpacity);
-            if (iconOpacityJson != null) anyPresent = true;
             StyleProperty<float> iconOpacity = iconOpacityJson != null
                 ? new StyleProperty<float>(iconOpacityJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
@@ -128,7 +115,6 @@ namespace MapRenderer.Unity.Style.Symbol
                 Translate       = translate,
                 TranslateAnchor = translateAnchor,
                 IconOpacity     = iconOpacity,
-                IsInertFallback = !anyPresent,
             };
         }
     }

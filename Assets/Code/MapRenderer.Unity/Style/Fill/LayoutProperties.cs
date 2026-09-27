@@ -13,15 +13,12 @@ namespace MapRenderer.Unity.Style.Fill
     public sealed class LayoutProperties
     {
         /// <summary>
-        /// fill-sort-key: the within-layer draw order for this layer's features. Default 0. Zoom- and
-        /// feature-capable, so it is evaluated per feature at build time rather than bound as a uniform.
-        /// Features sort ascending: a HIGHER sort key draws ABOVE a lower one.
+        /// fill-sort-key: the within-layer draw order for this layer's features. Null when absent; the
+        /// builder then skips the sort and keeps declared order. Zoom- and feature-capable, so it is
+        /// evaluated per feature at build time rather than bound as a uniform. Features sort ascending:
+        /// a HIGHER key draws ABOVE a lower one.
         /// </summary>
         public StyleProperty<float> SortKey { get; init; }
-
-        /// <summary>True when <c>fill-sort-key</c> was absent — every feature sorts equal, so the builder can
-        /// skip the sort entirely and keep the source's declared feature order byte-for-byte.</summary>
-        public bool SortKeyIsDefault { get; init; }
 
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private LayoutProperties() { }
@@ -34,10 +31,9 @@ namespace MapRenderer.Unity.Style.Fill
             JsonValue sortKeyJson = layout?.Get(PropertyNames.FillSortKey);
             return new LayoutProperties
             {
-                SortKeyIsDefault = (sortKeyJson == null),
                 SortKey = sortKeyJson != null
                     ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(0f),
+                    : null,
             };
         }
     }

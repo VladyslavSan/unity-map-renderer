@@ -111,7 +111,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             IReadOnlyList<SelectedTileFeature> features, Fill.LayoutProperties layout, double zoom,
             TileBuildBuffers buffers)
         {
-            if (layout == null || layout.SortKeyIsDefault) return features;
+            if (layout?.SortKey == null) return features;
 
             int count = features.Count;
             float[] sortKeys;

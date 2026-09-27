@@ -246,6 +246,6 @@ Rejected alternatives that still constrain the mechanism:
 `fill-outline-color` is not a paint-plumbing property: it means real LINE geometry along the polygon boundary —
 what style authors fake with a second `line` layer drawn after the `fill`. It therefore shares the line
 tessellator, not the fill paint path, and is separate work. It is parsed (`Fill.PaintProperties.OutlineColor`,
-falling back to `fill-color` when absent) and bound to `_FillOutlineColor`, which no pass reads.
+null when absent) and bound to `_FillOutlineColor` only when set — a uniform no pass reads either way.
 
 `fill-extrusion` is a different layer type and is not covered here.

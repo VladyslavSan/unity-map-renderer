@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Style.FillExtrusion
     /// <c>fill-extrusion-*</c> key, as in <see cref="Fill.PaintProperties"/>. Non-obvious why:
     /// <see cref="Translate"/> goes through the expression engine, because the spec allows a zoom-interpolated
     /// translate that a raw <c>Items[0]/[1]</c> read would collapse to <c>[0, 0]</c>. Absent properties use
-    /// the spec defaults; <see cref="IsInertFallback"/> is true when all are absent.
+    /// the spec defaults.
     /// </summary>
     public sealed class PaintProperties
     {
@@ -60,32 +60,6 @@ namespace MapRenderer.Unity.Style.FillExtrusion
         /// </summary>
         public StyleProperty<float> TranslateAnchor { get; init; }
 
-        /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
-        public bool IsInertFallback { get; init; }
-
-        // ── Convenience accessors matching Fill.PaintProperties' API ────────────────────────────
-
-        /// <summary>Classification of the fill-extrusion-height expression.</summary>
-        public ExpressionKind HeightKind => Height.Kind;
-
-        /// <summary>Classification of the fill-extrusion-base expression.</summary>
-        public ExpressionKind BaseKind => Base.Kind;
-
-        /// <summary>Classification of the fill-extrusion-color expression.</summary>
-        public ExpressionKind ColorKind => Color.Kind;
-
-        /// <summary>Classification of the fill-extrusion-opacity expression.</summary>
-        public ExpressionKind OpacityKind => Opacity.Kind;
-
-        /// <summary>Classification of the fill-extrusion-vertical-gradient expression.</summary>
-        public ExpressionKind VerticalGradientKind => VerticalGradient.Kind;
-
-        /// <summary>Classification of the fill-extrusion-translate expression.</summary>
-        public ExpressionKind TranslateKind => Translate.Kind;
-
-        /// <summary>Classification of the fill-extrusion-translate-anchor expression.</summary>
-        public ExpressionKind TranslateAnchorKind => TranslateAnchor.Kind;
-
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
@@ -98,39 +72,32 @@ namespace MapRenderer.Unity.Style.FillExtrusion
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static PaintProperties Parse(JsonValue paint)
         {
-            bool anyPresent = false;
-
             // fill-extrusion-height: default 0
             JsonValue heightJson = paint?.Get(PropertyNames.FillExtrusionHeight);
-            if (heightJson != null) anyPresent = true;
             StyleProperty<float> height = heightJson != null
                 ? new StyleProperty<float>(heightJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
             // fill-extrusion-base: default 0
             JsonValue baseJson = paint?.Get(PropertyNames.FillExtrusionBase);
-            if (baseJson != null) anyPresent = true;
             StyleProperty<float> baseHeight = baseJson != null
                 ? new StyleProperty<float>(baseJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
             // fill-extrusion-color: default rgba(0,0,0,1)
             JsonValue colorJson = paint?.Get(PropertyNames.FillExtrusionColor);
-            if (colorJson != null) anyPresent = true;
             StyleProperty<Color> color = colorJson != null
                 ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
                 : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
 
             // fill-extrusion-opacity: default 1.0
             JsonValue opacityJson = paint?.Get(PropertyNames.FillExtrusionOpacity);
-            if (opacityJson != null) anyPresent = true;
             StyleProperty<float> opacity = opacityJson != null
                 ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
 
             // fill-extrusion-vertical-gradient: default true (1.0). Tolerates data-driven by falling to default.
             JsonValue verticalGradientJson = paint?.Get(PropertyNames.FillExtrusionVerticalGradient);
-            if (verticalGradientJson != null) anyPresent = true;
             StyleProperty<float> verticalGradient;
             if (verticalGradientJson != null)
             {
@@ -156,7 +123,6 @@ namespace MapRenderer.Unity.Style.FillExtrusion
             // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the class
             // doc). WrapBareArrayLiterals admits the constant bare [x, y] form, which the strict parser rejects.
             JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);
-            if (translateJson != null) anyPresent = true;
             StyleProperty<double2> translate;
             if (translateJson != null)
             {
@@ -189,7 +155,6 @@ namespace MapRenderer.Unity.Style.FillExtrusion
 
             // fill-extrusion-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.FillExtrusionTranslateAnchor);
-            if (anchorJson != null) anyPresent = true;
             float anchorVal = (anchorJson != null && anchorJson.AsString(null) == "viewport") ? 1.0f : 0.0f;
             StyleProperty<float> translateAnchor = new StyleProperty<float>(anchorVal);
 
@@ -202,7 +167,6 @@ namespace MapRenderer.Unity.Style.FillExtrusion
                 VerticalGradient = verticalGradient,
                 Translate        = translate,
                 TranslateAnchor  = translateAnchor,
-                IsInertFallback  = !anyPresent,
             };
         }
     }

@@ -1034,7 +1034,7 @@ namespace MapRenderer.Tests.Style
     /// <summary>
     /// <see cref="Fill.LayoutProperties"/>: parsing <c>fill-sort-key</c>.
     ///
-    /// <para>The ordering behaviour it drives is pinned engine-side by <c>FillSortKeySnapshotTests</c>;
+    /// <para>The ordering behaviour it drives is pinned engine-side by <c>FillSortKeyAndOpacityTests</c>;
     /// this fixture covers the parse, the default, and the zoom/feature capability that decides whether the
     /// key is evaluated per feature at build time or could be hoisted.</para>
     ///
@@ -1044,29 +1044,28 @@ namespace MapRenderer.Tests.Style
     public class FillLayoutTests
     {
         [Test]
-        public void SortKey_Absent_DefaultsToZeroAndFlagsDefault()
+        public void SortKey_Absent_IsNull()
         {
             var layout = TestStyle.FillLayout();
 
-            Assert.IsTrue(layout.SortKeyIsDefault,
-                "an absent fill-sort-key must be flagged so the builder can skip the sort entirely — that " +
+            Assert.IsNull(layout.SortKey,
+                "an absent fill-sort-key must be null so the builder can skip the sort entirely — that " +
                 "is what keeps existing fill meshes byte-identical.");
-            Assert.AreEqual(0f, layout.SortKey.Evaluate(0.0), 1e-9, "spec default is 0");
         }
 
         [Test]
-        public void SortKey_EmptyLayoutObject_IsStillDefault()
+        public void SortKey_EmptyLayoutObject_IsStillNull()
         {
             var layout = TestStyle.FillLayout("{}");
-            Assert.IsTrue(layout.SortKeyIsDefault, "a layout object without the key is the same as no layout");
+            Assert.IsNull(layout.SortKey, "a layout object without the key is the same as no layout");
         }
 
         [Test]
-        public void SortKey_Constant_IsParsedAndNotFlaggedDefault()
+        public void SortKey_Constant_IsParsedAndNotNull()
         {
             var layout = TestStyle.FillLayout(@"{""fill-sort-key"": 7}");
 
-            Assert.IsFalse(layout.SortKeyIsDefault, "an explicit key must NOT be treated as absent");
+            Assert.IsNotNull(layout.SortKey, "an explicit key must NOT be treated as absent");
             Assert.AreEqual(7f, layout.SortKey.Evaluate(0.0), 1e-9);
             Assert.AreEqual(ExpressionKind.Constant, layout.SortKey.Kind);
         }
@@ -1076,7 +1075,7 @@ namespace MapRenderer.Tests.Style
         {
             var layout = TestStyle.FillLayout(@"{""fill-sort-key"": [""interpolate"", [""linear""], [""zoom""], 0, 0, 10, 100]}");
 
-            Assert.IsFalse(layout.SortKeyIsDefault);
+            Assert.IsNotNull(layout.SortKey);
             Assert.IsTrue(layout.SortKey.IsZoomDependent, "a zoom expression must classify as zoom-dependent");
             Assert.AreEqual(0f,   layout.SortKey.Evaluate(0.0),  1e-4);
             Assert.AreEqual(100f, layout.SortKey.Evaluate(10.0), 1e-4);
@@ -1103,7 +1102,7 @@ namespace MapRenderer.Tests.Style
             }");
 
             var fillLayer = (Fill.StyleLayer)style.Layers[0];
-            Assert.IsFalse(fillLayer.Layout.SortKeyIsDefault, "the parser must route layout onto the typed layer");
+            Assert.IsNotNull(fillLayer.Layout.SortKey, "the parser must route layout onto the typed layer");
             Assert.AreEqual(3f, fillLayer.Layout.SortKey.Evaluate(0.0), 1e-9);
         }
     }
@@ -1434,15 +1433,6 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        [Test]
-        public void Paint_ExtensionKeyCountsAsPresent_SoTheLayerIsNotInert()
-        {
-            // IsInertFallback drives "this layer declared nothing" short-circuits; an extension-only paint
-            // block HAS declared something, so treating it as inert would silently drop the layer.
-            var paint = TestStyle.FillPaint(@"{""x-fill-pattern-metres"": 10}");
-            Assert.IsFalse(paint.IsInertFallback);
-        }
-
         // ── The paint side of the same defect ────────────────────────────────────────────────────
 
         /// <summary>
@@ -1500,9 +1490,8 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{\"fill-extrusion-height\":42}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.HeightKind, "a numeric literal must classify as Constant.");
+            Assert.AreEqual(ExpressionKind.Constant, fp.Height.Kind, "a numeric literal must classify as Constant.");
             Assert.AreEqual(42f, fp.Height.Evaluate(0.0), 1e-4f, "fill-extrusion-height must pin to its literal value.");
-            Assert.IsFalse(fp.IsInertFallback, "a layer with fill-extrusion-height set is not inert.");
         }
 
         [Test]
@@ -1511,9 +1500,8 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.HeightKind, "absent fill-extrusion-height must use spec default (Constant kind).");
+            Assert.AreEqual(ExpressionKind.Constant, fp.Height.Kind, "absent fill-extrusion-height must use spec default (Constant kind).");
             Assert.AreEqual(0f, fp.Height.Evaluate(0.0), 1e-6f, "default fill-extrusion-height must be 0.");
-            Assert.IsTrue(fp.IsInertFallback, "a layer with no paint properties set must be flagged IsInertFallback.");
         }
 
         [Test]
@@ -1524,7 +1512,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, fp.HeightKind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(ExpressionKind.Zoom, fp.Height.Kind, "a zoom-interpolate expression must classify as Zoom.");
             Assert.AreEqual(0f, fp.Height.Evaluate(10.0), 0.01f);
             Assert.AreEqual(50f, fp.Height.Evaluate(16.0), 0.01f);
         }
@@ -1536,7 +1524,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, fp.HeightKind, "a [\"get\",...] expression must classify as Feature.");
+            Assert.AreEqual(ExpressionKind.Feature, fp.Height.Kind, "a [\"get\",...] expression must classify as Feature.");
             Assert.IsTrue(fp.Height.DependsOnFeature);
         }
 
@@ -1548,7 +1536,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{\"fill-extrusion-base\":5}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.BaseKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Base.Kind);
             Assert.AreEqual(5f, fp.Base.Evaluate(0.0), 1e-4f, "fill-extrusion-base must pin to its literal value.");
         }
 
@@ -1569,7 +1557,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, fp.BaseKind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(ExpressionKind.Zoom, fp.Base.Kind, "a zoom-interpolate expression must classify as Zoom.");
             Assert.AreEqual(0f, fp.Base.Evaluate(10.0), 0.01f);
             Assert.AreEqual(4f, fp.Base.Evaluate(16.0), 0.01f);
         }
@@ -1581,7 +1569,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, fp.BaseKind, "a [\"get\",...] expression must classify as Feature.");
+            Assert.AreEqual(ExpressionKind.Feature, fp.Base.Kind, "a [\"get\",...] expression must classify as Feature.");
             Assert.IsTrue(fp.Base.DependsOnFeature);
         }
 
@@ -1593,7 +1581,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{\"fill-extrusion-color\":[\"rgba\",200,100,50,1]}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.ColorKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Color.Kind);
             var c = fp.Color.Evaluate(0.0);
             Assert.AreEqual(200.0 / 255.0, c.R, 1e-3, "Red channel must match rgba(200,100,50,1).");
             Assert.AreEqual(100.0 / 255.0, c.G, 1e-3, "Green channel must match rgba(200,100,50,1).");
@@ -1606,7 +1594,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.ColorKind, "absent fill-extrusion-color must use spec default (Constant kind).");
+            Assert.AreEqual(ExpressionKind.Constant, fp.Color.Kind, "absent fill-extrusion-color must use spec default (Constant kind).");
             var c = fp.Color.Evaluate(0.0);
             Assert.AreEqual(0.0, c.R, 1e-4, "Default fill-extrusion-color R must be 0 (black).");
             Assert.AreEqual(0.0, c.G, 1e-4, "Default fill-extrusion-color G must be 0 (black).");
@@ -1623,7 +1611,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, fp.ColorKind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(ExpressionKind.Zoom, fp.Color.Kind, "a zoom-interpolate expression must classify as Zoom.");
 
             var atMin = fp.Color.Evaluate(10.0);
             Assert.AreEqual(1.0, atMin.R, 1e-3, "At zoom=10, interpolated color must be the first stop (red).");
@@ -1644,7 +1632,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, fp.ColorKind, "a [\"match\",[\"get\",...],...] expression must classify as Feature.");
+            Assert.AreEqual(ExpressionKind.Feature, fp.Color.Kind, "a [\"match\",[\"get\",...],...] expression must classify as Feature.");
             Assert.IsTrue(fp.Color.DependsOnFeature);
         }
 
@@ -1656,7 +1644,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.OpacityKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Opacity.Kind);
             Assert.AreEqual(1.0f, fp.Opacity.Evaluate(0.0), 1e-6f, "default fill-extrusion-opacity must be 1.0.");
         }
 
@@ -1677,7 +1665,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, fp.OpacityKind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(ExpressionKind.Zoom, fp.Opacity.Kind, "a zoom-interpolate expression must classify as Zoom.");
             Assert.AreEqual(0.2f, fp.Opacity.Evaluate(10.0), 0.01f);
             Assert.AreEqual(1.0f, fp.Opacity.Evaluate(16.0), 0.01f);
         }
@@ -1689,7 +1677,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, fp.OpacityKind, "a [\"get\",...] expression must classify as Feature.");
+            Assert.AreEqual(ExpressionKind.Feature, fp.Opacity.Kind, "a [\"get\",...] expression must classify as Feature.");
             Assert.IsTrue(fp.Opacity.DependsOnFeature);
         }
 
@@ -1747,11 +1735,10 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{\"fill-extrusion-translate\":[12,-4]}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind);
             var t = fp.Translate.Evaluate(0.0);
             Assert.AreEqual(12.0, t.x, 1e-6, "fill-extrusion-translate.x must pin to its literal value.");
             Assert.AreEqual(-4.0, t.y, 1e-6, "fill-extrusion-translate.y must pin to its literal value.");
-            Assert.IsFalse(fp.IsInertFallback, "a layer with fill-extrusion-translate set is not inert.");
         }
 
         [Test]
@@ -1760,7 +1747,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind);
+            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind);
             var t = fp.Translate.Evaluate(0.0);
             Assert.AreEqual(0.0, t.x, 1e-6);
             Assert.AreEqual(0.0, t.y, 1e-6);
@@ -1777,7 +1764,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, fp.TranslateKind,
+            Assert.AreEqual(ExpressionKind.Zoom, fp.Translate.Kind,
                 "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
 
             var atMin = fp.Translate.Evaluate(10.0);
@@ -1798,22 +1785,11 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLayer("{\"fill-extrusion-translate\":[\"get\",\"offset\"]}");
             var fp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind,
+            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind,
                 "a data-driven translate must fall back to the Constant default, not classify as Feature.");
             var t = fp.Translate.Evaluate(0.0);
             Assert.AreEqual(0.0, t.x, 1e-6);
             Assert.AreEqual(0.0, t.y, 1e-6);
-        }
-
-        // ── inert fallback / null paint ───────────────────────────────────────
-
-        [Test]
-        public void NullPaint_IsInertFallback()
-        {
-            var layer = MakeLayer(null);
-            var fp    = layer.Paint;
-
-            Assert.IsTrue(fp.IsInertFallback, "a layer with null Paint must be IsInertFallback.");
         }
 
         // ── StyleParser dispatch (Core half) ─────────────────────────────────────
@@ -1851,8 +1827,7 @@ namespace MapRenderer.Tests.Style
     /// <summary>
     /// <see cref="Line.PaintProperties"/> / <see cref="Line.LayoutProperties"/>:
     /// classification, pinned values, translate-array parse (one <c>StyleProperty&lt;double2&gt;</c>), anchor
-    /// encoding, pattern-name capture, join/cap layout parse into <c>JoinType</c>/<c>CapType</c>, and
-    /// inert fallback.
+    /// encoding, pattern-name capture, and join/cap layout parse into <c>JoinType</c>/<c>CapType</c>.
     /// </summary>
     [TestFixture]
     public class LinePaintTests
@@ -1878,12 +1853,10 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{\"line-color\":[\"rgba\",255,0,0,1]}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.ColorKind,
+            Assert.AreEqual(ExpressionKind.Constant, lp.Color.Kind,
                 "An rgba(...) literal must classify as Constant.");
             Assert.IsFalse(lp.Color.DependsOnFeature,
                 "Constant color must not depend on feature.");
-            Assert.IsFalse(lp.IsInertFallback,
-                "A layer with line-color set is not inert.");
 
             // Pinned: rgba(255,0,0,1) → R=1, G=0, B=0.
             var c = lp.Color.Evaluate(0.0);
@@ -1902,7 +1875,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer(paintJson);
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, lp.WidthKind,
+            Assert.AreEqual(ExpressionKind.Zoom, lp.Width.Kind,
                 "A zoom-interpolate expression must classify as Zoom.");
             Assert.IsFalse(lp.Width.DependsOnFeature, "Zoom width must not depend on feature.");
 
@@ -1929,11 +1902,10 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer(paintJson);
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Feature, lp.ColorKind,
+            Assert.AreEqual(ExpressionKind.Feature, lp.Color.Kind,
                 "A [\"get\",...] match expression must classify as Feature.");
             Assert.IsTrue(lp.Color.DependsOnFeature,
                 "Data-driven color must DependsOnFeature.");
-            Assert.IsFalse(lp.IsInertFallback);
         }
 
         // ── Absent line-color → Constant kind (spec default #000000) ────────────
@@ -1944,7 +1916,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.ColorKind,
+            Assert.AreEqual(ExpressionKind.Constant, lp.Color.Kind,
                 "Absent line-color must use spec default (Constant kind).");
             Assert.IsFalse(lp.Color.DependsOnFeature);
 
@@ -1952,9 +1924,6 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0.0, c.R, 1e-4, "Default line-color R must be 0 (black).");
             Assert.AreEqual(0.0, c.G, 1e-4, "Default line-color G must be 0 (black).");
             Assert.AreEqual(0.0, c.B, 1e-4, "Default line-color B must be 0 (black).");
-
-            Assert.IsTrue(lp.IsInertFallback,
-                "A layer with no paint properties set must be flagged IsInertFallback.");
         }
 
         // ── Absent line-opacity → Constant 1.0 ─────────────────────────────────
@@ -1965,7 +1934,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.OpacityKind);
+            Assert.AreEqual(ExpressionKind.Constant, lp.Opacity.Kind);
             float v = lp.Opacity.Evaluate(0.0);
             Assert.AreEqual(1.0f, v, 1e-6f, "Default line-opacity must be 1.0.");
         }
@@ -1978,7 +1947,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.WidthKind);
+            Assert.AreEqual(ExpressionKind.Constant, lp.Width.Kind);
             float v = lp.Width.Evaluate(0.0);
             Assert.AreEqual(1.0f, v, 1e-6f, "Default line-width must be 1.0.");
         }
@@ -2017,7 +1986,6 @@ namespace MapRenderer.Tests.Style
 
             float v = lp.GapWidth.Evaluate(0.0);
             Assert.AreEqual(8.0f, v, 1e-6f, "line-gap-width must be 8.0.");
-            Assert.IsFalse(lp.IsInertFallback);
         }
 
         // ── line-translate [16, -8] → double2 pinned ───────────────────────────
@@ -2028,7 +1996,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{\"line-translate\":[16,-8]}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.TranslateKind);
+            Assert.AreEqual(ExpressionKind.Constant, lp.Translate.Kind);
             var t = lp.Translate.Evaluate(0.0);
             Assert.AreEqual(16.0, t.x, 1e-6, "line-translate x must be 16.");
             Assert.AreEqual(-8.0, t.y, 1e-6, "line-translate y must be -8.");
@@ -2042,7 +2010,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{\"line-translate-anchor\":\"viewport\"}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.TranslateAnchorKind);
+            Assert.AreEqual(ExpressionKind.Constant, lp.TranslateAnchor.Kind);
             float v = lp.TranslateAnchor.Evaluate(0.0);
             Assert.AreEqual(1.0f, v, 1e-6f, "line-translate-anchor 'viewport' must encode as 1.0.");
         }
@@ -2127,11 +2095,10 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer("{\"line-offset\":5}");
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Constant, lp.OffsetKind,
+            Assert.AreEqual(ExpressionKind.Constant, lp.Offset.Kind,
                 "A numeric line-offset must classify as Constant.");
             float v = lp.Offset.Evaluate(0.0);
             Assert.AreEqual(5.0f, v, 1e-6f, "line-offset must evaluate to 5.0.");
-            Assert.IsFalse(lp.IsInertFallback);
         }
 
         [Test]
@@ -2161,7 +2128,7 @@ namespace MapRenderer.Tests.Style
             var layer = MakeLineLayer(json);
             var lp    = layer.Paint;
 
-            Assert.AreEqual(ExpressionKind.Zoom, lp.OffsetKind,
+            Assert.AreEqual(ExpressionKind.Zoom, lp.Offset.Kind,
                 "A zoom-interpolate line-offset must classify as Zoom kind.");
         }
 
@@ -2174,18 +2141,6 @@ namespace MapRenderer.Tests.Style
             var lp    = layer.Paint;
 
             Assert.AreEqual("road_shield", lp.PatternName, "line-pattern must be read as PatternName.");
-            Assert.IsFalse(lp.IsInertFallback);
-        }
-
-        // ── Null paint → IsInertFallback ────────────────────────────────────────
-
-        [Test]
-        public void LinePaint_NullPaint_IsInertFallback()
-        {
-            var layer = MakeLineLayer(null);
-            var lp    = layer.Paint;
-
-            Assert.IsTrue(lp.IsInertFallback, "A layer with null Paint must be IsInertFallback.");
         }
 
         // ── PropertyNames value constants ───────────────────────────────────────
@@ -2243,16 +2198,6 @@ namespace MapRenderer.Tests.Style
 
             Assert.AreEqual(1.0f, bp.Opacity.Evaluate(0.0), 1e-6f, "Default background-opacity must be 1.0.");
             Assert.IsNull(bp.PatternName, "Default background-pattern must be null.");
-            Assert.IsTrue(bp.IsInertFallback, "A layer with no paint properties set must be IsInertFallback.");
-        }
-
-        [Test]
-        public void BackgroundPaint_NullPaint_IsInertFallback()
-        {
-            var layer = MakeBackgroundLayer(null);
-            var bp    = layer.Paint;
-
-            Assert.IsTrue(bp.IsInertFallback, "A layer with null Paint must be IsInertFallback.");
         }
 
         // ── Explicit parse ────────────────────────────────────────────────────────
@@ -2267,7 +2212,6 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1.0, c.R, 1e-4, "Red channel must be 1.0 for #ff0000.");
             Assert.AreEqual(0.0, c.G, 1e-4);
             Assert.AreEqual(0.0, c.B, 1e-4);
-            Assert.IsFalse(bp.IsInertFallback);
         }
 
         [Test]
@@ -2289,7 +2233,6 @@ namespace MapRenderer.Tests.Style
             var bp    = layer.Paint;
 
             Assert.AreEqual(0.5f, bp.Opacity.Evaluate(0.0), 1e-6f);
-            Assert.IsFalse(bp.IsInertFallback);
         }
 
         [Test]
@@ -2299,7 +2242,6 @@ namespace MapRenderer.Tests.Style
             var bp    = layer.Paint;
 
             Assert.AreEqual("stripes", bp.PatternName);
-            Assert.IsFalse(bp.IsInertFallback);
         }
 
         // ── Zoom classification ──────────────────────────────────────────────────
@@ -2405,7 +2347,6 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1f, sym.Paint.Opacity.Evaluate(0.0), 1e-6, "text-opacity default is 1");
             Assert.AreEqual(new float2(0, 0), sym.Paint.Translate, "text-translate default is [0,0]");
             Assert.AreEqual(TextTranslateAnchor.Map, sym.Paint.TranslateAnchor, "text-translate-anchor default is map");
-            Assert.IsTrue(sym.Paint.IsInertFallback, "an empty paint sub-tree is an inert fallback");
 
             // Slice A layout defaults.
             Assert.AreEqual(TextAnchor.Center, sym.Layout.TextAnchor, "text-anchor default is center");
@@ -2455,7 +2396,6 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(sym.Layout.IconIgnorePlacement, "icon-ignore-placement:true must parse to true");
 
             Assert.AreEqual(0.5f, sym.Paint.IconOpacity.Evaluate(0.0), 1e-6);
-            Assert.IsFalse(sym.Paint.IsInertFallback, "an icon-opacity-only paint sub-tree is NOT an inert fallback");
         }
 
         // ── C1 — icon-optional / text-optional parse as plain layout booleans ──────────────────────────────
@@ -3256,7 +3196,7 @@ namespace MapRenderer.Tests.Style
                     "resolve, or the 'keep both in sync' instruction is unfollowable.");
         }
 
-        // ── LinePaint.HasDashArray parse integration ──────────────────────────────────────────
+        // ── LinePaint.DashArray parse integration ─────────────────────────────────────────────
 
         private static Line.StyleLayer MakeDashLayer(string paintJson)
         {
@@ -3271,32 +3211,21 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void LinePaint_HasDashArray_FalseWhenAbsent()
+        public void LinePaint_DashArray_NullWhenAbsent()
         {
             var layer = MakeDashLayer("{\"line-width\":2}");
             var paint = layer.Paint;
-            Assert.That(paint.HasDashArray, Is.False);
             Assert.That(paint.DashArray, Is.Null);
         }
 
         [Test]
-        public void LinePaint_HasDashArray_TrueWhenPresent()
+        public void LinePaint_DashArray_ParsedWhenPresent()
         {
             var layer = MakeDashLayer("{\"line-dasharray\":[2,1]}");
             var paint = layer.Paint;
-            Assert.That(paint.HasDashArray, Is.True);
             Assert.That(paint.DashArray, Is.Not.Null);
             Assert.That(paint.DashArrayKind,
                 Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant));
-        }
-
-        [Test]
-        public void LinePaint_HasDashArray_IsNotInertFallback()
-        {
-            var layer = MakeDashLayer("{\"line-dasharray\":[2,1]}");
-            var paint = layer.Paint;
-            Assert.That(paint.IsInertFallback, Is.False,
-                "Line layer with line-dasharray must not be IsInertFallback.");
         }
 
         // ── Helper: count on-cycles over a line span ──────────────────────────────────────────

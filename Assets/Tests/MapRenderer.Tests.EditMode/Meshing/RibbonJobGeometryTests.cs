@@ -294,9 +294,9 @@ namespace MapRenderer.Tests.Meshing
             var paint = paintLayer.Paint;
             var layout = paintLayer.Layout;
 
-            // Confirm the paint classified WidthKind as Feature (gate for the bake).
-            Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.WidthKind,
-                "WidthKind must be Feature for a [\"get\",...] match expression.");
+            // Confirm the paint classified Width.Kind as Feature (gate for the bake).
+            Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.Width.Kind,
+                "Width.Kind must be Feature for a [\"get\",...] match expression.");
 
             var mda = Mesh.AllocateWritableMeshData(1);
             // The builder BORROWS the source-layer buffer; the caller mints and frees it. The
@@ -363,9 +363,9 @@ namespace MapRenderer.Tests.Meshing
             var paint = paintLayer.Paint;
             var layout = paintLayer.Layout;
 
-            // Confirm the paint classified OpacityKind as Feature.
-            Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.OpacityKind,
-                "OpacityKind must be Feature for a [\"get\",...] match expression.");
+            // Confirm the paint classified Opacity.Kind as Feature.
+            Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.Opacity.Kind,
+                "Opacity.Kind must be Feature for a [\"get\",...] match expression.");
 
             var mda = Mesh.AllocateWritableMeshData(1);
             // The builder BORROWS the source-layer buffer; the caller mints and frees it. The
