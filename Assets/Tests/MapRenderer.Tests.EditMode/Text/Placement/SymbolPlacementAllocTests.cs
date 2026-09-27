@@ -36,7 +36,7 @@ using MapRenderer.Unity.Jobs.Symbols;
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Tests; // TestGlyphSource
 using SymbolStyle = MapRenderer.Unity.Style.Symbol;

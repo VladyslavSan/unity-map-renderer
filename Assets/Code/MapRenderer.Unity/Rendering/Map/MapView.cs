@@ -370,10 +370,11 @@ namespace MapRenderer.Unity.Rendering.Map
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
             CommitProbe?.Invoke(CommitPhase.LayersBuilt);
-            // Token = styleId + Root + built numbering + FillAntialiasing (bakes into vertices,
-            // not a uniform — a toggle changes neither Root's bytes nor the numbering) — set AFTER Build.
+            // See StyleToken's own doc for what the digest folds in and why; set AFTER Build, since it
+            // needs the built layer numbering.
             TileManager.CurrentStyle = new Tile.StyleToken(JsonCanonical.CacheKey(
-                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing));
+                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing
+                + "|src=" + ResolvedSourceIdentity(specs)));
             CommitProbe?.Invoke(CommitPhase.StyleTokenWritten);
             LogSkippedLayers(Layers.SkippedLayers); // once per style load, never per tile/frame
             // Non-obvious why: Build seeds px uniforms at ratio 1, and this async continuation can resume after this
@@ -391,6 +392,7 @@ namespace MapRenderer.Unity.Rendering.Map
                     _symbolRenderLayers.Add(s);
                 }
 
+            SymbolSubsystem.DevicePixelRatio = _config.DevicePixelRatio;
             SymbolSubsystem.SetStyle(_style,
                 _symbolStyleLayers); // group symbol layers + (re)build the shared glyph pipeline
             CommitProbe?.Invoke(CommitPhase.SymbolStyleApplied);
@@ -445,7 +447,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>
         /// Resolves each rendered source-id of <paramref name="style"/> into a
         /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
-        /// fetch); a <c>url</c>-only source fetches its TileJSON once. A failed TileJSON skips that source only.
+        /// fetch); a <c>url</c>-only source fetches its TileJSON once; a geojson source whose <c>data</c> is
+        /// a URL string fetches it the same way. A failed fetch skips that source only.
         /// It runs before <see cref="Rendering.Layers.RenderLayerSet.Build"/>, so it walks the raw style layers through
         /// <see cref="Rendering.Layers.RenderLayerFactory.TryGetFetchSource"/>, the one registry of fetching layers.
         /// </summary>
@@ -476,21 +479,31 @@ namespace MapRenderer.Unity.Rendering.Map
                     continue;
                 }
 
-                // A geojson source is sliced locally, with no TileJSON, tiles[] or byte fetcher, so it branches
-                // before the TileJSON fetch and the no-tiles skip. A bad source is skipped, never a thrown SetStyle.
+                // A geojson source is sliced locally, with no tiles[] or byte fetcher, so it branches before
+                // the TileJSON fetch and the no-tiles skip; a URL `data` is the one thing it still fetches,
+                // through the same loader. A bad source is skipped, never a thrown SetStyle.
                 if (def.Type == SourceType.GeoJson)
                 {
-                    if (def.Data == null || !def.Data.IsObject)
-                    {
-                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an INLINE object " +
-                                         "`data` (a URL-valued `data` is not supported yet) — skipped.");
-                        continue;
-                    }
-
                     GeoJson.GeoJsonDataset parsed;
                     try
                     {
-                        parsed = GeoJson.GeoJsonParser.Parse(def.Data);
+                        if (def.Data != null && def.Data.Kind == JsonKind.String)
+                        {
+                            // A URL `data`: one document fetch through the same loader TileJSON uses, before
+                            // anything is mutated — BuildSourceSpecs is already SetStyle's one pre-mutation await.
+                            string text = await loader(def.Data.AsString(), ct);
+                            parsed = GeoJson.GeoJsonParser.Parse(text);
+                        }
+                        else if (def.Data != null && def.Data.IsObject)
+                        {
+                            parsed = GeoJson.GeoJsonParser.Parse(def.Data);
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an inline object " +
+                                             "or URL string `data` — skipped.");
+                            continue;
+                        }
                     }
                     catch (System.OperationCanceledException)
                     {
@@ -498,16 +511,25 @@ namespace MapRenderer.Unity.Rendering.Map
                     }
                     catch (System.Exception ex)
                     {
-                        // System.Exception, not only GeoJsonFormatException: any other parser throw would fault
-                        // SetStyle for the whole style over one bad source. Cancellation is rethrown above.
-                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to parse: " +
+                        // System.Exception, not only GeoJsonFormatException: any other parser or loader throw
+                        // would fault SetStyle for the whole style over one bad source. Cancellation is
+                        // rethrown above.
+                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to load or parse: " +
                                          $"{ex.Message}. Source skipped.");
                         continue;
                     }
 
-                    // Slice options are per-source by design; v1 has no style key for them, so the default is
-                    // supplied HERE, at the wiring site, and the source keeps taking them as a parameter.
-                    var geoJsonOptions = GeoJson.GeoJsonSliceOptions.Default;
+                    // Slice options are per-source, supplied HERE at the wiring site. An authored `buffer`
+                    // (Style Spec [0, 512], 512 = one tile width = 4096 reference units, hence x8) overrides
+                    // the margin; absent (def.Buffer null) keeps GeoJsonSliceOptions.Default's margin.
+                    var geoJsonOptions = def.Buffer is double buffer
+                        ? new GeoJson.GeoJsonSliceOptions
+                        {
+                            Extent                  = GeoJson.GeoJsonSliceOptions.DefaultExtent,
+                            BufferAtReferenceExtent = buffer * (TileBufferClip.ReferenceExtent / 512.0),
+                            SimplifyTolerance       = 0.0,
+                        }
+                        : GeoJson.GeoJsonSliceOptions.Default;
                     specs.Add(new Tile.TileManager.SourceSpec(
                         sid, Tile.TileManager.SourceKey.From(def), def.MinZoom, def.MaxZoom,
                         () => new Tile.Processing.GeoJsonTileFeatureSource(parsed, geoJsonOptions, scheduler)));
@@ -515,12 +537,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 }
 
                 // Fetch + resolve the TileJSON ONCE when the source is url-only (inline tiles[] short-circuits).
+                TileJson resolvedTileJson = null;
                 if (SourceResolver.NeedsTileJson(def))
                 {
                     try
                     {
                         string tjText = await loader(def.Url, ct);
-                        SourceResolver.Resolve(def, TileJsonParser.Parse(tjText));
+                        resolvedTileJson = TileJsonParser.Parse(tjText);
+                        SourceResolver.Resolve(def, resolvedTileJson);
                     }
                     catch (System.OperationCanceledException)
                     {
@@ -541,17 +565,55 @@ namespace MapRenderer.Unity.Rendering.Map
                 }
 
                 var address = new TileUrlTemplate { Template = def.Tiles[0], Tms = def.Scheme == "tms" };
-                var    key      = Tile.TileManager.SourceKey.From(def);
-                // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource
-                // seam — TileManager never names the byte-level type.
+                // def.Bounds/BoundsMalformed reflect whichever JSON supplied `bounds` (TileJSON or the
+                // source's own — SourceResolver.Resolve carries both), validated below before the key.
+                Tile.GeoBounds bounds = ValidateBounds(def.Bounds, def.BoundsMalformed, sid);
+                var            key    = Tile.TileManager.SourceKey.From(def, bounds);
+
+                // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource seam.
+                // A `"tms"` scheme flips only the fetch address (inside TileUrlTemplate); everything
+                // downstream keeps XYZ addressing.
                 specs.Add(new Tile.TileManager.SourceSpec(
                     sid, key, def.MinZoom, def.MaxZoom,
-                    () => new Tile.Processing.MvtTileFeatureSource(factory(address), scheduler)));
+                    () => new Tile.Processing.MvtTileFeatureSource(factory(address), scheduler),
+                    bounds));
             }
 
             return specs;
         }
 
+        /// <summary>Converts a resolved, already-validated <c>bounds</c> array to <see cref="Tile.GeoBounds"/>.
+        /// <paramref name="malformed"/> (<see cref="Style.SourceDefinition.BoundsMalformed"/>) is the
+        /// parser's verdict, read here rather than re-inspecting raw JSON. Malformed warns once and returns
+        /// <c>default</c> (no gate); otherwise <paramref name="parsedBounds"/> converts unchanged.</summary>
+        private static Tile.GeoBounds ValidateBounds(double[] parsedBounds, bool malformed, string sourceId)
+        {
+            if (malformed)
+            {
+                Debug.LogWarning($"[MapView.SetStyle] source '{sourceId}' has a malformed bounds (need " +
+                                  "[west, south, east, north] as 4 numbers, south <= north, longitudes in " +
+                                  "[-180, 180]) — ignored, no bounds gate.");
+                return default;
+            }
+
+            return new Tile.GeoBounds
+            {
+                West = parsedBounds[0], South = parsedBounds[1],
+                East = parsedBounds[2], North = parsedBounds[3],
+                HasBounds = true,
+            };
+        }
+
+        /// <summary>Joins every spec's <c>(SourceId, resolved SourceKey)</c> in order — the style-token
+        /// input <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s full-rebuild arm folds in,
+        /// so two loads that resolve a source differently never share a prepared-cache key.</summary>
+        private static string ResolvedSourceIdentity(List<Tile.TileManager.SourceSpec> specs)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < specs.Count; i++)
+                sb.Append(specs[i].SourceId).Append('=').Append(specs[i].Key).Append(';');
+            return sb.ToString();
+        }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 

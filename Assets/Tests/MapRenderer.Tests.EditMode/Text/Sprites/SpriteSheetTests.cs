@@ -3,26 +3,35 @@
 // Fetch gating, then sheet decode, then source.
 //
 // Contents:
-//   SpriteFetchGatingTests  — the sprite sheet must be fetched for a style that has no symbol layers.
-//   SpriteSheetTests        — SpriteSheet decodes the fixture sprite PNG, repacks it with a one-texel transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord (x,y) — of the repacked index — reads back at Texture2D.GetPixel(x,y).
-//   SpriteSourceTests       — FixtureSpriteSource serves the committed fixture sheet (mirrors FixtureGlyphSource's role for glyphs), and SpriteSourceFactory's missing-URL resilience seam (a style with no sprite URL returns null rather than throwing — icons are optional,…
+//   SpriteFetchGatingTests          — the sprite sheet must be fetched for a style that has no symbol layers.
+//   SpriteSheetTests                — SpriteSheet decodes the fixture sprite PNG, repacks it with a one-texel transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord (x,y) — of the repacked index — reads back at Texture2D.GetPixel(x,y).
+//   SpriteSourceTests               — FixtureSpriteSource serves the committed fixture sheet (mirrors FixtureGlyphSource's role for glyphs), and SpriteSourceFactory's missing-URL resilience seam (a style with no sprite entries returns an empty list rather than throwing — icons are optional,…
+//   SpriteSourceFactoryRatioTests   — the @2x suffix decision from the device pixel ratio, and SpriteSheetSource's 404-on-@2x fallback to 1x.
+//   DevicePixelRatioWiringTests     — MapView.Config.DevicePixelRatio reaches SymbolSubsystem's sprite-source factory.
 
 using System.Collections;
+using System.Collections.Generic;
+using System.Net;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Tile; // UniTaskParkExtensions.WaitOffPlayerLoop
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using System;
 using System.IO;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using System.Text.RegularExpressions;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Source;
+using MapRenderer.Tests.DataSources;
 using Object = UnityEngine.Object;
 
 
@@ -62,10 +71,10 @@ namespace MapRenderer.Tests.Text.Sprites
             using var subsystem = new SymbolSubsystem(mapCamera);
             {
                 int fetches = 0;
-                subsystem.SpriteSourceFactoryOverride = _ =>
+                subsystem.SpriteSourceFactoryOverride = (_, _) =>
                 {
                     fetches++;
-                    return new FixtureSpriteSource();
+                    return new[] { ("default", (ISpriteSource)new FixtureSpriteSource()) };
                 };
 
                 // No symbol layers at all — the case an early return on "no symbol layers" would swallow.
@@ -90,6 +99,115 @@ namespace MapRenderer.Tests.Text.Sprites
                     MapRenderer.Unity.Style.Fill.FillPattern.TryResolve("marker", subsystem.SpriteAtlas, out _),
                     "the fixture sheet's 'marker' sprite must resolve through the delivered atlas");
             }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SpriteSheetMergeTests — array-form root `sprite`: N sheets merge into one atlas
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class SpriteSheetMergeTests : BaseTestFixture
+    {
+        /// <summary>A tiny solid-color sheet with one sprite named "x" covering the whole image.</summary>
+        private static (byte[] Png, string Json) BuildOneSpriteFixture(int size, Color32 color)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, mipChain: false);
+            try
+            {
+                var pixels = new Color32[size * size];
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = color;
+                tex.SetPixels32(pixels);
+                tex.Apply(updateMipmaps: false);
+                byte[] png = tex.EncodeToPNG();
+                string json = $"{{\"x\":{{\"width\":{size},\"height\":{size},\"x\":0,\"y\":0,\"pixelRatio\":1}}}}";
+                return (png, json);
+            }
+            finally
+            {
+                Object.DestroyImmediate(tex);
+            }
+        }
+
+        [Test]
+        public void TwoSheets_DefaultUnprefixed_OtherIdPrefixed_DistinctRects()
+        {
+            (byte[] defaultPng, string defaultJson) = BuildOneSpriteFixture(4, new Color32(255, 0, 0, 255));
+            (byte[] aPng, string aJson) = BuildOneSpriteFixture(6, new Color32(0, 255, 0, 255));
+
+            var sheets = new (string Id, byte[] Png, SpriteIndex Index)[]
+            {
+                ("default", defaultPng, SpriteIndex.Parse(defaultJson)),
+                ("a", aPng, SpriteIndex.Parse(aJson)),
+            };
+
+            using var sheet = new SpriteSheet(sheets);
+
+            Assert.IsTrue(sheet.View.Index.TryGetSprite("x", out SpriteEntry defaultEntry),
+                "the default sheet's name must stay unprefixed");
+            Assert.IsTrue(sheet.View.Index.TryGetSprite("a:x", out SpriteEntry aEntry),
+                "the non-default sheet's name must be prefixed 'id:name'");
+            Assert.IsFalse(sheet.View.Index.TryGetSprite("default:x", out _),
+                "the default id must never itself be used as a prefix");
+
+            Assert.AreEqual(4, defaultEntry.Width);
+            Assert.AreEqual(6, aEntry.Width);
+            Assert.AreNotEqual((defaultEntry.X, defaultEntry.Y), (aEntry.X, aEntry.Y),
+                "the two sheets must occupy distinct, non-overlapping rects, not one overwriting the other");
+        }
+
+        [UnityTest]
+        public IEnumerator OneSheetMissing_TheOtherSheetsIconStillWorks()
+        {
+            var go  = Track(new GameObject("SpriteMergeMissingHost"));
+            var cam = go.AddComponent<Camera>();
+            var mapCamera = new MapCamera(cam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
+                zoom: 5.0, heading: 0.0, tilt: 0.0));
+            using var subsystem = new SymbolSubsystem(mapCamera);
+
+            subsystem.SpriteSourceFactoryOverride = (_, _) => new (string, ISpriteSource)[]
+            {
+                ("default", new FixtureSpriteSource()),
+                ("missing", new GatedSpriteSource(_ => UniTask.FromResult(SpriteResponse.Absent()))),
+            };
+
+            var style = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+            subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
+
+            for (int i = 0; i < 8 && subsystem.SpriteAtlas == null; i++) yield return null;
+
+            Assert.IsNotNull(subsystem.SpriteAtlas,
+                "the surviving sheet must still reach SpriteAtlas even though the other sheet was missing");
+            Assert.IsTrue(subsystem.SpriteAtlas.Index.TryGetSprite("marker", out _),
+                "the working sheet's icon must resolve — a missing sheet must drop only its own names");
+        }
+
+        [UnityTest]
+        public IEnumerator OneSheetThrows_TheOtherSheetsIconStillWorks()
+        {
+            var go  = Track(new GameObject("SpriteMergeThrowHost"));
+            var cam = go.AddComponent<Camera>();
+            var mapCamera = new MapCamera(cam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
+                zoom: 5.0, heading: 0.0, tilt: 0.0));
+            using var subsystem = new SymbolSubsystem(mapCamera);
+
+            subsystem.SpriteSourceFactoryOverride = (_, _) => new (string, ISpriteSource)[]
+            {
+                ("default", new FixtureSpriteSource()),
+                ("broken", new GatedSpriteSource(_ => throw new InvalidOperationException("simulated fetch failure"))),
+            };
+
+            var style = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+            subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
+
+            for (int i = 0; i < 8 && subsystem.SpriteAtlas == null; i++) yield return null;
+
+            Assert.IsNotNull(subsystem.SpriteAtlas,
+                "the surviving sheet must still reach SpriteAtlas even though the other sheet's fetch threw");
+            Assert.IsTrue(subsystem.SpriteAtlas.Index.TryGetSprite("marker", out _),
+                "the working sheet's icon must resolve — a per-sheet fetch exception must drop only that sheet");
         }
     }
 
@@ -268,8 +386,8 @@ namespace MapRenderer.Tests.Text.Sprites
     /// <summary>
     /// <see cref="FixtureSpriteSource"/> serves the committed fixture sheet (mirrors
     /// <c>FixtureGlyphSource</c>'s role for glyphs), and <see cref="SpriteSourceFactory"/>'s
-    /// missing-URL resilience seam (a style with no <c>sprite</c> URL returns <c>null</c> rather than
-    /// throwing — icons are optional, unlike glyphs).
+    /// missing-URL resilience seam (a style with no <c>sprite</c> entries returns an empty list rather
+    /// than throwing — icons are optional, unlike glyphs).
     /// </summary>
     [TestFixture]
     public class SpriteSourceTests : BaseTestFixture
@@ -319,7 +437,7 @@ namespace MapRenderer.Tests.Text.Sprites
         }
 
         [Test]
-        public void SpriteSourceFactory_NullSpriteUrl_ReturnsNullAndWarnsOnce()
+        public void SpriteSourceFactory_NoSpriteEntries_ReturnsEmptyListAndWarnsOnce()
         {
             // The "warn once" latch is process-wide, and any earlier test that applies a sprite-less style
             // consumes the one warning. Clearing it here keeps this assertion independent of test order.
@@ -327,19 +445,238 @@ namespace MapRenderer.Tests.Text.Sprites
 
             LogAssert.Expect(UnityEngine.LogType.Warning, new Regex("SpriteSourceFactory"));
 
-            ISpriteSource source = SpriteSourceFactory.Create(new StyleDocument { Sprite = null });
+            var sources = SpriteSourceFactory.Create(new StyleDocument(), 1.0);
 
-            Assert.IsNull(source, "a style with no sprite URL must yield a null source, not throw");
+            Assert.AreEqual(0, sources.Count, "a style with no sprite entries must yield an empty list, not throw");
         }
 
         [Test]
-        public void SpriteSourceFactory_WithSpriteUrl_ReturnsNonNullSource()
+        public void SpriteSourceFactory_WithSpriteUrl_ReturnsOneSource()
         {
-            using ISpriteSource source =
-                SpriteSourceFactory.Create(new StyleDocument { Sprite = "https://example.invalid/sprite" });
+            var sources = SpriteSourceFactory.Create(
+                new StyleDocument { Sprites = { new SpriteReference { Id = "default", Url = "https://example.invalid/sprite" } } },
+                1.0);
 
+            Assert.AreEqual(1, sources.Count, "a style with one sprite entry must yield one source");
+            Assert.AreEqual("default", sources[0].Id);
+            using ISpriteSource source = sources[0].Source;
             Assert.IsNotNull(source, "a style with a sprite URL must yield a real source");
             Assert.IsInstanceOf<SpriteSheetSource>(source);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SpriteSourceFactoryRatioTests — the @2x suffix decision, and its 404 fallback to 1x
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="SpriteSourceFactory.Create"/> picks the sprite sheet's density suffix from the device
+    /// pixel ratio: at or above <see cref="SpriteSourceFactory.TwoXThreshold"/> (1.5) requests <c>@2x</c>;
+    /// an implausible ratio sanitizes to 1x, through the same <c>DeviceScaling.SafeRatio</c> fallback
+    /// framing uses. <see cref="SpriteSheetSource"/> falls back to the plain 1x sheet only when the @2x
+    /// sheet is explicitly absent (404/204) — a 5xx or a cancel propagates instead.
+    /// </summary>
+    [TestFixture]
+    public class SpriteSourceFactoryRatioTests
+    {
+        /// <summary>Serves every request from a caller-supplied responder, recording each requested path.
+        /// Runs until <c>Stop()</c>ped — unlike a single-shot loopback, the fallback arm needs to answer
+        /// TWO requests.</summary>
+        private static HttpListener StartPathAwareServer(
+            int port, Func<string, (int Status, byte[] Body)> respond, List<string> requestedPaths)
+        {
+            var hl = new HttpListener();
+            hl.Prefixes.Add($"http://127.0.0.1:{port}/");
+            hl.Start();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    while (true)
+                    {
+                        HttpListenerContext ctx = hl.GetContext();
+                        string path = ctx.Request.Url.AbsolutePath;
+                        lock (requestedPaths) requestedPaths.Add(path);
+                        (int status, byte[] body) = respond(path);
+                        ctx.Response.StatusCode = status;
+                        if (body != null && body.Length > 0)
+                        {
+                            ctx.Response.ContentLength64 = body.Length;
+                            ctx.Response.OutputStream.Write(body, 0, body.Length);
+                        }
+                        ctx.Response.OutputStream.Close();
+                        ctx.Response.Close();
+                    }
+                }
+                catch (HttpListenerException) { /* stopped between requests */ }
+                catch (ObjectDisposedException) { }
+            });
+            return hl;
+        }
+
+        /// <summary>Fetches once against a 404-everything server and hands the FIRST requested path to
+        /// <paramref name="onPath"/> — enough to see which suffix the factory chose.</summary>
+        private static IEnumerator FirstRequestedPathAsync(double ratio, Action<string> onPath)
+        {
+            int port = HttpTileSourceTests.FindFreePort();
+            var requestedPaths = new List<string>();
+            var hl = StartPathAwareServer(port, _ => (404, null), requestedPaths);
+
+            Exception caught = null;
+            try
+            {
+                var sources = SpriteSourceFactory.Create(
+                    new StyleDocument { Sprites = { new SpriteReference { Id = "default", Url = $"http://127.0.0.1:{port}/sprite" } } }, ratio);
+                using ISpriteSource source = sources[0].Source;
+                yield return source.FetchAsync()
+                    .ContinueWith((Action<SpriteResponse>)(_ => { }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
+
+            Assert.IsNull(caught, $"a 404 must not throw. Exception: {caught?.Message}");
+            Assert.Greater(requestedPaths.Count, 0, "at least one request must have been made");
+            onPath(requestedPaths[0]);
+        }
+
+        /// <summary>The FIRST path requested reflects the ratio's chosen suffix: at or above the threshold
+        /// requests <c>@2x</c>; below it, or at a NaN/implausible ratio DeviceScaling.SafeRatio sanitizes
+        /// to 1x, requests the plain sheet.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_RequestsTheSuffixTheRatioChooses()
+        {
+            (double Ratio, bool ExpectsTwoX, string Why)[] cases =
+            {
+                (1.0, false, "ratio 1.0"),
+                (2.0, true, "ratio 2.0"),
+                (SpriteSourceFactory.TwoXThreshold - 0.01, false, "just below the threshold"),
+                (SpriteSourceFactory.TwoXThreshold, true, "exactly at the threshold"),
+                (double.NaN, false, "a NaN ratio, sanitized to 1x"),
+                (100.0, false, "an implausibly high ratio, sanitized to 1x"),
+            };
+
+            foreach (var c in cases)
+            {
+                string firstPath = null;
+                yield return FirstRequestedPathAsync(c.Ratio, p => firstPath = p);
+                Assert.AreEqual(c.ExpectsTwoX, firstPath.EndsWith("@2x.json"),
+                    $"{c.Why}: expected @2x={c.ExpectsTwoX}, first request was '{firstPath}'");
+            }
+        }
+
+        /// <summary>A 200 on the @2x sheet must be used AS-IS — nothing may also request the 1x sheet, or
+        /// accept its DIFFERENT content. Distinct content per suffix is essential: an implementation that
+        /// always fetches the 1x sheet regardless of suffix would otherwise pass every other test here.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_2xSheetSucceeds_NeverFallsBackTo1x()
+        {
+            int port = HttpTileSourceTests.FindFreePort();
+            byte[] twoXJson = System.Text.Encoding.UTF8.GetBytes("{\"only-in-2x\":{\"width\":1,\"height\":1,\"x\":0,\"y\":0,\"pixelRatio\":2}}");
+            byte[] oneXJson = System.Text.Encoding.UTF8.GetBytes("{\"only-in-1x\":{\"width\":1,\"height\":1,\"x\":0,\"y\":0,\"pixelRatio\":1}}");
+            byte[] png = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", "sprites", "sample-sprite.png"));
+
+            var requestedPaths = new List<string>();
+            var hl = StartPathAwareServer(port, path =>
+            {
+                if (path.EndsWith(".png")) return (200, png);
+                return (200, path.Contains("@2x") ? twoXJson : oneXJson);
+            }, requestedPaths);
+
+            SpriteResponse response = default;
+            Exception caught = null;
+            try
+            {
+                var sources = SpriteSourceFactory.Create(
+                    new StyleDocument { Sprites = { new SpriteReference { Id = "default", Url = $"http://127.0.0.1:{port}/sprite" } } }, 2.0);
+                using ISpriteSource source = sources[0].Source;
+                yield return source.FetchAsync()
+                    .ContinueWith((Action<SpriteResponse>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
+
+            Assert.IsNull(caught, $"a successful @2x fetch must not throw. Exception: {caught?.Message}");
+            Assert.IsTrue(requestedPaths.TrueForAll(p => p.Contains("@2x")),
+                $"a successful @2x sheet must never also request the 1x sheet: {string.Join(", ", requestedPaths)}");
+            Assert.IsTrue(response.HasData, "the @2x fetch must succeed");
+            Assert.AreEqual(System.Text.Encoding.UTF8.GetString(twoXJson), response.Json,
+                "the response must carry the @2x sheet's OWN content, not the 1x sheet's different content");
+        }
+
+        /// <summary>A 404 on the @2x sheet falls back to the plain 1x sheet, and the caller sees a
+        /// successful response built from the FALLBACK content — reusing the committed sprite fixture, the
+        /// same one <see cref="FixtureSpriteSource"/> serves.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_2xSheet404s_FallsBackToThe1xSheet()
+        {
+            int port = HttpTileSourceTests.FindFreePort();
+            byte[] fixtureJson = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", "sprites", "sample-sprite.json"));
+            byte[] fixturePng  = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", "sprites", "sample-sprite.png"));
+            var requestedPaths = new List<string>();
+            var hl = StartPathAwareServer(port, path =>
+            {
+                if (path.Contains("@2x")) return (404, null);
+                return (200, path.EndsWith(".json") ? fixtureJson : fixturePng);
+            }, requestedPaths);
+
+            SpriteResponse response = default;
+            Exception caught = null;
+            try
+            {
+                var sources = SpriteSourceFactory.Create(
+                    new StyleDocument { Sprites = { new SpriteReference { Id = "default", Url = $"http://127.0.0.1:{port}/sprite" } } }, 2.0);
+                using ISpriteSource source = sources[0].Source;
+                yield return source.FetchAsync()
+                    .ContinueWith((Action<SpriteResponse>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
+
+            Assert.IsNull(caught, $"a 404-then-fallback must not throw. Exception: {caught?.Message}");
+            Assert.IsTrue(requestedPaths.Exists(p => p.Contains("@2x")), "the @2x sheet must be requested first");
+            Assert.IsTrue(requestedPaths.Exists(p => !p.Contains("@2x")), "the plain 1x sheet must be requested as a fallback");
+            Assert.IsTrue(response.HasData, "the fallback 1x fetch must succeed and report HasData");
+            Assert.AreEqual(System.Text.Encoding.UTF8.GetString(fixtureJson), response.Json,
+                "the response must carry the FALLBACK (1x) sheet's content");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // DevicePixelRatioWiringTests — MapView.Config.DevicePixelRatio -> SymbolSubsystem
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary><c>MapView.Config.DevicePixelRatio</c> reaches <c>SymbolSubsystem</c>'s sprite-source
+    /// factory, through the property <c>MapView.SetStyle</c> sets right before calling
+    /// <c>SymbolSubsystem.SetStyle</c>.</summary>
+    [TestFixture]
+    public class DevicePixelRatioWiringTests : BaseTestFixture
+    {
+        [Test]
+        public void SetStyle_PassesConfiguredDevicePixelRatio_ToTheSpriteSourceFactory()
+        {
+            var go = Track(new GameObject("DevicePixelRatioWiring"));
+            var view = go.AddComponent<MapViewComponent>().WithTestMaterials();
+            view.WithTestCamera();
+            view.Config.DevicePixelRatio = 2.0;
+
+            double? seenRatio = null;
+            view.View.SymbolSubsystem.SpriteSourceFactoryOverride = (styleDoc, ratio) =>
+            {
+                seenRatio = ratio;
+                return null; // no sprite fetch needed — this test only checks what the factory would receive
+            };
+
+            string styleJson = @"{
+                ""version"": 8,
+                ""layers"": [ { ""id"": ""bg"", ""type"": ""background"",
+                                ""paint"": { ""background-color"": ""#ff0000"" } } ]
+            }";
+            var task = view.SetStyle(StyleParser.Parse(styleJson), "ratio-wiring").Preserve();
+            task.WaitOffPlayerLoop(5000);
+            task.GetAwaiter().GetResult();
+
+            Assert.AreEqual(2.0, seenRatio,
+                "SymbolSubsystem's sprite-source factory must see the configured DevicePixelRatio");
         }
     }
 }

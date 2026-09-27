@@ -1,7 +1,7 @@
 // Not a blittable job type: a parse-time value in SpriteIndex's managed Dictionary that never crosses
 // into a NativeArray/Burst job, so it has no blittable-field constraint (contrast GlyphAtlasEntry).
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// One sprite's location + metadata inside a MapLibre sprite sheet, as parsed from the sprite

@@ -3,7 +3,7 @@
 This file is the one place that lists the MapLibre style spec surface and the status of each item in this
 renderer. Other docs point here. They do not keep their own copy.
 
-**Snapshot date: 2026-09-26.**
+**Snapshot date: 2026-09-27.**
 
 **How this was traced.** The spec surface comes from the public MapLibre style spec pages
 (maplibre.org/maplibre-style-spec: root, sources, layers, light, sky, projection, terrain, expressions).
@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 52 supported, 57 partial, 5 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 54 supported, 57 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -70,7 +70,7 @@ marked † is otherwise complete; its status does not count this limit. The desi
 | `projection` | `not supported` | The globe exists, but the host selects it (`MapHost.UseGlobe`), not the style. See [`projection-globe-track-design.md`](projection-globe-track-design.md). |
 | `terrain` | `not supported` | No `raster-dem` source and no terrain mesh. See [`depth-and-render-regimes-design.md`](depth-and-render-regimes-design.md) § 6 (D). |
 | `sources` | `partial` | See § 4. |
-| `sprite` | `partial` | A single URL string only. The array form (several sprite sheets) gives no sprite. Only the 1x sheet is fetched. |
+| `sprite` | `supported` | Both the string form and the array form (several sprite sheets, each id:name-prefixed except `default`) merge into one atlas. The sheets stack vertically before the merge, so many large sheets can exceed `SpriteSheetPadder.MaxSheetDimension` (8192) or a GPU texture size limit. |
 | `glyphs` | `supported` | PBF glyph ranges are fetched into the SDF atlas. |
 | `font-faces` | `not supported` | Text uses the `glyphs` PBF path only. |
 | `transition` | `not supported` | A restyle eases over `MapView.StyleTransition`, a host setting. The root key and every `*-transition` key are not read. |
@@ -113,7 +113,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 | `vector` | `partial` | MVT only. Key status is below. |
 | `raster` | `not supported` | No raster layer renderer, so the source is never fetched. See [`meshing-design.md`](meshing-design.md) § "Fill-extrusion and the raster seat". |
 | `raster-dem` | `not supported` | No terrain or hillshade. |
-| `geojson` | `partial` | Inline `data` object only, sliced locally. Key status is below. |
+| `geojson` | `partial` | Sliced locally. Key status is below. |
 | `image` | `not supported` | Not built. |
 | `video` | `not supported` | Not built. |
 
@@ -123,8 +123,8 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 |---|---|---|
 | `url` (TileJSON) | `supported` | Fetched once per style load. Inline `tiles` wins. |
 | `tiles` | `partial` | Only the first URL template is used. |
-| `minzoom` / `maxzoom` | `supported` | Gate tile requests; the camera overzooms past `maxzoom`. |
-| `bounds` | `parsed, inert` | Used only to tell two sources apart; tile requests are not limited to it. |
+| `minzoom` / `maxzoom` | `partial` | A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom; there is no per-source overzoom, only past the host `TileSelection.MaxZoom` cap. |
+| `bounds` | `supported` | Gates tile requests: a cover tile whose ground quad does not strictly overlap `bounds` is never fetched. |
 | `scheme` | `supported` | `"tms"` flips only the fetch address (`TileUrlTemplate`); every other identity (loaded/cache keys) stays XYZ. |
 | `attribution` | `no rendering effect` | Not read. |
 | `promoteId` | `not supported` | Feature ids come from the tile. |
@@ -135,9 +135,10 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 
 | Key | Status | Note |
 |---|---|---|
-| `data` | `partial` | An inline object only. A URL string skips the source with a warning. |
-| `maxzoom` | `partial` | Read, but an absent key gives 22 (the vector default), not the spec's 18. |
-| `buffer` / `tolerance` | `not supported` | The slicer uses fixed defaults (`GeoJsonSliceOptions.Default`). |
+| `data` | `supported` | An inline object, or a URL string fetched through the same loader TileJSON uses. |
+| `maxzoom` | `partial` | Defaults to 18 (the spec value) when absent. A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom — the same per-source-overzoom limit as the vector row. |
+| `buffer` | `partial` | An authored value is honoured (×8 to reference units, clamped to [0, 512]). An absent key keeps the slicer's own 64-reference-unit default, not the spec's 128. |
+| `tolerance` | `not supported` | Not read. The slicer runs at tolerance 0 (`GeoJsonSliceOptions.SimplifyTolerance` accepts no other value). |
 | `cluster`, `clusterRadius`, `clusterMaxZoom`, `clusterMinPoints`, `clusterProperties` | `not supported` | No clustering. |
 | `lineMetrics` | `not supported` | `line-gradient` is not built. |
 | `generateId` / `promoteId` | `not supported` | Not read. |

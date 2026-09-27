@@ -7,10 +7,13 @@ namespace MapRenderer.Unity.Rendering.Tile
     /// <see cref="PreparedTileCache"/>'s composite key (alongside <c>TileId</c> and layerId). MapView
     /// supplies it; the cache never interprets the string, only compares it, so prepared meshes under two
     /// different tokens coexist rather than flush. The id is a digest of <c>styleId</c> plus the style
-    /// document's content plus the layer numbering <c>RenderLayerSet.Build</c> actually produced
-    /// (<see cref="Map.MapView.SetStyle"/>, <c>JsonCanonical.CacheKey</c>) — the numbering matters because
+    /// document's content plus the layer numbering <c>RenderLayerSet.Build</c> actually produced plus each
+    /// source's resolved identity (<c>SourceId</c> + <c>SourceKey</c>) — computed in
+    /// <see cref="Map.MapView.SetStyle"/> via <c>JsonCanonical.CacheKey</c>. The numbering matters because
     /// a <c>MapMaterialSet</c> field Build reads is live-mutable and can shift dense layer ids under
-    /// unchanged content. Non-local invariant: two runs that differ in ANY of these components digest
+    /// unchanged content; the resolved identity matters because a TileJSON can resolve differently under
+    /// identical style text, which the digest would otherwise never see. Non-local invariant: two runs that
+    /// differ in ANY of these components digest
     /// unequal for every pair a session actually produces, which lets the cache skip a separate purge
     /// condition. <c>JsonCanonical.CacheKey</c> is a 64-bit FNV-1a hash, not a cryptographic one, so this
     /// is not a guarantee against a hash collision.

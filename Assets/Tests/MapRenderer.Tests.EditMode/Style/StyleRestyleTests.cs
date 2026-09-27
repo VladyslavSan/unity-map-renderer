@@ -23,7 +23,7 @@ using Background = MapRenderer.Unity.Style.Background;
 using MapRenderer.Unity.Jobs.Tiles;
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Unity.Style.Symbol;
@@ -425,7 +425,9 @@ namespace MapRenderer.Tests.Style
 
             Assert.AreEqual(8, doc.Version);
             Assert.AreEqual("Minimal", doc.Name);
-            Assert.AreEqual("https://example.com/sprite", doc.Sprite);
+            Assert.AreEqual(1, doc.Sprites.Count);
+            Assert.AreEqual("default", doc.Sprites[0].Id);
+            Assert.AreEqual("https://example.com/sprite", doc.Sprites[0].Url);
             Assert.AreEqual("https://example.com/{fontstack}/{range}.pbf", doc.Glyphs);
 
             Assert.AreEqual(1, doc.Sources.Count);

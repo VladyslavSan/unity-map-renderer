@@ -2,20 +2,22 @@
 // inside `MapRenderer.Unity.*` the leading `Unity` binds to `MapRenderer.Unity` (CS0234).
 
 using System;
+using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// The Unity-side sprite sheet: an immutable <see cref="Texture2D"/> decoded once from the sprite PNG,
-    /// paired with its <see cref="SpriteIndex"/>. Main-thread only. Non-local invariant: a top-left coord
-    /// <c>(x,y)</c> reads <c>GetPixel(x,y)</c>, as in the glyph atlas, so one shader binds either texture.
-    /// The ctor repacks every sprite with a one-texel transparent border; see
+    /// The Unity-side sprite sheet: an immutable <see cref="Texture2D"/> decoded once from the sprite
+    /// PNG(s), paired with its <see cref="SpriteIndex"/>. Main-thread only. Non-local invariant: a
+    /// top-left coord <c>(x,y)</c> reads <c>GetPixel(x,y)</c>, as in the glyph atlas, so one shader binds
+    /// either texture. The ctor repacks every sprite with a one-texel transparent border; see
     /// docs/labels-and-symbols-design.md § "Sampling the sheet — bilinear + a one-texel padded repack".
+    /// The multi-sheet ctor merges via <see cref="SpriteSheetStacker"/> before the same repack runs.
     /// </summary>
     public sealed class SpriteSheet : VerifiedDisposable
     {
@@ -37,15 +39,13 @@ namespace MapRenderer.Unity.Text
             Size = new int2(_texture.width, _texture.height),
         };
 
+        /// <summary>Decodes one sprite sheet.</summary>
         public SpriteSheet(byte[] pngBytes, SpriteIndex index)
         {
             if (pngBytes == null) throw new ArgumentNullException(nameof(pngBytes));
             if (index == null) throw new ArgumentNullException(nameof(index));
 
             var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
-            // A local the `finally` can see: until `_texture` owns it, a throw would strand it. Nulled on
-            // success, so the `finally` and DoDispose never both destroy it.
-            Texture2D repacked = null;
             try
             {
                 decoded.LoadImage(pngBytes);
@@ -54,7 +54,72 @@ namespace MapRenderer.Unity.Text
                 // GetPixels32, not GetRawTextureData: LoadImage picks its own format from the PNG, so the
                 // raw bytes may not be RGBA32.
                 byte[] source = PackTopLeftOrigin(decoded.GetPixels32(), sourceSize);
+                (_texture, _index) = BuildFrom(source, sourceSize, index);
+            }
+            finally
+            {
+                decoded.DestroySafely();
+            }
+        }
 
+        /// <summary>Decodes and merges <paramref name="sheets"/> (id, PNG bytes, parsed index) — the
+        /// Style Spec's array-form root <c>sprite</c>. One entry with id <c>"default"</c> produces the
+        /// same atlas, names and texture as the single-sheet constructor. See
+        /// <see cref="SpriteSheetStacker"/> for the merge rule.</summary>
+        public SpriteSheet(IReadOnlyList<(string Id, byte[] Png, SpriteIndex Index)> sheets)
+        {
+            if (sheets == null || sheets.Count == 0)
+                throw new ArgumentException("at least one sheet is required", nameof(sheets));
+
+            var stackInputs = new List<SpriteSheetStacker.Sheet>(sheets.Count);
+            var decodedTextures = new List<Texture2D>(sheets.Count);
+            try
+            {
+                foreach ((string id, byte[] png, SpriteIndex index) in sheets)
+                {
+                    if (png == null)
+                        throw new ArgumentException("a sheet's PNG bytes must not be null", nameof(sheets));
+
+                    var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
+                    decodedTextures.Add(decoded);
+                    if (!decoded.LoadImage(png))
+                    {
+                        Debug.LogWarning($"SpriteSheet: sheet '{id}' failed to decode as PNG; its sprites will not render.");
+                        continue; // drop only this sheet — the same forward-compat posture as an absent fetch
+                    }
+
+                    var size = new int2(decoded.width, decoded.height);
+                    stackInputs.Add(new SpriteSheetStacker.Sheet
+                    {
+                        Id = id,
+                        Pixels = PackTopLeftOrigin(decoded.GetPixels32(), size),
+                        Size = size,
+                        Index = index ?? new SpriteIndex(),
+                    });
+                }
+
+                if (stackInputs.Count == 0)
+                    throw new ArgumentException("no sheet decoded successfully", nameof(sheets));
+
+                (byte[] mergedPixels, int2 mergedSize, SpriteIndex mergedIndex) = SpriteSheetStacker.Stack(stackInputs);
+                (_texture, _index) = BuildFrom(mergedPixels, mergedSize, mergedIndex);
+            }
+            finally
+            {
+                foreach (Texture2D decoded in decodedTextures)
+                    decoded.DestroySafely();
+            }
+        }
+
+        /// <summary>Plans the padded repack over <paramref name="source"/>, composes it, and builds the
+        /// bound <see cref="Texture2D"/> — the tail both constructors share.</summary>
+        private static (Texture2D Texture, SpriteIndex Index) BuildFrom(byte[] source, int2 sourceSize, SpriteIndex index)
+        {
+            // A local the `finally` can see: until the caller owns it, a throw would strand it. Nulled on
+            // success, so the `finally` and DoDispose never both destroy it.
+            Texture2D repacked = null;
+            try
+            {
                 SpritePadPlan plan = SpriteSheetPadder.Plan(index, sourceSize, BorderTexels);
                 if (plan.Padding != BorderTexels && index.Count > 0)
                     Debug.LogWarning(
@@ -72,13 +137,12 @@ namespace MapRenderer.Unity.Text
                 repacked.filterMode = FilterMode.Bilinear;
                 repacked.wrapMode = TextureWrapMode.Clamp;
 
-                _texture = repacked;
+                Texture2D result = repacked;
                 repacked = null; // ownership transferred — see the local's declaration above
-                _index = plan.Index;
+                return (result, plan.Index);
             }
             finally
             {
-                decoded.DestroySafely();
                 repacked.DestroySafely(); // non-null only on the throw path
             }
         }

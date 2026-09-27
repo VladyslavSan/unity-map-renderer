@@ -74,7 +74,7 @@ namespace MapRenderer.Unity.Text
         public List<ExtractedLayer> ExtractLayers(
             IDecodedTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
             double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null,
-            MapRenderer.Core.Text.Sprites.SpriteAtlasView spriteAtlas = null)
+            MapRenderer.Unity.Text.Sprites.SpriteAtlasView spriteAtlas = null)
         {
             var result = new List<ExtractedLayer>(symbolLayers?.Count ?? 0);
             if (tile == null || symbolLayers == null || projection == null) return result;
@@ -111,7 +111,7 @@ namespace MapRenderer.Unity.Text
             SymbolTileBuffer buffer,
             IReadOnlyList<int> materialIndices = null,
             CancellationToken ct = default,
-            MapRenderer.Core.Text.Sprites.SpriteAtlasView spriteAtlas = null)
+            MapRenderer.Unity.Text.Sprites.SpriteAtlasView spriteAtlas = null)
         {
             if (buffer == null) return;
             List<ExtractedLayer> extracted = ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices, spriteAtlas);

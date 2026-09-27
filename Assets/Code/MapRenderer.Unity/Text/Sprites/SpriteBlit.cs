@@ -1,7 +1,7 @@
 // Engine-free: no UnityEngine dependency.
 // Construction convention: object initializer with named members.
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// One content-rect copy instruction for the sprite-sheet repack: copy the <see cref="Width"/> ×

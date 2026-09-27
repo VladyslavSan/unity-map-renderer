@@ -146,6 +146,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLayerType.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLayer.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SourceDefinition.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/SpriteReference.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleDocument.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleParser.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleLight.cs" />
@@ -374,24 +375,28 @@
     <!-- S18 Unity-side batch: GlyphManager fetch/decode/cache/atlas tests (shared verbatim) -->
 
     <!-- I1: sprite JSON index — Core source, engine-free -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteEntry.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteIndex.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteEntry.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteIndex.cs" />
 
     <!-- Padded sprite repack (docs/labels-and-symbols-design.md § "Sampling the sheet — bilinear + a one-texel
          padded repack"): rect planning + pixel composition,
          both engine-free (the composer works over RGBA32 byte arrays, not Texture2D). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteBlit.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpritePadPlan.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/ShelfRectPacker.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteSheetPadder.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteBlit.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpritePadPlan.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/ShelfRectPacker.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteSheetPadder.cs" />
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetPadderTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteSheetComposer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteSheetComposer.cs" />
+
+    <!-- Merges N sprite sheets (array-form root `sprite`) into one source buffer, engine-free -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteSheetStacker.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetStackerTests.cs" />
 
     <!-- I3: icon labels — Core source, engine-free -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteAtlasView.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolKind.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/IconImageResolver.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IconQuadLayout.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/IconQuadLayout.cs" />
     <!-- UMR-176 round B: StyleTests.cs — 12 formerly-separate fast-lane Style fixtures (TileJson/
          StyleProperty/StyleLayerEagerParse/FillLayout/FillPattern/FillExtrusionPaint/LinePaint/
          BackgroundPaint/SymbolStyleLayer/TextFieldResolver/LineDash/IconImageResolver)Tests.cs — packed

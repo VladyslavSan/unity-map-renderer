@@ -14,7 +14,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using FillShaderProps = MapRenderer.Unity.Rendering.ShaderProperties.Fill;
 using FillStyle       = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Text;

@@ -10,7 +10,7 @@
 using System;
 using System.IO;
 using NUnit.Framework;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using Unity.Mathematics;
 using System.Collections.Generic;
 using System.Text;

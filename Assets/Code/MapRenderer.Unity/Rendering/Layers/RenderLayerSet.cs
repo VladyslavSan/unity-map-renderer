@@ -5,7 +5,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Style;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Layers

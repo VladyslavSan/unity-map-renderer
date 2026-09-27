@@ -10,6 +10,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.View;
 using MapRenderer.Core.Lifetime;
@@ -267,9 +268,15 @@ namespace MapRenderer.Unity.Text
         /// source. Null ⇒ the production <see cref="GlyphSourceFactory.Create"/>.</summary>
         internal Func<StyleDocument, IGlyphSource> GlyphSourceFactoryOverride { get; set; }
 
-        /// <summary>Test seam: the sprite-source factory <c>SetStyle</c> uses, overridable to inject a fixture
-        /// source. Null ⇒ the production <see cref="SpriteSourceFactory.Create"/>.</summary>
-        internal Func<StyleDocument, ISpriteSource> SpriteSourceFactoryOverride { get; set; }
+        /// <summary>Test seam: the sprite-source factory <c>SetStyle</c> uses, overridable to inject fixture
+        /// sources. Null or an empty list ⇒ no sprites for this style. Null ⇒ the production
+        /// <see cref="SpriteSourceFactory.Create"/>.</summary>
+        internal Func<StyleDocument, double, IReadOnlyList<(string Id, ISpriteSource Source)>> SpriteSourceFactoryOverride { get; set; }
+
+        /// <summary>The device pixel ratio <c>MapView</c> sets before calling <see cref="SetStyle"/> —
+        /// <see cref="FetchSpriteSheetAsync"/> reads it once, when the fetch starts, so a live change mid-style
+        /// never re-triggers a fetch (the sheet is fetched once per style either way).</summary>
+        internal double DevicePixelRatio { get; set; } = 1.0;
 
         // Per-frame observability (mirrors TileManager's *LastTick counters) — read by tests, never the live path.
         internal int TailsStartedLastPump  { get; private set; }
@@ -803,28 +810,39 @@ namespace MapRenderer.Unity.Text
             }
         }
 
-        /// <summary>Fetch + decode this style's sprite sheet (index JSON + PNG), fire-and-forget from
-        /// <c>SetStyle</c>. A null source or absent response (404/204) leaves <c>_spriteSheet</c>/<c>_spriteAtlas</c>
-        /// null — inert (every icon path is null-guarded). Cancelled via <paramref name="ct"/> (this style's
-        /// <c>_buildCts</c> scope).</summary>
+        /// <summary>Fetch + decode this style's sprite sheet(s) (index JSON + PNG per entry), fire-and-forget
+        /// from <c>SetStyle</c>. No sprite entries, or every sheet absent, leaves <c>_spriteSheet</c>/
+        /// <c>_spriteAtlas</c> null — inert (every icon path is null-guarded). A sheet that fails or comes
+        /// back absent (404/204) drops only that sheet's names; the others still merge. Cancelled via
+        /// <paramref name="ct"/> (this style's <c>_buildCts</c> scope).</summary>
         private async UniTask FetchSpriteSheetAsync(StyleDocument style, CancellationToken ct)
         {
-            ISpriteSource source = null;
+            IReadOnlyList<(string Id, ISpriteSource Source)> sources = null;
             try
             {
-                source = (SpriteSourceFactoryOverride ?? SpriteSourceFactory.Create)(style);
-                if (source == null) return; // no 'sprite' URL — inert, style still loads
+                sources = (SpriteSourceFactoryOverride ?? SpriteSourceFactory.Create)(style, DevicePixelRatio);
+                if (sources == null || sources.Count == 0) return; // no 'sprite' entries — inert, style still loads
 
-                SpriteResponse resp = await source.FetchAsync(ct);
-                if (!resp.HasData) return; // explicitly absent (404/204) — inert
+                var fetches = new UniTask<(string Id, SpriteResponse Response)>[sources.Count];
+                for (int i = 0; i < sources.Count; i++)
+                    fetches[i] = FetchOneSpriteSheetAsync(sources[i].Id, sources[i].Source, ct);
+                (string Id, SpriteResponse Response)[] results = await UniTask.WhenAll(fetches);
                 ct.ThrowIfCancellationRequested();
+
+                var sheets = new List<(string Id, byte[] Png, SpriteIndex Index)>(results.Length);
+                foreach (var (id, resp) in results)
+                {
+                    if (!resp.HasData) continue; // this sheet is explicitly absent (404/204) — its names are just missing
+                    sheets.Add((id, resp.Png, SpriteIndex.Parse(resp.Json)));
+                }
+                if (sheets.Count == 0) return; // every sheet came back absent — inert
 
                 // Texture2D construction (inside the SpriteSheet ctor) is a main-thread-only Unity API — guard
                 // even though FetchAsync's continuation typically already resumes on main.
                 await UniTask.SwitchToMainThread();
                 ct.ThrowIfCancellationRequested();
 
-                var sheet = new SpriteSheet(resp.Png, SpriteIndex.Parse(resp.Json));
+                var sheet = new SpriteSheet(sheets);
                 _spriteSheet = sheet;
                 _spriteAtlas = sheet.View;
             }
@@ -838,7 +856,31 @@ namespace MapRenderer.Unity.Text
             }
             finally
             {
-                source?.Dispose();
+                if (sources != null)
+                    foreach (var (_, source) in sources)
+                        source?.Dispose();
+            }
+        }
+
+        /// <summary>Fetches one sheet, turning a per-sheet exception into an absent response so one bad
+        /// sheet cannot fail <c>UniTask.WhenAll</c>'s batch for the others. A cancellation still propagates
+        /// — <see cref="FetchSpriteSheetAsync"/>'s own catch handles it.</summary>
+        private static async UniTask<(string Id, SpriteResponse Response)> FetchOneSpriteSheetAsync(
+            string id, ISpriteSource source, CancellationToken ct)
+        {
+            try
+            {
+                SpriteResponse response = await source.FetchAsync(ct);
+                return (id, response);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SymbolSubsystem] sprite sheet '{id}' fetch failed: {ex.Message}");
+                return (id, SpriteResponse.Absent());
             }
         }
 

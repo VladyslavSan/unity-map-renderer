@@ -63,10 +63,12 @@ namespace MapRenderer.Tests.GeoJsons
 
         /// <summary>A one-source, one-fill-layer style over inline geojson. The style layer declares NO
         /// <c>source-layer</c> — that is what the Style Spec says for a geojson source. A wrong
-        /// source-layer resolution selects zero features here.</summary>
-        private static string StyleWithInlineData(string dataJson) => $@"{{
+        /// source-layer resolution selects zero features here. <paramref name="bufferJson"/>, when given,
+        /// is an authored `buffer` key on the source.</summary>
+        private static string StyleWithInlineData(string dataJson, string bufferJson = null) => $@"{{
             ""version"": 8,
-            ""sources"": {{ ""geo"": {{ ""type"": ""geojson"", ""data"": {dataJson} }} }},
+            ""sources"": {{ ""geo"": {{ ""type"": ""geojson"", ""data"": {dataJson}
+                {(bufferJson == null ? "" : $@", ""buffer"": {bufferJson}")} }} }},
             ""layers"": [
                 {{ ""id"": ""geo-fill"", ""type"": ""fill"", ""source"": ""geo"",
                    ""paint"": {{ ""fill-color"": ""#ff0000"" }} }}
@@ -173,132 +175,165 @@ namespace MapRenderer.Tests.GeoJsons
 
                 Assert.AreEqual(0, docFetches,  "a geojson source must never attempt a TileJSON round trip");
                 Assert.AreEqual(0, factoryCalls, "…nor construct a byte fetcher: it has no bytes");
-
-                Assert.IsTrue(view.AllTilesSettled(), "the tile must settle");
-                Mesh[] meshes = view.GetTileMeshes(WorldTile);
-                Assert.IsNotNull(meshes, "the inline geojson source must have produced a tile mesh");
-                Assert.AreEqual(1, meshes.Length, "one fill layer ⇒ one layer mesh");
-                Assert.IsNotNull(meshes[0]);
-                // 4 interior + 8 band vertices, the band AFTER the quad. Claims below read only the interior
-                // prefix, because band vertices also sit on corners and would exhaust the corner pool.
-                const int interiorVertexCount = 4;
-                Assert.AreEqual(interiorVertexCount + 2 * interiorVertexCount, meshes[0].vertexCount,
-                    "the authored rectangle triangulates to a 4-vertex quad (Mercator, no subdivision), " +
-                    "plus the outward boundary band's two vertices per ring vertex");
-
-                // One tile unit at this extent, in world metres — the quantization bound, derived rather
-                // than guessed, and multiplied by 2 to cover the round trip through geodetic.
-                double tileUnitWorld = 2.0 * WebMercator.WorldExtent / GeoJsonSliceOptions.DefaultExtent;
-                double tolerance     = 2.0 * tileUnitWorld;
-
-                var expected = new List<double2>
-                {
-                    ExpectedWorldXZ(RectMin, RectMin), ExpectedWorldXZ(RectMax, RectMin),
-                    ExpectedWorldXZ(RectMax, RectMax), ExpectedWorldXZ(RectMin, RectMax),
-                };
-                // A whole tile edge must be far outside the tolerance, or "on the authored corners" would be
-                // satisfiable by "anywhere in the tile".
-                Assert.Less(tolerance * 100.0, 2.0 * WebMercator.WorldExtent,
-                    "the tolerance must be orders of magnitude below a tile edge, or it could pass by looseness");
-
-                // Each vertex claims a DISTINCT corner. The claimed corner per slot is recorded, because the
-                // topology arm below reads the index buffer in authored corners.
-                Vector3[] meshVertices = meshes[0].vertices;
-                var authoredCornerOf   = new int[interiorVertexCount];
-                var unclaimed          = new List<double2>(expected);
-                var unclaimedCorner    = new List<int>();
-                for (int c = 0; c < expected.Count; c++) unclaimedCorner.Add(c);
-
-                for (int v = 0; v < interiorVertexCount; v++)
-                {
-                    Vector3 vertex  = meshVertices[v];
-                    int     claimed = -1;
-                    for (int c = 0; c < unclaimed.Count; c++)
-                        if (math.abs(vertex.x - unclaimed[c].x) <= tolerance &&
-                            math.abs(vertex.z - unclaimed[c].y) <= tolerance) { claimed = c; break; }
-
-                    Assert.GreaterOrEqual(claimed, 0,
-                        $"mesh vertex ({vertex.x}, {vertex.z}) is not on any AS-YET-UNCLAIMED authored corner " +
-                        $"of the polygon (expected one of {string.Join("; ", expected)}, still unclaimed: " +
-                        $"{string.Join("; ", unclaimed)}). The source rendering SOMETHING is not the claim — " +
-                        "it must render the authored geometry, at the authored place, and a corner may only " +
-                        "be matched once, or four vertices collapsed onto one corner would pass.");
-                    authoredCornerOf[v] = unclaimedCorner[claimed];
-                    unclaimed.RemoveAt(claimed);
-                    unclaimedCorner.RemoveAt(claimed);
-                }
-                Assert.IsEmpty(unclaimed,
-                    $"every authored corner must be covered: {string.Join("; ", unclaimed)} was not. With " +
-                    "the four-vertex count pinned above and one-to-one consumption this is already implied " +
-                    "— it is asserted anyway because it names the missing corner, which neither the count " +
-                    "nor the per-vertex arm does. It does NOT survive a fixture emitting more vertices: " +
-                    "AreEqual(4, vertexCount) fires first, and a fifth vertex would trip the per-vertex arm " +
-                    "against an emptied pool.");
-
-                // ── The triangles must PARTITION the quad, which the summed area below cannot see. ──
-                // Interior triangles only: a band triangle has a vertex past the prefix and no authored corner.
-                var interiorIndices = new List<int>();
-                foreach (int[] triangle in Triples(meshes[0].triangles))
-                    if (triangle[0] < interiorVertexCount && triangle[1] < interiorVertexCount && triangle[2] < interiorVertexCount)
-                        interiorIndices.AddRange(triangle);
-                int[] meshIndices = interiorIndices.ToArray();
-                Assert.AreEqual(6, meshIndices.Length,
-                    "a quad is two triangles, so six indices — asserted before the topology arms read them, " +
-                    "or a fan of some other length would make those arms mean something else");
-                Assert.AreEqual(6 + 6 * interiorVertexCount, meshes[0].triangles.Length,
-                    "…and the band contributes six indices per ring edge on top, which is what makes the " +
-                    "filter above a filter rather than a no-op");
-
-                var referencedCorners = new HashSet<int>();
-                var triangleCorners   = new List<HashSet<int>>();
-                for (int t = 0; t + 2 < meshIndices.Length; t += 3)
-                {
-                    var corners = new HashSet<int>
-                    {
-                        authoredCornerOf[meshIndices[t]],
-                        authoredCornerOf[meshIndices[t + 1]],
-                        authoredCornerOf[meshIndices[t + 2]],
-                    };
-                    Assert.AreEqual(3, corners.Count,
-                        $"triangle {t / 3} names only {corners.Count} distinct authored corners — it is " +
-                        "degenerate, an edge or a point pretending to be a face");
-                    triangleCorners.Add(corners);
-                    referencedCorners.UnionWith(corners);
-                }
-
-                Assert.AreEqual(4, referencedCorners.Count,
-                    "every one of the four authored corners must be REFERENCED by the index buffer. This is " +
-                    "the arm the area sum cannot make: two triples naming the same three corners leave the " +
-                    "fourth vertex present-but-unindexed, and half the rectangle's area counted twice adds " +
-                    "up to exactly the whole. The polygon on screen would be a triangle.");
-
-                var sharedCorners = new HashSet<int>(triangleCorners[0]);
-                sharedCorners.IntersectWith(triangleCorners[1]);
-                Assert.AreEqual(2, sharedCorners.Count,
-                    "the two triangles must meet on exactly one EDGE — two shared corners. Three means they " +
-                    "are the same face; fewer means they do not tile a quad at all.");
-
-                var sharedPair = new List<int>(sharedCorners);
-                sharedPair.Sort();
-                Assert.AreEqual(2, sharedPair[1] - sharedPair[0],
-                    $"the shared edge must be a DIAGONAL of the authored rectangle — corners two apart in " +
-                    $"ring order — not a side. Corners {sharedPair[0]} and {sharedPair[1]} are adjacent, " +
-                    "which means the two triangles fold over one side of the quad and cover it twice while " +
-                    "leaving the other half bare.");
-
-                // …and the quad encloses the authored AREA. Position alone cannot see a fan wound so that the
-                // triangles cancel or overlap; a degenerate mesh is zero here, not merely mis-placed.
-                double2 spanMin = ExpectedWorldXZ(RectMin, RectMin);
-                double2 spanMax = ExpectedWorldXZ(RectMax, RectMax);
-                double expectedArea = math.abs((spanMax.x - spanMin.x) * (spanMax.y - spanMin.y));
-                Assert.Greater(expectedArea, 0.0, "precondition: the authored rectangle has area at all");
-
-                Assert.AreEqual(expectedArea, TriangleArea(meshes[0]), expectedArea * 0.01,
-                    "the indexed triangles must enclose the AUTHORED area, within 1%. Zero here is the " +
-                    "collapsed-mesh failure the positional arms above are not asked to catch; " +
-                    "twice it would be a doubled or self-overlapping fan.");
+                AssertAuthoredPolygonRendered(view);
             }
             finally { view.Teardown(); }
+        }
+
+        /// <summary>A geojson source whose <c>data</c> is a URL string renders the SAME authored polygon as
+        /// the inline arm above, fetched once through the document loader (like TileJSON) before anything
+        /// is mutated.</summary>
+        [Test]
+        public void AUrlGeoJsonSource_RendersItsAuthoredPolygon()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            int docFetches = 0, factoryCalls = 0;
+            string geoJsonText = RectangleAt(RectMin, RectMax);
+            view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(geoJsonText); };
+            view.View.TileSourceFactoryOverride = template => { Interlocked.Increment(ref factoryCalls); return TestDataSource.Absent(); };
+
+            try
+            {
+                SpinToCompleted(view.SetStyle(
+                    StyleParser.Parse(StyleWithInlineData(@"""https://example.com/data.geojson""")), "geojson-url"));
+                PumpUntilSettled(view);
+
+                Assert.AreEqual(1, docFetches, "a URL `data` must fetch exactly once through the document loader");
+                Assert.AreEqual(0, factoryCalls, "…and never construct a byte fetcher: it has no tiles");
+                AssertAuthoredPolygonRendered(view);
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>The shared assertion body for both the inline and URL `data` render teeth: the four
+        /// interior vertices must sit on the AUTHORED corners, each claimed ONE-TO-ONE, and the triangles
+        /// must TILE the quad (a summed-area check alone cannot catch two copies of one half-triangle).</summary>
+        private static void AssertAuthoredPolygonRendered(MapView view)
+        {
+            Assert.IsTrue(view.AllTilesSettled(), "the tile must settle");
+            Mesh[] meshes = view.GetTileMeshes(WorldTile);
+            Assert.IsNotNull(meshes, "the geojson source must have produced a tile mesh");
+            Assert.AreEqual(1, meshes.Length, "one fill layer ⇒ one layer mesh");
+            Assert.IsNotNull(meshes[0]);
+            // 4 interior + 8 band vertices, the band AFTER the quad. Claims below read only the interior
+            // prefix, because band vertices also sit on corners and would exhaust the corner pool.
+            const int interiorVertexCount = 4;
+            Assert.AreEqual(interiorVertexCount + 2 * interiorVertexCount, meshes[0].vertexCount,
+                "the authored rectangle triangulates to a 4-vertex quad (Mercator, no subdivision), " +
+                "plus the outward boundary band's two vertices per ring vertex");
+
+            // One tile unit at this extent, in world metres — the quantization bound, derived rather
+            // than guessed, and multiplied by 2 to cover the round trip through geodetic.
+            double tileUnitWorld = 2.0 * WebMercator.WorldExtent / GeoJsonSliceOptions.DefaultExtent;
+            double tolerance     = 2.0 * tileUnitWorld;
+
+            var expected = new List<double2>
+            {
+                ExpectedWorldXZ(RectMin, RectMin), ExpectedWorldXZ(RectMax, RectMin),
+                ExpectedWorldXZ(RectMax, RectMax), ExpectedWorldXZ(RectMin, RectMax),
+            };
+            // A whole tile edge must be far outside the tolerance, or "on the authored corners" would be
+            // satisfiable by "anywhere in the tile".
+            Assert.Less(tolerance * 100.0, 2.0 * WebMercator.WorldExtent,
+                "the tolerance must be orders of magnitude below a tile edge, or it could pass by looseness");
+
+            // Each vertex claims a DISTINCT corner. The claimed corner per slot is recorded, because the
+            // topology arm below reads the index buffer in authored corners.
+            Vector3[] meshVertices = meshes[0].vertices;
+            var authoredCornerOf   = new int[interiorVertexCount];
+            var unclaimed          = new List<double2>(expected);
+            var unclaimedCorner    = new List<int>();
+            for (int c = 0; c < expected.Count; c++) unclaimedCorner.Add(c);
+
+            for (int v = 0; v < interiorVertexCount; v++)
+            {
+                Vector3 vertex  = meshVertices[v];
+                int     claimed = -1;
+                for (int c = 0; c < unclaimed.Count; c++)
+                    if (math.abs(vertex.x - unclaimed[c].x) <= tolerance &&
+                        math.abs(vertex.z - unclaimed[c].y) <= tolerance) { claimed = c; break; }
+
+                Assert.GreaterOrEqual(claimed, 0,
+                    $"mesh vertex ({vertex.x}, {vertex.z}) is not on any AS-YET-UNCLAIMED authored corner " +
+                    $"of the polygon (expected one of {string.Join("; ", expected)}, still unclaimed: " +
+                    $"{string.Join("; ", unclaimed)}). The source rendering SOMETHING is not the claim — " +
+                    "it must render the authored geometry, at the authored place, and a corner may only " +
+                    "be matched once, or four vertices collapsed onto one corner would pass.");
+                authoredCornerOf[v] = unclaimedCorner[claimed];
+                unclaimed.RemoveAt(claimed);
+                unclaimedCorner.RemoveAt(claimed);
+            }
+            Assert.IsEmpty(unclaimed,
+                $"every authored corner must be covered: {string.Join("; ", unclaimed)} was not. With " +
+                "the four-vertex count pinned above and one-to-one consumption this is already implied " +
+                "— it is asserted anyway because it names the missing corner, which neither the count " +
+                "nor the per-vertex arm does. It does NOT survive a fixture emitting more vertices: " +
+                "AreEqual(4, vertexCount) fires first, and a fifth vertex would trip the per-vertex arm " +
+                "against an emptied pool.");
+
+            // ── The triangles must PARTITION the quad, which the summed area below cannot see. ──
+            // Interior triangles only: a band triangle has a vertex past the prefix and no authored corner.
+            var interiorIndices = new List<int>();
+            foreach (int[] triangle in Triples(meshes[0].triangles))
+                if (triangle[0] < interiorVertexCount && triangle[1] < interiorVertexCount && triangle[2] < interiorVertexCount)
+                    interiorIndices.AddRange(triangle);
+            int[] meshIndices = interiorIndices.ToArray();
+            Assert.AreEqual(6, meshIndices.Length,
+                "a quad is two triangles, so six indices — asserted before the topology arms read them, " +
+                "or a fan of some other length would make those arms mean something else");
+            Assert.AreEqual(6 + 6 * interiorVertexCount, meshes[0].triangles.Length,
+                "…and the band contributes six indices per ring edge on top, which is what makes the " +
+                "filter above a filter rather than a no-op");
+
+            var referencedCorners = new HashSet<int>();
+            var triangleCorners   = new List<HashSet<int>>();
+            for (int t = 0; t + 2 < meshIndices.Length; t += 3)
+            {
+                var corners = new HashSet<int>
+                {
+                    authoredCornerOf[meshIndices[t]],
+                    authoredCornerOf[meshIndices[t + 1]],
+                    authoredCornerOf[meshIndices[t + 2]],
+                };
+                Assert.AreEqual(3, corners.Count,
+                    $"triangle {t / 3} names only {corners.Count} distinct authored corners — it is " +
+                    "degenerate, an edge or a point pretending to be a face");
+                triangleCorners.Add(corners);
+                referencedCorners.UnionWith(corners);
+            }
+
+            Assert.AreEqual(4, referencedCorners.Count,
+                "every one of the four authored corners must be REFERENCED by the index buffer. This is " +
+                "the arm the area sum cannot make: two triples naming the same three corners leave the " +
+                "fourth vertex present-but-unindexed, and half the rectangle's area counted twice adds " +
+                "up to exactly the whole. The polygon on screen would be a triangle.");
+
+            var sharedCorners = new HashSet<int>(triangleCorners[0]);
+            sharedCorners.IntersectWith(triangleCorners[1]);
+            Assert.AreEqual(2, sharedCorners.Count,
+                "the two triangles must meet on exactly one EDGE — two shared corners. Three means they " +
+                "are the same face; fewer means they do not tile a quad at all.");
+
+            var sharedPair = new List<int>(sharedCorners);
+            sharedPair.Sort();
+            Assert.AreEqual(2, sharedPair[1] - sharedPair[0],
+                $"the shared edge must be a DIAGONAL of the authored rectangle — corners two apart in " +
+                $"ring order — not a side. Corners {sharedPair[0]} and {sharedPair[1]} are adjacent, " +
+                "which means the two triangles fold over one side of the quad and cover it twice while " +
+                "leaving the other half bare.");
+
+            // …and the quad encloses the authored AREA. Position alone cannot see a fan wound so that the
+            // triangles cancel or overlap; a degenerate mesh is zero here, not merely mis-placed.
+            double2 spanMin = ExpectedWorldXZ(RectMin, RectMin);
+            double2 spanMax = ExpectedWorldXZ(RectMax, RectMax);
+            double expectedArea = math.abs((spanMax.x - spanMin.x) * (spanMax.y - spanMin.y));
+            Assert.Greater(expectedArea, 0.0, "precondition: the authored rectangle has area at all");
+
+            Assert.AreEqual(expectedArea, TriangleArea(meshes[0]), expectedArea * 0.01,
+                "the indexed triangles must enclose the AUTHORED area, within 1%. Zero here is the " +
+                "collapsed-mesh failure the positional arms above are not asked to catch; " +
+                "twice it would be a doubled or self-overlapping fan.");
         }
 
         /// <summary>
@@ -331,12 +366,13 @@ namespace MapRenderer.Tests.GeoJsons
             finally { view.Teardown(); }
         }
 
-        /// <summary>A geojson source whose <c>data</c> is a URL string (unsupported) or malformed is SKIPPED
-        /// with a warning and never faults <c>SetStyle</c>. Skipping is observed, not inferred from no throw: no
-        /// source factory or document loader runs, nothing renders, and NO source is wired. The last arm
-        /// catches an EMPTY <c>FeatureCollection</c> substitute, which fetches and renders nothing.</summary>
+        /// <summary>A geojson source is SKIPPED with a warning and never faults <c>SetStyle</c>, both when
+        /// <c>data</c> is a malformed inline object (valid JSON, not a valid GeoJSON document) and when it is
+        /// neither a string nor an object at all (e.g. a bare number). Skipping is observed, not inferred
+        /// from no throw: no source factory or document loader runs, nothing renders, and NO source is
+        /// wired.</summary>
         [Test]
-        public void UnsupportedOrMalformedData_IsSkipped_NotThrown()
+        public void MalformedInlineData_IsSkipped_NotThrown()
         {
             var view = NewView(out var go);
             Track(go);
@@ -347,15 +383,122 @@ namespace MapRenderer.Tests.GeoJsons
             try
             {
                 Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(@"""https://example.com/data.geojson""")), "url-data")),
-                    "URL-valued `data` is not supported yet and must be skipped, not thrown");
-                AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a URL-valued `data`");
-
-                Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(
                     StyleParser.Parse(StyleWithInlineData(@"{""type"":""Nonsense""}")), "bad-data")),
                     "a malformed inline dataset must be skipped, not thrown — a fixture typo must not take " +
                     "the whole style down");
                 AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a malformed inline dataset");
+
+                Assert.DoesNotThrow(() => SpinToCompleted(view.SetStyle(
+                    StyleParser.Parse(StyleWithInlineData("42")), "number-data")),
+                    "a `data` that is neither a string nor an object must be skipped, not thrown");
+                AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a `data` that is a bare number");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>A style with a BAD geojson source (URL `data`, either a loader throw or a fetched body
+        /// that is not valid GeoJSON) next to a GOOD one: the bad source is skipped with a warning and never
+        /// faults <c>SetStyle</c>, and the good source still wires — proving isolation, not merely
+        /// "the whole style didn't throw" (which an all-bad style cannot tell apart from a real skip).</summary>
+        [Test]
+        public void UrlDataFailure_IsSkipped_TheOtherSourceStillWires()
+        {
+            string mixedStyle = $@"{{
+                ""version"": 8,
+                ""sources"": {{
+                    ""bad"":  {{ ""type"": ""geojson"", ""data"": ""https://example.com/data.geojson"" }},
+                    ""good"": {{ ""type"": ""geojson"", ""data"": {RectangleAt(RectMin, RectMax)} }}
+                }},
+                ""layers"": [
+                    {{ ""id"": ""bad-fill"",  ""type"": ""fill"", ""source"": ""bad"",
+                       ""paint"": {{ ""fill-color"": ""#ff0000"" }} }},
+                    {{ ""id"": ""good-fill"", ""type"": ""fill"", ""source"": ""good"",
+                       ""paint"": {{ ""fill-color"": ""#00ff00"" }} }}
+                ]
+            }}";
+
+            // Arm 1: the loader itself throws.
+            var view1 = NewView(out var go1);
+            Track(go1);
+            view1.View.DocumentLoaderOverride = (uri, ct) => throw new System.IO.FileNotFoundException("no such document", uri);
+            try
+            {
+                Assert.DoesNotThrow(() => SpinToCompleted(view1.SetStyle(StyleParser.Parse(mixedStyle), "loader-throws")),
+                    "a loader failure on one geojson source must not fault SetStyle for the whole style");
+                PumpUntilSettled(view1);
+                Assert.AreEqual(1, view1.WiredFeatureSourceCount(),
+                    "only the GOOD source must be wired — the bad one is skipped, not both, and not neither");
+            }
+            finally { view1.Teardown(); }
+
+            // Arm 2: the loader succeeds, but the body is not valid GeoJSON.
+            var view2 = NewView(out var go2);
+            Track(go2);
+            view2.View.DocumentLoaderOverride = (uri, ct) => UniTask.FromResult(@"{""type"":""Nonsense""}");
+            try
+            {
+                Assert.DoesNotThrow(() => SpinToCompleted(view2.SetStyle(StyleParser.Parse(mixedStyle), "loader-bad-body")),
+                    "a fetched body that is not valid GeoJSON must not fault SetStyle for the whole style");
+                PumpUntilSettled(view2);
+                Assert.AreEqual(1, view2.WiredFeatureSourceCount(),
+                    "only the GOOD source must be wired — the bad one is skipped, not both, and not neither");
+            }
+            finally { view2.Teardown(); }
+        }
+
+        /// <summary>The document loader is called exactly once per <c>SetStyle</c> for a URL `data`, and
+        /// cancelling mid-fetch keeps the PREVIOUS style live — the same transactional-restyle contract
+        /// TileJSON already has. The gate registers on the passed token itself (as a real fetch's
+        /// cancellation would), so no frame pump is needed: everything up to the suspending await, and the
+        /// cancel's completion of that same await, runs synchronously.</summary>
+        [Test]
+        public void UrlDataFetch_IsCalledOnceAndCancelKeepsThePreviousStyleLive()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                // First style: background only, commits synchronously — establishes the "previous style".
+                SpinToCompleted(view.SetStyle(StyleParser.Parse(@"{
+                    ""version"": 8,
+                    ""layers"": [ { ""id"": ""bg"", ""type"": ""background"",
+                                    ""paint"": { ""background-color"": ""#ff0000"" } } ]
+                }"), "first"));
+                Assert.AreEqual("first", view.StyleId);
+
+                // Second style: a URL-data geojson source whose fetch never completes on its own — only a
+                // cancel of the passed token settles it — so BuildSourceSpecs' await genuinely suspends.
+                int docFetches = 0;
+                view.View.DocumentLoaderOverride = (uri, ct) =>
+                {
+                    Interlocked.Increment(ref docFetches);
+                    var tcs = new UniTaskCompletionSource<string>();
+                    ct.Register(() => tcs.TrySetCanceled());
+                    return tcs.Task;
+                };
+
+                using var cts = new CancellationTokenSource();
+                UniTask setStyleTask = view.SetStyle(
+                    StyleParser.Parse(StyleWithInlineData(@"""https://example.com/data.geojson""")),
+                    "second", cts.Token).Preserve();
+
+                Assert.AreEqual(1, docFetches, "the URL data must be fetched exactly once per SetStyle");
+
+                cts.Cancel();
+
+                System.OperationCanceledException caught = null;
+                try
+                {
+                    setStyleTask.WaitOffPlayerLoop(10000);
+                    setStyleTask.GetAwaiter().GetResult();
+                }
+                catch (System.OperationCanceledException ex) { caught = ex; }
+                Assert.IsNotNull(caught, "a cancelled URL-data fetch must surface as OperationCanceledException");
+
+                Assert.AreEqual("first", view.StyleId,
+                    "a cancel during the geojson URL fetch must leave the PREVIOUS style's identity live");
+                Assert.AreEqual(0, view.FillLayerCount(),
+                    "the cancelled style's fill layer must never have been built — the first style has none");
             }
             finally { view.Teardown(); }
         }
@@ -394,8 +537,8 @@ namespace MapRenderer.Tests.GeoJsons
 
         // ── SourceKey carries the inline-data identity ────────────────────────────────────────────────
 
-        private static SourceDefinition GeoJsonDef(string dataJson)
-            => StyleParser.Parse(StyleWithInlineData(dataJson)).GetSource("geo");
+        private static SourceDefinition GeoJsonDef(string dataJson, string bufferJson = null)
+            => StyleParser.Parse(StyleWithInlineData(dataJson, bufferJson)).GetSource("geo");
 
         /// <summary><b>Different data (unit)</b> — two definitions identical except for the inline <c>data</c>
         /// produce DIFFERENT keys. Without the field they are value-equal on all six other fields (an inline
@@ -441,6 +584,33 @@ namespace MapRenderer.Tests.GeoJsons
                 TileManager.SourceKey.From(first).GetHashCode(),
                 TileManager.SourceKey.From(second).GetHashCode(),
                 "…and the hash must agree, or the dictionary lookups the diff performs never reach Equals");
+        }
+
+        /// <summary><b>Different URL data (unit)</b> — two definitions identical except for the URL string
+        /// `data` produce DIFFERENT keys, the same discriminator the inline-object case already has.</summary>
+        [Test]
+        public void TwoUrlDataSources_DifferingOnlyInTheUrl_HaveDifferentKeys()
+        {
+            SourceDefinition first  = GeoJsonDef(@"""https://example.com/a.geojson""");
+            SourceDefinition second = GeoJsonDef(@"""https://example.com/b.geojson""");
+
+            Assert.AreNotEqual(TileManager.SourceKey.From(first), TileManager.SourceKey.From(second),
+                "two different data URLs must not be the same source, or a restyle between them would keep " +
+                "the first URL's pipeline and never re-fetch the second.");
+        }
+
+        /// <summary><b>URL vs inline data (unit)</b> — a URL string and an inline object produce DIFFERENT
+        /// keys even where nothing else on the definition differs, so a restyle between the two kinds always
+        /// rebuilds the pipeline rather than keeping a fetched dataset's mesh for a definition that now
+        /// declares its own.</summary>
+        [Test]
+        public void UrlDataAndInlineData_HaveDifferentKeys()
+        {
+            SourceDefinition urlSource    = GeoJsonDef(@"""https://example.com/a.geojson""");
+            SourceDefinition inlineSource = GeoJsonDef(RectangleAt(RectMin, RectMax));
+
+            Assert.AreNotEqual(TileManager.SourceKey.From(urlSource), TileManager.SourceKey.From(inlineSource),
+                "a URL data source and an inline data source must not be the same source, even coincidentally.");
         }
 
         /// <summary>The same claim where member ORDER differs — the realistic re-parse difference, and the
@@ -606,6 +776,52 @@ namespace MapRenderer.Tests.GeoJsons
                 Assert.AreEqual(2, created,
                     "a restyle to DIFFERENT inline data must REBUILD the pipeline. Keeping it is the recorded " +
                     "bug: the second style's tiles would be served from the first dataset.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>
+        /// The same claim, varying ONLY <c>buffer</c> (same data throughout): the restyle diff must REBUILD
+        /// the pipeline when the authored margin changes, or a restyle from <c>buffer: 0</c> to <c>buffer:
+        /// 512</c> keeps serving tiles sliced at the OLD margin.
+        /// </summary>
+        [Test]
+        public void TheRestyleDiff_RebuildsWhenOnlyBufferChanged()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax), "0"));
+                view.View.Layers.Build(style, 0.0, view.Config.MaterialSet);
+
+                int created = 0;
+
+                void Apply(SourceDefinition def)
+                {
+                    var specs = new List<TileManager.SourceSpec>
+                    {
+                        new TileManager.SourceSpec("geo", TileManager.SourceKey.From(def), 0, 22, () =>
+                        {
+                            created++;
+                            return new GeoJsonTileFeatureSource(
+                                GeoJsonParser.Parse(def.Data), GeoJsonSliceOptions.Default, Scheduler);
+                        }),
+                    };
+                    view.View.TileManager.SetSources(specs, view.Config.Backend);
+                }
+
+                Apply(GeoJsonDef(RectangleAt(RectMin, RectMax), "0"));
+                Assert.AreEqual(1, created, "precondition: the first application builds the pipeline");
+
+                Apply(GeoJsonDef(RectangleAt(RectMin, RectMax), "0"));
+                Assert.AreEqual(1, created,
+                    "a restyle to the SAME buffer (and data) must KEEP the pipeline");
+
+                Apply(GeoJsonDef(RectangleAt(RectMin, RectMax), "512"));
+                Assert.AreEqual(2, created,
+                    "a restyle that changes ONLY `buffer` must REBUILD the pipeline — keeping it serves " +
+                    "tiles sliced at the OLD margin under the NEW style");
             }
             finally { view.Teardown(); }
         }
@@ -909,6 +1125,135 @@ namespace MapRenderer.Tests.GeoJsons
             SharedDisposable<IDecodedTile> handle = await source.GetTile(WorldTile);
             Assert.AreEqual(0, source.InFlightCount);
             handle?.Release();
+        }
+
+        // ── An authored `buffer` overrides the slicer margin ─────────────────────────────────────────
+
+        // Away from the world tile, the poles and the antimeridian, so a negative tile-local offset still
+        // lands at a valid, in-range lon/lat rather than wrapping or clamping.
+        private static readonly TileId MidTile = new TileId { Z = 4, X = 8, Y = 8 };
+
+        private static string PointAt(TileId tile, double px, double py)
+        {
+            double2 lonLat = tile.ToLonLat(px, py, GeoJsonSliceOptions.DefaultExtent);
+            return GeoJsonTestFixtures.Collection(GeoJsonTestFixtures.Feature(
+                "Point", GeoJsonTestFixtures.Position(lonLat.x, lonLat.y)));
+        }
+
+        /// <summary>Builds the geojson source through the REAL <c>MapView.BuildSourceSpecs</c> — the ONE
+        /// place `buffer` is converted — rather than duplicating the conversion in the test. Blocks
+        /// synchronously ON THE CALLING (main) THREAD: an `async Task` test resumes wherever its awaited
+        /// UniTask's continuation lands, which <see cref="GetTileSync"/>'s off-main slice would break, and
+        /// the <c>view.Teardown()</c> every caller runs afterward needs the main thread.</summary>
+        private static ITileFeatureSource WiredGeoJsonSource(
+            MapView view, string dataJson, string bufferJson = null)
+        {
+            var style = StyleParser.Parse(StyleWithInlineData(dataJson, bufferJson));
+            UniTask<List<TileManager.SourceSpec>> task =
+                view.View.BuildSourceSpecs(style, CancellationToken.None).Preserve();
+            Assert.IsTrue(task.WaitOffPlayerLoop(10000), "BuildSourceSpecs must complete within the timeout");
+            List<TileManager.SourceSpec> specs = task.GetAwaiter().GetResult();
+            Assert.AreEqual(1, specs.Count, "precondition: exactly one geojson source spec was built");
+            return specs[0].CreateSource();
+        }
+
+        /// <summary>Blocks synchronously on the calling thread, for the same reason as
+        /// <see cref="WiredGeoJsonSource"/>: <c>GetTile</c> slices OFF the main thread, so an `await` here
+        /// would resume the test method itself off-thread, ahead of a `view.Teardown()` that needs it.</summary>
+        private static SharedDisposable<IDecodedTile> GetTileSync(ITileFeatureSource source, TileId tile)
+        {
+            UniTask<SharedDisposable<IDecodedTile>> task = source.GetTile(tile).Preserve();
+            Assert.IsTrue(task.WaitOffPlayerLoop(10000), "GetTile must complete within the timeout");
+            return task.GetAwaiter().GetResult();
+        }
+
+        /// <summary>An authored `buffer: 8` must convert to 64 reference units (x8), not 8 (1:1). A
+        /// point 60 units past the tile edge sits inside the correct 64-unit margin but outside a bogus
+        /// 8-unit one, so a 1:1 mapping fails this while the x8 conversion passes it.</summary>
+        [Test]
+        public void AuthoredBuffer_ConvertsToReferenceUnits_ByFactorOf8()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                using ITileFeatureSource source = WiredGeoJsonSource(view, PointAt(MidTile, -60.0, 2048.0), "8");
+
+                SharedDisposable<IDecodedTile> handle = null;
+                try
+                {
+                    handle = GetTileSync(source, MidTile);
+                    Assert.IsNotNull(handle,
+                        "buffer: 8 must reach the slicer as 64 reference units; a point 60 units past the edge " +
+                        "is inside that margin, so it must still be captured");
+                }
+                finally { handle?.Release(); }
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>`buffer: 0` cuts exactly at the tile edge. A point 10 units past it is absent.</summary>
+        [Test]
+        public void ZeroBuffer_ExcludesAPointPastTheTileEdge()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                using ITileFeatureSource source = WiredGeoJsonSource(view, PointAt(MidTile, -10.0, 2048.0), "0");
+
+                SharedDisposable<IDecodedTile> handle = GetTileSync(source, MidTile);
+                Assert.IsNull(handle,
+                    "buffer: 0 must cut at the tile boundary — a point 10 units past the edge must be absent");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>`buffer: 512` (one tile width, the Style Spec ceiling) reaches a point 0.9 tile
+        /// widths past the edge.</summary>
+        [Test]
+        public void MaxBuffer_ReachesAPointNearlyAWholeTileWidthPastTheEdge()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                double pastEdge = 0.9 * GeoJsonSliceOptions.DefaultExtent;
+                using ITileFeatureSource source = WiredGeoJsonSource(
+                    view, PointAt(MidTile, -pastEdge, 2048.0), "512");
+
+                SharedDisposable<IDecodedTile> handle = null;
+                try
+                {
+                    handle = GetTileSync(source, MidTile);
+                    Assert.IsNotNull(handle,
+                        "buffer: 512 must reach a full tile width (4096 reference units) past the edge, which " +
+                        "covers a point 0.9 tile widths out");
+                }
+                finally { handle?.Release(); }
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>An ABSENT `buffer` key keeps <see cref="GeoJsonSliceOptions.DefaultBufferAtReferenceExtent"/>
+        /// rather than the spec's 128 default — a point 100 units past the edge (inside the spec default,
+        /// outside the kept one) must stay absent.</summary>
+        [Test]
+        public void AbsentBuffer_KeepsTheSlicerDefaultMargin_NotTheSpecDefault()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                using ITileFeatureSource source = WiredGeoJsonSource(
+                    view, PointAt(MidTile, -100.0, 2048.0)); // no bufferJson: key absent
+
+                SharedDisposable<IDecodedTile> handle = GetTileSync(source, MidTile);
+                Assert.IsNull(handle,
+                    "an absent buffer key must keep the slicer's existing 64-unit margin, not the spec's " +
+                    "128 default (which x8 to 1024 reference units would have reached this point)");
+            }
+            finally { view.Teardown(); }
         }
     }
 }

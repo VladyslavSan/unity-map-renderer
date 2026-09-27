@@ -35,7 +35,7 @@ using Background = MapRenderer.Unity.Style.Background;
 using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Text;
 using System.Collections.Generic;
@@ -320,6 +320,60 @@ namespace MapRenderer.Tests.Style
 
             var emptyTiles = new SourceDefinition { Url = "https://x/tiles.json", Tiles = new string[0] };
             Assert.IsTrue(SourceResolver.NeedsTileJson(emptyTiles), "empty tiles[] treated as absent");
+        }
+
+        // =========================================================================================
+        // 7. geojson `maxzoom` defaults to the spec's 18, not the vector default of 22.
+        // =========================================================================================
+        [Test]
+        public void MaxZoomDefault_Is18ForGeoJson_22ForVectorAndOthers()
+        {
+            SourceDefinition GeoJson(string maxZoomJson = null) => StyleParser.Parse($@"{{
+                ""sources"": {{ ""g"": {{ ""type"": ""geojson"", ""data"": {{ ""type"": ""FeatureCollection"",
+                    ""features"": [] }}{(maxZoomJson == null ? "" : $@", ""maxzoom"": {maxZoomJson}")} }} }}
+            }}").Sources["g"];
+
+            Assert.AreEqual(StyleParser.DefaultGeoJsonSourceMaxZoom, GeoJson().MaxZoom,
+                "an absent maxzoom on a geojson source must default to the spec's 18, not the vector default");
+            Assert.AreEqual(12, GeoJson("12").MaxZoom, "an explicit maxzoom is read as-is");
+
+            SourceDefinition vector = StyleParser.Parse(@"{
+                ""sources"": { ""v"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } }
+            }").Sources["v"];
+            Assert.AreEqual(StyleParser.DefaultSourceMaxZoom, vector.MaxZoom,
+                "a vector source's absent maxzoom must stay the vector default (22), unaffected by the " +
+                "geojson-specific default");
+        }
+
+        // =========================================================================================
+        // 8. geojson `buffer`: an AUTHORED value only, clamped to [0, 512]; absent/non-number is null.
+        // =========================================================================================
+        [Test]
+        public void BufferParsing_ClampsToSpecRange_AndIsNullWhenAbsentOrNotANumber()
+        {
+            SourceDefinition GeoJsonWithBuffer(string bufferJson) => StyleParser.Parse($@"{{
+                ""sources"": {{ ""g"": {{ ""type"": ""geojson"", ""data"": {{ ""type"": ""FeatureCollection"",
+                    ""features"": [] }}, ""buffer"": {bufferJson} }} }}
+            }}").Sources["g"];
+
+            Assert.AreEqual(0.0, GeoJsonWithBuffer("-5").Buffer, "a negative buffer clamps to 0");
+            Assert.AreEqual(512.0, GeoJsonWithBuffer("9999").Buffer, "a buffer above 512 clamps to the spec ceiling");
+            Assert.AreEqual(128.0, GeoJsonWithBuffer("128").Buffer, "an in-range value is read as-is");
+            Assert.IsNull(GeoJsonWithBuffer(@"""x""").Buffer,
+                "a non-number value falls back to null (the same as an absent key), not a thrown parse or a coerced 0");
+
+            SourceDefinition absent = StyleParser.Parse(@"{
+                ""sources"": { ""g"": { ""type"": ""geojson"", ""data"": { ""type"": ""FeatureCollection"",
+                    ""features"": [] } } }
+            }").Sources["g"];
+            Assert.IsNull(absent.Buffer, "an absent buffer key is null — an AUTHORED value only");
+
+            SourceDefinition vector = StyleParser.Parse(@"{
+                ""sources"": { ""v"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""],
+                    ""buffer"": 64 } }
+            }").Sources["v"];
+            Assert.IsNull(vector.Buffer,
+                "`buffer` is a geojson-only key — a vector source's value must not be read at all");
         }
     }
 
@@ -3561,6 +3615,72 @@ namespace MapRenderer.Tests.Style
 
             Assert.IsNotNull(doc.Sky);
             Assert.AreEqual(1.0, doc.Sky.FogColor.Evaluate(0.0).R, 1e-4);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SpriteReferenceParseTests — root `sprite`: string form and array form
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class SpriteReferenceParseTests
+    {
+        [Test]
+        public void StringForm_ParsesToOneDefaultEntry()
+        {
+            var doc = StyleParser.Parse("{\"version\":8,\"sprite\":\"https://example.invalid/sprite\",\"layers\":[]}");
+
+            Assert.AreEqual(1, doc.Sprites.Count);
+            Assert.AreEqual("default", doc.Sprites[0].Id);
+            Assert.AreEqual("https://example.invalid/sprite", doc.Sprites[0].Url);
+        }
+
+        [Test]
+        public void ArrayForm_KeepsEveryIdInDeclaredOrder()
+        {
+            var doc = StyleParser.Parse(
+                "{\"version\":8,\"sprite\":[" +
+                "{\"id\":\"default\",\"url\":\"https://example.invalid/a\"}," +
+                "{\"id\":\"extra\",\"url\":\"https://example.invalid/b\"}" +
+                "],\"layers\":[]}");
+
+            Assert.AreEqual(2, doc.Sprites.Count);
+            Assert.AreEqual("default", doc.Sprites[0].Id);
+            Assert.AreEqual("https://example.invalid/a", doc.Sprites[0].Url);
+            Assert.AreEqual("extra", doc.Sprites[1].Id);
+            Assert.AreEqual("https://example.invalid/b", doc.Sprites[1].Url);
+        }
+
+        [Test]
+        public void ArrayForm_MalformedEntry_IsDroppedNotThrown()
+        {
+            var doc = StyleParser.Parse(
+                "{\"version\":8,\"sprite\":[" +
+                "{\"id\":\"good\",\"url\":\"https://example.invalid/a\"}," +
+                "{\"id\":\"missingUrl\"}," +
+                "{\"url\":\"https://example.invalid/missing-id\"}," +
+                "\"not-an-object\"" +
+                "],\"layers\":[]}");
+
+            Assert.AreEqual(1, doc.Sprites.Count, "only the well-formed entry must survive");
+            Assert.AreEqual("good", doc.Sprites[0].Id);
+        }
+
+        [Test]
+        public void AbsentSprite_YieldsAnEmptyList()
+        {
+            var doc = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+
+            Assert.AreEqual(0, doc.Sprites.Count);
+        }
+
+        [Test]
+        public void MalformedSpriteType_YieldsAnEmptyList()
+        {
+            // A number where the spec expects a string or an array — tolerate rather than throw.
+            var doc = StyleParser.Parse("{\"version\":8,\"sprite\":42,\"layers\":[]}");
+
+            Assert.AreEqual(0, doc.Sprites.Count);
         }
     }
 }

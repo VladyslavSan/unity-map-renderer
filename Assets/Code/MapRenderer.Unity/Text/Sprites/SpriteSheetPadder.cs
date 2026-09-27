@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// Plans the rects of a <b>padded repack</b> of a sprite sheet (<c>SpriteSheetComposer</c> moves the pixels):

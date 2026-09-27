@@ -157,7 +157,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Value-equality identity of a resolved source definition — the restyle diff key. Two
         /// sources are "the same" (keep the pipeline, reuse cached bytes) iff their resolved
-        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c>/<c>type</c> match.
+        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c>/<c>buffer</c>/<c>type</c> match.
         /// Non-obvious why: an inline source has no <c>url</c>/<c>tiles[]</c>, so without <c>data</c> a restyle to
         /// another dataset keeps the first pipeline. <c>type</c> selects the factory (byte fetcher or local slicer),
         /// so without it a switch between MVT and inline GeoJSON also keeps the wrong pipeline. That repro is
@@ -169,14 +169,15 @@ namespace MapRenderer.Unity.Rendering.Tile
             public readonly int    MinZoom;
             public readonly int    MaxZoom;
             public readonly string Scheme;
-            public readonly string Bounds; // bounds joined with ',' — value-equality (null when default/absent)
+            public readonly string Bounds; // the VALIDATED GeoBounds joined with ',' — null when no gate
             public readonly string Data;   // canonical `data` text — null when the key is absent
+            public readonly string Buffer; // round-trip invariant `buffer` text — null when absent (geojson only)
             public readonly SourceType Type; // the discriminator that selects the factory — see the type doc
 
             /// <summary>Private, with every parameter required, so <see cref="From"/> is the only way to
             /// mint a key — a defaulted <c>type</c>/<c>data</c> would silently compare equal across the field the diff branches on.</summary>
             private SourceKey(string url, string tiles, int minZoom, int maxZoom, string scheme, string bounds,
-                string data, SourceType type)
+                string data, string buffer, SourceType type)
             {
                 Type    = type;
                 Url     = url;
@@ -186,21 +187,39 @@ namespace MapRenderer.Unity.Rendering.Tile
                 Scheme  = scheme;
                 Bounds  = bounds;
                 Data    = data;
+                Buffer  = buffer;
             }
 
-            /// <summary>Builds the key from a resolved <see cref="SourceDefinition"/>.</summary>
-            public static SourceKey From(SourceDefinition def)
+            /// <summary>Builds the key from a resolved <see cref="SourceDefinition"/> and its VALIDATED
+            /// <paramref name="bounds"/> gate — not <c>def.Bounds</c>'s raw array — so a malformed bounds
+            /// (no gate) and one that resolves to the same spec-default array (e.g. absent bounds) never
+            /// collide onto one key.</summary>
+            public static SourceKey From(SourceDefinition def, in GeoBounds bounds = default)
             {
-                string tiles  = def.Tiles  != null ? string.Join("\n", def.Tiles) : null;
-                string bounds = def.Bounds != null ? string.Join(",",  def.Bounds) : null;
-                string data   = def.Data   != null ? JsonCanonical.Write(def.Data) : null;
-                return new SourceKey(def.Url, tiles, def.MinZoom, def.MaxZoom, def.Scheme, bounds, data, def.Type);
+                string tiles      = def.Tiles != null ? string.Join("\n", def.Tiles) : null;
+                string boundsText = bounds.HasBounds ? JoinInvariant(bounds) : null;
+                string data       = def.Data  != null ? JsonCanonical.Write(def.Data) : null;
+                string buffer     = def.Buffer.HasValue
+                    ? def.Buffer.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+                    : null;
+                return new SourceKey(
+                    def.Url, tiles, def.MinZoom, def.MaxZoom, def.Scheme, boundsText, data, buffer, def.Type);
+            }
+
+            /// <summary>Joins the four bounds fields with a comma, each formatted round-trip ("R") and
+            /// culture-invariant — the current-culture default (<see cref="double.ToString()"/>) renders a
+            /// fraction with a comma under e.g. de-DE, colliding with the separator.</summary>
+            private static string JoinInvariant(in GeoBounds bounds)
+            {
+                var ci = System.Globalization.CultureInfo.InvariantCulture;
+                return bounds.West.ToString("R", ci) + "," + bounds.South.ToString("R", ci) + "," +
+                       bounds.East.ToString("R", ci) + "," + bounds.North.ToString("R", ci);
             }
 
             public bool Equals(SourceKey o)
                 => Type       == o.Type    && Url    == o.Url    && Tiles   == o.Tiles
                    && MinZoom == o.MinZoom && MaxZoom == o.MaxZoom && Scheme == o.Scheme
-                   && Bounds  == o.Bounds  && Data   == o.Data;
+                   && Bounds  == o.Bounds  && Data   == o.Data    && Buffer == o.Buffer;
 
             public override bool Equals(object obj) => obj is SourceKey o && Equals(o);
 
@@ -216,10 +235,18 @@ namespace MapRenderer.Unity.Rendering.Tile
                     h = h * 31 + (Scheme ?? string.Empty).GetHashCode();
                     h = h * 31 + (Bounds ?? string.Empty).GetHashCode();
                     h = h * 31 + (Data   ?? string.Empty).GetHashCode();
+                    h = h * 31 + (Buffer ?? string.Empty).GetHashCode();
                     h = h * 31 + (int)Type;
                     return h;
                 }
             }
+
+            /// <summary>A canonical text form carrying every field <see cref="Equals"/> compares — used to
+            /// fold a source's resolved identity into <see cref="Map.MapView"/>'s style token (so a
+            /// TileJSON that resolves differently under an otherwise-unchanged style busts the prepared-tile
+            /// cache, whose own key carries no source identity).</summary>
+            public override string ToString()
+                => $"{Type}|{Url}|{Tiles}|{MinZoom}|{MaxZoom}|{Scheme}|{Bounds}|{Data}|{Buffer}";
         }
 
         /// <summary>The caller's recipe for one source pipeline — a <see cref="CreateSource"/> thunk lets <see cref="SetSources"/> build only new/changed pipelines.</summary>
@@ -229,16 +256,20 @@ namespace MapRenderer.Unity.Rendering.Tile
             public readonly SourceKey                       Key;
             public readonly int                             MinZoom;
             public readonly int                             MaxZoom;
+            /// <summary>The declared bounds gate; <c>default</c> (<see cref="GeoBounds.HasBounds"/> false)
+            /// means no gate.</summary>
+            public readonly GeoBounds                       Bounds;
             public readonly System.Func<ITileFeatureSource> CreateSource;
 
             public SourceSpec(string            sourceId, SourceKey key, int minZoom, int maxZoom,
-                System.Func<ITileFeatureSource> createSource)
+                System.Func<ITileFeatureSource> createSource, in GeoBounds bounds = default)
             {
                 SourceId     = sourceId;
                 Key          = key;
                 MinZoom      = minZoom;
                 MaxZoom      = maxZoom;
                 CreateSource = createSource;
+                Bounds       = bounds;
             }
         }
 
@@ -868,7 +899,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     TileId id = _cover[i];
                     for (int s = 0; s < _sources.Count; s++)
                     {
-                        if (!_sources.AdmitsZoom(s, id.Z)) continue; // source doesn't serve this zoom
+                        if (!_sources.AdmitsTile(s, id)) continue; // source doesn't serve this zoom/bounds
                         var key = new LoadedKey(id, s);
                         if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
                         if (_desiredSet.Add(key)) _desired.Add(key);

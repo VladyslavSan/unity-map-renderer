@@ -29,7 +29,7 @@ using UnityEngine;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using System.Threading.Tasks;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Tiles;

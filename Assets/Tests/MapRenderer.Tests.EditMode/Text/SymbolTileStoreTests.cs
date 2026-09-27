@@ -421,7 +421,7 @@ namespace MapRenderer.Tests.Text
             var subsystem = new SymbolSubsystem(_mapCamera) { NowSecondsOverride = () => _simulatedNow };
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             subsystem.GlyphSourceFactoryOverride  = _ => TestGlyphSource.FromRanges(ranges);
-            subsystem.SpriteSourceFactoryOverride = _ => new GatedSpriteSource(spriteFetch);
+            subsystem.SpriteSourceFactoryOverride = (_, _) => new[] { ("default", (ISpriteSource)new GatedSpriteSource(spriteFetch)) };
             StyleDocument style = StyleParser.Parse(StyleJson);
             subsystem.SetStyle(style, ExtractSymbolLayers(style));
             return subsystem;

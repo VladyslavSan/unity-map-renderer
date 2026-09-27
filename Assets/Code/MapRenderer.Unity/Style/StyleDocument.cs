@@ -17,8 +17,10 @@ namespace MapRenderer.Unity.Style
         /// <summary>Human-readable style name (root <c>name</c>), or null.</summary>
         public string Name;
 
-        /// <summary>Sprite sheet base URL (root <c>sprite</c>), or null.</summary>
-        public string Sprite;
+        /// <summary>Sprite sheet references (root <c>sprite</c>) — one entry per id, in declared order.
+        /// A string form parses to one entry with id <c>"default"</c>. Never null, empty when the key is
+        /// absent or malformed.</summary>
+        public readonly List<SpriteReference> Sprites = new List<SpriteReference>();
 
         /// <summary>Glyph PBF URL template (root <c>glyphs</c>), or null.</summary>
         public string Glyphs;

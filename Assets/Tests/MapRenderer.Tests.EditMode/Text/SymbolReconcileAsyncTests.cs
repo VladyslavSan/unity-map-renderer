@@ -3289,7 +3289,7 @@ namespace MapRenderer.Tests.Text
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            _subsystem.SpriteSourceFactoryOverride = _ => new GatedSpriteSource(gatedFetch);
+            _subsystem.SpriteSourceFactoryOverride = (_, _) => new[] { ("default", (ISpriteSource)new GatedSpriteSource(gatedFetch)) };
             StyleDocument style = StyleParser.Parse(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }

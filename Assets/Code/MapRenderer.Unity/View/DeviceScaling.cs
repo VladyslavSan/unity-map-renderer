@@ -101,8 +101,9 @@ namespace MapRenderer.Unity.View
         /// home of that fallback
         /// (<c>DevicePixelRatioFramingTests.RatioFallback_HasExactlyOneHome_InDeviceScaling</c>).
         /// Non-obvious why: a clamp would draw a plausible-looking wrong map; the fallback gives the
-        /// neutral default every test runs at.</summary>
-        private static double SafeRatio(double devicePixelRatio)
+        /// neutral default every test runs at. Internal: <see cref="Rendering.Source.SpriteSourceFactory"/>
+        /// reuses it to sanitize the ratio its own @2x threshold reads.</summary>
+        internal static double SafeRatio(double devicePixelRatio)
             => devicePixelRatio >= MinPlausibleRatio && devicePixelRatio <= MaxPlausibleRatio
                 ? devicePixelRatio
                 : 1.0;

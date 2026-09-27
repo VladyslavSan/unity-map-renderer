@@ -14,7 +14,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Unity.Style.Symbol;

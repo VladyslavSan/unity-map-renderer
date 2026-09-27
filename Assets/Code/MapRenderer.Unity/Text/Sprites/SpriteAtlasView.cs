@@ -3,7 +3,7 @@
 
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// The read-only sprite-sheet view <c>SymbolFeatureExtractor</c> consumes to

@@ -3,7 +3,7 @@
 using System.Collections.Generic;
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// Deterministic next-fit-decreasing-height <b>shelf</b> rectangle packing of axis-aligned cells into the

@@ -1,7 +1,7 @@
 // Engine-free: no UnityEngine dependency.
 
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using Unity.Mathematics;
 
 namespace MapRenderer.Unity.Style.Fill

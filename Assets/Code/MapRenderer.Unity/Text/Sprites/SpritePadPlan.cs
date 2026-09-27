@@ -4,7 +4,7 @@
 using System.Collections.Generic;
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// The result of planning a padded repack of a sprite sheet (<c>SpriteSheetPadder.Plan</c>): the

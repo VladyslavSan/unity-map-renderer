@@ -21,8 +21,9 @@ namespace MapRenderer.Core.GeoJson
 
         /// <summary>64 tile units at <see cref="TileBufferClip.ReferenceExtent"/> — the OpenMapTiles standard
         /// buffer this repo already documents at <c>Tiles/TileBufferClip.cs</c>. Chosen so the slicer's
-        /// window and the fill pipeline's clip window are IDENTICAL at the standard setting, which makes the
-        /// pipeline clip a provable no-op on GeoJSON tiles rather than merely a harmless one.</summary>
+        /// window and the fill pipeline's clip window are IDENTICAL at the standard setting, making the
+        /// pipeline clip a provable no-op — true only while a source's Style Spec <c>buffer</c> stays absent;
+        /// an authored one overrides this at the <c>MapView</c> wiring site.</summary>
         public const double DefaultBufferAtReferenceExtent = 64.0;
 
         /// <summary>Tile-local coordinate range: <c>[0, Extent]</c> is the tile proper.</summary>

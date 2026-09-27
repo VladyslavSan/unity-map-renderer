@@ -3,7 +3,7 @@
 using System.Collections.Generic;
 using MapRenderer.Core.Json;
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// A parsed MapLibre sprite JSON index: name → <see cref="SpriteEntry"/>. Mirrors

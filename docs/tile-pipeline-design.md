@@ -75,13 +75,22 @@ construction.
 would hand every caller the `ITileFeatureSource` and the mutable `MinZoom`/`MaxZoom` fields no caller should
 touch, and every later need ("just the source id", "is this slot sourceless?") would be met by punching a
 property off the returned object instead of by an intention-revealing method. Ten narrow operations ship
-instead — `SourceIdOf`, `IsSourceless`, `AdmitsZoom`, `SourceAt`, `ReleaseTile`, `Rebuild` among them — and
+instead — `SourceIdOf`, `IsSourceless`, `AdmitsTile`, `SourceAt`, `ReleaseTile`, `Rebuild` among them — and
 `TileProcessingStructureTests.SourceRegistry_SurfaceIsExactlyTenMembers` pins the bound, so a later "just add a getter"
 fails loudly rather than reopening the indexer shape.
+
+A source's fetch ADDRESS is the only place a non-XYZ tile identity exists (`scheme: "tms"`, flipped by
+`TileUrlTemplate` at fetch time); `bounds` gates admission instead, in `AdmitsTile`, so every other
+identity — `LoadedKey`, placement, cache keys — stays XYZ throughout.
 
 A tiled source's fetch composes three things: addressing (`TileUrlTemplate`, which turns a `TileId` into a
 URI), a transport (`HttpTransport` or `FileTransport`, each returning bytes or absent) and the encoding the
 source declares (`TemplatedTileSource` pairs the bytes with it).
+
+`bounds` is malformed — a warning, no gate, never a fault — when it is not exactly 4 numbers, when
+`south > north`, or when a longitude falls outside [-180, 180]. The longitude case is rejected rather than
+wrapped: the spec's own `west > east` convention already covers crossing the antimeridian in-range, and a
+second wrapping rule would let the two disagree on the same input.
 
 **The three-consumer agreement invariant.** The kick, the prepared-cache probe and the release transfer must
 agree on what "this tile's complete prepared set" means; a disagreement serves a partial tile as a complete
@@ -180,10 +189,13 @@ for other reasons; the bake does not read it.
 
 The rule that licenses `PreparedTileCache` holding no purge of its own: **a new bake input either enters the
 cache token or gets its own purge.** The current inputs split across the two mechanisms. Content,
-`FillAntialiasing` and the built layer numbering fold into `TileManager.CurrentStyle`'s `StyleToken`
-(`MapView.SetStyle`, keyed through `JsonCanonical.CacheKey`). The clip window has its own diff-and-purge in
-`TileManager.TickCore`, where a changed `BufferClip` clears the prepared cache directly. `Zoom = id.Z` and
-the projection are session-constant, so neither needs a token component or a purge.
+`FillAntialiasing`, the built layer numbering, and each source's resolved identity (`SourceId` + `SourceKey`)
+fold into `TileManager.CurrentStyle`'s `StyleToken` (`MapView.SetStyle`, keyed through
+`JsonCanonical.CacheKey`) — the resolved identity because a TileJSON can resolve differently under identical
+style text, and `PreparedKey` carries no source identity of its own to catch that. The clip window has its
+own diff-and-purge in `TileManager.TickCore`, where a changed `BufferClip` clears the prepared cache
+directly. `Zoom = id.Z` and the projection are session-constant, so neither needs a token component or a
+purge.
 
 **`MapViewConfig.MaterialSet` is assumed baked into the scene and constant for the session.** Nothing
 enforces it: `MaterialSet` is a serialized public field any caller could reassign, and test setup does. The

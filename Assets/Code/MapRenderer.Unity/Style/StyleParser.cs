@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MapRenderer.Core.Json;
+using Unity.Mathematics;
 
 namespace MapRenderer.Unity.Style
 {
@@ -18,6 +19,7 @@ namespace MapRenderer.Unity.Style
         public const string DefaultScheme = "xyz";
         public const int DefaultSourceMinZoom = 0;
         public const int DefaultSourceMaxZoom = 22;
+        public const int DefaultGeoJsonSourceMaxZoom = 18;
         public static readonly double[] DefaultBounds = { -180.0, -85.051129, 180.0, 85.051129 };
 
         /// <summary>Parse from a JSON string.</summary>
@@ -35,7 +37,7 @@ namespace MapRenderer.Unity.Style
 
             doc.Version = root.GetInt("version", 0);
             doc.Name = root.GetString("name");
-            doc.Sprite = root.GetString("sprite");
+            doc.Sprites.AddRange(ParseSprites(root));
             doc.Glyphs = root.GetString("glyphs");
 
             if (root.TryGet("sources", out var sources) && sources.IsObject)
@@ -56,6 +58,40 @@ namespace MapRenderer.Unity.Style
             return doc;
         }
 
+        /// <summary>
+        /// Parses root <c>sprite</c>: a string counts as one entry with id <c>"default"</c>; an array
+        /// keeps every well-formed <c>{id, url}</c> entry in declared order. Any other shape, or an array
+        /// entry missing <c>id</c>/<c>url</c>, is dropped rather than thrown (the same forward-compat
+        /// posture <see cref="ParseSource"/> takes).
+        /// </summary>
+        private static List<SpriteReference> ParseSprites(JsonValue root)
+        {
+            var result = new List<SpriteReference>();
+            JsonValue sprite = root.Get("sprite");
+            if (sprite == null)
+                return result;
+
+            if (sprite.Kind == JsonKind.String)
+            {
+                result.Add(new SpriteReference { Id = "default", Url = sprite.AsString() });
+                return result;
+            }
+
+            if (sprite.Kind == JsonKind.Array)
+            {
+                foreach (JsonValue item in sprite.Items)
+                {
+                    string id = item.GetString("id");
+                    string url = item.GetString("url");
+                    if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(url))
+                        continue;
+                    result.Add(new SpriteReference { Id = id, Url = url });
+                }
+            }
+
+            return result;
+        }
+
         private static SourceDefinition ParseSource(JsonValue json)
         {
             var src = new SourceDefinition { Raw = json };
@@ -69,11 +105,16 @@ namespace MapRenderer.Unity.Style
             src.Tiles = ParseStringArray(json.Get("tiles"));
             // geojson `data`: retained verbatim, because the spec allows an inline object OR a URL string.
             src.Data = json.Get("data");
+            // `buffer` (geojson only, per the spec) is an AUTHORED value only — a non-geojson source, an
+            // absent key, or a non-number stays null, so MapView keeps GeoJsonSliceOptions.DefaultBufferAtReferenceExtent.
+            double? rawBuffer = src.Type == SourceType.GeoJson ? json.GetNullableDouble("buffer") : null;
+            src.Buffer = rawBuffer.HasValue ? math.clamp(rawBuffer.Value, 0.0, 512.0) : (double?)null;
 
             // Vector-source defaults. (Other source types carry these keys too; applying the vector
             // defaults is harmless for them and the raw object is always retained for later stages.)
             src.MinZoom = json.GetInt("minzoom", DefaultSourceMinZoom);
-            src.MaxZoom = json.GetInt("maxzoom", DefaultSourceMaxZoom);
+            src.MaxZoom = json.GetInt("maxzoom",
+                src.Type == SourceType.GeoJson ? DefaultGeoJsonSourceMaxZoom : DefaultSourceMaxZoom);
             src.Scheme = json.GetString("scheme", DefaultScheme);
             src.Bounds = ParseBounds(json, out src.BoundsMalformed);
 

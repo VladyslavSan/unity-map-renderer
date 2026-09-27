@@ -19,6 +19,7 @@ using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
@@ -93,8 +94,12 @@ namespace MapRenderer.Tests.MapViews
 
             try
             {
-                // Warm up: load the whole cover and let every tile settle.
-                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style);
+                // Warm up: load the whole cover and let every tile settle. A real (full-world) bounds gate
+                // — HasBounds=true, not the default — so the steady-state tick below actually measures
+                // AdmitsTile's overlap branch, not the HasBounds-false early-out.
+                double[] d = StyleParser.DefaultBounds;
+                var fullWorldBounds = new GeoBounds { West = d[0], South = d[1], East = d[2], North = d[3], HasBounds = true };
+                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style, bounds: fullWorldBounds);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 

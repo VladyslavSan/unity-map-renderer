@@ -10,12 +10,16 @@
 //   SourceTileGraphBuildTests          — Fixture: SampleTileFixture + a fill layer on countries.
 //   FillExtrusionGraphBuildTests       — Style: fill@0, fill-extrusion@1 (constant height — teeth (b)/(c) are about allocation/scheduling/disposal STRUCTURE, not the bake; tooth (a) already covers the data-driven bake byte-for-byte), line@2 (matches no LineString geometry on this polygon-only…
 //   TileBackgroundQuadProjectionTests  — Globe curvature (the projection payoff) and synthetic ring encoding.
+//   SourceRegistryBoundsTests          — SourceRegistry.AdmitsTile's `bounds` gate, direct (no MapView/camera): strict overlap, antimeridian, malformed-length, default-admits-everything, zoom-still-applies.
+//   VectorSourceSchemeAndBoundsTests   — `scheme`/`bounds` wired through the real MapView.SetStyle -> BuildSourceSpecs path (inline `tiles[]` and TileJSON-resolved).
 
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
@@ -3080,6 +3084,655 @@ namespace MapRenderer.Tests.Tiles
                 "a kind column shorter than the path list must be rejected, not silently mis-joined");
             Assert.That(ex.Message, Does.Contain("one entry per feature"),
                 "the message must name the contract that was violated, so a wiring error is diagnosable");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SourceRegistryBoundsTests — SourceRegistry.AdmitsTile's `bounds` gate, direct unit tests
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="SourceRegistry.AdmitsTile"/> against a bare pipeline (no MapView/camera): the `bounds`
+    /// gate is a STRICT unit-square overlap (a tile that only touches the boundary is rejected), the zoom
+    /// gate still applies with bounds present, and the default (full-world) bounds admit every tile.
+    /// </summary>
+    [TestFixture]
+    public class SourceRegistryBoundsTests
+    {
+        private static readonly IWorkScheduler Scheduler = new ThreadPoolWorkScheduler();
+
+        private static GeoBounds Gb(double west, double south, double east, double north)
+            => new GeoBounds { West = west, South = south, East = east, North = north, HasBounds = true };
+
+        private static TileManager.SourceSpec Spec(int minZoom, int maxZoom, in GeoBounds bounds)
+            => new TileManager.SourceSpec("s", default, minZoom, maxZoom,
+                () => new MvtTileFeatureSource(TestDataSource.Absent(), Scheduler), bounds);
+
+        private static SourceRegistry BuildRegistry(TileManager.SourceSpec spec)
+        {
+            var registry = new SourceRegistry();
+            registry.Rebuild(new List<TileManager.SourceSpec> { spec }, hasBackground: false);
+            return registry;
+        }
+
+        /// <summary>`bounds: [0,0,180,85]` is the NE quadrant (lon 0..180, lat 0..85). At z1 (a 2x2 grid) it
+        /// must admit ONLY (X=1,Y=0).</summary>
+        [Test]
+        public void QuadrantBounds_AtZ1_AdmitsOnlyTheNorthEastTile()
+        {
+            using var registry = BuildRegistry(Spec(0, 22, Gb(0, 0, 180, 85)));
+
+            Assert.IsTrue(registry.AdmitsTile(0, new TileId { Z = 1, X = 1, Y = 0 }), "NE quadrant");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 1, X = 0, Y = 0 }), "NW quadrant");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 1, X = 1, Y = 1 }), "SE quadrant");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 1, X = 0, Y = 1 }), "SW quadrant");
+        }
+
+        /// <summary>The overlap is STRICT. At z2, tile (X=1,Y=1) shares only the lon=0 boundary LINE with
+        /// `bounds` (zero-width in x; it genuinely overlaps in y) and tile (X=2,Y=2) shares only the lat=0
+        /// line (zero-width in y; it genuinely overlaps in x). Both must be rejected — RED under
+        /// `&lt;=`/`&gt;=` in <see cref="SourceRegistry.AdmitsTile"/>, which would wrongly admit either.</summary>
+        [Test]
+        public void QuadrantBounds_AtZ2_RejectsATileThatOnlyTouchesTheBoundary()
+        {
+            using var registry = BuildRegistry(Spec(0, 22, Gb(0, 0, 180, 85)));
+
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 1, Y = 1 }),
+                "touches lon=0 only (x in [0.25,0.5], the boundary is x=0.5)");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 2, Y = 2 }),
+                "touches lat=0 only (y in [0.5,0.75], the boundary is y=0.5)");
+            // Positive control, same zoom: a tile genuinely inside both ranges is admitted.
+            Assert.IsTrue(registry.AdmitsTile(0, new TileId { Z = 2, X = 3, Y = 1 }),
+                "precondition: a tile that genuinely overlaps both ranges at z2 must still be admitted");
+        }
+
+        /// <summary><c>bounds</c> crossing the antimeridian (west &gt; east) gates on TWO x-ranges: near
+        /// lon +180 and near lon -180. A z2 tile straddling neither (a middle column) must be rejected.</summary>
+        [Test]
+        public void AntimeridianBounds_AdmitBothEdgeColumns_RejectsTheMiddle()
+        {
+            using var registry = BuildRegistry(Spec(0, 22, Gb(170, -10, -170, 10)));
+
+            Assert.IsTrue(registry.AdmitsTile(0, new TileId { Z = 2, X = 0, Y = 1 }), "west edge column (near lon -180)");
+            Assert.IsTrue(registry.AdmitsTile(0, new TileId { Z = 2, X = 3, Y = 1 }), "east edge column (near lon +180)");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 1, Y = 1 }), "middle column must not admit");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 2, Y = 1 }), "middle column must not admit");
+        }
+
+        /// <summary>A tile inside `bounds` is still rejected once its zoom exceeds the source's `maxzoom` —
+        /// the bounds gate does not override the zoom gate.</summary>
+        [Test]
+        public void TileInsideBounds_AboveMaxZoom_IsRejected()
+        {
+            using var registry = BuildRegistry(Spec(0, 1, Gb(0, 0, 180, 85)));
+
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 3, Y = 1 }),
+                "inside `bounds` (see the z2 positive control above), but z2 > MaxZoom=1");
+        }
+
+        /// <summary>The spec-default bounds (the whole world) must admit every tile, including the
+        /// pole-adjacent row 0 / row (2^z-1) edges — a bounded sweep over z0..4.</summary>
+        [Test]
+        public void DefaultBounds_AdmitEveryTile_ZoomZeroThroughFour()
+        {
+            double[] d = StyleParser.DefaultBounds;
+            using var registry = BuildRegistry(Spec(0, 22, Gb(d[0], d[1], d[2], d[3])));
+
+            for (int z = 0; z <= 4; z++)
+            {
+                int n = 1 << z;
+                for (int x = 0; x < n; x++)
+                for (int y = 0; y < n; y++)
+                    Assert.IsTrue(registry.AdmitsTile(0, new TileId { Z = z, X = x, Y = y }),
+                        $"the default (full-world) bounds must admit every tile, including edges — " +
+                        $"z{z}/{x}/{y} was rejected");
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // VectorSourceSchemeAndBoundsTests — scheme:"tms" / bounds, wired through MapView.SetStyle
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The vector-source `scheme`/`bounds` wiring in <c>MapView.BuildSourceSpecs</c>: a `"tms"` scheme flips
+    /// the fetch address (never the loaded/cache key), `bounds` gates which cover tiles are ever admitted,
+    /// and a malformed `bounds` warns instead of gating. Every test drives the real async
+    /// <c>MapView.SetStyle</c> -&gt; <c>BuildSourceSpecs</c> path — never <c>LoadTestStyle</c>, which bypasses
+    /// the branch under test.
+    /// </summary>
+    [TestFixture]
+    public class VectorSourceSchemeAndBoundsTests : BaseTestFixture
+    {
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
+
+        private static MapView NewView(out GameObject go)
+        {
+            go = new GameObject("VectorSourceSchemeAndBounds");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            return view;
+        }
+
+        private static void SpinToCompleted(UniTask task, int timeoutMs = 20000)
+        {
+            var t = task.Preserve();
+            t.WaitOffPlayerLoop(timeoutMs);
+            t.GetAwaiter().GetResult();
+        }
+
+        /// <summary>Also requires <c>DesiredCount() == 0</c>: <c>AllTilesSettled()</c> alone can fire once
+        /// every so-far-ADMITTED tile is built, before a capped admission has drained the rest of a
+        /// multi-tile cover into the loaded set.</summary>
+        private static void PumpUntilSettled(MapView view, int maxTicks = 2000)
+        {
+            for (int f = 0; f < maxTicks; f++)
+            {
+                view.LateUpdate();
+                view.DrainMeshBuilds();
+                if (view.LoadedTileCount() > 0 && view.DesiredCount() == 0 && view.AllTilesSettled())
+                    return;
+            }
+        }
+
+        /// <summary>An inline vector `tiles[]` source with one fill layer, plus whatever extra source keys
+        /// <paramref name="extraSourceKeys"/> supplies (e.g. <c>, "scheme": "tms"</c>).</summary>
+        private static StyleDocument VectorStyle(string extraSourceKeys = "") => StyleParser.Parse($@"{{
+            ""version"": 8,
+            ""sources"": {{ ""v"": {{ ""type"": ""vector"",
+                ""tiles"": [""https://example.com/{{z}}/{{x}}/{{y}}.pbf""] {extraSourceKeys} }} }},
+            ""layers"": [ {{ ""id"": ""v-fill"", ""type"": ""fill"", ""source"": ""v"", ""source-layer"": ""x"",
+                ""paint"": {{ ""fill-color"": ""#ff0000"" }} }} ]
+        }}");
+
+        /// <summary>A `url`-only vector source, resolved through a TileJSON the test serves via
+        /// <c>DocumentLoaderOverride</c>.</summary>
+        private static StyleDocument UrlVectorStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""v"": { ""type"": ""vector"", ""url"": ""https://example.com/tj.json"" } },
+            ""layers"": [ { ""id"": ""v-fill"", ""type"": ""fill"", ""source"": ""v"", ""source-layer"": ""x"",
+                ""paint"": { ""fill-color"": ""#ff0000"" } } ]
+        }");
+
+        /// <summary>Records every fetched URI (resolved through the factory's <c>address</c> parameter, so
+        /// a <c>"tms"</c> scheme's flip is visible here) under a lock — a fetch can run off the main thread
+        /// once <c>TileManager</c> kicks it.</summary>
+        private static Func<TileUrlTemplate, IDataSource> RecordingFactory(List<string> into, object gate)
+            => address => TestDataSource.FromFetch(id =>
+            {
+                lock (gate) into.Add(address.Resolve(id));
+                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            });
+
+        // T-A1 (the flip formula itself) is a direct unit test on TileUrlTemplate — see
+        // DataSources/DataSourceTests.cs' TileUrlTemplateTests.
+
+        /// <summary>No `scheme` key: the fetch set must equal the loaded (XYZ) set — no flip at all. Uses the
+        /// TMS tooth's own off-equator setup, so the precondition below (a flip would be DETECTABLE, were one
+        /// applied) actually holds — at z0 a flip is the identity and this tooth would pass vacuously.</summary>
+        [Test]
+        public void NoScheme_FetchSetEqualsLoadedSet()
+        {
+            var view    = NewView(out var go);
+            var fetched = new List<string>();
+            var gate    = new object();
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 60, 4.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = RecordingFactory(fetched, gate);
+
+                SpinToCompleted(view.SetStyle(VectorStyle(), "no-scheme"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                Assert.Greater(loaded.Count, 0, "precondition: something was covered and admitted");
+
+                var flippedLoaded = new List<TileId>();
+                foreach (TileId id in loaded)
+                    flippedLoaded.Add(new TileId { Z = id.Z, X = id.X, Y = (1 << id.Z) - 1 - id.Y });
+                CollectionAssert.AreNotEquivalent(flippedLoaded, loaded,
+                    "precondition: the camera must sit off the equator, so a flip would be DETECTABLE here — " +
+                    "otherwise an implementation that always flips could still pass the assert below.");
+
+                var expectedFetched = new List<string>();
+                foreach (TileId id in loaded)
+                    expectedFetched.Add($"https://example.com/{id.Z}/{id.X}/{id.Y}.pbf");
+                CollectionAssert.AreEquivalent(expectedFetched, fetched,
+                    "with no `scheme`, the fetch set must equal the loaded (XYZ) set — no flip at all.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>`scheme: "tms"` flips only the fetch address. An off-equator camera makes the z1 cover
+        /// row-asymmetric, so <c>flip(loaded)</c> genuinely differs from <c>loaded</c> — the precondition that
+        /// keeps this tooth from passing on a symmetric cover where a flip would be invisible.</summary>
+        [Test]
+        public void TmsScheme_FetchSetIsTheYFlipOfTheLoadedSet_OnARowAsymmetricCover()
+        {
+            var view    = NewView(out var go);
+            var fetched = new List<string>();
+            var gate    = new object();
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 60, 4.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = RecordingFactory(fetched, gate);
+
+                SpinToCompleted(view.SetStyle(VectorStyle(@", ""scheme"": ""tms"""), "tms"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                Assert.Greater(loaded.Count, 0, "precondition: something was covered and admitted");
+                foreach (TileId id in loaded)
+                    Assert.AreEqual(0, id.Y,
+                        $"precondition: the camera at lat=60 must cover the NORTH row (Y=0) only — {id} " +
+                        "is outside it, which would make the row-asymmetry claim below unverified");
+
+                var expectedFlipped = new List<string>();
+                foreach (TileId id in loaded)
+                    expectedFlipped.Add($"https://example.com/{id.Z}/{id.X}/{(1 << id.Z) - 1 - id.Y}.pbf");
+
+                CollectionAssert.AreEquivalent(expectedFlipped, fetched,
+                    "the fetch set must be the Y-flip of the loaded (XYZ) set.");
+
+                var unflipped = new List<string>();
+                foreach (TileId id in loaded)
+                    unflipped.Add($"https://example.com/{id.Z}/{id.X}/{id.Y}.pbf");
+                CollectionAssert.AreNotEquivalent(unflipped, fetched,
+                    "precondition: the camera must sit off the equator, so the flip is not the identity — " +
+                    "otherwise this tooth cannot tell a flip from no flip at all.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>A `url`-only source resolved through TileJSON must flip exactly like an inline one, when
+        /// the TileJSON itself (not the style source object) declares `"scheme": "tms"`.</summary>
+        [Test]
+        public void TmsScheme_ResolvedThroughTileJson_AlsoFlips()
+        {
+            var view    = NewView(out var go);
+            var fetched = new List<string>();
+            var gate    = new object();
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 60, 4.0));
+                view.View.Camera.SyncToCamera();
+                view.View.DocumentLoaderOverride = (uri, ct) => UniTask.FromResult(@"{
+                    ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""], ""scheme"": ""tms""
+                }");
+                view.View.TileSourceFactoryOverride = RecordingFactory(fetched, gate);
+
+                SpinToCompleted(view.SetStyle(UrlVectorStyle(), "tms-tilejson"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                Assert.Greater(loaded.Count, 0, "precondition: something was covered and admitted");
+
+                var expectedFlipped = new List<string>();
+                foreach (TileId id in loaded)
+                    expectedFlipped.Add($"https://example.com/{id.Z}/{id.X}/{(1 << id.Z) - 1 - id.Y}.pbf");
+
+                CollectionAssert.AreEquivalent(expectedFlipped, fetched,
+                    "a TileJSON-resolved `scheme: \"tms\"` must flip the fetch address exactly like an inline one.");
+
+                var unflipped = new List<string>();
+                foreach (TileId id in loaded)
+                    unflipped.Add($"https://example.com/{id.Z}/{id.X}/{id.Y}.pbf");
+                CollectionAssert.AreNotEquivalent(unflipped, fetched,
+                    "precondition: an off-equator camera, so the flip is not the identity.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>Quadrant `bounds` reduces the fetch set to exactly the admitted NE tile at z1. The
+        /// control arm (no bounds) proves the SAME camera would otherwise admit more than one tile, so the
+        /// single-tile result below is the bounds gate, not a camera that only ever sees one tile.</summary>
+        [Test]
+        public void QuadrantBounds_OnlyTheAdmittedTileIsFetched()
+        {
+            var control = NewView(out var controlGo);
+            Track(controlGo);
+            try
+            {
+                control.Config.TileSelection.MinZoom = 1; control.Config.TileSelection.MaxZoom = 1;
+                control.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                control.View.Camera.SyncToCamera();
+                control.View.TileSourceFactoryOverride = _ => TestDataSource.Absent(); // never a real network fetch
+                SpinToCompleted(control.SetStyle(VectorStyle(), "no-bounds"));
+                PumpUntilSettled(control);
+
+                var controlLoaded = new List<TileId>();
+                control.CollectLoadedTileIds(controlLoaded);
+                Assert.Greater(controlLoaded.Count, 1,
+                    "precondition: without `bounds` this camera must admit MORE than the NE quadrant tile " +
+                    "alone, or the arm below cannot tell a bounds gate from a camera that only sees one tile");
+                CollectionAssert.Contains(controlLoaded, new TileId { Z = 1, X = 1, Y = 0 });
+            }
+            finally { control.Teardown(); }
+
+            var view    = NewView(out var go);
+            var fetched = new List<string>();
+            var gate    = new object();
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = RecordingFactory(fetched, gate);
+
+                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 0, 180, 85]"), "bounds"));
+                PumpUntilSettled(view);
+
+                CollectionAssert.AreEquivalent(new[] { "https://example.com/1/1/0.pbf" }, fetched,
+                    "`bounds: [0,0,180,85]` must admit ONLY the NE quadrant tile at z1.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>The same gate, resolved through TileJSON instead of an inline `bounds` key.</summary>
+        [Test]
+        public void QuadrantBounds_ResolvedThroughTileJson_OnlyTheAdmittedTileIsFetched()
+        {
+            var view    = NewView(out var go);
+            var fetched = new List<string>();
+            var gate    = new object();
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.View.Camera.SyncToCamera();
+                view.View.DocumentLoaderOverride = (uri, ct) => UniTask.FromResult(@"{
+                    ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""], ""bounds"": [0, 0, 180, 85]
+                }");
+                view.View.TileSourceFactoryOverride = RecordingFactory(fetched, gate);
+
+                SpinToCompleted(view.SetStyle(UrlVectorStyle(), "bounds-tilejson"));
+                PumpUntilSettled(view);
+
+                CollectionAssert.AreEquivalent(new[] { "https://example.com/1/1/0.pbf" }, fetched,
+                    "a TileJSON-resolved `bounds` must gate exactly like an inline one.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>A malformed `bounds` (here: 3 numbers, not 4) warns EXACTLY ONCE and does NOT gate — a
+        /// non-NE tile (which a real `[0,0,180,85]`-style gate would reject) is still admitted, rather than
+        /// the whole source silently losing its bounds visibility. z1, not z0: the world tile overlaps any
+        /// bounds trivially, so a z0 arm could not tell "gated" from "not gated" apart.</summary>
+        [Test]
+        public void MalformedBounds_WarnsOnce_AndDoesNotGate()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            int warningCount = 0;
+            void CountWarnings(string logString, string stackTrace, LogType type)
+            {
+                if (type == LogType.Warning && logString.Contains("malformed bounds")) warningCount++;
+            }
+            Application.logMessageReceived += CountWarnings;
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent(); // never a real network fetch
+
+                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
+                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 0, 180]"), "malformed"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 0, Y = 0 },
+                    "a malformed `bounds` must not gate at all — the NW tile (a real [0,0,180,85] gate " +
+                    "would reject it) is still admitted.");
+                Assert.AreEqual(1, warningCount,
+                    "the malformed-bounds warning must fire exactly once per style load, not once per " +
+                    "tile or per tick.");
+            }
+            finally
+            {
+                Application.logMessageReceived -= CountWarnings;
+                view.Teardown();
+            }
+        }
+
+        /// <summary>The same claim for the OTHER malformed shape: a non-number item (here `"x"`), not a
+        /// short array — end to end, so this also proves <c>ValidateBounds</c> maps it to no gate.</summary>
+        [Test]
+        public void MalformedBounds_NonNumberItem_WarnsOnce_AndDoesNotGate()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
+
+                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
+                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 0, 180, ""x""]"), "malformed-nonnumber"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 0, Y = 0 },
+                    "a non-number bounds item must not gate at all — the NW tile is still admitted.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>A `bounds` key on a geojson source is not a spec-defined gate for it: a tile OUTSIDE the
+        /// declared `bounds` — which a real vector-source gate would reject — is still admitted. z1, not z0:
+        /// the world tile overlaps ANY bounds trivially, so a z0 arm could not tell "gated" from "not gated"
+        /// apart (see the same reasoning on <see cref="MalformedBounds_WarnsOnce_AndDoesNotGate"/>).</summary>
+        [Test]
+        public void GeoJsonSource_DeclaredBounds_DoesNotGateAdmission()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.View.Camera.SyncToCamera();
+
+                var style = StyleParser.Parse(@"{
+                    ""version"": 8,
+                    ""sources"": { ""g"": { ""type"": ""geojson"", ""bounds"": [170, 80, 175, 85],
+                        ""data"": {""type"":""FeatureCollection"",""features"":[]} } },
+                    ""layers"": [ { ""id"": ""g-fill"", ""type"": ""fill"", ""source"": ""g"",
+                        ""paint"": { ""fill-color"": ""#ff0000"" } } ]
+                }");
+                SpinToCompleted(view.SetStyle(style, "geojson-bounds"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 0, Y = 1 },
+                    "a `bounds` key on a geojson source is not a spec-defined gate for it — a tile outside " +
+                    "the declared [170,80,175,85] (a tiny NE-polar sliver) must still be admitted.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        // ── SourceKey: malformed vs legitimate bounds ─────────────────────────────────────────────────
+
+        /// <summary>A source JSON with `bounds: [0,0,180,"x"]` (malformed, no gate) and one with no `bounds`
+        /// key at all (absent, also no gate) resolve to the SAME <see cref="SourceDefinition.Bounds"/> raw
+        /// array (both fall back to the spec default) but must still produce DIFFERENT <c>SourceKey</c>s.
+        /// <c>SourceKey.From</c> keys on the VALIDATED <see cref="GeoBounds"/>, not on the raw array, so the
+        /// two tell apart on <see cref="GeoBounds.HasBounds"/> (malformed: false; absent: true).</summary>
+        [Test]
+        public void SourceKeyFrom_MalformedAndAbsentBounds_ProduceDifferentKeys()
+        {
+            SourceDefinition malformedDef = VectorStyle(@", ""bounds"": [0, 0, 180, ""x""]").GetSource("v");
+            SourceDefinition absentDef    = VectorStyle().GetSource("v");
+
+            Assert.AreEqual(absentDef.Bounds, malformedDef.Bounds,
+                "the test only proves something if both raw arrays are the SAME spec-default shape.");
+
+            // Mirrors BuildSourceSpecs' own resolution (MapView.ValidateBounds): malformed resolves to no
+            // gate; absent resolves to the default array, still a real (if world-spanning) gate.
+            GeoBounds malformedBounds = default;
+            double[]  ab              = absentDef.Bounds;
+            var absentBounds = new GeoBounds { West = ab[0], South = ab[1], East = ab[2], North = ab[3], HasBounds = true };
+
+            TileManager.SourceKey malformedKey = TileManager.SourceKey.From(malformedDef, malformedBounds);
+            TileManager.SourceKey absentKey    = TileManager.SourceKey.From(absentDef, absentBounds);
+
+            Assert.AreNotEqual(absentKey, malformedKey,
+                "keying on the VALIDATED gate must distinguish a malformed (no-gate) bounds from an absent " +
+                "one sharing the same raw array — keying on the raw array instead collides them, letting a " +
+                "restyle between the two take the cheap in-place path and never re-evaluate admission under " +
+                "the new gate.");
+        }
+
+        /// <summary><c>SourceKey.From</c> must format `bounds` doubles culture-invariant. Under a
+        /// comma-decimal culture (de-DE), <c>double.ToString()</c>'s current-culture default renders 0.5 as
+        /// "0,5" — a comma indistinguishable from the join separator.</summary>
+        [Test]
+        public void SourceKeyFrom_FormatsBoundsCultureInvariantly()
+        {
+            var originalCulture = Thread.CurrentThread.CurrentCulture;
+            try
+            {
+                Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+
+                SourceDefinition def = VectorStyle(@", ""bounds"": [0, 0.5, 180, 85]").GetSource("v");
+                double[] db = def.Bounds;
+                var bounds = new GeoBounds { West = db[0], South = db[1], East = db[2], North = db[3], HasBounds = true };
+                TileManager.SourceKey key = TileManager.SourceKey.From(def, bounds);
+                string[] parts = key.Bounds.Split(',');
+
+                Assert.AreEqual(4, parts.Length,
+                    "a non-invariant format would render 0.5 as \"0,5\" under de-DE — an extra comma " +
+                    "splitting the joined string into a bogus 5th part.");
+                Assert.AreEqual(0.5, double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                    "each part must parse back as the ORIGINAL number, read culture-invariantly.");
+            }
+            finally { Thread.CurrentThread.CurrentCulture = originalCulture; }
+        }
+
+        // ── StyleToken: a TileJSON-only resolution change ─────────────────────────────────────────────
+
+        /// <summary>Two `SetStyle` calls over the IDENTICAL style document, differing only in what the
+        /// TileJSON resolves to (no scheme vs `"tms"`), must not share a <c>StyleToken</c> — a collision
+        /// would let <c>PreparedTileCache</c> (keyed on <c>(StyleToken, TileId, layerId)</c>, which carries
+        /// no source identity of its own) serve a mesh built from the OLD resolution as a hit for the new
+        /// one.</summary>
+        [Test]
+        public void ARestyleThatOnlyChangesTheResolvedTileJson_ChangesTheStyleToken()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+                view.View.Camera.SetProperties(Cam(0, 0, 0.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
+
+                string tileJsonScheme = "xyz";
+                view.View.DocumentLoaderOverride = (uri, ct) => UniTask.FromResult(
+                    $@"{{ ""tiles"": [""https://example.com/{{z}}/{{x}}/{{y}}.pbf""], ""scheme"": ""{tileJsonScheme}"" }}");
+
+                // A FRESH StyleDocument each call — SourceResolver.Resolve MUTATES the SourceDefinition it
+                // resolves (fills Tiles/Scheme/Bounds in place), so reusing one object across both calls
+                // would make the second NeedsTileJson false and never re-fetch at all.
+                SpinToCompleted(view.SetStyle(UrlVectorStyle(), "same-style-id"));
+                PumpUntilSettled(view);
+                var firstToken = view.View.TileManager.CurrentStyle;
+
+                tileJsonScheme = "tms"; // the TileJSON resolves DIFFERENTLY; the style TEXT is unchanged
+                SpinToCompleted(view.SetStyle(UrlVectorStyle(), "same-style-id"));
+                PumpUntilSettled(view);
+                var secondToken = view.View.TileManager.CurrentStyle;
+
+                Assert.AreNotEqual(firstToken, secondToken,
+                    "a TileJSON that resolves to a different `scheme` (or `bounds`/`tiles`) under the SAME " +
+                    "style document must change the StyleToken.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        // ── ValidateBounds: south > north, and an out-of-range longitude ──────────────────────────────
+
+        /// <summary>`south > north` is malformed (a warning, no gate) rather than an inverted region that
+        /// silently rejects tiles it should admit. z1: at z0 both an inverted gate and "no gate" admit the
+        /// world tile, so the arm could not tell them apart.</summary>
+        [Test]
+        public void SouthGreaterThanNorthBounds_WarnsOnce_AndDoesNotGate()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
+                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
+
+                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
+                // west=0, south=50, east=180, north=10 — inverted. If accepted as-is (not caught), the SE
+                // quadrant tile below is REJECTED (its y-range never reaches the inverted, too-far-north
+                // "south" value); if correctly treated as malformed (no gate), it is admitted.
+                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 50, 180, 10]"), "south-gt-north"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 1, Y = 1 },
+                    "south > north must be treated as malformed (no gate), not an inverted region that " +
+                    "rejects a tile a real gate would never touch.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>A longitude outside [-180, 180] is malformed (a warning, no gate) rather than a raw,
+        /// unwrapped coordinate fed straight into the unit-square math.</summary>
+        [Test]
+        public void OutOfRangeLongitudeBounds_WarnsOnce_AndDoesNotGate()
+        {
+            var view = NewView(out var go);
+            Track(go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
+                view.View.Camera.SetProperties(Cam(0, 0, 2.0));
+                view.View.Camera.SyncToCamera();
+                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
+
+                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
+                // west=-190 (out of range), east=-170. If accepted raw (not caught), the region still spans
+                // a narrow sliver near lon -180; a MIDDLE column tile (below) sits outside it either way, so
+                // it discriminates "malformed -> no gate" (admitted) from "accepted raw" (rejected).
+                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [-190, -10, -170, 10]"), "lon-oor"));
+                PumpUntilSettled(view);
+
+                var loaded = new List<TileId>();
+                view.CollectLoadedTileIds(loaded);
+                CollectionAssert.Contains(loaded, new TileId { Z = 2, X = 1, Y = 1 },
+                    "a west/east outside [-180,180] must be treated as malformed (no gate), not fed raw " +
+                    "into the unit-square math.");
+            }
+            finally { view.Teardown(); }
         }
     }
 }

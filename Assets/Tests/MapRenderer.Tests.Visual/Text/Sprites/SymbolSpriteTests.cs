@@ -22,7 +22,7 @@ using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 
 namespace MapRenderer.Tests.Text.Placement
 {

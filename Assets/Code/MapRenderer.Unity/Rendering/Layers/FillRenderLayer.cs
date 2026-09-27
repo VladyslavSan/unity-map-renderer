@@ -6,7 +6,7 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;

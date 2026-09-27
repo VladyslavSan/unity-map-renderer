@@ -4,7 +4,7 @@
 using System;
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Text.Sprites
+namespace MapRenderer.Unity.Text.Sprites
 {
     /// <summary>
     /// Executes a <see cref="SpritePadPlan"/> over pixels: copies each sprite's content block and makes a

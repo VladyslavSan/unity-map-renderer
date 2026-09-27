@@ -32,7 +32,7 @@ using Unity.Mathematics;
 using System.Threading.Tasks;
 using MapRenderer.Unity.Text;
 using System.Security.Cryptography;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Unity.Text.Sprites;
 using System.Linq;
 using System.Reflection;
 

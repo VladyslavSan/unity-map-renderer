@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Style
     /// <summary>
     /// A style source definition (Style Spec <c>sources[]</c>). Vector fields are typed; the whole object
     /// stays in <see cref="Raw"/>. <see cref="StyleParser"/> applies the Style Spec "Sources" defaults for an
-    /// absent key: <c>scheme</c> = "xyz", <c>minzoom</c> = 0, <c>maxzoom</c> = 22,
+    /// absent key: <c>scheme</c> = "xyz", <c>minzoom</c> = 0, <c>maxzoom</c> = 22 (18 for geojson),
     /// <c>bounds</c> = [-180, -85.051129, 180, 85.051129].
     /// </summary>
     public sealed class SourceDefinition
@@ -40,7 +40,7 @@ namespace MapRenderer.Unity.Style
         /// <summary>Source <c>minzoom</c>. Defaults to 0 for vector when absent.</summary>
         public int MinZoom;
 
-        /// <summary>Source <c>maxzoom</c>. Defaults to 22 for vector when absent.</summary>
+        /// <summary>Source <c>maxzoom</c>. Defaults to 22 for vector when absent, 18 for geojson.</summary>
         public int MaxZoom;
 
         /// <summary>
@@ -68,6 +68,12 @@ namespace MapRenderer.Unity.Style
         /// violation as well as a lie about half the values. Null when the key is absent.
         /// </summary>
         public JsonValue Data;
+
+        /// <summary>Style Spec <c>buffer</c> (geojson only), clamped to [0, 512] (512 = one tile width).
+        /// Null for a non-geojson source, an absent key, or a non-number — an AUTHORED value only:
+        /// <c>MapView.BuildSourceSpecs</c> then keeps <c>GeoJsonSliceOptions.DefaultBufferAtReferenceExtent</c>
+        /// rather than the spec's 128 default.</summary>
+        public double? Buffer;
 
         /// <summary>The full original source JSON object (preserves any unknown/forward-compat keys).</summary>
         public JsonValue Raw;

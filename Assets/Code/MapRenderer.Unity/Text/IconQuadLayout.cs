@@ -1,9 +1,10 @@
 // Engine-free: no UnityEngine dependency.
 
 using Unity.Mathematics;
-using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Core.Text;
+using MapRenderer.Unity.Text.Sprites;
 
-namespace MapRenderer.Core.Text
+namespace MapRenderer.Unity.Text
 {
     /// <summary>
     /// Turns one resolved <see cref="SpriteEntry"/> + <c>icon-*</c> layout properties into one symbol-local,
