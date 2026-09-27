@@ -803,6 +803,15 @@ other, and the rule for guards applies: assert it was satisfiable.
   made "all green" unreadable. And when a maintainer reports "still happening", the FIRST move is to confirm
   the code under test is the code running, before touching the maths again.
 
+- **A SubShader `Queue` tag is not observable through `renderQueue` in the headless EditMode runner.** In
+  this runner, `Shader.renderQueue` and a fresh `new Material(shader).renderQueue` both read `2000`
+  (Geometry) even for a shader whose SubShader Tags already declare `"Queue" = "Transparent"` (confirmed on
+  `Map/Line`, untouched, always correct) — not a stale import, since a targeted
+  `AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate)` changes nothing and the log confirms the
+  reimport ran. Test a material's queue through a loaded `.mat` asset (its own serialized
+  `m_CustomRenderQueue` override) or after the code that sets it explicitly (e.g. `LayerDrawOrder`), never
+  through a bare `new Material(shader)`'s default.
+
 - **A straight-road fixture cannot see a corner defect — and "my fixture disagrees with the scene" means the
   fixture is wrong, not the scene.** S114's teeth all render one straight road, so they measured the
   extrusion's convexity beautifully and were blind to the reported symptom, which turned out to involve

@@ -71,8 +71,8 @@ Shader "Map/FillUnlit"
     {
         Tags
         {
-            "RenderType" = "Opaque"
-            "Queue" = "Geometry"
+            "RenderType" = "Transparent"
+            "Queue" = "Transparent"
             "RenderPipeline" = "UniversalPipeline"
             "UniversalMaterialType" = "Unlit"
             "IgnoreProjector" = "True"

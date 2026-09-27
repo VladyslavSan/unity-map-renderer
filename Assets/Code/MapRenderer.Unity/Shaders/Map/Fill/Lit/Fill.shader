@@ -135,8 +135,8 @@ Shader "Map/Fill"
     {
         Tags
         {
-            "RenderType" = "Opaque"
-            "Queue" = "Geometry"
+            "RenderType" = "Transparent"
+            "Queue" = "Transparent"
             "RenderPipeline" = "UniversalPipeline"
             "UniversalMaterialType" = "Lit"
             "IgnoreProjector" = "True"
