@@ -24,7 +24,7 @@ Clean-room: our own architecture + standard async patterns; UniTask is a vendore
 - But `MapRenderer.Core` is **engine-free by design** — its asmdef references only `Unity.Mathematics`, and
   `Tools/core-tests` compiles the *real* Core `.cs` files with a 2-field math shim and **no UnityEngine**, for
   a fast headless test loop (`docs/` + `CLAUDE.md`). `Task` looks like the natural primitive for the Core
-  data layer (`IDataSource.FetchAsync`, `FileDataSource`, `TileScheduler`), because `Task` is BCL
+  data layer (`IDataSource.FetchAsync`, `TileScheduler`), because `Task` is BCL
   (engine-free) and the obvious Unity replacement, `Awaitable`, is not.
 
 ## Why UniTask, not `Awaitable`
@@ -55,22 +55,23 @@ UniTask is the only primitive that satisfies every constraint. (Sources: Cysharp
 ```
 MapRenderer.Core (engine-free, headless-testable; UniTask via NetCore build)
   IDataSource : UniTask<TileResponse> FetchAsync(TileId, CancellationToken)   ← Task-free contract
-  FileDataSource    : sync File.ReadAllBytes wrapped in UniTask.RunOnThreadPool (no Task)
   InMemory/Fixture  : UniTask.FromResult / UniTaskCompletionSource (tests)
   TileScheduler     : UniTask orchestration + cache
   decode/triangulate/geometry: pure, sync
 
 MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Object lifecycle)
-  UnityWebRequestDataSource : UnityWebRequest + .ToUniTask()  ← efficient production HTTP, zero Task
+  HttpTransport      : UnityWebRequest + .ToUniTask()  ← efficient production HTTP, zero Task
+  FileTransport      : sync File.ReadAllBytes after a SwitchToThreadPool hop (no Task)
+  TemplatedTileSource: addresses (TileUrlTemplate) + dispatches to HttpTransport/FileTransport by scheme
   MapView mesh-build/consume : IWorkScheduler.Schedule → WorkHandle<T> (poll/consume; no PlayerLoop hop)
   Mesh/GameObject create + Object.Destroy : MAIN THREAD ONLY
   cancellation : destroyCancellationToken
 ```
 
 **Dependency inversion for HTTP** resolves the last Task-in-Core problem: `HttpClient.GetAsync` is inherently
-`Task` and there's no Task-free HTTP in engine-free BCL — so real HTTP moves to the Unity
-`UnityWebRequestDataSource`, while Core defines only the `UniTask` contract and ships a Task-free file/fixture
-impl. A test-only impl *may* fall back to `Task`/`HttpClient` as an explicit escape hatch, but we don't need it.
+`Task` and there's no Task-free HTTP in engine-free BCL — so real HTTP lives in the Unity `HttpTransport`,
+while Core defines only the `UniTask` contract and ships a Task-free fixture impl. A test-only impl *may*
+fall back to `Task`/`HttpClient` as an explicit escape hatch, but we don't need it.
 
 ### CPU offload: `IWorkScheduler`/`WorkHandle<T>`, not UniTask
 

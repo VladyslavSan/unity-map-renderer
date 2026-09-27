@@ -80,8 +80,12 @@ instead — `SourceIdOf`, `IsSourceless`, `AdmitsTile`, `SourceAt`, `ReleaseTile
 fails loudly rather than reopening the indexer shape.
 
 A source's fetch ADDRESS is the only place a non-XYZ tile identity exists (`scheme: "tms"`, flipped by
-`TmsYFlipDataSource` at fetch time); `bounds` gates admission instead, in `AdmitsTile`, so every other
+`TileUrlTemplate` at fetch time); `bounds` gates admission instead, in `AdmitsTile`, so every other
 identity — `LoadedKey`, placement, cache keys — stays XYZ throughout.
+
+A tiled source's fetch composes three things: addressing (`TileUrlTemplate`, which turns a `TileId` into a
+URI), a transport (`HttpTransport` or `FileTransport`, each returning bytes or absent) and the encoding the
+source declares (`TemplatedTileSource` pairs the bytes with it).
 
 `bounds` is malformed — a warning, no gate, never a fault — when it is not exactly 4 numbers, when
 `south > north`, or when a longitude falls outside [-180, 180]. The longitude case is rejected rather than

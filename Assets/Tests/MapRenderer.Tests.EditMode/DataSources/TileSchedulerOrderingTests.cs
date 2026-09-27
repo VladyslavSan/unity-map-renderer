@@ -161,7 +161,7 @@ namespace MapRenderer.Tests.DataSources
         /// <c>TileScheduler.cs</c> must contain ZERO occurrences of <c>SwitchToThreadPool</c> or
         /// <c>RunOnThreadPool</c>, in code OR comments: the ordering rests on the lock, not on scheduling.
         /// Limitation: a hop through another API, or inside the injected <see cref="IDataSource"/>, passes.
-        /// <c>FileDataSource.cs</c> keeps a guarded occurrence, pinned by the test below.
+        /// <c>FileTransport.cs</c> keeps a guarded occurrence, pinned by the test below.
         /// </summary>
         [Test]
         public void TileScheduler_IntroducesNoThreadPoolHop()
@@ -176,38 +176,38 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // FileDataSource's hop stays, but only inside its WebGL-excluding guard.
+        // FileTransport's hop stays, but only inside its WebGL-excluding guard.
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// <c>FileDataSource.cs</c>'s <c>await UniTask.SwitchToThreadPool();</c> offloads a blocking read and
+        /// <c>FileTransport.cs</c>'s <c>await UniTask.SwitchToThreadPool();</c> offloads a blocking read and
         /// must sit inside <c>#if !UNITY_WEBGL || UNITY_EDITOR</c>, or a WebGL player hangs on it. The test
         /// matches the CALL STATEMENT, not the token the file's prose also names, and checks the order of guard,
         /// call and <c>#endif</c>. Limitation: it takes the FIRST <c>#endif</c>, so a nested <c>#if</c> could
         /// satisfy it wrongly, and it cannot prove the WebGL path works.
         /// </summary>
         [Test]
-        public void FileDataSource_ThreadPoolHop_IsGuardedForWebGl()
+        public void FileTransport_ThreadPoolHop_IsGuardedForWebGl()
         {
-            string source = ReadSourceFile("Assets", "Code", "MapRenderer.Core", "Data", "FileDataSource.cs");
+            string source = ReadSourceFile("Assets", "Code", "MapRenderer.Unity", "Rendering", "Source", "FileTransport.cs");
 
             const string callStatement = "await UniTask.SwitchToThreadPool();";
             const string guard         = "#if !UNITY_WEBGL || UNITY_EDITOR";
             const string endGuard      = "#endif";
 
             Assert.AreEqual(1, CountOccurrences(source, callStatement),
-                $"FileDataSource.cs must contain the call statement '{callStatement}' exactly once.");
+                $"FileTransport.cs must contain the call statement '{callStatement}' exactly once.");
 
-            // Line-anchored: the "\n" prefix skips the class doc's prose mention of the directive, which
-            // follows "(<c>" rather than a newline.
+            // Line-anchored: the "\n" prefix requires the guard to start its own line, not merely appear
+            // as a substring inside a longer line (e.g. a doc comment quoting it inline).
             int guardIndex = source.IndexOf("\n" + guard, StringComparison.Ordinal);
             Assert.Greater(guardIndex, -1,
-                $"FileDataSource.cs must contain the exact guard line '{guard}'.");
+                $"FileTransport.cs must contain the exact guard line '{guard}'.");
 
             int callIndex = source.IndexOf(callStatement, StringComparison.Ordinal);
             int endGuardIndex = source.IndexOf(endGuard, guardIndex, StringComparison.Ordinal);
             Assert.Greater(endGuardIndex, -1,
-                $"FileDataSource.cs must contain a matching '{endGuard}' after the guard.");
+                $"FileTransport.cs must contain a matching '{endGuard}' after the guard.");
 
             Assert.Greater(callIndex, guardIndex,
                 "the SwitchToThreadPool call must occur AFTER the #if guard opens.");

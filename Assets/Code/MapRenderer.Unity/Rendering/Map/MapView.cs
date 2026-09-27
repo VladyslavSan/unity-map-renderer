@@ -248,7 +248,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // Loader seams — production defaults; tests inject counting/offline fakes via InternalsVisibleTo.
         internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
-        internal System.Func<string, IDataSource>                        TileSourceFactoryOverride;
+        internal System.Func<TileUrlTemplate, IDataSource>                TileSourceFactoryOverride;
 
         /// <summary>The six mutation sites of <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s
         /// full-rebuild arm after which an exception would leave persistent state a later call or frame
@@ -454,7 +454,8 @@ namespace MapRenderer.Unity.Rendering.Map
             StyleDocument style, CancellationToken ct)
         {
             var loader    = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
-            var factory   = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
+            // Vector tiles decode as MVT; the encoding is the source's, never the transport's.
+            var factory   = TileSourceFactoryOverride ?? (address => new TemplatedTileSource(address, TileEncoding.Mvt));
             IWorkScheduler scheduler = WorkSchedulerFactory.ForCurrentPlatform();
 
             // Distinct rendered source-ids in declared order.
@@ -550,23 +551,18 @@ namespace MapRenderer.Unity.Rendering.Map
                     continue;
                 }
 
-                string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
-                bool   tms      = def.Scheme == "tms";
+                var address = new TileUrlTemplate { Template = def.Tiles[0], Tms = def.Scheme == "tms" };
                 // def.Bounds/BoundsMalformed reflect whichever JSON supplied `bounds` (TileJSON or the
                 // source's own — SourceResolver.Resolve carries both), validated below before the key.
                 Tile.GeoBounds bounds = ValidateBounds(def.Bounds, def.BoundsMalformed, sid);
                 var            key    = Tile.TileManager.SourceKey.From(def, bounds);
 
                 // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource seam.
-                // A `"tms"` scheme flips only the fetch address; everything downstream keeps XYZ addressing.
+                // A `"tms"` scheme flips only the fetch address (inside TileUrlTemplate); everything
+                // downstream keeps XYZ addressing.
                 specs.Add(new Tile.TileManager.SourceSpec(
                     sid, key, def.MinZoom, def.MaxZoom,
-                    () =>
-                    {
-                        IDataSource byteSource = factory(template);
-                        if (tms) byteSource = new TmsYFlipDataSource(byteSource);
-                        return new Tile.Processing.MvtTileFeatureSource(byteSource, scheduler);
-                    },
+                    () => new Tile.Processing.MvtTileFeatureSource(factory(address), scheduler),
                     bounds));
             }
 

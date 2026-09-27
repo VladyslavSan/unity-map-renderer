@@ -283,10 +283,10 @@ same call independently, reachable on web through a `file://` tile template.
 
 Fixed by ordering the `_inFlight` registration under `TileScheduler`'s own lock, conditional on the CTS
 reservation still being live, instead of behind a thread-pool hop — no platform branch needed; the ordering
-is now a lock fact, not a scheduling one. `FileDataSource`'s hop is a genuine I/O offload rather than an
-ordering guard, so it keeps its `#if !UNITY_WEBGL || UNITY_EDITOR` guard (the one remaining platform branch
-on this path): desktop/editor is byte-identical, and a WebGL player runs the read synchronously inline
-instead of hanging.
+is now a lock fact, not a scheduling one. `FileTransport.FetchOffMainAsync`'s hop is a genuine I/O offload
+rather than an ordering guard, so it keeps its `#if !UNITY_WEBGL || UNITY_EDITOR` guard (the one remaining
+platform branch on this path): desktop/editor is byte-identical, and a WebGL player runs the read
+synchronously inline instead of hanging.
 
 ### Things that follow from the above
 

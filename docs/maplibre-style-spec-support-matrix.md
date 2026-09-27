@@ -125,7 +125,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 | `tiles` | `partial` | Only the first URL template is used. |
 | `minzoom` / `maxzoom` | `partial` | A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom; there is no per-source overzoom, only past the host `TileSelection.MaxZoom` cap. |
 | `bounds` | `supported` | Gates tile requests: a cover tile whose ground quad does not strictly overlap `bounds` is never fetched. |
-| `scheme` | `supported` | `"tms"` flips only the fetch address (`TmsYFlipDataSource`); every other identity (loaded/cache keys) stays XYZ. |
+| `scheme` | `supported` | `"tms"` flips only the fetch address (`TileUrlTemplate`); every other identity (loaded/cache keys) stays XYZ. |
 | `attribution` | `no rendering effect` | Not read. |
 | `promoteId` | `not supported` | Feature ids come from the tile. |
 | `volatile` | `not supported` | Tile caching does not read it. |

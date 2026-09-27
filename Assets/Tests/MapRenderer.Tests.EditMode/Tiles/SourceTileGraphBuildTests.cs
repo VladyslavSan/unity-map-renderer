@@ -27,6 +27,7 @@ using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.IO;
@@ -3256,17 +3257,18 @@ namespace MapRenderer.Tests.Tiles
                 ""paint"": { ""fill-color"": ""#ff0000"" } } ]
         }");
 
-        /// <summary>Records every fetched <see cref="TileId"/> under a lock — a fetch can run off the main
-        /// thread once <c>TileManager</c> kicks it.</summary>
-        private static Func<string, IDataSource> RecordingFactory(List<TileId> into, object gate)
-            => _ => TestDataSource.FromFetch(id =>
+        /// <summary>Records every fetched URI (resolved through the factory's <c>address</c> parameter, so
+        /// a <c>"tms"</c> scheme's flip is visible here) under a lock — a fetch can run off the main thread
+        /// once <c>TileManager</c> kicks it.</summary>
+        private static Func<TileUrlTemplate, IDataSource> RecordingFactory(List<string> into, object gate)
+            => address => TestDataSource.FromFetch(id =>
             {
-                lock (gate) into.Add(id);
+                lock (gate) into.Add(address.Resolve(id));
                 return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
             });
 
-        // T-A1 (the flip formula itself) is a direct unit test on TmsYFlipDataSource — see
-        // DataSources/DataSourceTests.cs' TmsYFlipDataSourceTests.
+        // T-A1 (the flip formula itself) is a direct unit test on TileUrlTemplate — see
+        // DataSources/DataSourceTests.cs' TileUrlTemplateTests.
 
         /// <summary>No `scheme` key: the fetch set must equal the loaded (XYZ) set — no flip at all. Uses the
         /// TMS tooth's own off-equator setup, so the precondition below (a flip would be DETECTABLE, were one
@@ -3275,7 +3277,7 @@ namespace MapRenderer.Tests.Tiles
         public void NoScheme_FetchSetEqualsLoadedSet()
         {
             var view    = NewView(out var go);
-            var fetched = new List<TileId>();
+            var fetched = new List<string>();
             var gate    = new object();
             Track(go);
             try
@@ -3299,7 +3301,10 @@ namespace MapRenderer.Tests.Tiles
                     "precondition: the camera must sit off the equator, so a flip would be DETECTABLE here — " +
                     "otherwise an implementation that always flips could still pass the assert below.");
 
-                CollectionAssert.AreEquivalent(loaded, fetched,
+                var expectedFetched = new List<string>();
+                foreach (TileId id in loaded)
+                    expectedFetched.Add($"https://example.com/{id.Z}/{id.X}/{id.Y}.pbf");
+                CollectionAssert.AreEquivalent(expectedFetched, fetched,
                     "with no `scheme`, the fetch set must equal the loaded (XYZ) set — no flip at all.");
             }
             finally { view.Teardown(); }
@@ -3312,7 +3317,7 @@ namespace MapRenderer.Tests.Tiles
         public void TmsScheme_FetchSetIsTheYFlipOfTheLoadedSet_OnARowAsymmetricCover()
         {
             var view    = NewView(out var go);
-            var fetched = new List<TileId>();
+            var fetched = new List<string>();
             var gate    = new object();
             Track(go);
             try
@@ -3333,13 +3338,17 @@ namespace MapRenderer.Tests.Tiles
                         $"precondition: the camera at lat=60 must cover the NORTH row (Y=0) only — {id} " +
                         "is outside it, which would make the row-asymmetry claim below unverified");
 
-                var flippedLoaded = new List<TileId>();
+                var expectedFlipped = new List<string>();
                 foreach (TileId id in loaded)
-                    flippedLoaded.Add(new TileId { Z = id.Z, X = id.X, Y = (1 << id.Z) - 1 - id.Y });
+                    expectedFlipped.Add($"https://example.com/{id.Z}/{id.X}/{(1 << id.Z) - 1 - id.Y}.pbf");
 
-                CollectionAssert.AreEquivalent(flippedLoaded, fetched,
+                CollectionAssert.AreEquivalent(expectedFlipped, fetched,
                     "the fetch set must be the Y-flip of the loaded (XYZ) set.");
-                CollectionAssert.AreNotEquivalent(loaded, fetched,
+
+                var unflipped = new List<string>();
+                foreach (TileId id in loaded)
+                    unflipped.Add($"https://example.com/{id.Z}/{id.X}/{id.Y}.pbf");
+                CollectionAssert.AreNotEquivalent(unflipped, fetched,
                     "precondition: the camera must sit off the equator, so the flip is not the identity — " +
                     "otherwise this tooth cannot tell a flip from no flip at all.");
             }
@@ -3352,7 +3361,7 @@ namespace MapRenderer.Tests.Tiles
         public void TmsScheme_ResolvedThroughTileJson_AlsoFlips()
         {
             var view    = NewView(out var go);
-            var fetched = new List<TileId>();
+            var fetched = new List<string>();
             var gate    = new object();
             Track(go);
             try
@@ -3372,13 +3381,17 @@ namespace MapRenderer.Tests.Tiles
                 view.CollectLoadedTileIds(loaded);
                 Assert.Greater(loaded.Count, 0, "precondition: something was covered and admitted");
 
-                var flippedLoaded = new List<TileId>();
+                var expectedFlipped = new List<string>();
                 foreach (TileId id in loaded)
-                    flippedLoaded.Add(new TileId { Z = id.Z, X = id.X, Y = (1 << id.Z) - 1 - id.Y });
+                    expectedFlipped.Add($"https://example.com/{id.Z}/{id.X}/{(1 << id.Z) - 1 - id.Y}.pbf");
 
-                CollectionAssert.AreEquivalent(flippedLoaded, fetched,
+                CollectionAssert.AreEquivalent(expectedFlipped, fetched,
                     "a TileJSON-resolved `scheme: \"tms\"` must flip the fetch address exactly like an inline one.");
-                CollectionAssert.AreNotEquivalent(loaded, fetched,
+
+                var unflipped = new List<string>();
+                foreach (TileId id in loaded)
+                    unflipped.Add($"https://example.com/{id.Z}/{id.X}/{id.Y}.pbf");
+                CollectionAssert.AreNotEquivalent(unflipped, fetched,
                     "precondition: an off-equator camera, so the flip is not the identity.");
             }
             finally { view.Teardown(); }
@@ -3411,7 +3424,7 @@ namespace MapRenderer.Tests.Tiles
             finally { control.Teardown(); }
 
             var view    = NewView(out var go);
-            var fetched = new List<TileId>();
+            var fetched = new List<string>();
             var gate    = new object();
             Track(go);
             try
@@ -3424,7 +3437,7 @@ namespace MapRenderer.Tests.Tiles
                 SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 0, 180, 85]"), "bounds"));
                 PumpUntilSettled(view);
 
-                CollectionAssert.AreEquivalent(new[] { new TileId { Z = 1, X = 1, Y = 0 } }, fetched,
+                CollectionAssert.AreEquivalent(new[] { "https://example.com/1/1/0.pbf" }, fetched,
                     "`bounds: [0,0,180,85]` must admit ONLY the NE quadrant tile at z1.");
             }
             finally { view.Teardown(); }
@@ -3435,7 +3448,7 @@ namespace MapRenderer.Tests.Tiles
         public void QuadrantBounds_ResolvedThroughTileJson_OnlyTheAdmittedTileIsFetched()
         {
             var view    = NewView(out var go);
-            var fetched = new List<TileId>();
+            var fetched = new List<string>();
             var gate    = new object();
             Track(go);
             try
@@ -3451,7 +3464,7 @@ namespace MapRenderer.Tests.Tiles
                 SpinToCompleted(view.SetStyle(UrlVectorStyle(), "bounds-tilejson"));
                 PumpUntilSettled(view);
 
-                CollectionAssert.AreEquivalent(new[] { new TileId { Z = 1, X = 1, Y = 0 } }, fetched,
+                CollectionAssert.AreEquivalent(new[] { "https://example.com/1/1/0.pbf" }, fetched,
                     "a TileJSON-resolved `bounds` must gate exactly like an inline one.");
             }
             finally { view.Teardown(); }

@@ -59,9 +59,6 @@ namespace MapRenderer.Core.Data
         /// Fetches tile bytes. Returns a <see cref="TileResponse"/> with <c>HasData=false</c>
         /// when the tile is explicitly absent (e.g. 404/204 or missing file). Throws on a
         /// genuine error (network failure, I/O error, unexpected HTTP status).
-        ///
-        /// Core callers: FileDataSource, fixture fakes. Unity callers: UnityWebRequestDataSource
-        /// (production HTTP), TileScheduler (orchestration).
         /// </summary>
         UniTask<TileResponse> FetchAsync(TileId coord, CancellationToken ct = default);
     }

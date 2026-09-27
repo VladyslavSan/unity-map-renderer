@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
     /// <see cref="IGlyphSource"/> over <see cref="UnityWebRequest"/>, with the same cancellation and
-    /// absent-vs-error mapping as <see cref="UnityWebRequestDataSource"/>. Fills the style's <c>glyphs</c>
+    /// absent-vs-error mapping as <see cref="HttpTransport"/>. Fills the style's <c>glyphs</c>
     /// template and fetches raw bytes; <see cref="GlyphPbfDecoder"/> decodes them. <c>{fontstack}</c> is
     /// URL-escaped (font names contain spaces); <c>{range}</c> is the inclusive 256-codepoint span
     /// <c>"{rangeStart}-{rangeStart+255}"</c>.
@@ -30,7 +30,7 @@ namespace MapRenderer.Unity.Rendering.Source
             using var req = UnityWebRequest.Get(url);
             req.downloadHandler = new DownloadHandlerBuffer();
 
-            // Same mapping as UnityWebRequestDataSource: 404/204 -> Absent(), a cancel surfacing as a
+            // Same mapping as HttpTransport: 404/204 -> Absent(), a cancel surfacing as a
             // generic UnityWebRequestException -> OperationCanceledException, other errors re-throw.
             try
             {

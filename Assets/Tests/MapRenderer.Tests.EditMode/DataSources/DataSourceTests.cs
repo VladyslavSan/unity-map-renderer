@@ -4,10 +4,10 @@
 // Contents:
 //   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>
 //                                     interface, EditMode async-Task unit teeth.
-//   UnityWebRequestDataSourceTests  — UnityWebRequestDataSource against a loopback HttpListener, including the 404 -> Absent mapping.
-//   TmsYFlipDataSourceTests         — the scheme:"tms" Y-flip decorator: fetch-address flip and Encoding/Dispose forwarding.
-//   DataSourceRenderPathTests       — FileDataSource through the render pipeline.
-//   DataSourceTests                 — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
+//   HttpTileSourceTests             — TemplatedTileSource over HttpTransport against a loopback HttpListener, including the 404 -> Absent mapping.
+//   TileUrlTemplateTests            — the scheme:"tms" Y-flip addressing: TileUrlTemplate.Resolve and the TemplatedTileSource composition tooth.
+//   DataSourceRenderPathTests       — TemplatedTileSource (file://) through the render pipeline.
+//   DataSourceTests                 — TemplatedTileSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
 
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
@@ -127,16 +127,17 @@ namespace MapRenderer.Tests.DataSources
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // UnityWebRequestDataSourceTests — UnityWebRequestDataSource against a loopback HttpListener
+    // HttpTileSourceTests — TemplatedTileSource over HttpTransport, against a loopback HttpListener
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Tests for <see cref="UnityWebRequestDataSource"/>, including the 404→Absent mapping. The vendored
-    /// ToUniTask throws for any non-2xx status, so only the narrow
-    /// <c>catch (UnityWebRequestException) when 404/204</c> can return TileResponse.Absent.
+    /// Tests for <see cref="TemplatedTileSource"/> over <see cref="HttpTransport"/>, including the
+    /// 404→Absent mapping. The vendored ToUniTask throws for any non-2xx status, so only the narrow
+    /// <c>catch (UnityWebRequestException) when 404/204</c> returns <c>null</c>; <c>TemplatedTileSource</c>
+    /// is what maps that <c>null</c> to <c>TileResponse.Absent</c>.
     /// </summary>
     [TestFixture]
-    public class UnityWebRequestDataSourceTests
+    public class HttpTileSourceTests
     {
         // ── Loopback server helpers ────────────────────────────────────────────────────────────
 
@@ -210,7 +211,7 @@ namespace MapRenderer.Tests.DataSources
 
             try
             {
-                using var source = new UnityWebRequestDataSource(url);
+                using var source = new TemplatedTileSource(new TileUrlTemplate { Template = url }, TileEncoding.Mvt);
                 // A coroutine, so UnityWebRequest's PlayerLoop hook pumps. The Action<T> cast picks the
                 // void ContinueWith overload that ToCoroutine accepts.
                 yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
@@ -247,7 +248,7 @@ namespace MapRenderer.Tests.DataSources
 
             try
             {
-                using var source = new UnityWebRequestDataSource(url);
+                using var source = new TemplatedTileSource(new TileUrlTemplate { Template = url }, TileEncoding.Mvt);
                 yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
                     .ContinueWith((Action<TileResponse>)(r => { response = r; }))
                     .ToCoroutine(ex => { caught = ex; });
@@ -266,84 +267,207 @@ namespace MapRenderer.Tests.DataSources
             Assert.AreEqual(expected.Length, response.Bytes.Length,
                 "Response byte count must match the served body.");
         }
+
+        /// <summary>A 204 response must yield <c>HasData == false</c>, same mapping as 404. Characterisation
+        /// only: cannot see the post-await 204 check — a 204 body is empty, so <c>downloadHandler.data</c>
+        /// is already <c>null</c> and maps to absent through the general null-bytes path either way.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_204Response_ReturnsAbsent()
+        {
+            int port     = FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 204);
+
+            TileResponse response = default;
+            Exception    caught   = null;
+            try
+            {
+                using var source = new TemplatedTileSource(new TileUrlTemplate { Template = url }, TileEncoding.Mvt);
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
+                    .ContinueWith((Action<TileResponse>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsNull(caught, $"A 204 response must NOT throw. Exception: {caught?.Message}");
+            Assert.IsFalse(response.HasData, "HTTP 204 must produce HasData == false (TileResponse.Absent).");
+        }
+
+        /// <summary>A zero-length 200 body gives <c>downloadHandler.data == null</c>; <see cref="HttpTransport"/>
+        /// treats <c>null</c> as absent, so an empty body is negative-cached and re-fetched after the TTL,
+        /// never cached as present-with-null-bytes.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_200EmptyBody_ReturnsAbsent()
+        {
+            int port     = FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 200, new byte[0]);
+
+            TileResponse response = default;
+            Exception    caught   = null;
+            try
+            {
+                using var source = new TemplatedTileSource(new TileUrlTemplate { Template = url }, TileEncoding.Mvt);
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
+                    .ContinueWith((Action<TileResponse>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsNull(caught, $"A 200 empty body must NOT throw. Exception: {caught?.Message}");
+            Assert.IsFalse(response.HasData,
+                "a zero-length 200 body must map to absent (HttpTransport treats null bytes as absent).");
+        }
+
+        /// <summary>HTTP 500 must throw, never be swallowed as absent.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_500Response_Throws()
+        {
+            int port     = FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 500);
+
+            Exception caught = null;
+            try
+            {
+                using var source = new TemplatedTileSource(new TileUrlTemplate { Template = url }, TileEncoding.Mvt);
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
+                    .ContinueWith((Action<TileResponse>)(_ => { }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsInstanceOf<UnityWebRequestException>(caught,
+                "HTTP 500 must throw UnityWebRequestException, not be swallowed as Absent.");
+        }
+
+        /// <summary>A mid-flight cancel must surface as <see cref="OperationCanceledException"/>. The
+        /// listener accepts the connection and never replies, so the fetch stays in-flight until cancelled.
+        /// Limitation: this cannot isolate the <c>when (ct.IsCancellationRequested)</c> remap from a
+        /// same-shaped OCE the runtime raises on its own — only that a cancel produces an OCE somehow.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_CancelMidFlight_ThrowsOperationCanceled()
+        {
+            int port = FindFreePort();
+            string url = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
+            var hl = new HttpListener();
+            hl.Prefixes.Add($"http://127.0.0.1:{port}/");
+            hl.Start();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { hl.GetContext(); /* never respond */ }
+                catch { }
+            });
+
+            using var cts = new CancellationTokenSource();
+            UniTask<TileResponse> task;
+            try
+            {
+                using var source = new TemplatedTileSource(new TileUrlTemplate { Template = url }, TileEncoding.Mvt);
+                task = source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 }, cts.Token).Preserve();
+
+                yield return null; // let the request actually get sent before cancelling
+                cts.Cancel();
+
+                int frames = 0;
+                while (!task.Status.IsCompleted() && frames++ < 300) yield return null;
+            }
+            finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
+
+            Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the frame bound.");
+
+            Exception caught = null;
+            try { task.GetAwaiter().GetResult(); }
+            catch (Exception ex) { caught = ex; }
+
+            Assert.IsInstanceOf<OperationCanceledException>(caught,
+                "a mid-flight cancel must surface as OperationCanceledException.");
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TmsYFlipDataSourceTests — the scheme:"tms" Y-flip decorator
+    // TileUrlTemplateTests — the scheme:"tms" Y-flip addressing
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// <see cref="TmsYFlipDataSource"/> flips only the fetch address; <c>Encoding</c> and <c>Dispose</c>
-    /// forward to the inner source untouched.
-    /// </summary>
+    /// <summary><see cref="TileUrlTemplate"/>'s <c>Resolve</c> flips only the substituted <c>y</c>.</summary>
     [TestFixture]
-    public class TmsYFlipDataSourceTests
+    public class TileUrlTemplateTests
     {
         [Test]
-        public async Task FetchAsync_FlipsY_ForANonZeroZoom()
+        public void Resolve_Tms_FlipsY_ForANonZeroZoom()
         {
-            TileId seen = default;
-            var inner = TestDataSource.FromFetch(id =>
-            {
-                seen = id;
-                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
-            });
-            using var source = new TmsYFlipDataSource(inner);
-
-            await source.FetchAsync(new TileId { Z = 3, X = 5, Y = 1 });
-
-            Assert.AreEqual(new TileId { Z = 3, X = 5, Y = 6 }, seen,
-                "z3 has 8 rows (0..7); TMS row 1 is XYZ row 6 — y' = (1<<z) - 1 - y. X and Z must pass through unchanged.");
+            var address = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = true };
+            Assert.AreEqual("3/5/6", address.Resolve(new TileId { Z = 3, X = 5, Y = 1 }),
+                "z3 has 8 rows (0..7); TMS row 1 is XYZ row 6 — y' = (1<<z) - 1 - y. X and Z pass through unchanged.");
         }
 
         /// <summary>Control: at z0 there is one row, so the correct flip is the identity. Without this arm, an
         /// implementation that flips unconditionally by some OTHER formula could still satisfy the z3 case by
         /// coincidence; z0 pins that the formula, not just "some flip", is <c>(1&lt;&lt;z) - 1 - y</c>.</summary>
         [Test]
-        public async Task FetchAsync_ZoomZero_IsUnaffected()
+        public void Resolve_Tms_ZoomZero_IsUnaffected()
         {
-            TileId seen = default;
-            var inner = TestDataSource.FromFetch(id =>
+            var address = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = true };
+            Assert.AreEqual("0/0/0", address.Resolve(new TileId { Z = 0, X = 0, Y = 0 }));
+        }
+
+        /// <summary>Control: with no <c>scheme: "tms"</c>, <c>Resolve</c> never flips.</summary>
+        [Test]
+        public void Resolve_Xyz_DoesNotFlip()
+        {
+            var address = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = false };
+            Assert.AreEqual("3/5/1", address.Resolve(new TileId { Z = 3, X = 5, Y = 1 }));
+        }
+
+        /// <summary>Composition tooth: <see cref="TemplatedTileSource"/> must actually route the id through
+        /// <see cref="TileUrlTemplate.Resolve"/> (with its <c>Tms</c> flag), not just carry the flag inertly.
+        /// Fetching the XYZ id (1,0,1) over a <c>Tms=true</c> template must read the file the flip resolves
+        /// to (z1/x0/y0); the <c>Tms=false</c> control arm, same fetch, must miss it.</summary>
+        [Test]
+        public async Task TemplatedTileSource_Tms_FetchesTheFlippedFile()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            string tilePath = Path.Combine(tempRoot, "1", "0", "0.mvt");
+            Directory.CreateDirectory(Path.GetDirectoryName(tilePath));
+            File.WriteAllBytes(tilePath, new byte[] { 1, 2, 3 });
+
+            try
             {
-                seen = id;
-                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
-            });
-            using var source = new TmsYFlipDataSource(inner);
+                var tmsTemplate = new TileUrlTemplate
+                {
+                    Template = "file://" + Path.Combine(tempRoot, "{z}", "{x}", "{y}.mvt"), Tms = true,
+                };
+                using var tmsSource = new TemplatedTileSource(tmsTemplate, TileEncoding.Mvt);
+                TileResponse tmsResponse = await tmsSource.FetchAsync(new TileId { Z = 1, X = 0, Y = 1 });
+                Assert.IsTrue(tmsResponse.HasData,
+                    "Tms=true must resolve TileId(1,0,1) to the flipped path 1/0/0.mvt, which exists.");
 
-            await source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
-
-            Assert.AreEqual(new TileId { Z = 0, X = 0, Y = 0 }, seen);
-        }
-
-        [Test]
-        public void Encoding_ForwardsToTheInnerSource()
-        {
-            using var inner  = TestDataSource.FromBytes(new byte[] { 1 }, TileEncoding.Mvt);
-            using var source = new TmsYFlipDataSource(inner);
-            Assert.AreEqual(TileEncoding.Mvt, source.Encoding);
-        }
-
-        [Test]
-        public void Dispose_ForwardsToTheInnerSource()
-        {
-            var inner  = TestDataSource.Absent();
-            var source = new TmsYFlipDataSource(inner);
-
-            source.Dispose();
-
-            Assert.IsTrue(inner.WasDisposed,
-                "Dispose must forward to the inner source, or its scheduler/cache/connection leaks.");
+                var xyzTemplate = new TileUrlTemplate
+                {
+                    Template = "file://" + Path.Combine(tempRoot, "{z}", "{x}", "{y}.mvt"), Tms = false,
+                };
+                using var xyzSource = new TemplatedTileSource(xyzTemplate, TileEncoding.Mvt);
+                TileResponse xyzResponse = await xyzSource.FetchAsync(new TileId { Z = 1, X = 0, Y = 1 });
+                Assert.IsFalse(xyzResponse.HasData,
+                    "control: Tms=false must resolve TileId(1,0,1) to the unflipped path 1/0/1.mvt, which does not exist.");
+            }
+            finally
+            {
+                if (Directory.Exists(tempRoot))
+                    Directory.Delete(tempRoot, recursive: true);
+            }
         }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // DataSourceRenderPathTests — FileDataSource through the render pipeline
+    // DataSourceRenderPathTests — TemplatedTileSource (file://) through the render pipeline
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="FileDataSource"/> feeds the render path: its bytes give the same vertex CONTENT HASH (not
-    /// just count) through decode → assemble → TileToGeoJob → ProjectPointsJob as the fixture bytes. It is an
-    /// A-vs-A comparison, so triangulation adds nothing and is left out.
+    /// <see cref="TemplatedTileSource"/> over a <c>file://</c> template feeds the render path: its bytes give
+    /// the same vertex CONTENT HASH (not just count) through decode → assemble → TileToGeoJob →
+    /// ProjectPointsJob as the fixture bytes. It is an A-vs-A comparison, so triangulation adds nothing and
+    /// is left out.
     /// </summary>
     [TestFixture]
     public class DataSourceRenderPathTests
@@ -355,7 +479,7 @@ namespace MapRenderer.Tests.DataSources
             FileAssert.Exists(fixturePath);
             byte[] fixtureBytes = File.ReadAllBytes(fixturePath);
 
-            // 1. Feed bytes via FileDataSource.
+            // 1. Feed bytes via a file:// TemplatedTileSource.
             string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
             string tilePath = Path.Combine(tempRoot, "0", "0", "0.mvt");
             Directory.CreateDirectory(Path.GetDirectoryName(tilePath));
@@ -364,15 +488,16 @@ namespace MapRenderer.Tests.DataSources
             byte[] fileBytes;
             try
             {
-                using var fileSource = new FileDataSource(tempRoot);
+                var address = new TileUrlTemplate { Template = "file://" + Path.Combine(tempRoot, "{z}", "{x}", "{y}.mvt") };
+                using var fileSource = new TemplatedTileSource(address, TileEncoding.Mvt);
                 // FetchAsync completes on the ThreadPool, so GetResult() at once throws "Not yet completed".
                 // Park until the fetch completes.
                 var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
                 fetchTask.WaitOffPlayerLoop(10000);
                 Assert.IsTrue(fetchTask.Status.IsCompleted(),
-                    "FileDataSource.FetchAsync must complete within 10 seconds.");
+                    "TemplatedTileSource.FetchAsync must complete within 10 seconds.");
                 var fileResp = fetchTask.GetAwaiter().GetResult();
-                Assert.IsTrue(fileResp.HasData, "FileDataSource must return HasData=true");
+                Assert.IsTrue(fileResp.HasData, "TemplatedTileSource must return HasData=true");
                 fileBytes = fileResp.Bytes;
             }
             finally
@@ -387,10 +512,10 @@ namespace MapRenderer.Tests.DataSources
             string fileHash     = BuildContentHash(fileBytes);
 
             Assert.AreEqual(baselineHash, fileHash,
-                "FileDataSource render path content hash must match the direct baseline. " +
+                "the file-source render path content hash must match the direct baseline. " +
                 "A mismatch means the file source returns different bytes or the decode path is non-deterministic.");
 
-            Debug.Log($"[DataSourceRenderPathTests] FileDataSource produces an identical content hash: {baselineHash[..16]}...");
+            Debug.Log($"[DataSourceRenderPathTests] the file source produces an identical content hash: {baselineHash[..16]}...");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
@@ -480,11 +605,11 @@ namespace MapRenderer.Tests.DataSources
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // DataSourceTests — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource over UniTask
+    // DataSourceTests — TemplatedTileSource/MvtTileFeatureSource over UniTask
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Data-source interface, LRU cache, scheduler deduplication, FileDataSource byte identity,
+    /// Data-source interface, LRU cache, scheduler deduplication, file-source byte identity,
     /// absent-vs-error, and cancellation. Offline and deterministic: <see cref="UniTaskCompletionSource{T}"/>
     /// controls timing. Tests await, because GetAwaiter().GetResult() does not block on a UniTask.
     /// </summary>
@@ -523,8 +648,8 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // 1. Byte identity: FileDataSource serves correct bytes
-        //    (HTTP lives in UnityWebRequestDataSource, not in Core)
+        // 1. Byte identity: the file-source TemplatedTileSource serves correct bytes
+        //    (HTTP lives in HttpTransport, not in Core)
         // -----------------------------------------------------------------------------------------
 
         [Test]
@@ -533,7 +658,7 @@ namespace MapRenderer.Tests.DataSources
             byte[] fixtureBytes = LoadFixtureBytes();
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
 
-            // Write fixture into a temp dir so FileDataSource can read it.
+            // Write fixture into a temp dir so the file-source template can read it.
             string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
             string tilePath = Path.Combine(tempRoot, "0", "0", "0.mvt");
             Directory.CreateDirectory(Path.GetDirectoryName(tilePath));
@@ -542,12 +667,13 @@ namespace MapRenderer.Tests.DataSources
             try
             {
                 TileResponse fileResponse;
-                using (var fileSource = new FileDataSource(tempRoot))
+                var address = new TileUrlTemplate { Template = "file://" + Path.Combine(tempRoot, "{z}", "{x}", "{y}.mvt") };
+                using (var fileSource = new TemplatedTileSource(address, TileEncoding.Mvt))
                 {
                     fileResponse = await fileSource.FetchAsync(tileId);
                 }
 
-                Assert.IsTrue(fileResponse.HasData,  "FileDataSource: HasData must be true");
+                Assert.IsTrue(fileResponse.HasData,  "the file source: HasData must be true");
                 Assert.AreEqual(TileEncoding.Mvt, fileResponse.Encoding, "File Encoding");
 
                 // Byte-for-byte identical
@@ -577,7 +703,8 @@ namespace MapRenderer.Tests.DataSources
             Directory.CreateDirectory(emptyRoot);
             try
             {
-                using var source = new FileDataSource(emptyRoot);
+                var address = new TileUrlTemplate { Template = "file://" + Path.Combine(emptyRoot, "{z}", "{x}", "{y}.mvt") };
+                using var source = new TemplatedTileSource(address, TileEncoding.Mvt);
                 var response = await source.FetchAsync(new TileId { Z = 5, X = 10, Y = 15 });
                 Assert.IsFalse(response.HasData,   "Missing file → HasData must be false");
                 Assert.IsNull(response.Bytes,       "Missing file → Bytes must be null");
