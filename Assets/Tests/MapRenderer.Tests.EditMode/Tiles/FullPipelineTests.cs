@@ -58,7 +58,7 @@ using MapRenderer.Unity.Jobs.Tiles;
 using System.Linq;
 using System.Text;
 using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using System.Threading.Tasks;
 using MapRenderer.Unity.Concurrency;
 using Object = UnityEngine.Object;

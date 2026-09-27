@@ -9,7 +9,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 
 namespace MapRenderer.Tests.Cameras
 {

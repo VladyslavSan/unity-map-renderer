@@ -18,7 +18,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.App;
 using MapRenderer.App.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Jobs;

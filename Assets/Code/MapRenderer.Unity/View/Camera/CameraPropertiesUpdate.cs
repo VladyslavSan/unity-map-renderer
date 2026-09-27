@@ -1,6 +1,6 @@
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Unity.View.Camera
+namespace MapRenderer.Unity.View.Cameras
 {
     /// <summary>
     /// A nullable PATCH struct: <see cref="ApplyTo"/> applies only its non-null fields to the current

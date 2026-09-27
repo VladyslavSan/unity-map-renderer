@@ -23,7 +23,7 @@ using CoreColor = MapRenderer.Core.Expressions.Color;
 using System.Collections.Generic;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;

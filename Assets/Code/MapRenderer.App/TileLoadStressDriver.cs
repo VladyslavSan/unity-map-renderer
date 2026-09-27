@@ -1,6 +1,6 @@
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 
 using MapRenderer.Unity.Rendering.Map;
 

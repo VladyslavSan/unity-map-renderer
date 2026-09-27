@@ -10,7 +10,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Style;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;

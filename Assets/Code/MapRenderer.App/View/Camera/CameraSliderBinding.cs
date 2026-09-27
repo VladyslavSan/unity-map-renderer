@@ -1,8 +1,8 @@
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 
-namespace MapRenderer.App.View.Camera
+namespace MapRenderer.App.View.Cameras
 {
     /// <summary>
     /// The pure, engine-free two-way reconcile between an Editor authoring surface's Zoom / Tilt / Heading

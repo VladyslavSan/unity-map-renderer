@@ -20,7 +20,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.App;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;

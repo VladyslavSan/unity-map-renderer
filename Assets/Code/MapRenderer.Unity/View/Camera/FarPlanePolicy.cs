@@ -3,7 +3,7 @@
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Unity.View.Camera
+namespace MapRenderer.Unity.View.Cameras
 {
     /// <summary>
     /// Computes the camera far-clip distance (render metres) from the view. A policy, not a constant, because

@@ -3,7 +3,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 // Alias, not a plain `using`: the namespace segment `Rendering` collides with a bare UnityEngine type in
 // lookup — the CS0118 trap this repo documents at RenderLayerSet.cs.
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;

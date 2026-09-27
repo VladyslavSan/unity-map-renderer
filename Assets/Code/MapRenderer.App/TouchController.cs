@@ -8,7 +8,7 @@ using Unity.Mathematics;
 using MapRenderer.App.View;
 using MapRenderer.Unity.View;
 using MapRenderer.Core.Geo;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 
 // Alias the Core TouchPhase to avoid CS0104 ambiguity with UnityEngine.InputSystem.TouchPhase.
 using CoreTouchPhase = MapRenderer.App.View.TouchPhase;

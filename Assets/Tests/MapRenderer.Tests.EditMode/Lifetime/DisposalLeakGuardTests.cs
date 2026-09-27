@@ -18,7 +18,7 @@ using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Concurrency;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile;

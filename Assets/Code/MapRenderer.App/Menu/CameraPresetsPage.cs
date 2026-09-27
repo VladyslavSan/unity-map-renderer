@@ -1,5 +1,5 @@
 using MapRenderer.Core.Geo;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using UnityEngine;
 
 using MapRenderer.Unity.Rendering.Map;

@@ -5,7 +5,7 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.App;
-using MapRenderer.App.View.Camera;
+using MapRenderer.App.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 

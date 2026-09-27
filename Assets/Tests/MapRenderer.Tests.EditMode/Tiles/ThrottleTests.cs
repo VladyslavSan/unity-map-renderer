@@ -37,7 +37,7 @@ using UnityEngine.TestTools.Constraints;
 using Unity.Mathematics;
 using Unity.Profiling;
 using Is = UnityEngine.TestTools.Constraints.Is;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.App;

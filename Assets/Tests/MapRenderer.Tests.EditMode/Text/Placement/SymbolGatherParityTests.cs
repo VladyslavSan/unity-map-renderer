@@ -34,7 +34,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using Symbol = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using UnityEngine.TestTools.Constraints;
 using MapRenderer.Unity.Style.Symbol;
 using Is = UnityEngine.TestTools.Constraints.Is; // Is.Not.AllocatingGCMemory()

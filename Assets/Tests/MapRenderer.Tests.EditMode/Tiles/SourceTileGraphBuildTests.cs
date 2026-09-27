@@ -32,7 +32,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.IO;
 using Cysharp.Threading.Tasks;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Rendering.Materials;

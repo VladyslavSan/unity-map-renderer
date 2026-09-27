@@ -12,7 +12,7 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Materials;

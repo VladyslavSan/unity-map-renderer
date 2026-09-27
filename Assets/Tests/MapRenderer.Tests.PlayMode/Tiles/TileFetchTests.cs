@@ -15,7 +15,7 @@ using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity.Style;
-using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.View.Cameras;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.Collections.Generic;
 using Unity.Profiling;
