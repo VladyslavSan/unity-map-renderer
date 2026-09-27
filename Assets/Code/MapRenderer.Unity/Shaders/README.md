@@ -263,8 +263,7 @@ shader that takes world `+Y` as up with no mesh frame. That holds on both projec
 tiles are rebased into the look-at tangent frame. The blend spans the visible sky strip: from
 `_MapEdgeElevation`, the ray elevation where the rendered map ends (the far cut, or the globe's limb when
 nearer), to `_SkyTopElevation`, the ray through the top of the screen. So the colour depends on the view,
-not only on the ray's direction. `SkyGradient.UpdateMapEdge` pushes both every frame from the committed
-camera.
+not only on the ray's direction. `SkyGradient.Update` pushes both every frame from the committed camera.
 
 ## The haze
 

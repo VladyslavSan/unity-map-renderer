@@ -456,7 +456,9 @@ namespace MapRenderer.Tests.Visual
 
             Frame hazed;
             DistanceHaze.HazeRange range;
-            double edgeDeg, height, near;
+            double edgeDeg;
+            double height;
+            double near;
             using (VisualScene scene = NewScene().RenderMode(mode).Haze())
             {
                 VisualFrame frame = scene.Render(Size);
@@ -524,7 +526,10 @@ namespace MapRenderer.Tests.Visual
                 .Configure(config => config.SymbolTileCoverageCull = 0.0) // far tiles are thin on screen
                 .ExpectSymbolQuads(2);
 
-            double clearFar, clearNear, hazedFar, hazedNear;
+            double clearFar;
+            double clearNear;
+            double hazedFar;
+            double hazedNear;
             using (VisualScene scene = NewSymbolScene())
             {
                 VisualFrame frame = scene.Render(Size);
@@ -736,7 +741,7 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(Size, Size);
             sky.ApplyStyle(StyleSky.Parse(null), zoom: 15.0);
             sky.SetOverride(Color.red, Color.blue);
-            sky.UpdateMapEdge(mapCamera);
+            sky.Update(0.0, mapCamera, SunLight.DefaultIntensity); // the single per-frame call; ApplyStyle/SetOverride only track values now
             snap.Render(camera); // absorbs shader warm-up
             snap.Render(camera);
             Frame frame = snap.Pixels;

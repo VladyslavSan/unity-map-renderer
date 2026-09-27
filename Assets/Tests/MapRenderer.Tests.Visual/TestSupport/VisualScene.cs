@@ -264,7 +264,13 @@ namespace MapRenderer.Tests
 
             _mapCam = new MapCamera(_unityCamera, _cameraProperties);
             _mapView.SetCamera(_mapCam);
-            if (_haze) _mapView.EnableHaze();
+            if (_haze)
+            {
+                // The scene's own directional light stands in for the sun a SceneEnvironment always requires.
+                var environment = new MapRenderer.Unity.Rendering.Map.SceneEnvironment(light);
+                environment.EnableHaze();
+                _mapView.SetEnvironment(environment);
+            }
 
             // Glyph seam: AFTER SetCamera builds View, BEFORE SetStyle consumes it. A fill-only scene leaves it
             // null and takes the production GlyphSourceFactory.Create path.

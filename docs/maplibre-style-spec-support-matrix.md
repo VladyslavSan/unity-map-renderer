@@ -79,7 +79,8 @@ marked † is otherwise complete; its status does not count this limit. The desi
 ## 2. `light`
 
 `light` drives one scene directional light (`SunLight`). That light shades every lit layer (lit fills,
-lines and fill-extrusions), not only fill-extrusions as the spec describes.
+lines and fill-extrusions), not only fill-extrusions as the spec describes. `intensity` also scales the
+`sky` gradient and the haze fog colour — a deviation from the spec; see § 3.
 
 | Property | Status | Note |
 |---|---|---|
@@ -91,7 +92,10 @@ lines and fill-extrusions), not only fill-extrusions as the spec describes.
 ## 3. `sky`
 
 `sky-color` and `horizon-color` paint a gradient behind the map (`SkyGradient`). `fog-color` tints distant
-ground through URP linear fog (`DistanceHaze`).
+ground through URP linear fog (`DistanceHaze`). Known deviation: both `SkyGradient` and `DistanceHaze`
+additionally scale their colour by `light-intensity` (`AmbientBrightnessResponse.Scale`), unchanged at
+`light-intensity`'s own spec default (0.5). Below the default the colour dims; above it the colour brightens,
+clamped per channel. The spec defines no relationship between `sky` and `light`.
 
 | Property | Status | Note |
 |---|---|---|

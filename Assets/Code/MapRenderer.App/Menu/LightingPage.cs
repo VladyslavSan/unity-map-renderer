@@ -6,10 +6,10 @@ namespace MapRenderer.App.Menu
 {
     /// <summary>
     /// Lighting page: runtime overrides for the sun, the sky and the haze, on top of the live style's
-    /// <c>light</c> and <c>sky</c> blocks (<see cref="MapViewComponent.SetSunOverride"/>,
-    /// <see cref="MapViewComponent.SetSkyOverride"/>, <see cref="MapViewComponent.SetHazeOverride"/>). Controls
-    /// seed from the live state on the first draw, on every restyle, and again when a restyle's ease ends.
-    /// "Reset to style" clears all three overrides and reverts to the style's own values.
+    /// <c>light</c> and <c>sky</c> blocks (<see cref="SunLight.SetOverride"/>, <see cref="SkyGradient.SetOverride"/>,
+    /// <see cref="DistanceHaze.SetOverride"/>, reached through <see cref="MapViewComponent.Environment"/>).
+    /// Controls seed from the live state on the first draw, on every restyle, and again when a restyle's ease
+    /// ends. "Reset to style" clears all three overrides and reverts to the style's own values.
     /// </summary>
     internal sealed class LightingPage : IMenuPage
     {
@@ -25,7 +25,7 @@ namespace MapRenderer.App.Menu
         private float _intensity;
         private float _h, _s, _v;
 
-        // The values last pushed through SetSunOverride — compared against the live fields each draw so
+        // The values last pushed through SunLight.SetOverride — compared against the live fields each draw so
         // Apply runs only when a control actually moved, not on every Layout/Repaint pass (which would
         // fight Reset and re-assert a stale override under a live restyle).
         private float _appliedAzimuthDeg, _appliedElevationDeg, _appliedIntensity;
@@ -57,7 +57,8 @@ namespace MapRenderer.App.Menu
 
             if (map.StyleId != _seededStyleId || (_seededMidTransition && !IsTransitioning(map))) Seed(map);
 
-            GUILayout.Label(map.SunLight != null && map.SunLight.IsOverridden ? "Sun (overridden)" : "Sun");
+            SceneEnvironment env = map.Environment;
+            GUILayout.Label(env != null && env.Sun.IsOverridden ? "Sun (overridden)" : "Sun");
             GUILayout.Label($"Azimuth: {_azimuthDeg:F0}°");
             _azimuthDeg = GUILayout.HorizontalSlider(_azimuthDeg, 0f, 360f);
             GUILayout.Label($"Elevation: {_elevationDeg:F0}°");
@@ -79,42 +80,42 @@ namespace MapRenderer.App.Menu
             }
 
             GUILayout.Space(10f);
-            GUILayout.Label(map.SkyGradient != null && map.SkyGradient.IsOverridden ? "Sky (overridden)" : "Sky");
+            GUILayout.Label(env?.Sky != null && env.Sky.IsOverridden ? "Sky (overridden)" : "Sky");
             DrawColorControl("Sky", ref _skyH, ref _skyS, ref _skyV);
             DrawColorControl("Horizon", ref _horizonH, ref _horizonS, ref _horizonV);
 
             GUILayout.Space(10f);
-            GUILayout.Label(map.DistanceHaze != null && map.DistanceHaze.IsOverridden ? "Haze (overridden)" : "Haze");
+            GUILayout.Label(env?.Haze != null && env.Haze.IsOverridden ? "Haze (overridden)" : "Haze");
             _hazeOn = GUILayout.Toggle(_hazeOn, "Haze on");
             DrawColorControl("Fog", ref _fogH, ref _fogS, ref _fogV);
 
             GUILayout.Space(6f);
             if (GUILayout.Button("Reset to style"))
             {
-                map.ResetSunToStyle();
-                map.ResetSkyToStyle();
-                map.ResetHazeToStyle();
+                env?.Sun.ResetToStyle();
+                env?.Sky?.ResetToStyle();
+                env?.Haze?.ResetToStyle();
                 Seed(map); // controls match the now-live style; nothing pending to Apply below
                 return;
             }
 
             if (HasPendingChange())
             {
-                map.SetSunOverride(Angle.FromDegrees(_azimuthDeg), Angle.FromDegrees(90.0 - _elevationDeg),
+                env?.Sun.SetOverride(Angle.FromDegrees(_azimuthDeg), Angle.FromDegrees(90.0 - _elevationDeg),
                     Color.HSVToRGB(_h, _s, _v), _intensity);
                 MarkApplied();
             }
 
             if (HasPendingSkyChange())
             {
-                map.SetSkyOverride(Color.HSVToRGB(_skyH, _skyS, _skyV),
-                                   Color.HSVToRGB(_horizonH, _horizonS, _horizonV));
+                env?.Sky?.SetOverride(Color.HSVToRGB(_skyH, _skyS, _skyV),
+                                      Color.HSVToRGB(_horizonH, _horizonS, _horizonV));
                 MarkSkyApplied();
             }
 
             if (HasPendingHazeChange())
             {
-                map.SetHazeOverride(_hazeOn, Color.HSVToRGB(_fogH, _fogS, _fogV));
+                env?.Haze?.SetOverride(_hazeOn, Color.HSVToRGB(_fogH, _fogS, _fogV));
                 MarkHazeApplied();
             }
         }
@@ -125,7 +126,9 @@ namespace MapRenderer.App.Menu
         {
             _seededStyleId       = map.StyleId;
             _seededMidTransition = IsTransitioning(map);
-            SkyGradient sky = map.SkyGradient;
+            SceneEnvironment env = map.Environment;
+
+            SkyGradient sky = env?.Sky;
             if (sky != null)
             {
                 Color.RGBToHSV(sky.SkyColor, out _skyH, out _skyS, out _skyV);
@@ -133,7 +136,7 @@ namespace MapRenderer.App.Menu
                 MarkSkyApplied();
             }
 
-            DistanceHaze haze = map.DistanceHaze;
+            DistanceHaze haze = env?.Haze;
             if (haze != null)
             {
                 _hazeOn = haze.Enabled;
@@ -141,7 +144,7 @@ namespace MapRenderer.App.Menu
                 MarkHazeApplied();
             }
 
-            SunLight sun = map.SunLight;
+            SunLight sun = env?.Sun;
             if (sun == null) return;
 
             _azimuthDeg   = (float)sun.Azimuth.NormalizedDegrees().Degrees;
@@ -153,8 +156,11 @@ namespace MapRenderer.App.Menu
 
         /// <summary>True while a restyle still eases the sun, the sky or the haze.</summary>
         private static bool IsTransitioning(MapViewComponent map)
-            => map.SunLight?.IsTransitioning == true || map.SkyGradient?.IsTransitioning == true
-            || map.DistanceHaze?.IsTransitioning == true;
+        {
+            SceneEnvironment env = map.Environment;
+            return env != null && (env.Sun.IsTransitioning || env.Sky?.IsTransitioning == true
+                                 || env.Haze?.IsTransitioning == true);
+        }
 
         private bool HasPendingChange()
             => _azimuthDeg != _appliedAzimuthDeg || _elevationDeg != _appliedElevationDeg

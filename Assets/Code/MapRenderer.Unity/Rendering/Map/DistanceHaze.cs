@@ -3,18 +3,32 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Layers;
+using MapRenderer.Unity.Interpolation;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
     /// Fades distant map ground toward the style's <c>fog-color</c> with URP linear fog, so the far cut
     /// dissolves into the sky. The fog range follows the committed far plane every frame
-    /// (<see cref="UpdateRange"/>), and there is no haze while the far cut is off screen. This is the only
+    /// (<see cref="Update"/>, which also scales the fog colour by <see cref="AmbientBrightnessResponse"/>),
+    /// and there is no haze while the far cut is off screen. This is the only
     /// writer of the <see cref="RenderSettings"/> fog fields; <see cref="Dispose"/> restores them. A restyle
-    /// eases the fog colour over the style transition; <see cref="Advance"/> moves it.
+    /// eases the fog colour over the style transition; <see cref="Update"/> moves it.
     /// </summary>
     internal sealed class DistanceHaze : IDisposable
     {
+        /// <summary>The one interpolation value: the fog colour. <c>UnityEngine.Color</c> cannot implement
+        /// <see cref="IInterpolatable{T}"/> itself, so this wraps it.</summary>
+        private readonly struct HazeColor : IInterpolatable<HazeColor>
+        {
+            public Color Value { get; init; }
+
+            public HazeColor Interpolate(in HazeColor to, float weight) => new HazeColor
+            {
+                Value = ColorMix.Lerp(Value, to.Value, weight),
+            };
+        }
+
         /// <summary>The fog mode the renderer uses. The build keeps only this mode's shader variants.</summary>
         internal const FogMode HazeFogMode = FogMode.Linear;
 
@@ -26,16 +40,17 @@ namespace MapRenderer.Unity.Rendering.Map
         internal const double HazeStartFraction = 0.5;
 
         private readonly (bool fog, FogMode mode, Color color, float start, float end) _saved;
-        private StyleSky _style;
-        private double   _lastZoom;
-        private StyleEase _ease;
-        private Color    _fromColor, _toColor;
+        private StyleSky              _style;
+        private double                _lastZoom;
+        private Smoothstep<HazeColor> _interpolation;
 
-        /// <summary>Saves the current <see cref="RenderSettings"/> fog, for <see cref="Dispose"/>.</summary>
+        /// <summary>Saves the current <see cref="RenderSettings"/> fog, for <see cref="Dispose"/>. The fog
+        /// colour starts at the spec default white.</summary>
         public DistanceHaze()
         {
             _saved = (RenderSettings.fog, RenderSettings.fogMode, RenderSettings.fogColor,
                       RenderSettings.fogStartDistance, RenderSettings.fogEndDistance);
+            _interpolation.Set(new HazeColor { Value = Color.white });
         }
 
         /// <summary>True while a runtime override is showing instead of the style's own values.</summary>
@@ -45,10 +60,10 @@ namespace MapRenderer.Unity.Rendering.Map
         public bool Enabled { get; private set; } = true;
 
         /// <summary>The fog colour last written (style- or override-derived).</summary>
-        public Color FogColor { get; private set; } = Color.white;
+        public Color FogColor => _interpolation.Current.Value;
 
-        /// <summary>True while a restyle ease is still moving the fog colour.</summary>
-        public bool IsTransitioning => _ease.IsActive;
+        /// <summary>True while a restyle interpolation is still moving the fog colour.</summary>
+        public bool IsTransitioning => _interpolation.IsActive;
 
         /// <summary>Applies <paramref name="style"/>'s <c>fog-color</c> at <paramref name="zoom"/>, switches the
         /// haze on and clears any runtime override. A style with no <c>sky</c> block gets the spec default white.
@@ -62,30 +77,19 @@ namespace MapRenderer.Unity.Rendering.Map
             _lastZoom    = zoom;
             IsOverridden = false;
             Enabled      = true;
-            _fromColor   = FogColor;
-            _toColor     = ZoomStyleApplier.ToUnityColor(style.FogColor.Evaluate(zoom));
-            _ease.Arm(first ? default : transition, nowSeconds);
-            if (!_ease.IsActive) FogColor = _toColor;
-        }
-
-        /// <summary>Moves this frame's eased fog colour. Call before <see cref="UpdateRange"/>, which writes it.
-        /// A no-op when no ease is running.</summary>
-        public void Advance(double nowSeconds)
-        {
-            if (!_ease.IsActive) return;
-            float weight = _ease.Step(nowSeconds);
-            if (!_ease.IsActive) { FogColor = _toColor; return; }
-            FogColor = StyleEase.Mix(_fromColor, _toColor, weight);
+            var target = new HazeColor { Value = ZoomStyleApplier.ToUnityColor(style.FogColor.Evaluate(zoom)) };
+            double delaySeconds    = first ? 0.0 : transition.DelaySeconds;
+            double durationSeconds = first ? 0.0 : transition.DurationSeconds;
+            _interpolation.Start(target, delaySeconds, durationSeconds, nowSeconds);
         }
 
         /// <summary>Overrides the switch and the colour on top of the last applied style, until
         /// <see cref="ResetToStyle"/> or the next <see cref="ApplyStyle"/>.</summary>
         public void SetOverride(bool enabled, Color fogColor)
         {
-            _ease.Stop();
             IsOverridden = true;
             Enabled      = enabled;
-            FogColor     = fogColor;
+            _interpolation.Set(new HazeColor { Value = fogColor });
         }
 
         /// <summary>Clears a runtime override and re-applies the last style. A no-op before the first
@@ -95,17 +99,20 @@ namespace MapRenderer.Unity.Rendering.Map
             if (_style != null) ApplyStyle(_style, _lastZoom, StyleTransition.Instant);
         }
 
-        /// <summary>Writes this frame's fog from the committed camera. Call after
-        /// <see cref="MapCamera.SyncToCamera"/>.</summary>
-        public void UpdateRange(MapCamera camera)
+        /// <summary>Moves this frame's interpolated fog colour, then writes the fog range from
+        /// <paramref name="camera"/>'s committed pose, its colour scaled by <paramref name="lightIntensity"/>
+        /// (see <see cref="AmbientBrightnessResponse"/>). Call after <see cref="MapCamera.SyncToCamera"/>.</summary>
+        public void Update(double nowSeconds, MapCamera camera, float lightIntensity)
         {
+            _interpolation.Update(nowSeconds);
+
             HazeRange range = Range(camera.CameraRelativePosition, camera.CurrentFarMetres,
                                     camera.Camera.nearClipPlane, camera.CurrentProperties.VerticalFovDeg);
             bool on = Enabled && range.On;
             RenderSettings.fog = on;
             if (!on) return;
             RenderSettings.fogMode          = HazeFogMode;
-            RenderSettings.fogColor         = FogColor;
+            RenderSettings.fogColor         = AmbientBrightnessResponse.Scale(FogColor, lightIntensity);
             RenderSettings.fogStartDistance = (float)range.Start;
             RenderSettings.fogEndDistance   = (float)range.End;
         }

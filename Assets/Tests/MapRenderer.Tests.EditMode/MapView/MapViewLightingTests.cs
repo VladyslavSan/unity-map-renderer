@@ -9,11 +9,15 @@
 //                                     and IsUsableAmbientProbe rejects a corrupt probe.
 //   SunLightDefaultIdentityTests    — a style with no `light` block reproduces today's bootstrap light exactly.
 //   SunLightOverrideTests           — a runtime override wins over the style, and a restyle clears it.
+//   AmbientBrightnessResponseTests  — the sky/haze intensity-response curve: identity at the default, scales in
+//                                     linear space at zero, clamps a channel the curve would push past 1.
 //   SkyGradientStyleTests           — spec defaults vs a specified sky; override/reset; lighting untouched.
 //   SkyMapEdgeTests                 — the visible sky strip: where the map ends (far cut or limb) and the top ray.
 //   DistanceHazeRangeTests          — the fog range: no haze top-down, full haze at the far cut, follows the far.
 //   DistanceHazeStyleTests          — spec default vs a specified fog-color; override/reset; fog restored on dispose.
-//   LightingRestyleEaseTests        — a restyle eases sun, sky and fog over the style transition; MapView drives it.
+//   LightingRestyleEaseTests        — a restyle eases sun, sky and fog over the style transition; MapView's
+//                                     SceneEnvironment drives it, and feeds SunLight's intensity (style or
+//                                     runtime override) to sky and haze — including that the writers darken by it.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -431,6 +435,54 @@ namespace MapRenderer.Tests.MapViews
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
+    // AmbientBrightnessResponseTests — the sky/haze intensity-response curve
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class AmbientBrightnessResponseTests
+    {
+        [Test]
+        public void AtDefaultIntensity_FactorIsOne_AndScaleIsIdentity()
+        {
+            var color = new Color(0.2f, 0.5f, 0.9f, 0.4f);
+
+            Assert.AreEqual(1f, AmbientBrightnessResponse.Factor(SunLight.DefaultIntensity),
+                "existing styles and goldens must not move at the light's own default intensity.");
+            Assert.AreEqual(color, AmbientBrightnessResponse.Scale(color, SunLight.DefaultIntensity),
+                "Scale returns the input unchanged at the default intensity.");
+        }
+
+        [Test]
+        public void Scale_AtZeroIntensity_ScalesInLinearSpace_KeepsAlpha()
+        {
+            var grey = new Color(0.5f, 0.5f, 0.5f, 0.3f);
+            float factor = AmbientBrightnessResponse.Factor(0f);
+            Assert.Greater(factor, 0f, "zero light must not go fully black — a lit surface keeps an ambient floor.");
+            Assert.Less(factor, 1f, "zero light must be darker than the default.");
+
+            Color scaled = AmbientBrightnessResponse.Scale(grey, 0f);
+
+            Color expectedLinear = grey.linear * factor;
+            Assert.AreEqual(expectedLinear.r, scaled.linear.r, 1e-5f, "the response scales the LINEAR channel.");
+            Assert.AreEqual(expectedLinear.g, scaled.linear.g, 1e-5f, "the response scales the LINEAR channel.");
+            Assert.AreEqual(expectedLinear.b, scaled.linear.b, 1e-5f, "the response scales the LINEAR channel.");
+            Assert.AreEqual(0.3f, scaled.a, "the brightness response is an RGB effect; alpha is the caller's own.");
+        }
+
+        [Test]
+        public void Scale_AboveTheCeiling_ClampsToOnePerChannel()
+        {
+            // The style's own maximum intensity (light-intensity 1) pushes a light grey's linear channel
+            // past 1 before the clamp.
+            Color scaled = AmbientBrightnessResponse.Scale(new Color(0.9f, 0.9f, 0.9f, 1f), SunLight.IntensityToUnity(1f));
+
+            Assert.That(scaled.r, Is.EqualTo(1f).Within(1e-6f), "a displayable colour never exceeds 1 per channel.");
+            Assert.That(scaled.g, Is.EqualTo(1f).Within(1e-6f));
+            Assert.That(scaled.b, Is.EqualTo(1f).Within(1e-6f));
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
     // SkyGradientStyleTests — the style `sky` → skybox gradient writer
     // ───────────────────────────────────────────────────────────────────────────────────
 
@@ -446,12 +498,19 @@ namespace MapRenderer.Tests.MapViews
             return camera;
         }
 
+        /// <summary>A <see cref="MapCamera"/> over a fresh <see cref="NewCamera"/>, for <see cref="SkyGradient.Update"/>,
+        /// which needs one to refresh the map edge. The pose is unchecked by these tests — only the material
+        /// colours are.</summary>
+        private MapCamera NewMapCamera() => new MapCamera(NewCamera(), MapRenderer.Core.Geo.CameraProperties.Default);
+
         [Test]
         public void ApplyStyle_NoSkyBlock_UsesSpecDefaults()
         {
-            using var sky = new SkyGradient(NewCamera());
+            MapCamera camera = NewMapCamera();
+            using var sky = new SkyGradient(camera.Camera);
 
             sky.ApplyStyle(StyleSky.Parse(null), zoom: 0.0);
+            sky.Update(0.0, camera, SunLight.DefaultIntensity);
 
             Assert.AreEqual(0x88 / 255f, sky.SkyColor.r, 1e-6f, "no `sky` block ⇒ spec default sky-color #88C6FC.");
             Assert.AreEqual(0xC6 / 255f, sky.SkyColor.g, 1e-6f, "no `sky` block ⇒ spec default sky-color #88C6FC.");
@@ -464,9 +523,11 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void ApplyStyle_SpecifiedSky_WritesItsColors()
         {
-            using var sky = new SkyGradient(NewCamera());
+            MapCamera camera = NewMapCamera();
+            using var sky = new SkyGradient(camera.Camera);
 
             sky.ApplyStyle(ParseSky("{\"sky\":{\"sky-color\":\"#ff0000\",\"horizon-color\":\"#00ff00\"}}"), zoom: 0.0);
+            sky.Update(0.0, camera, SunLight.DefaultIntensity);
 
             Assert.AreEqual(Color.red, sky.SkyColor);
             Assert.AreEqual(Color.green, sky.HorizonColor);
@@ -477,10 +538,12 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void SetOverride_WinsOverStyle_UntilRestyle()
         {
-            using var sky = new SkyGradient(NewCamera());
+            MapCamera camera = NewMapCamera();
+            using var sky = new SkyGradient(camera.Camera);
             sky.ApplyStyle(StyleSky.Parse(null), zoom: 0.0);
 
             sky.SetOverride(Color.red, Color.blue);
+            sky.Update(0.0, camera, SunLight.DefaultIntensity);
 
             Assert.IsTrue(sky.IsOverridden);
             Assert.AreEqual(Color.red, sky.Material.GetColor(SkyPropertyId.SkyColor));
@@ -495,11 +558,13 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void ResetToStyle_ReappliesLastStyle()
         {
-            using var sky = new SkyGradient(NewCamera());
+            MapCamera camera = NewMapCamera();
+            using var sky = new SkyGradient(camera.Camera);
             sky.ApplyStyle(ParseSky("{\"sky\":{\"sky-color\":\"#ff0000\"}}"), zoom: 0.0);
             sky.SetOverride(Color.blue, Color.blue);
 
             sky.ResetToStyle();
+            sky.Update(0.0, camera, SunLight.DefaultIntensity);
 
             Assert.IsFalse(sky.IsOverridden);
             Assert.AreEqual(Color.red, sky.SkyColor);
@@ -703,7 +768,7 @@ namespace MapRenderer.Tests.MapViews
             using var haze = new DistanceHaze();
 
             haze.ApplyStyle(StyleSky.Parse(null), zoom: 15.0);
-            haze.UpdateRange(NewCamera(60.0));
+            haze.Update(0.0, NewCamera(60.0), SunLight.DefaultIntensity);
 
             Assert.IsTrue(RenderSettings.fog, "spec defaults: a style with no `sky` block still hazes.");
             Assert.AreEqual(Color.white, RenderSettings.fogColor, "no `sky` block ⇒ spec default fog-color white.");
@@ -716,7 +781,7 @@ namespace MapRenderer.Tests.MapViews
             using var haze = new DistanceHaze();
 
             haze.ApplyStyle(ParseSky("{\"sky\":{\"fog-color\":\"#ff0000\"}}"), zoom: 15.0);
-            haze.UpdateRange(NewCamera(60.0));
+            haze.Update(0.0, NewCamera(60.0), SunLight.DefaultIntensity);
 
             Assert.AreEqual(Color.red, haze.FogColor);
             Assert.AreEqual(Color.red, RenderSettings.fogColor);
@@ -728,7 +793,7 @@ namespace MapRenderer.Tests.MapViews
             using var haze = new DistanceHaze();
 
             haze.ApplyStyle(StyleSky.Parse(null), zoom: 15.0);
-            haze.UpdateRange(NewCamera(0.0));
+            haze.Update(0.0, NewCamera(0.0), SunLight.DefaultIntensity);
 
             Assert.IsFalse(RenderSettings.fog, "top-down the far cut is off screen, so fog stays off.");
         }
@@ -741,19 +806,19 @@ namespace MapRenderer.Tests.MapViews
             haze.ApplyStyle(StyleSky.Parse(null), zoom: 15.0);
 
             haze.SetOverride(false, Color.blue);
-            haze.UpdateRange(camera);
+            haze.Update(0.0, camera, SunLight.DefaultIntensity);
             Assert.IsTrue(haze.IsOverridden);
             Assert.IsFalse(RenderSettings.fog, "the override switched the haze off.");
 
             haze.ResetToStyle();
-            haze.UpdateRange(camera);
+            haze.Update(0.0, camera, SunLight.DefaultIntensity);
             Assert.IsFalse(haze.IsOverridden);
             Assert.IsTrue(RenderSettings.fog, "reset re-applies the style, which hazes.");
             Assert.AreEqual(Color.white, RenderSettings.fogColor);
 
             haze.SetOverride(true, Color.blue);
             haze.ApplyStyle(ParseSky("{\"sky\":{\"fog-color\":\"#00ff00\"}}"), zoom: 15.0);
-            haze.UpdateRange(camera);
+            haze.Update(0.0, camera, SunLight.DefaultIntensity);
             Assert.IsFalse(haze.IsOverridden, "a restyle (ApplyStyle) must clear a runtime override.");
             Assert.AreEqual(Color.green, RenderSettings.fogColor);
         }
@@ -767,7 +832,7 @@ namespace MapRenderer.Tests.MapViews
             try
             {
                 haze.ApplyStyle(ParseSky("{\"sky\":{\"fog-color\":\"#ff0000\"}}"), zoom: 15.0);
-                haze.UpdateRange(NewCamera(60.0));
+                haze.Update(0.0, NewCamera(60.0), SunLight.DefaultIntensity);
                 Assert.IsTrue(RenderSettings.fog, "precondition: the haze wrote fog.");
             }
             finally { haze.Dispose(); }
@@ -783,12 +848,24 @@ namespace MapRenderer.Tests.MapViews
 
     /// <summary>
     /// <see cref="SunLight"/>, <see cref="SkyGradient"/> and <see cref="DistanceHaze"/> ease a restyle over the
-    /// same <see cref="StyleTransition"/> and clock as the layer paint. Each writer runs with no scene target,
-    /// so it tracks values only. The last test drives the ease through <see cref="MapView.LateUpdate"/>.
+    /// same <see cref="StyleTransition"/> and clock as the layer paint. The sun and sky writers run with no
+    /// scene target, so they track values only; the haze still needs a real <see cref="MapCamera"/> to
+    /// call <see cref="DistanceHaze.Update"/>. The last test drives the ease through <see cref="MapView.LateUpdate"/>.
     /// </summary>
     [TestFixture]
     public class LightingRestyleEaseTests : BaseTestFixture
     {
+        /// <summary>Per-channel <see cref="Color"/> comparison with a tolerance: a colour read back off a
+        /// material or <see cref="RenderSettings"/> round-trips through gamma-aware storage, landing a few
+        /// ULPs off an independently-computed expected value.</summary>
+        private static void AssertColorApprox(Color expected, Color actual, string what, float eps = 1e-4f)
+        {
+            Assert.AreEqual(expected.r, actual.r, eps, $"{what} (r)");
+            Assert.AreEqual(expected.g, actual.g, eps, $"{what} (g)");
+            Assert.AreEqual(expected.b, actual.b, eps, $"{what} (b)");
+            Assert.AreEqual(expected.a, actual.a, eps, $"{what} (a)");
+        }
+
         private const string Day =
             "{\"light\":{\"position\":[1.5,90,30],\"color\":\"#ffffff\",\"intensity\":0.5}," +
             "\"sky\":{\"sky-color\":\"#88bbff\",\"horizon-color\":\"#ffffff\",\"fog-color\":\"#ffffff\"}}";
@@ -813,7 +890,7 @@ namespace MapRenderer.Tests.MapViews
         private void Apply(string json, in StyleTransition transition, double nowSeconds)
             => _writers.Apply(json, transition, nowSeconds);
 
-        private void Advance(double nowSeconds) => _writers.Advance(nowSeconds);
+        private void Update(double nowSeconds) => _writers.Update(nowSeconds);
 
         private Written Now() => _writers.Snapshot();
 
@@ -825,44 +902,58 @@ namespace MapRenderer.Tests.MapViews
             return reference.Snapshot();
         }
 
-        /// <summary>The three writers with no scene target, so each tracks its values only.</summary>
+        /// <summary>A real <see cref="SceneEnvironment"/> with no sun light and no sky camera, so
+        /// <see cref="Sun"/>/<see cref="Sky"/> track values only; <see cref="Haze"/> still needs a real
+        /// <see cref="MapCamera"/> to call <see cref="DistanceHaze.Update"/> — this owns one, camera-only, and
+        /// destroys it on <see cref="Dispose"/>. Drives <see cref="Sun"/>/<see cref="Sky"/>/<see cref="Haze"/>
+        /// through <see cref="SceneEnvironment"/>'s own ordering, not a re-implementation of it.</summary>
         private sealed class Writers : System.IDisposable
         {
-            public SunLight     Sun  { get; } = new SunLight(null);
-            public SkyGradient  Sky  { get; } = new SkyGradient(null);
-            public DistanceHaze Haze { get; } = new DistanceHaze();
+            private readonly MapCamera _camera =
+                new MapCamera(new GameObject("Writers_TestCamera").AddComponent<Camera>(),
+                             MapRenderer.Core.Geo.CameraProperties.Default);
+            private readonly SceneEnvironment _env;
+
+            public Writers()
+            {
+                _env = new SceneEnvironment(null);
+                _env.EnableSky(null);
+                _env.EnableHaze();
+            }
+
+            public SunLight     Sun  => _env.Sun;
+            public SkyGradient  Sky  => _env.Sky;
+            public DistanceHaze Haze => _env.Haze;
 
             public void Apply(string json, in StyleTransition transition, double nowSeconds)
             {
                 JsonValue root = JsonParser.Parse(json);
-                Sun.ApplyStyle(StyleLight.Parse(root.Get("light")), 0.0, transition, nowSeconds);
-                StyleSky sky = StyleSky.Parse(root.Get("sky"));
-                Sky.ApplyStyle(sky, 0.0, transition, nowSeconds);
-                Haze.ApplyStyle(sky, 0.0, transition, nowSeconds);
+                StyleLight light = StyleLight.Parse(root.Get("light"));
+                StyleSky   sky   = StyleSky.Parse(root.Get("sky"));
+                _env.ApplyStyle(light, sky, 0.0, transition, nowSeconds);
             }
 
-            public void Advance(double nowSeconds)
-            {
-                Sun.Advance(nowSeconds);
-                Sky.Advance(nowSeconds);
-                Haze.Advance(nowSeconds);
-            }
+            public void Update(double nowSeconds) => _env.Update(nowSeconds, _camera);
 
             public Written Snapshot() => new Written(Sun.Azimuth, Sun.Polar, Sun.Color, Sun.Intensity,
                                                      Sky.SkyColor, Sky.HorizonColor, Haze.FogColor);
 
             public void Dispose()
             {
-                Sky.Dispose();
-                Haze.Dispose();
+                _env.Dispose();
+                UnityEngine.Object.DestroyImmediate(_camera.Camera.gameObject);
             }
         }
 
         /// <summary>Every value the three writers last wrote. Struct equality compares each field exactly.</summary>
         private readonly struct Written
         {
-            public readonly Angle Azimuth, Polar;
-            public readonly Color SunColor, Sky, Horizon, Fog;
+            public readonly Angle Azimuth;
+            public readonly Angle Polar;
+            public readonly Color SunColor;
+            public readonly Color Sky;
+            public readonly Color Horizon;
+            public readonly Color Fog;
             public readonly float Intensity;
 
             public Written(Angle azimuth, Angle polar, Color sunColor, float intensity, Color sky, Color horizon,
@@ -900,7 +991,7 @@ namespace MapRenderer.Tests.MapViews
             Apply(Night, Eased, 0.0);
             Written night = Snapped(Night);
 
-            Advance(Mid);
+            Update(Mid);
 
             Written mid = Now();
             AssertStrictlyBetween(day.SunColor, night.SunColor, mid.SunColor, "sun colour");
@@ -921,7 +1012,7 @@ namespace MapRenderer.Tests.MapViews
 
             // Warm the EXACT measured delegate (JIT) outside the measured region — a one-shot lambda's own
             // first invocation can itself register a false positive (gc-and-allocation-design.md § 6).
-            TestDelegate act = () => Advance(Mid * 1.5);
+            TestDelegate act = () => Update(Mid * 1.5);
             for (int w = 0; w < 50; w++) act();
             AllocationDiagnostics.AssertNotAllocating(act, "a mid-transition frame must not allocate.");
         }
@@ -932,9 +1023,9 @@ namespace MapRenderer.Tests.MapViews
             Apply(Day, Eased, 0.0);
             Apply(Night, Eased, 0.0);
 
-            Advance(Mid);
+            Update(Mid);
             Assert.AreNotEqual(Snapped(Night), Now(), "fixture: the mid frame must not be the target yet.");
-            Advance(Eased.DurationSeconds);
+            Update(Eased.DurationSeconds);
 
             Assert.AreEqual(Snapped(Night), Now(), "the last frame must write the target itself, not a lerp near it.");
             Assert.IsFalse(_writers.Sun.IsTransitioning || _writers.Sky.IsTransitioning || _writers.Haze.IsTransitioning,
@@ -946,13 +1037,13 @@ namespace MapRenderer.Tests.MapViews
         {
             Apply(Day, Eased, 0.0);
             Apply(Night, Eased, 0.0);
-            Advance(Mid);
+            Update(Mid);
 
             Apply(Red, StyleTransition.Instant, Mid);
 
             Assert.AreEqual(Snapped(Red), Now(), "an instant transition must snap in the same call.");
-            Advance(Mid * 1.5);
-            Advance(Eased.DurationSeconds * 2.0);
+            Update(Mid * 1.5);
+            Update(Eased.DurationSeconds * 2.0);
             Assert.AreEqual(Snapped(Red), Now(), "the ease that was running must not resume after an instant snap.");
         }
 
@@ -961,16 +1052,16 @@ namespace MapRenderer.Tests.MapViews
         {
             Apply(Day, Eased, 0.0);
             Apply(Night, Eased, 0.0);
-            Advance(Mid);
+            Update(Mid);
             Written mid = Now();
             Assert.AreNotEqual(Snapped(Night), mid, "fixture: the first ease must still be running.");
 
             Apply(Day, Eased, Mid);
-            Advance(Mid);
+            Update(Mid);
 
             Assert.AreEqual(mid, Now(),
                 "the second ease must start from the value on screen, not from the old target (night).");
-            Advance(Mid + Eased.DurationSeconds);
+            Update(Mid + Eased.DurationSeconds);
             Assert.AreEqual(Snapped(Day), Now(), "the second ease must end on its own target.");
         }
 
@@ -979,7 +1070,7 @@ namespace MapRenderer.Tests.MapViews
         {
             Apply(Day, Eased, 0.0);
             Apply(Night, Eased, 0.0);
-            Advance(Mid);
+            Update(Mid);
 
             _writers.Sun.SetOverride(Angle.FromDegrees(10.0), Angle.FromDegrees(20.0), Color.green, 3f);
             _writers.Sky.SetOverride(Color.red, Color.blue);
@@ -988,8 +1079,8 @@ namespace MapRenderer.Tests.MapViews
             Assert.AreEqual(new Written(Angle.FromDegrees(10.0), Angle.FromDegrees(20.0), Color.green, 3f,
                                         Color.red, Color.blue, Color.yellow), overridden, "an override must show in the same call.");
 
-            Advance(Mid * 1.5);
-            Advance(Eased.DurationSeconds * 2.0);
+            Update(Mid * 1.5);
+            Update(Eased.DurationSeconds * 2.0);
             Assert.AreEqual(overridden, Now(), "the ease must not overwrite an override.");
         }
 
@@ -1000,27 +1091,94 @@ namespace MapRenderer.Tests.MapViews
         {
             var view = RestyleHarness.NewRestyleView(SampleTileFixture.Bytes(), out var go);
             Track(go);
+            var environment = new SceneEnvironment(Track(new GameObject("TestSun")).AddComponent<Light>());
+            environment.EnableSky(null);
+            environment.EnableHaze();
+            view.View.SetEnvironment(environment);
             try
             {
                 double now = 0.0;
                 view.View.NowSecondsOverride = () => now;
                 view.View.StyleTransition = Eased;
-                view.View.SetSkyTarget(null);
-                view.View.EnableHaze();
                 RestyleHarness.SpinToCompleted(view.SetStyle(MapStyle(Day), "day"));
                 view.LateUpdate();
-                Color daySky = view.View.SkyGradient.SkyColor, dayFog = view.View.DistanceHaze.FogColor;
+                Color daySky = environment.Sky.SkyColor;
+                Color dayFog = environment.Haze.FogColor;
 
                 RestyleHarness.SpinToCompleted(view.SetStyle(MapStyle(Night), "night"));
                 now = Mid;
                 view.LateUpdate();
-                AssertStrictlyBetween(daySky, Snapped(Night).Sky, view.View.SkyGradient.SkyColor, "sky-color");
-                AssertStrictlyBetween(dayFog, Snapped(Night).Fog, view.View.DistanceHaze.FogColor, "fog-color");
+                AssertStrictlyBetween(daySky, Snapped(Night).Sky, environment.Sky.SkyColor, "sky-color");
+                AssertStrictlyBetween(dayFog, Snapped(Night).Fog, environment.Haze.FogColor, "fog-color");
 
                 now = Eased.DurationSeconds;
                 view.LateUpdate();
-                Assert.AreEqual(Snapped(Night).Sky, view.View.SkyGradient.SkyColor, "the view must settle the sky.");
-                Assert.AreEqual(Snapped(Night).Fog, view.View.DistanceHaze.FogColor, "the view must settle the fog.");
+                Assert.AreEqual(Snapped(Night).Sky, environment.Sky.SkyColor, "the view must settle the sky.");
+                Assert.AreEqual(Snapped(Night).Fog, environment.Haze.FogColor, "the view must settle the fog.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary><see cref="SceneEnvironment.Update"/> reads <see cref="SunLight.Intensity"/> every frame and
+        /// feeds it to <see cref="Rendering.Map.SkyGradient"/> and <see cref="Rendering.Map.DistanceHaze"/> —
+        /// from a style's own <c>light.intensity</c>, and from a runtime override (the Lighting page's
+        /// Intensity slider).</summary>
+        [Test]
+        public void MapView_Restyle_FeedsSunLightIntensityToSkyAndHaze()
+        {
+            var view = RestyleHarness.NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            var environment = new SceneEnvironment(Track(new GameObject("TestSun")).AddComponent<Light>());
+            try
+            {
+                view.View.StyleTransition = StyleTransition.Instant;
+                environment.EnableSky(view.View.Camera.Camera);
+                environment.EnableHaze();
+                view.View.SetEnvironment(environment);
+                // Tilt 60°/FOV 60°/aspect 1 puts the far cut on screen, so DistanceHaze actually writes fog
+                // (DistanceHazeRangeTests pins this pose).
+                view.View.Camera.SetProperties(new MapRenderer.Core.Geo.CameraProperties(
+                    new GeoCoordinate3D { Longitude = 10.0, Latitude = 10.0 }, 4.0, 0.0, 60.0, 60.0));
+
+                // Style path: `light.intensity` dims the sky and the fog.
+                const string Dim = "{\"light\":{\"intensity\":0}," +
+                    "\"sky\":{\"sky-color\":\"#ff0000\",\"horizon-color\":\"#00ff00\",\"fog-color\":\"#0000ff\"}}";
+                RestyleHarness.SpinToCompleted(view.SetStyle(MapStyle(Dim), "dim"));
+                view.LateUpdate();
+
+                Assert.Less(environment.Sun.Intensity, SunLight.DefaultIntensity,
+                    "precondition: the style dimmed the light.");
+                Assert.IsTrue(RenderSettings.fog, "precondition: this pose puts the far cut on screen.");
+                Assert.AreEqual(Color.red, environment.Sky.SkyColor, "the style's own colour is untouched by the response.");
+                Assert.AreEqual(Color.green, environment.Sky.HorizonColor);
+                Assert.AreEqual(Color.blue, environment.Haze.FogColor);
+                AssertColorApprox(AmbientBrightnessResponse.Scale(Color.red, environment.Sun.Intensity),
+                    environment.Sky.Material.GetColor(SkyPropertyId.SkyColor),
+                    "the sky follows the style's own light intensity.");
+                AssertColorApprox(AmbientBrightnessResponse.Scale(Color.blue, environment.Sun.Intensity),
+                    RenderSettings.fogColor, "the fog follows the style's own light intensity.");
+
+                // Slider path: restyle to the default intensity, then override the light to zero.
+                RestyleHarness.SpinToCompleted(view.SetStyle(MapStyle(Day), "day"));
+                view.LateUpdate();
+                Assert.AreEqual(SunLight.DefaultIntensity, environment.Sun.Intensity, 1e-6f,
+                    "precondition: the restyle returned to the default intensity.");
+                Color daySky = environment.Sky.SkyColor;
+                Color dayFog = environment.Haze.FogColor;
+
+                environment.Sun.SetOverride(environment.Sun.Azimuth, environment.Sun.Polar,
+                    environment.Sun.Color, 0f);
+                view.LateUpdate();
+
+                Assert.IsTrue(RenderSettings.fog, "precondition: this pose still puts the far cut on screen.");
+                AssertColorApprox(AmbientBrightnessResponse.Scale(daySky, 0f),
+                    environment.Sky.Material.GetColor(SkyPropertyId.SkyColor),
+                    "the Lighting page's Intensity slider darkens the sky the same way.");
+                AssertColorApprox(AmbientBrightnessResponse.Scale(dayFog, 0f), RenderSettings.fogColor,
+                    "the Intensity slider darkens the fog the same way.");
             }
             finally
             {

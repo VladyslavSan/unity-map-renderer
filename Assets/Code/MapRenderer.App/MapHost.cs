@@ -105,15 +105,16 @@ namespace MapRenderer.App
             // 3.5. After EnsureDirectionalLight, so a procedural skybox convolves against the real sun.
             EnsureEnvironmentLighting(renderMode);
 
-            // 3.6. Point the sun writer at the bootstrap light BEFORE SetStyle (step 4), so the first
-            //      style load applies its `light` block instead of leaving the bootstrap Euler(60,30,0).
-            if (mapView != null) mapView.SetSunLightTarget(sunLight);
-
-            // 3.7. Same ordering reason: the first style load paints its `sky` behind Camera.main.
-            if (mapView != null) mapView.SetSkyTarget(Camera.main);
-
-            // 3.8. Same ordering reason: the first style load sets the haze's fog colour.
-            if (mapView != null) mapView.EnableHaze();
+            // 3.6. Build the scene environment over the bootstrap light BEFORE SetStyle (step 4), so the first
+            //      style load applies its `light`/`sky` blocks instead of leaving the bootstrap values, paints
+            //      the sky behind Camera.main, and sets the haze's fog colour, all from that one load.
+            if (mapView != null)
+            {
+                var environment = new SceneEnvironment(sunLight);
+                environment.EnableSky(Camera.main);
+                environment.EnableHaze();
+                mapView.SetEnvironment(environment);
+            }
 
             // 4. SetStyle is async (style doc + any TileJSON) and fire-and-forget; tiles stream in as it completes.
             if (mapView != null)
@@ -282,7 +283,8 @@ namespace MapRenderer.App
 
         /// <summary>
         /// Returns <paramref name="convolved"/> when it is trusted and usable. Otherwise returns a flat probe of
-        /// <paramref name="ambient"/>, with each channel raised to at least <see cref="MinFallbackAmbient"/>.
+        /// <paramref name="ambient"/>, with each channel raised to at least
+        /// <see cref="AmbientBrightnessResponse.MinFallbackAmbient"/>.
         /// </summary>
         /// <param name="convolved">The probe <c>DynamicGI.UpdateEnvironment</c> produced.</param>
         /// <param name="trustConvolution">False when the device cannot run the convolution.</param>
@@ -291,18 +293,16 @@ namespace MapRenderer.App
         {
             if (trustConvolution && IsUsableAmbientProbe(convolved)) return convolved;
 
+            float floor = AmbientBrightnessResponse.MinFallbackAmbient;
             var flat = new SphericalHarmonicsL2();
-            flat.AddAmbientLight(new Color(math.max(ambient.r, MinFallbackAmbient),
-                                           math.max(ambient.g, MinFallbackAmbient),
-                                           math.max(ambient.b, MinFallbackAmbient)));
+            flat.AddAmbientLight(new Color(math.max(ambient.r, floor),
+                                           math.max(ambient.g, floor),
+                                           math.max(ambient.b, floor)));
             return flat;
         }
 
         /// <summary>Bound far above the coefficients of a real sky; readback garbage exceeds it by decades.</summary>
         private const float MaxProbeCoefficient = 1e4f;
-
-        /// <summary>Darkest channel value of the fallback probe. A flat 0.4 renders correctly on web.</summary>
-        private const float MinFallbackAmbient = 0.4f;
 
         /// <summary>
         /// True when every coefficient is finite and within <see cref="MaxProbeCoefficient"/>, and the DC term

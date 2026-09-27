@@ -5,6 +5,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Common;
 using MapRenderer.Unity.Rendering.Layers;
+using MapRenderer.Unity.Interpolation;
 using SkyPropertyId = MapRenderer.Unity.Rendering.ShaderProperties.Sky.PropertyId;
 
 namespace MapRenderer.Unity.Rendering.Map
@@ -16,10 +17,23 @@ namespace MapRenderer.Unity.Rendering.Map
     /// both pushed every frame. It never writes <see cref="RenderSettings"/>, so
     /// ambient and reflections are unchanged. A runtime override replaces the style colours until
     /// <see cref="ResetToStyle"/> or the next <see cref="ApplyStyle"/>. A restyle eases the colours over the
-    /// style transition; <see cref="Advance"/> moves it.
+    /// style transition; <see cref="Update"/> moves it and scales it by <see cref="AmbientBrightnessResponse"/>.
     /// </summary>
     internal sealed class SkyGradient : IDisposable
     {
+        /// <summary>One interpolation endpoint: the sky and horizon colours.</summary>
+        private readonly struct SkyColors : IInterpolatable<SkyColors>
+        {
+            public Color Sky     { get; init; }
+            public Color Horizon { get; init; }
+
+            public SkyColors Interpolate(in SkyColors to, float weight) => new SkyColors
+            {
+                Sky     = ColorMix.Lerp(Sky, to.Sky, weight),
+                Horizon = ColorMix.Lerp(Horizon, to.Horizon, weight),
+            };
+        }
+
         /// <summary>The shader the runtime material uses; listed in Always Included Shaders.</summary>
         internal const string ShaderName = "Map/Sky";
 
@@ -32,10 +46,9 @@ namespace MapRenderer.Unity.Rendering.Map
         private readonly bool             _addedSkybox;
         private readonly Material         _previousSkyboxMaterial;
         private readonly CameraClearFlags _previousClearFlags;
-        private StyleSky                  _style;
-        private double                    _lastZoom;
-        private StyleEase                 _ease;
-        private (Color sky, Color horizon) _from, _to;
+        private StyleSky              _style;
+        private double                _lastZoom;
+        private Smoothstep<SkyColors> _interpolation;
 
         /// <summary>Points <paramref name="camera"/> at a new sky material. With no camera, or no
         /// <c>Map/Sky</c> shader in the build, it tracks colours only and the camera keeps its clear.</summary>
@@ -70,14 +83,14 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>True while a runtime override is showing instead of the style's own colours.</summary>
         public bool IsOverridden { get; private set; }
 
-        /// <summary>The sky colour last written (style- or override-derived).</summary>
-        public Color SkyColor { get; private set; }
+        /// <summary>The sky colour (style- or override-derived), unscaled by light intensity.</summary>
+        public Color SkyColor => _interpolation.Current.Sky;
 
-        /// <summary>The horizon colour last written (style- or override-derived).</summary>
-        public Color HorizonColor { get; private set; }
+        /// <summary>The horizon colour (style- or override-derived), unscaled by light intensity.</summary>
+        public Color HorizonColor => _interpolation.Current.Horizon;
 
-        /// <summary>True while a restyle ease is still moving the colours.</summary>
-        public bool IsTransitioning => _ease.IsActive;
+        /// <summary>True while a restyle interpolation is still moving the colours.</summary>
+        public bool IsTransitioning => _interpolation.IsActive;
 
         /// <summary>Applies <paramref name="style"/>'s sky colours at <paramref name="zoom"/> and clears any
         /// runtime override. A style with no <c>sky</c> block gets the spec defaults. The first style, and an
@@ -89,29 +102,34 @@ namespace MapRenderer.Unity.Rendering.Map
             _style       = style;
             _lastZoom    = zoom;
             IsOverridden = false;
-            _from = (SkyColor, HorizonColor);
-            _to   = (ZoomStyleApplier.ToUnityColor(style.SkyColor.Evaluate(zoom)),
-                     ZoomStyleApplier.ToUnityColor(style.HorizonColor.Evaluate(zoom)));
-            _ease.Arm(first ? default : transition, nowSeconds);
-            if (!_ease.IsActive) Write(_to.sky, _to.horizon);
+            var target = new SkyColors
+            {
+                Sky     = ZoomStyleApplier.ToUnityColor(style.SkyColor.Evaluate(zoom)),
+                Horizon = ZoomStyleApplier.ToUnityColor(style.HorizonColor.Evaluate(zoom)),
+            };
+            double delaySeconds    = first ? 0.0 : transition.DelaySeconds;
+            double durationSeconds = first ? 0.0 : transition.DurationSeconds;
+            _interpolation.Start(target, delaySeconds, durationSeconds, nowSeconds);
         }
 
-        /// <summary>Writes this frame's eased colours. A no-op when no ease is running.</summary>
-        public void Advance(double nowSeconds)
+        /// <summary>Moves this frame's interpolated colours, refreshes the map edge/top from
+        /// <paramref name="camera"/>, then writes the material at <paramref name="lightIntensity"/> (see
+        /// <see cref="AmbientBrightnessResponse"/>). The material write runs even with no interpolation
+        /// running, so a live intensity change shows with no restyle in progress. Call after
+        /// <see cref="MapCamera.SyncToCamera"/>.</summary>
+        public void Update(double nowSeconds, MapCamera camera, float lightIntensity)
         {
-            if (!_ease.IsActive) return;
-            float weight = _ease.Step(nowSeconds);
-            if (!_ease.IsActive) { Write(_to.sky, _to.horizon); return; }
-            Write(StyleEase.Mix(_from.sky, _to.sky, weight), StyleEase.Mix(_from.horizon, _to.horizon, weight));
+            _interpolation.Update(nowSeconds);
+            UpdateMapEdge(camera);
+            PushToMaterial(lightIntensity);
         }
 
         /// <summary>Overrides both colours on top of the last applied style, until
         /// <see cref="ResetToStyle"/> or the next <see cref="ApplyStyle"/>.</summary>
         public void SetOverride(Color skyColor, Color horizonColor)
         {
-            _ease.Stop();
             IsOverridden = true;
-            Write(skyColor, horizonColor);
+            _interpolation.Set(new SkyColors { Sky = skyColor, Horizon = horizonColor });
         }
 
         /// <summary>Clears a runtime override and re-applies the last style sky. A no-op before the first
@@ -122,8 +140,8 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>Pushes this frame's <see cref="MapEdgeElevation"/> and <see cref="TopElevation"/> from the
-        /// committed camera. Call after <see cref="MapCamera.SyncToCamera"/>.</summary>
-        public void UpdateMapEdge(MapCamera camera)
+        /// committed camera.</summary>
+        private void UpdateMapEdge(MapCamera camera)
         {
             if (Material == null) return;
             double3 position = camera.CameraRelativePosition;
@@ -178,12 +196,13 @@ namespace MapRenderer.Unity.Rendering.Map
             Material.DestroySafely();
         }
 
-        private void Write(Color skyColor, Color horizonColor)
+        /// <summary>Writes <see cref="SkyColor"/>/<see cref="HorizonColor"/> to the material, each scaled by
+        /// <see cref="AmbientBrightnessResponse.Scale"/> of <paramref name="lightIntensity"/>.</summary>
+        private void PushToMaterial(float lightIntensity)
         {
-            SkyColor = skyColor; HorizonColor = horizonColor;
             if (Material == null) return;
-            Material.SetColor(SkyPropertyId.SkyColor, skyColor);
-            Material.SetColor(SkyPropertyId.HorizonColor, horizonColor);
+            Material.SetColor(SkyPropertyId.SkyColor, AmbientBrightnessResponse.Scale(SkyColor, lightIntensity));
+            Material.SetColor(SkyPropertyId.HorizonColor, AmbientBrightnessResponse.Scale(HorizonColor, lightIntensity));
         }
     }
 }

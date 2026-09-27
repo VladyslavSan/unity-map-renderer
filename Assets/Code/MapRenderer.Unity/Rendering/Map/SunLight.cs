@@ -3,6 +3,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Layers;
+using MapRenderer.Unity.Interpolation;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -11,35 +12,62 @@ namespace MapRenderer.Unity.Rendering.Map
     /// <c>light.position</c> (azimuth/polar, anchor always <c>"map"</c>), color and intensity. A runtime
     /// override (<see cref="SetOverride"/>) replaces the style values on the same light until
     /// <see cref="ResetToStyle"/> runs or the next <see cref="ApplyStyle"/> (a restyle always clears it).
-    /// A restyle eases from the current values over the style transition; <see cref="Advance"/> moves it.
+    /// A restyle eases from the current values over the style transition; <see cref="Update"/> moves it.
     /// </summary>
     internal sealed class SunLight
     {
-        private readonly Light _light;
-        private StyleLight     _style;
-        private double         _lastZoom;
-        private StyleEase      _ease;
-        private (Angle azimuth, Angle polar, Color color, float intensity) _from, _to;
+        /// <summary>One interpolation endpoint: the light's azimuth, polar angle, color and intensity.</summary>
+        private readonly struct LightState : IInterpolatable<LightState>
+        {
+            public Angle Azimuth   { get; init; }
+            public Angle Polar     { get; init; }
+            public Color Color     { get; init; }
+            public float Intensity { get; init; }
 
-        public SunLight(Light light) => _light = light;
+            public LightState Interpolate(in LightState to, float weight) => new LightState
+            {
+                Azimuth   = Angle.LerpShortest(Azimuth, to.Azimuth, weight),
+                Polar     = Angle.FromDegrees(math.lerp(Polar.Degrees, to.Polar.Degrees, weight)),
+                Color     = ColorMix.Lerp(Color, to.Color, weight),
+                Intensity = math.lerp(Intensity, to.Intensity, weight),
+            };
+        }
+
+        private readonly Light        _light;
+        private StyleLight            _style;
+        private double                _lastZoom;
+        private Smoothstep<LightState> _interpolation;
+
+        /// <summary>The default light: white, <see cref="DefaultIntensity"/>, azimuth/polar zero. A light with
+        /// no style yet reads this from the properties; <paramref name="light"/> itself is not written until
+        /// the first <see cref="ApplyStyle"/> or <see cref="SetOverride"/>.</summary>
+        public SunLight(Light light)
+        {
+            _light = light;
+            _interpolation.Set(new LightState { Color = UnityEngine.Color.white, Intensity = DefaultIntensity });
+        }
 
         /// <summary>True while a runtime override is showing instead of the style's own values.</summary>
         public bool IsOverridden { get; private set; }
 
         /// <summary>The azimuth last written to the light (style- or override-derived).</summary>
-        public Angle Azimuth { get; private set; }
+        public Angle Azimuth => _interpolation.Current.Azimuth;
 
         /// <summary>The polar angle (from zenith) last written to the light.</summary>
-        public Angle Polar { get; private set; }
+        public Angle Polar => _interpolation.Current.Polar;
 
         /// <summary>The color last written to the light.</summary>
-        public Color Color { get; private set; } = UnityEngine.Color.white;
+        public Color Color => _interpolation.Current.Color;
+
+        /// <summary>Unity <c>Light.intensity</c> at <c>light-intensity</c>'s own spec default (0.5) — see
+        /// <see cref="IntensityToUnity"/>. A light with no style yet reads this.</summary>
+        internal const float DefaultIntensity = 1f;
 
         /// <summary>The intensity last written to the light.</summary>
-        public float Intensity { get; private set; } = 1f;
+        public float Intensity => _interpolation.Current.Intensity;
 
-        /// <summary>True while a restyle ease is still moving the light.</summary>
-        public bool IsTransitioning => _ease.IsActive;
+        /// <summary>True while a restyle interpolation is still moving the light.</summary>
+        public bool IsTransitioning => _interpolation.IsActive;
 
         /// <summary>
         /// Applies <paramref name="style"/>'s light at <paramref name="zoom"/> and clears any runtime
@@ -54,24 +82,23 @@ namespace MapRenderer.Unity.Rendering.Map
             _lastZoom     = zoom;
             IsOverridden  = false;
             LightPosition position = style.Position.Evaluate(zoom);
-            _from = (Azimuth, Polar, Color, Intensity);
-            _to   = (position.Azimuthal, position.Polar,
-                     ZoomStyleApplier.ToUnityColor(style.Color.Evaluate(zoom)),
-                     IntensityToUnity(style.Intensity.Evaluate(zoom)));
-            _ease.Arm(first ? default : transition, nowSeconds);
-            if (!_ease.IsActive) Write(_to.azimuth, _to.polar, _to.color, _to.intensity);
+            var target = new LightState
+            {
+                Azimuth   = position.Azimuthal,
+                Polar     = position.Polar,
+                Color     = ZoomStyleApplier.ToUnityColor(style.Color.Evaluate(zoom)),
+                Intensity = IntensityToUnity(style.Intensity.Evaluate(zoom)),
+            };
+            double delaySeconds    = first ? 0.0 : transition.DelaySeconds;
+            double durationSeconds = first ? 0.0 : transition.DurationSeconds;
+            _interpolation.Start(target, delaySeconds, durationSeconds, nowSeconds);
+            if (!_interpolation.IsActive) WriteToLight(_interpolation.Current);
         }
 
-        /// <summary>Writes this frame's eased light. A no-op when no ease is running.</summary>
-        public void Advance(double nowSeconds)
+        /// <summary>Writes this frame's interpolated light. A no-op when no interpolation is running.</summary>
+        public void Update(double nowSeconds)
         {
-            if (!_ease.IsActive) return;
-            float weight = _ease.Step(nowSeconds);
-            if (!_ease.IsActive) { Write(_to.azimuth, _to.polar, _to.color, _to.intensity); return; }
-            Write(Angle.LerpShortest(_from.azimuth, _to.azimuth, weight),
-                  Angle.FromDegrees(math.lerp(_from.polar.Degrees, _to.polar.Degrees, weight)),
-                  StyleEase.Mix(_from.color, _to.color, weight),
-                  math.lerp(_from.intensity, _to.intensity, weight));
+            if (_interpolation.Update(nowSeconds)) WriteToLight(_interpolation.Current);
         }
 
         /// <summary>Overrides azimuth, polar angle, color and intensity on the live light, on top of the
@@ -80,9 +107,9 @@ namespace MapRenderer.Unity.Rendering.Map
         /// caller already resolved it, the same way <see cref="IntensityToUnity"/> resolves a style's.</param>
         public void SetOverride(Angle azimuth, Angle polar, Color color, float intensity)
         {
-            _ease.Stop();
             IsOverridden = true;
-            Write(azimuth, polar, color, intensity);
+            _interpolation.Set(new LightState { Azimuth = azimuth, Polar = polar, Color = color, Intensity = intensity });
+            WriteToLight(_interpolation.Current);
         }
 
         /// <summary>Clears a runtime override and re-applies the last style light. A no-op before the
@@ -92,13 +119,12 @@ namespace MapRenderer.Unity.Rendering.Map
             if (_style != null) ApplyStyle(_style, _lastZoom, StyleTransition.Instant);
         }
 
-        private void Write(Angle azimuth, Angle polar, Color color, float intensity)
+        private void WriteToLight(LightState state)
         {
-            Azimuth = azimuth; Polar = polar; Color = color; Intensity = intensity;
             if (_light == null) return;
-            _light.transform.rotation = Rotation(azimuth, polar);
-            _light.color              = color;
-            _light.intensity          = intensity;
+            _light.transform.rotation = Rotation(state.Azimuth, state.Polar);
+            _light.color              = state.Color;
+            _light.intensity          = state.Intensity;
         }
 
         /// <summary>
