@@ -63,6 +63,7 @@ MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Obje
   HttpTransport      : UnityWebRequest + .ToUniTask()  ← efficient production HTTP, zero Task
   FileTransport      : sync File.ReadAllBytes after a SwitchToThreadPool hop (no Task)
   TemplatedTileSource: addresses (TileUrlTemplate) + dispatches to HttpTransport/FileTransport by scheme
+  StyleDocumentLoader: one-shot style/TileJSON read, through HttpTransport/FileTransport.ReadText by scheme
   MapView mesh-build/consume : IWorkScheduler.Schedule → WorkHandle<T> (poll/consume; no PlayerLoop hop)
   Mesh/GameObject create + Object.Destroy : MAIN THREAD ONLY
   cancellation : destroyCancellationToken

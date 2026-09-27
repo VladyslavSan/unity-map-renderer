@@ -14,7 +14,7 @@
 //   TileBuildGraphKindNeutralityTests       — TileBuildGraph retains no per-kind (fill/line/extrusion) knowledge.
 //   RenderModeMeshingFenceTests             — mesh preparation never branches on render mode (Lit vs Unlit).
 //   GlobeFillVertexKeySizeTests             — GlobeFillVertexKey is hand-enumerated field by field; a new GlobeFillVertex column is not picked up automatically.
-//   TileTransportStructureTests             — HttpTransport/FileTransport name no tile encoding; TileEncoding.Mvt is named once, at the BuildSourceSpecs factory; HttpTransport introduces no thread hop; HttpTransport is the one site naming HttpStatusCode.NotFound.
+//   TileTransportStructureTests             — HttpTransport/FileTransport name no tile encoding; TileEncoding.Mvt is named once, at the BuildSourceSpecs factory; HttpTransport introduces no thread hop; HttpTransport is the one site naming HttpStatusCode.NotFound and calling SendWebRequest(.
 
 using System;
 using System.Collections.Generic;
@@ -2957,14 +2957,23 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary><c>HttpStatusCode.NotFound</c> — the absent-mapping literal glyphs/sprites/tiles all
-        /// need — may appear at exactly one production site: <c>HttpTransport.SendAsync</c>. A second
-        /// clause pinning <c>SendWebRequest(</c> to the same file lands once the style-document loader also
-        /// moves onto <c>HttpTransport</c>. Limitation: a text match — a copied filter written as
-        /// <c>ResponseCode == 404</c> or <c>(HttpStatusCode)404</c> would evade it.</summary>
+        /// need — and <c>SendWebRequest(</c> — the one place a request is actually issued — may each appear
+        /// at exactly one production site: <c>HttpTransport</c>. Limitation: a text match — a copied filter
+        /// written as <c>ResponseCode == 404</c> or <c>(HttpStatusCode)404</c> would evade the first
+        /// clause.</summary>
         [Test]
         public void HttpTransport_IsTheOnlySendSite()
         {
             string codeRoot = Path.Combine(Application.dataPath, "Code");
+
+            AssertOnlyInHttpTransport(codeRoot, "HttpStatusCode.NotFound");
+            AssertOnlyInHttpTransport(codeRoot, "SendWebRequest(");
+        }
+
+        /// <summary>Scans every <c>.cs</c> file under <paramref name="codeRoot"/> (excluding ThirdParty) for
+        /// <paramref name="token"/> and asserts it appears exactly once, in <c>HttpTransport.cs</c>.</summary>
+        private static void AssertOnlyInHttpTransport(string codeRoot, string token)
+        {
             int    total    = 0;
             string offender = null;
 
@@ -2973,16 +2982,16 @@ namespace MapRenderer.Tests.Structure
                 if (file.Contains(Path.DirectorySeparatorChar + "ThirdParty" + Path.DirectorySeparatorChar))
                     continue;
 
-                int hits = CountOccurrences(File.ReadAllText(file), "HttpStatusCode.NotFound");
+                int hits = CountOccurrences(File.ReadAllText(file), token);
                 if (hits > 0 && Path.GetFileName(file) != "HttpTransport.cs")
                     offender = file;
                 total += hits;
             }
 
             Assert.AreEqual(1, total,
-                "'HttpStatusCode.NotFound' must appear exactly once across Assets/Code (excluding " +
-                "ThirdParty) — HttpTransport.SendAsync is the one production site that maps a 404 to absent.");
-            Assert.IsNull(offender, $"the occurrence must be in HttpTransport.cs, not '{offender}'.");
+                $"'{token}' must appear exactly once across Assets/Code (excluding ThirdParty) — " +
+                "HttpTransport is the one production site that issues and maps an HTTP request.");
+            Assert.IsNull(offender, $"the '{token}' occurrence must be in HttpTransport.cs, not '{offender}'.");
         }
     }
 }

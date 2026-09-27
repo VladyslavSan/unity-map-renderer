@@ -6,6 +6,7 @@
 //                                     interface, EditMode async-Task unit teeth.
 //   HttpTileSourceTests             — TemplatedTileSource over HttpTransport against a loopback HttpListener, including the 404 -> Absent mapping.
 //   TileUrlTemplateTests            — the scheme:"tms" Y-flip addressing: TileUrlTemplate.Resolve and the TemplatedTileSource composition tooth.
+//   StyleDocumentLoaderTests        — StyleDocumentLoader.LoadTextAsync over HttpTransport/FileTransport, including the 404/204 -> FileNotFoundException mapping.
 //   DataSourceRenderPathTests       — TemplatedTileSource (file://) through the render pipeline.
 //   DataSourceTests                 — TemplatedTileSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
 
@@ -144,9 +145,9 @@ namespace MapRenderer.Tests.DataSources
         /// <summary>
         /// Finds a free loopback port by binding a listener on port 0, recording the assigned port,
         /// then stopping it before returning. Avoids the classic race by using a short-lived listener
-        /// to claim the OS port number.
+        /// to claim the OS port number. Internal: <c>StyleDocumentLoaderTests</c> shares it.
         /// </summary>
-        private static int FindFreePort()
+        internal static int FindFreePort()
         {
             var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
             listener.Start();
@@ -157,9 +158,10 @@ namespace MapRenderer.Tests.DataSources
 
         /// <summary>
         /// Starts an HttpListener on a loopback address and serves one response asynchronously.
-        /// The listener is stopped and closed after serving the single request.
+        /// The listener is stopped and closed after serving the single request. Internal:
+        /// <c>StyleDocumentLoaderTests</c> shares it.
         /// </summary>
-        private static HttpListener StartLoopbackServer(string prefix, int statusCode, byte[] body = null)
+        internal static HttpListener StartLoopbackServer(string prefix, int statusCode, byte[] body = null)
         {
             var hl = new HttpListener();
             hl.Prefixes.Add(prefix);
@@ -503,6 +505,180 @@ namespace MapRenderer.Tests.DataSources
                 if (Directory.Exists(tempRoot))
                     Directory.Delete(tempRoot, recursive: true);
             }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // StyleDocumentLoaderTests — StyleDocumentLoader.LoadTextAsync, over HttpTransport/FileTransport
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="StyleDocumentLoader"/>'s HTTP and file branches: both now throw
+    /// <see cref="FileNotFoundException"/> when the document is absent (404/204 or missing file), the same
+    /// mapping <see cref="TemplatedTileSource"/> uses for tiles. Shares the loopback helpers with
+    /// <see cref="HttpTileSourceTests"/>.
+    /// </summary>
+    [TestFixture]
+    public class StyleDocumentLoaderTests
+    {
+        // ── Characterisation — unaffected by the absent → FileNotFoundException mapping ─────────
+
+        [UnityTest]
+        public IEnumerator LoadTextAsync_Http200_ReturnsBody()
+        {
+            int port     = HttpTileSourceTests.FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/style.json";
+            byte[] body  = System.Text.Encoding.UTF8.GetBytes("{\"version\":8}");
+            var listener = HttpTileSourceTests.StartLoopbackServer($"http://127.0.0.1:{port}/", 200, body);
+
+            string    response = null;
+            Exception caught   = null;
+            try
+            {
+                yield return StyleDocumentLoader.LoadTextAsync(url)
+                    .ContinueWith((Action<string>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsNull(caught, $"A 200 OK response must NOT throw. Exception: {caught?.Message}");
+            Assert.AreEqual("{\"version\":8}", response, "LoadTextAsync must return the served body as text.");
+        }
+
+        /// <summary>The file is missing inside an EXISTING directory, so the loader throws
+        /// <see cref="FileNotFoundException"/>, not <see cref="DirectoryNotFoundException"/>.</summary>
+        [Test]
+        public void LoadTextAsync_MissingFile_ThrowsFileNotFound()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir); // the directory exists; the file inside it does not
+            string uri = "file://" + Path.Combine(dir, "style.json");
+
+            try
+            {
+                var task = StyleDocumentLoader.LoadTextAsync(uri);
+
+                FileNotFoundException caught = null;
+                try { task.GetAwaiter().GetResult(); }
+                catch (FileNotFoundException ex) { caught = ex; }
+
+                Assert.IsNotNull(caught,
+                    "a missing file inside an EXISTING directory must throw FileNotFoundException, not " +
+                    "DirectoryNotFoundException.");
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        [Test]
+        public void LoadTextAsync_FileRead_CompletesInline()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, "style.json");
+            File.WriteAllText(path, "{\"version\":8}");
+            string uri = "file://" + path;
+
+            try
+            {
+                var task = StyleDocumentLoader.LoadTextAsync(uri);
+                Assert.IsTrue(task.Status.IsCompleted(),
+                    "the file:// branch has no await point, so the task must already be complete right " +
+                    "after the call — no spin needed.");
+                Assert.AreEqual("{\"version\":8}", task.GetAwaiter().GetResult());
+            }
+            finally
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            }
+        }
+
+        /// <summary>Characterisation only: passes on both old and new code — the old path usually surfaces
+        /// OperationCanceledException too, via ToUniTask's own cancellation handling; the remap only
+        /// matters on a race.</summary>
+        [UnityTest]
+        public IEnumerator LoadTextAsync_CancelMidFlight_ThrowsOperationCanceled()
+        {
+            int port = HttpTileSourceTests.FindFreePort();
+            string url = $"http://127.0.0.1:{port}/style.json";
+            var hl = new HttpListener();
+            hl.Prefixes.Add($"http://127.0.0.1:{port}/");
+            hl.Start();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { hl.GetContext(); /* never respond */ }
+                catch { }
+            });
+
+            using var cts = new CancellationTokenSource();
+            UniTask<string> task;
+            try
+            {
+                task = StyleDocumentLoader.LoadTextAsync(url, cts.Token).Preserve();
+
+                yield return null; // let the request actually get sent before cancelling
+                cts.Cancel();
+
+                int frames = 0;
+                while (!task.Status.IsCompleted() && frames++ < 300) yield return null;
+            }
+            finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
+
+            Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the frame bound.");
+
+            Exception caught = null;
+            try { task.GetAwaiter().GetResult(); }
+            catch (Exception ex) { caught = ex; }
+
+            Assert.IsInstanceOf<OperationCanceledException>(caught,
+                "a mid-flight cancel must surface as OperationCanceledException.");
+        }
+
+        // ── Absent responses throw FileNotFoundException ──────────────────────────────────────────
+
+        /// <summary>An HTTP 404 throws <see cref="FileNotFoundException"/>, the same absent-mapping type
+        /// the file branch and tiles use.</summary>
+        [UnityTest]
+        public IEnumerator LoadTextAsync_Http404_ThrowsFileNotFound()
+        {
+            int port     = HttpTileSourceTests.FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/style.json";
+            var listener = HttpTileSourceTests.StartLoopbackServer($"http://127.0.0.1:{port}/", 404);
+
+            Exception caught = null;
+            try
+            {
+                yield return StyleDocumentLoader.LoadTextAsync(url)
+                    .ContinueWith((Action<string>)(_ => { }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsInstanceOf<FileNotFoundException>(caught,
+                "an HTTP 404 must throw FileNotFoundException, the same absent-mapping type as a missing file.");
+        }
+
+        /// <summary>An HTTP 204 throws <see cref="FileNotFoundException"/> too, the same as a 404.</summary>
+        [UnityTest]
+        public IEnumerator LoadTextAsync_Http204_ThrowsFileNotFound()
+        {
+            int port     = HttpTileSourceTests.FindFreePort();
+            string url   = $"http://127.0.0.1:{port}/style.json";
+            var listener = HttpTileSourceTests.StartLoopbackServer($"http://127.0.0.1:{port}/", 204);
+
+            Exception caught = null;
+            try
+            {
+                yield return StyleDocumentLoader.LoadTextAsync(url)
+                    .ContinueWith((Action<string>)(_ => { }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally { try { listener.Stop(); } catch { } }
+
+            Assert.IsInstanceOf<FileNotFoundException>(caught,
+                "an HTTP 204 must throw FileNotFoundException.");
         }
     }
 

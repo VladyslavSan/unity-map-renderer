@@ -1127,8 +1127,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "the file:// tile must build from the local fixture");
                 Assert.AreEqual(netBefore, HttpTransport.DebugRequestCount,
-                    "a file:// chain must issue ZERO HTTP requests — no network. " +
-                    "A >0 delta means the style/TileJSON/tiles hit the network (offline guarantee broken).");
+                    "a file:// chain must issue ZERO HTTP requests — no network. The style document, any " +
+                    "TileJSON and every tile all route through HttpTransport when http(s), so a >0 delta " +
+                    "means one of the three hit the network (offline guarantee broken).");
                 Assert.AreEqual(styleUri, view.StyleId, "SetStyle(uri) ⇒ styleId == uri");
             }
             finally { view.Teardown(); }
