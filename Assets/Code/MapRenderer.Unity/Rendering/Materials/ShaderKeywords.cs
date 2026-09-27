@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         public const string ReceiveShadowsOff               = "_RECEIVE_SHADOWS_OFF";
 
         // Surface / detail features — declared by Fill.shader AND Line.shader (:181-187), and
-        // MapLine.mat carries _SURFACE_TYPE_TRANSPARENT as a live keyword.
+        // Line.mat carries _SURFACE_TYPE_TRANSPARENT as a live keyword.
         public const string NormalMap                = "_NORMALMAP";
         public const string ParallaxMap              = "_PARALLAXMAP";
         public const string DetailMulx2              = "_DETAIL_MULX2";

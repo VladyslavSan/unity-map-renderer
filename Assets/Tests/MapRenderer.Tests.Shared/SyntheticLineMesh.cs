@@ -154,7 +154,7 @@ namespace MapRenderer.Tests
             md.SetIndexBufferParams(iCount, IndexFormat.UInt32);
             var idx = md.GetIndexData<int>();
             // Reverse the winding as StyledLineTileBuilder does, so the ribbons stay Unity-front under
-            // MapLine.mat's stock Cull Back. Every SyntheticLineMesh build path passes through here.
+            // Line.mat's stock Cull Back. Every SyntheticLineMesh build path passes through here.
             for (int i = 0; i + 2 < iCount; i += 3)
             {
                 idx[i + 0] = indices[i + 0];

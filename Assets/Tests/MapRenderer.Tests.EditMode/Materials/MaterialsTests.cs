@@ -2,7 +2,7 @@
 // carriers. MapMaterialSetValidationTests.cs is separate: its `using System;` makes bare Object ambiguous.
 //
 // Contents:
-//   MapFillMaterialTests                — the committed MapFill.mat/MapLine.mat template
+//   FillMaterialTests                   — the committed Fill.mat/Line.mat template
 //                                          assets (shader reference, paint + URP Lit properties).
 //   MapFillUnlitMaterialTests           — Map/FillUnlit shader twin
 //                                          structural acceptance teeth.
@@ -46,11 +46,11 @@ using UnityEditor;
 namespace MapRenderer.Tests.Materials
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapFillMaterialTests — committed MapFill.mat/MapLine.mat template asset acceptance
+    // FillMaterialTests — committed Fill.mat/Line.mat template asset acceptance
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
-    public class MapFillMaterialTests
+    public class FillMaterialTests
     {
         private const string MatPath     = "Assets/Code/MapRenderer.Unity/Materials/Map/Fill/Lit/Fill.mat";
         private const string ShaderName  = "Map/Fill";
@@ -62,98 +62,98 @@ namespace MapRenderer.Tests.Materials
 
 #if UNITY_EDITOR
         [Test]
-        public void MapFillMat_Exists()
+        public void FillMat_Exists()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
             Assert.That(mat, Is.Not.Null,
-                $"MapFill.mat must exist at '{MatPath}'. " +
+                $"Fill.mat must exist at '{MatPath}'. " +
                 "The committed template material asset is required.");
         }
 
         [Test]
-        public void MapFillMat_ReferencesCorrectShader()
+        public void FillMat_ReferencesCorrectShader()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
-            Assume.That(mat, Is.Not.Null, "MapFill.mat not found — run MapFillMat_Exists first.");
+            Assume.That(mat, Is.Not.Null, "Fill.mat not found — run FillMat_Exists first.");
 
             Assert.That(mat.shader, Is.Not.Null,
-                "MapFill.mat shader reference must not be null.");
+                "Fill.mat shader reference must not be null.");
             Assert.That(mat.shader.name, Is.EqualTo(ShaderName),
-                $"MapFill.mat must reference shader '{ShaderName}', not '{mat.shader?.name}'. " +
-                "Check that the GUID in MapFill.mat matches Assets/Code/MapRenderer.Unity/Shaders/Map/Fill/Fill.shader.meta.");
+                $"Fill.mat must reference shader '{ShaderName}', not '{mat.shader?.name}'. " +
+                "Check that the GUID in Fill.mat matches Assets/Code/MapRenderer.Unity/Shaders/Map/Fill/Fill.shader.meta.");
         }
 
         [Test]
-        public void MapFillMat_HasBaseColorProperty()
+        public void FillMat_HasBaseColorProperty()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
-            Assume.That(mat, Is.Not.Null, "MapFill.mat not found.");
+            Assume.That(mat, Is.Not.Null, "Fill.mat not found.");
 
             // _BaseColor, not _Color, so URP's legacy alias has no _Color to clobber to white on import.
             // Asserting the styled RGBA catches a white clobber.
             Color color = mat.GetColor("_BaseColor");
             Assert.That(color.r, Is.EqualTo(0.4f).Within(BaseColorTol),
-                $"MapFill.mat _BaseColor.r must be ~0.4 (got {color.r:F4}). A white clobber → 1.0 fails this.");
+                $"Fill.mat _BaseColor.r must be ~0.4 (got {color.r:F4}). A white clobber → 1.0 fails this.");
             Assert.That(color.g, Is.EqualTo(0.7f).Within(BaseColorTol),
-                $"MapFill.mat _BaseColor.g must be ~0.7 (got {color.g:F4}).");
+                $"Fill.mat _BaseColor.g must be ~0.7 (got {color.g:F4}).");
             Assert.That(color.b, Is.EqualTo(0.4f).Within(BaseColorTol),
-                $"MapFill.mat _BaseColor.b must be ~0.4 (got {color.b:F4}). A white clobber → 1.0 fails this.");
+                $"Fill.mat _BaseColor.b must be ~0.4 (got {color.b:F4}). A white clobber → 1.0 fails this.");
             Assert.That(color.a, Is.EqualTo(1.0f).Within(BaseColorTol),
-                $"MapFill.mat _BaseColor.a must be ~1.0 (got {color.a:F4}).");
+                $"Fill.mat _BaseColor.a must be ~1.0 (got {color.a:F4}).");
         }
 
         [Test]
-        public void MapFillMat_HasOpacityProperty()
+        public void FillMat_HasOpacityProperty()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
-            Assume.That(mat, Is.Not.Null, "MapFill.mat not found.");
+            Assume.That(mat, Is.Not.Null, "Fill.mat not found.");
 
             float opacity = mat.GetFloat("_Opacity");
             Assert.That(opacity, Is.GreaterThan(0f).And.LessThanOrEqualTo(1f),
-                "_Opacity must be present in MapFill.mat in range (0, 1].");
+                "_Opacity must be present in Fill.mat in range (0, 1].");
         }
 
         [Test]
-        public void MapFillMat_HasStandardLitProperties()
+        public void FillMat_HasStandardLitProperties()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
-            Assume.That(mat, Is.Not.Null, "MapFill.mat not found.");
+            Assume.That(mat, Is.Not.Null, "Fill.mat not found.");
 
             // Verify core URP Lit properties are present (full surface, not stripped).
             float metallic   = mat.GetFloat("_Metallic");
             float smoothness = mat.GetFloat("_Smoothness");
             Assert.That(metallic, Is.GreaterThanOrEqualTo(0f).And.LessThanOrEqualTo(1f),
-                "_Metallic must be present in MapFill.mat.");
+                "_Metallic must be present in Fill.mat.");
             Assert.That(smoothness, Is.GreaterThanOrEqualTo(0f).And.LessThanOrEqualTo(1f),
-                "_Smoothness must be present in MapFill.mat.");
+                "_Smoothness must be present in Fill.mat.");
         }
 
         [Test]
-        public void MapLineMat_Exists()
+        public void LineMat_Exists()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(LineMatPath);
             Assert.That(mat, Is.Not.Null,
-                $"MapLine.mat must exist at '{LineMatPath}'.");
+                $"Line.mat must exist at '{LineMatPath}'.");
         }
 
         [Test]
-        public void MapLineMat_HasBaseColorProperty()
+        public void LineMat_HasBaseColorProperty()
         {
             var mat = AssetDatabase.LoadAssetAtPath<Material>(LineMatPath);
-            Assume.That(mat, Is.Not.Null, "MapLine.mat not found — run MapLineMat_Exists first.");
+            Assume.That(mat, Is.Not.Null, "Line.mat not found — run LineMat_Exists first.");
             Assert.That(mat.HasProperty("_BaseColor"), Is.True);
         }
 
         [Test]
-        public void MapLineMat_ResolvesToTransparentQueue()
+        public void LineMat_ResolvesToTransparentQueue()
         {
             // The line must import transparent (queue >= 2501) for painter ordering. No URP BaseShaderGUI
-            // resolves the queue, so it comes from MapLine.mat's custom queue and the SubShader tag.
+            // resolves the queue, so it comes from Line.mat's custom queue and the SubShader tag.
             var mat = AssetDatabase.LoadAssetAtPath<Material>(LineMatPath);
-            Assume.That(mat, Is.Not.Null, "MapLine.mat not found — run MapLineMat_Exists first.");
+            Assume.That(mat, Is.Not.Null, "Line.mat not found — run LineMat_Exists first.");
 
             Assert.That(mat.renderQueue, Is.GreaterThanOrEqualTo(2501),
-                $"MapLine.mat must resolve to the Transparent render queue (>=2501) after a fresh "      +
+                $"Line.mat must resolve to the Transparent render queue (>=2501) after a fresh "      +
                 $"batch import, got {mat.renderQueue}. The queue comes from the material's "   +
                 "serialized custom render queue (3000) + the Line SubShader Queue=Transparent tag — "    +
                 "the raw ShaderGUI does not recompute it. A value of 2000 means the custom queue was " +
@@ -918,7 +918,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void LineShaderGUI_ValidateMaterial_OnCommittedBase_LeavesAntialiasingOn()
         {
-            // Every per-layer material copies MapLine.mat's keyword set, so the shipped base must keep AA ON
+            // Every per-layer material copies Line.mat's keyword set, so the shipped base must keep AA ON
             // through the sync.
             var m = Track(new Material(MapMaterialSetTestUtil.Load().LineMaterial));
             new LineShaderGUI().ValidateMaterial(m);
@@ -966,7 +966,7 @@ namespace MapRenderer.Tests.Materials
         public void LineShaderGUI_ValidateMaterial_OnCommittedBase_LeavesHairlineDefault()
         {
             // Per-layer materials copy the base's keyword set, so this fails once a strategy is saved into
-            // MapLine.mat.
+            // Line.mat.
             var m = Track(new Material(MapMaterialSetTestUtil.Load().LineMaterial));
             new LineShaderGUI().ValidateMaterial(m);
             Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),

@@ -3,7 +3,7 @@
 // declared in that layer's Properties{} block, and MaterialPropertyRegistryParityTests requires each one
 // to appear there. A frame global is the opposite: pushed once per frame with Shader.SetGlobalFloat, and
 // not a CBUFFER member. It must not be a Properties{} entry either: a ShaderLab property would serialise
-// a per-material value into MapLine.mat that shadows the global. The file is named FrameGlobalNames.cs,
+// a per-material value into Line.mat that shadows the global. The file is named FrameGlobalNames.cs,
 // not PropertyNames.cs, because the parity tests address the three registry files by explicit path.
 
 namespace MapRenderer.Unity.Rendering.ShaderProperties

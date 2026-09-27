@@ -100,7 +100,7 @@ CBUFFER_END
 // OUTSIDE the CBUFFER on purpose: this declaration does not change the UnityPerMaterial layout, which is
 // what SRP Batcher keys on. Inside it, the value would become per-material and would need a DOTS-instancing
 // slot and a BRG SoA field for a number identical on every layer. Absent from Line.shader's Properties{}
-// on purpose too: a ShaderLab property serialises a value into MapLine.mat that silently shadows the global.
+// on purpose too: a ShaderLab property serialises a value into Line.mat that silently shadows the global.
 //
 // SCOPE: it is the ruler for every quantity that is VIEW-INDEPENDENT — the dash parameterisation and the
 // WIDTH itself (and gap / line-offset, which act along the same axis).

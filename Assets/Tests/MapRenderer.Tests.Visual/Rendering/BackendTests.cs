@@ -211,7 +211,7 @@ namespace MapRenderer.Tests.Visual
                 projection: new SphericalProjection());
             Track(mapGo);
 
-            // Stock Cull Back, as the shipped MapFill.mat: StyledFillTileBuilder's winding reversal makes near-side
+            // Stock Cull Back, as the shipped Fill.mat: StyledFillTileBuilder's winding reversal makes near-side
             // fills Unity-front, so the far hemisphere does not bleed through ocean gaps.
             if (mat != null) mat.SetCull(CullMode.Back);
 

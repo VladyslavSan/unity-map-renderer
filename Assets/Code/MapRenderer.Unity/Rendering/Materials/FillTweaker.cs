@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// Re-asserts the fill compositing contract: shared base contract (no depth write, LEqual test,
         /// white identity) + straight ALPHA blend, plus the <c>_SURFACE_TYPE_TRANSPARENT</c> keyword —
         /// without it the fragment's alpha is discarded and fills render solid regardless of colour,
-        /// opacity or pattern. Non-local invariant: the keyword is also baked into <c>MapFill.mat</c>,
+        /// opacity or pattern. Non-local invariant: the keyword is also baked into <c>Fill.mat</c>,
         /// because <c>shader_feature_local_fragment</c> variants are stripped from player builds unless a
         /// material in the build declares it — enabling it only at runtime falls back to opaque in a build.
         /// </summary>

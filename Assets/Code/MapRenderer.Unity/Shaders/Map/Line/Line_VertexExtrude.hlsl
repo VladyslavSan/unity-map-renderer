@@ -343,7 +343,7 @@ float3 Line_VertexExtrude(
     // dashU = distanceAlong / dashMetersPerUnit — dimensionless position in line-width units,
     // world-anchored so the pattern stays welded to the road under any camera motion.
     // ALSO the surface u fed to InitializeStandardLitSurfaceData via uv.xy — inert while no line material
-    // binds a uv-dependent texture (MapLine.mat binds none), and the right axis for line-pattern.
+    // binds a uv-dependent texture (Line.mat binds none), and the right axis for line-pattern.
     // Mirror of LineDash.DashCoverage's "u = distanceAlong / metersPerDashUnit" (the CPU formula).
     dashU = (dashMetersPerUnit > 1e-6) ? (input.sideAndDist.y / dashMetersPerUnit) : 0.0;
 
