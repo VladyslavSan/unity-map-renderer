@@ -62,7 +62,7 @@ main thread may run ahead before it stalls. **It, not vsync, is the mechanism.**
 
 **Where vsync fits — one *sufficient* condition, not the enabler.** `vSyncCount ≥ 1` paces the *consumer*
 (present) at the refresh rate, which is one way to make the main thread not-the-bottleneck (if its work fits
-inside the v-blank interval). This project's `Bootstrapper.cs` sets `vSyncCount = 1`
+inside the v-blank interval). This project's `MapHost.cs` sets `vSyncCount = 1`
 (+ `Application.targetFrameRate = refreshRate`, which vSync ≥ 1 then **ignores**) — but that is just *our
 current pacing choice*, not what creates the window. An uncapped, GPU-bound build has the same window; a
 vsync-on but CPU-main-bound frame has none.

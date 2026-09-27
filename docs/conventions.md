@@ -482,8 +482,10 @@ without duplicating any type's own internal guard, because neither is a *second*
 "`NativeArray`/`NativeList`/etc. `.Dispose()` already early-returns on `!IsCreated`". **That premise is false
 for `NativeArray`.** Acting on it, a blanket sweep deleted all 57 guards and reddened **106 tests** — every
 path disposing a decoded MVT tile twice, across `Tests.Mvt`, `Style.FillPaintTests`,
-`Style.SymbolFeatureExtractorTests`, `Text.SymbolBuffer*`. Exactly seven of the 57 were load-bearing (`MvtModels.cs` x4, `NativeFilterEvaluator.cs` x2, and
-`MvtValueCompactionTests.cs` x1 — a test disposing once in its body and again in `finally`); the other 50
+`Style.SymbolFeatureExtractorTests`, `Text.SymbolBuffer*`. Exactly seven of the 57 were load-bearing
+(`MvtModels.cs` x4, the native filter evaluator's per-feature result buffers x2 — that wrapper class was
+later deleted when the job-graph epic batched filter evaluation — and `MvtValueCompactionTests.cs` x1,
+a test disposing once in its body and again in `finally`); the other 50
 removals were correct. A rule that is
 *mostly* right is the dangerous kind: it survives review because its examples are real, and it fails only
 where nobody looked.
@@ -736,7 +738,7 @@ why it is worth using where it carries information, and why it is worth *not* us
 
 **Design narrative belongs in `docs/`, not in the file.** Rationale, rejected alternatives and review history
 already have an SSOT (`docs/*-design.md`). Link to it; do not inline it. Carrying the argument alongside the
-code is how `DecodedTileLease.cs` reached **93 % comment** and `TileManager.cs` **68 %** across 2 425 lines.
+code is how `TileManager.cs` reached **68 % comment** across 2 425 lines.
 
 **The gate:** past the summary and params, a doc that runs longer than the member it documents must name
 which of the three reasons applies. If you cannot name one, cut it back to the floor.

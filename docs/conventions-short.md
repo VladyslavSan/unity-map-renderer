@@ -180,9 +180,10 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     mechanism and the writeback is what lets it see the disposed state. Prior art:
     `MvtLayer.Dispose` (`Mvt/MvtModels.cs:150-176`).
   - *Measured, the expensive way:* sweeping all 57 on the assumption they were redundant **reddened 106
-    tests**. Exactly **7** were load-bearing (`MvtModels.cs` ×4, `NativeFilterEvaluator.cs` ×2,
-    `MvtValueCompactionTests.cs` ×1 — a test that disposes once in its body and again in `finally`).
-    The other 50 removals were correct. Delete by the discriminator above, never in bulk.
+    tests**. Exactly **7** were load-bearing (`MvtModels.cs` ×4, the native filter evaluator's per-feature
+    result buffers ×2 — that wrapper class was later deleted when the job-graph epic batched filter
+    evaluation — and `MvtValueCompactionTests.cs` ×1, a test that disposes once in its body and again in
+    `finally`). The other 50 removals were correct. Delete by the discriminator above, never in bulk.
 
 - **`[ReadOnly]` belongs on a job field whose type contains a native container — including a generic type
   parameter, whose argument may. Elsewhere it is a no-op: harmless where it sits, not worth adding, and never
