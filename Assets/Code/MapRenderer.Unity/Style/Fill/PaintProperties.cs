@@ -46,7 +46,7 @@ namespace MapRenderer.Unity.Style.Fill
 
         /// <summary>
         /// fill-translate: pixel-space [x, y] translation offset. Default [0, 0], as one <c>double2</c>.
-        /// Constant only.
+        /// Constant or Zoom; Feature/Composite (data-driven) falls back to the default.
         /// </summary>
         public StyleProperty<double2> Translate { get; init; }
 
@@ -164,16 +164,12 @@ namespace MapRenderer.Unity.Style.Fill
                 antialias = new StyleProperty<bool>(antialiasDefault);
             }
 
-            // fill-translate: [x, y] — collapse to StyleProperty<double2>
+            // fill-translate: [x, y] px offset, parsed through the expression engine via TranslateProperty.
             JsonValue translateJson = paint?.Get(PropertyNames.FillTranslate);
             if (translateJson != null) anyPresent = true;
-            double txVal = 0.0, tyVal = 0.0;
-            if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
-            {
-                txVal = translateJson.Items[0].AsDouble(0.0);
-                tyVal = translateJson.Items[1].AsDouble(0.0);
-            }
-            StyleProperty<double2> translate = new StyleProperty<double2>(new double2(txVal, tyVal));
+            StyleProperty<double2> translate = translateJson != null
+                ? TranslateProperty.Parse(translateJson)
+                : new StyleProperty<double2>(new double2(0.0, 0.0));
 
             // fill-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.FillTranslateAnchor);

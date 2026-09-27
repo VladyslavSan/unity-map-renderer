@@ -194,6 +194,63 @@ namespace MapRenderer.Tests.Style
             }
         }
 
+        private const string LineZoomTranslateStyleJson = @"{
+    ""version"": 8,
+    ""layers"": [
+        { ""id"": ""road"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""l"",
+          ""paint"": { ""line-translate"": [""interpolate"",[""linear""],[""zoom""],
+                                             10,[""literal"",[0,0]],16,[""literal"",[20,-10]]] } }
+    ]
+}";
+
+        private const string FillZoomTranslateStyleJson = @"{
+    ""version"": 8,
+    ""layers"": [
+        { ""id"": ""ground"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""l"",
+          ""paint"": { ""fill-translate"": [""interpolate"",[""linear""],[""zoom""],
+                                             10,[""literal"",[0,0]],16,[""literal"",[20,-10]]] } }
+    ]
+}";
+
+        /// <summary>
+        /// A zoom-interpolated <c>line-translate</c>/<c>fill-translate</c> re-evaluates every frame at the
+        /// live zoom, THEN scales by dpr — the same uniform, now Zoom-kind instead of Constant.
+        /// </summary>
+        [Test]
+        public void TranslateUniforms_ZoomExpression_TracksZoomAtDpr2()
+        {
+            Material lineMat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
+            Material fillMat = Track(MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load()));
+            {
+                var lineApplier = new ZoomStyleApplier(lineMat);
+                MaterialFactory.BindLinePaintToApplier(
+                    FirstLayer<Line.StyleLayer>(LineZoomTranslateStyleJson).Paint, lineApplier, lineMat);
+                var fillApplier = new ZoomStyleApplier(fillMat);
+                MaterialFactory.BindFillPaintToApplier(
+                    FirstLayer<Fill.StyleLayer>(FillZoomTranslateStyleJson).Paint, fillApplier, fillMat);
+
+                int lineId = ShaderProperties.Line.PropertyId.LineTranslate;
+                int fillId = ShaderProperties.Fill.PropertyId.FillTranslate;
+
+                void AssertTranslate(Material mat, int id, string what, float x, float y, double zoom)
+                {
+                    Vector4 v = mat.GetVector(id);
+                    Assert.That(v.x, Is.EqualTo(x).Within(1e-3f), $"{what}.x must be {x} at zoom {zoom}, dpr 2.");
+                    Assert.That(v.y, Is.EqualTo(y).Within(1e-3f), $"{what}.y must be {y} at zoom {zoom}, dpr 2.");
+                }
+
+                lineApplier.ApplyZoom(new StyleFrameInputs(10.0, 2.0, 0.0));
+                fillApplier.ApplyZoom(new StyleFrameInputs(10.0, 2.0, 0.0));
+                AssertTranslate(lineMat, lineId, "line-translate", 0f, 0f, 10.0);
+                AssertTranslate(fillMat, fillId, "fill-translate", 0f, 0f, 10.0);
+
+                lineApplier.ApplyZoom(new StyleFrameInputs(16.0, 2.0, 0.0));
+                fillApplier.ApplyZoom(new StyleFrameInputs(16.0, 2.0, 0.0));
+                AssertTranslate(lineMat, lineId, "line-translate", 40f, -20f, 16.0);
+                AssertTranslate(fillMat, fillId, "fill-translate", 40f, -20f, 16.0);
+            }
+        }
+
         // ── The halo pair: not a material uniform ─────────────────────────────────────────────────
 
         // text-halo-width/-blur convert at emit against the LIVE ratio, so the tooth reads the emitted mesh:

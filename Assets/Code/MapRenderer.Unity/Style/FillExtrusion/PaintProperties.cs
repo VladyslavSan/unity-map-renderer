@@ -153,39 +153,13 @@ namespace MapRenderer.Unity.Style.FillExtrusion
                 verticalGradient = new StyleProperty<float>(1f);
             }
 
-            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the class
-            // doc). WrapBareArrayLiterals admits the constant bare [x, y] form, which the strict parser rejects.
+            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the
+            // class doc) via the shared TranslateProperty helper.
             JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);
             if (translateJson != null) anyPresent = true;
-            StyleProperty<double2> translate;
-            if (translateJson != null)
-            {
-                try
-                {
-                    JsonValue wrapped = ExpressionParser.WrapBareArrayLiterals(translateJson);
-                    var candidate = new StyleProperty<double2>(wrapped, new double2(0.0, 0.0),
-                        v =>
-                        {
-                            var a = v.AsArray();
-                            return new double2(a[0].AsNumber(), a[1].AsNumber());
-                        });
-                    // fill-extrusion-translate is a layer-level property — a data-driven value is spec-invalid
-                    // (Feature/Composite → default [0,0]), mirroring the VerticalGradient/Antialias guard.
-                    translate = candidate.DependsOnFeature
-                        ? new StyleProperty<double2>(new double2(0.0, 0.0))
-                        : candidate;
-                }
-                catch
-                {
-                    // A malformed translate (a parse failure, or a short array like [5] that throws at eager eval)
-                    // falls to the spec default rather than taking down the whole layer.
-                    translate = new StyleProperty<double2>(new double2(0.0, 0.0));
-                }
-            }
-            else
-            {
-                translate = new StyleProperty<double2>(new double2(0.0, 0.0));
-            }
+            StyleProperty<double2> translate = translateJson != null
+                ? TranslateProperty.Parse(translateJson)
+                : new StyleProperty<double2>(new double2(0.0, 0.0));
 
             // fill-extrusion-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.FillExtrusionTranslateAnchor);

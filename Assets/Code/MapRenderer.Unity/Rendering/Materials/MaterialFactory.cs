@@ -67,7 +67,7 @@ namespace MapRenderer.Unity.Rendering.Materials
             // property stays declared in the CBUFFER, which MapFillUnlitMaterialTests pins.
 
             // fill-translate: a px offset through Fill_VertexModify's MapPixelsToWorld, in line-translate's
-            // device-px space. It parses as always-Constant, so the per-frame applier cannot animate it.
+            // device-px space. Constant or Zoom; BindDevicePixelVector re-evaluates it every frame.
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Fill.PropertyId.FillTranslate);
 
             // fill-translate-anchor.
@@ -273,8 +273,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.Offset.DependsOnFeature)
                 applier.BindDevicePixelFloat(paint.Offset, ShaderProperties.Line.PropertyId.LineOffset);
 
-            // line-translate: a px offset through the SAME MapPixelsToWorld call as the widths. Parsed as
-            // always-Constant, so it cannot animate; the double2 → Vector4 cast happens inside the applier.
+            // line-translate: a px offset through the SAME MapPixelsToWorld call as the widths. Constant or
+            // Zoom; the double2 → Vector4 cast happens inside the applier.
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Line.PropertyId.LineTranslate);
 
             // line-translate-anchor.

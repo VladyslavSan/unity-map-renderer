@@ -53,8 +53,8 @@ namespace MapRenderer.Unity.Style.Line
 
         /// <summary>
         /// line-translate: pixel-space [x, y] translation offset applied in
-        /// <c>TranslateAnchor</c>-space coordinates. Default [0, 0]. Constant only: an expression
-        /// value reads as [0, 0].
+        /// <c>TranslateAnchor</c>-space coordinates. Default [0, 0]. Constant or Zoom;
+        /// Feature/Composite (data-driven) falls back to the default.
         /// </summary>
         public StyleProperty<double2> Translate { get; init; }
 
@@ -166,17 +166,12 @@ namespace MapRenderer.Unity.Style.Line
                 ? new StyleProperty<float>(offsetJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
-            // line-translate: [x, y] in pixels. Collapse to StyleProperty<double2>.
+            // line-translate: [x, y] px offset, parsed through the expression engine via TranslateProperty.
             JsonValue translateJson = paint?.Get(PropertyNames.LineTranslate);
             if (translateJson != null) anyPresent = true;
-            double txVal = 0.0, tyVal = 0.0;
-            if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
-            {
-                txVal = translateJson.Items[0].AsDouble(0.0);
-                tyVal = translateJson.Items[1].AsDouble(0.0);
-            }
-            // Translate is always constant (the array components are scalars, not expressions).
-            StyleProperty<double2> translate = new StyleProperty<double2>(new double2(txVal, tyVal));
+            StyleProperty<double2> translate = translateJson != null
+                ? TranslateProperty.Parse(translateJson)
+                : new StyleProperty<double2>(new double2(0.0, 0.0));
 
             // line-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.LineTranslateAnchor);

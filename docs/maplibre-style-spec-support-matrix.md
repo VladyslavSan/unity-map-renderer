@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 53 supported, 58 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 55 supported, 56 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -38,9 +38,9 @@ marked † is otherwise complete; its status does not count this limit. The desi
 **What an unsupported expression does.** It depends on where it is:
 
 - In an expression-capable property, or in `light.color`, `light.intensity` or `sky`, it fails the style
-  parse. `MapView.SetStyle` logs the error and keeps the previous style. Four properties are exceptions:
-  `fill-antialias`, `fill-extrusion-translate`, `fill-extrusion-vertical-gradient` and `line-dasharray`
-  catch the error and use their default.
+  parse. `MapView.SetStyle` logs the error and keeps the previous style. Six properties are exceptions:
+  `fill-antialias`, `fill-extrusion-translate`, `fill-extrusion-vertical-gradient`, `line-dasharray`,
+  `fill-translate` and `line-translate` catch the error and use their default.
 - In a property whose note starts with "Constant only", or in a pattern name, any expression gives that
   property's default.
 - In a layer `filter`, the style load checks it once and logs one warning if it does not compile (an
@@ -188,7 +188,7 @@ Owning design: [`fill-parity-design.md`](fill-parity-design.md).
 | `fill-layer-opacity` | `not supported` | Not built. |
 | `fill-color` | `supported` | Data-driven values are †. On a pattern layer it tints the pattern; see `fill-pattern`. |
 | `fill-outline-color` | `parsed, inert` | Bound to a uniform that no shader pass reads. It needs line geometry: [`fill-parity-design.md`](fill-parity-design.md) § 7. |
-| `fill-translate` | `partial` | Constant only. A zoom expression reads as `[0, 0]`. |
+| `fill-translate` | `supported` | Constant or Zoom. A data-driven value is spec-invalid for a layer-level property and falls back to `[0, 0]`. |
 | `fill-translate-anchor` | `partial` | Constant only. |
 | `fill-pattern` | `partial` | Constant sprite name only; the spec also allows data-driven. Known deviation: `fill-color` tints the pattern, and an absent `fill-color` is white. See [`fill-parity-design.md`](fill-parity-design.md) § 2. |
 
@@ -207,7 +207,7 @@ Owning designs: [`line-rendering-design.md`](line-rendering-design.md),
 | `line-opacity` | `supported` | Data-driven values are †. |
 | `line-layer-opacity` | `not supported` | Not built. |
 | `line-color` | `supported` | Data-driven values are †. |
-| `line-translate` | `partial` | Constant only. A zoom expression reads as `[0, 0]`. |
+| `line-translate` | `supported` | Constant or Zoom. A data-driven value is spec-invalid for a layer-level property and falls back to `[0, 0]`. |
 | `line-translate-anchor` | `partial` | Constant only. `"map"` is approximate near the limb of a zoomed-out globe: [`line-translate-parity-design.md`](line-translate-parity-design.md) § "The residual". |
 | `line-width` | `supported` | Data-driven values are †. |
 | `line-gap-width` | `partial` | Constant and zoom only. A data-driven value is ignored. |

@@ -6,6 +6,7 @@
 //   StylePropertyTests          — StyleProperty<T>: parse, classify, evaluate (uniform + bake), GC-allocation gate.
 //   StyleLayerEagerParseTests   — the eight style property types parse eagerly via a static Parse factory.
 //   FillLayoutTests             — Fill.LayoutProperties: parsing fill-sort-key.
+//   FillPaintTranslateTests     — Fill.PaintProperties.Translate: the shared TranslateProperty route.
 //   FillPatternTests            — Fill.FillPattern: resolving a fill-pattern sprite name against a sheet.
 //   FillExtrusionPaintTests     — FillExtrusion.PaintProperties: classification + spec defaults.
 //   LinePaintTests              — Line.PaintProperties/LayoutProperties: classification, translate, join/cap layout.
@@ -1157,6 +1158,37 @@ namespace MapRenderer.Tests.Style
         }
     }
 
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // FillPaintTranslateTests — Fill.PaintProperties.Translate: the shared TranslateProperty route
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Its own fixture (not <see cref="FillPaintTests"/> in StyleRestyleTests.cs, which needs
+    /// Unity.Collections for other siblings): every type named here is Core/Unity.Mathematics-engine-free,
+    /// so it lives in this file for core-tests coverage.</summary>
+    [TestFixture]
+    public class FillPaintTranslateTests
+    {
+        [Test]
+        public void Translate_ZoomExpression_ClassifiesAsZoom_NotCollapsedToDefault()
+        {
+            var paint = TestStyle.FillPaint(
+                "{\"fill-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}");
+
+            Assert.AreEqual(ExpressionKind.Zoom, paint.TranslateKind,
+                "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
+
+            var atMin = paint.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, atMin.x, 0.01);
+            Assert.AreEqual(0.0, atMin.y, 0.01);
+
+            var atMax = paint.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, atMax.x, 0.01,
+                "at zoom=16 the interpolated translate must reach its second stop, NOT stay at [0,0].");
+            Assert.AreEqual(-10.0, atMax.y, 0.01);
+        }
+    }
+
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillPatternTests — Fill.FillPattern: resolving a fill-pattern sprite name against a sheet
@@ -2081,6 +2113,69 @@ namespace MapRenderer.Tests.Style
             var t = lp.Translate.Evaluate(0.0);
             Assert.AreEqual(16.0, t.x, 1e-6, "line-translate x must be 16.");
             Assert.AreEqual(-8.0, t.y, 1e-6, "line-translate y must be -8.");
+        }
+
+        [Test]
+        public void LinePaint_Translate_ZoomExpression_ClassifiesAsZoom_NotCollapsedToDefault()
+        {
+            const string paintJson =
+                "{\"line-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}";
+            var layer = MakeLineLayer(paintJson);
+            var lp    = layer.Paint;
+
+            Assert.AreEqual(ExpressionKind.Zoom, lp.TranslateKind,
+                "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
+
+            var atMin = lp.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, atMin.x, 0.01);
+            Assert.AreEqual(0.0, atMin.y, 0.01);
+
+            var atMax = lp.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, atMax.x, 0.01,
+                "at zoom=16 the interpolated translate must reach its second stop, NOT stay at [0,0].");
+            Assert.AreEqual(-10.0, atMax.y, 0.01);
+        }
+
+        [Test]
+        public void LinePaint_Translate_LegacyStopsFunction_GivesTheSameTwoValues()
+        {
+            // The shared TranslateProperty route also parses a legacy {"stops": …} function, through the
+            // same WrapBareArrayLiterals + ExpressionParser path as the modern form above.
+            var layer = MakeLineLayer("{\"line-translate\":{\"stops\":[[10,[0,0]],[16,[20,-10]]]}}");
+            var lp    = layer.Paint;
+
+            var atMin = lp.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, atMin.x, 0.01);
+            Assert.AreEqual(0.0, atMin.y, 0.01);
+
+            var atMax = lp.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, atMax.x, 0.01);
+            Assert.AreEqual(-10.0, atMax.y, 0.01);
+        }
+
+        [Test]
+        public void LinePaint_Translate_DataDriven_FallsBackToDefault()
+        {
+            var layer = MakeLineLayer("{\"line-translate\":[\"get\",\"t\"]}");
+            var lp    = layer.Paint;
+
+            Assert.AreEqual(ExpressionKind.Constant, lp.TranslateKind,
+                "a data-driven translate must fall back to the Constant default, not classify as Feature.");
+            var t = lp.Translate.Evaluate(0.0);
+            Assert.AreEqual(0.0, t.x, 1e-6);
+            Assert.AreEqual(0.0, t.y, 1e-6);
+        }
+
+        [Test]
+        public void LinePaint_Translate_ShortArray_FallsBackToDefault_DoesNotThrow()
+        {
+            var layer = MakeLineLayer("{\"line-translate\":[5]}");
+            var lp    = layer.Paint;
+
+            var t = lp.Translate.Evaluate(0.0);
+            Assert.AreEqual(0.0, t.x, 1e-6);
+            Assert.AreEqual(0.0, t.y, 1e-6);
         }
 
         // ── line-translate-anchor "viewport" → 1.0 ─────────────────────────────
