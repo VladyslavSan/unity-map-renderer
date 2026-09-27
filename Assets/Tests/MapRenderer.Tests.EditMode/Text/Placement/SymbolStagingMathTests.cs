@@ -12,7 +12,7 @@
 //   SymbolBearingTests                  — the alignment→billboard-rotation mapping.
 //   SymbolCandidateRangeTilingTests     — Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast dotnet core-tests project.
 //   SymbolCollisionTests                — The one direct tooth for ComparePlacementOrder: the placement order key is (SortKey, WasPlacedLastFrame, FeatureIndex, TileKey, FadeId), each term breaking a tie left by the one before it.
-//   SymbolFarPlaneCullTests             — The Core distance math for the pre-projection far-plane symbol cull: a symbol farther from the camera than the cull distance is culled; a non-positive distance disables it; and the per-frame rebase rotation is applied to the anchor (so the cull measures…
+//   SymbolFarPlaneCullTests             — The Core view-depth math for the pre-projection far-plane symbol cull: a symbol whose depth along the camera's forward axis exceeds the cull distance is culled; a non-positive distance disables it; the per-frame rebase rotation is applied to the anchor…
 //   SymbolPairingTests                  — Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast dotnet core-tests project.
 //   SymbolScreenProjectionTests         — TryProjectAnchor golden + culling, over a hand-built view-projection matrix chosen so every value is hand-computable (no live camera needed — the EditMode-only SymbolScreenProjectionUnityTests cross-checks against a REAL…
 //   SymbolStagingMathCurvedUpTests      — pins PolylineArcMath.SampleUp's per-glyph sample EXACTLY — a large (90 deg), synthetic per-vertex up span, so the difference is not float noise.
@@ -33,6 +33,7 @@ using System.Collections.Generic;
 using System;
 using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.View;
+using MapRenderer.Unity.View.Cameras;
 
 
 namespace MapRenderer.Tests.Text.Placement
@@ -1048,45 +1049,47 @@ namespace MapRenderer.Tests.Text.Placement
     // SymbolFarPlaneCullTests — the core distance math for the pre-projection far-plane cull
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The Core distance math for the pre-projection far-plane symbol cull: a symbol farther from the camera
-    /// than the cull distance is culled; a non-positive distance disables it; and the per-frame rebase rotation is
-    /// applied to the anchor (so the cull measures the true camera→anchor separation, not a pre-rebase one). The
-    /// gather-path WIRING (fraction × far, fade-out-in-place) is pinned separately in the EditMode placement teeth.</summary>
+    /// <summary>The Core view-depth math for the pre-projection far-plane symbol cull: a symbol whose depth along
+    /// the camera's forward (toward its look-at) exceeds the cull distance is culled; a non-positive distance
+    /// disables it; and the per-frame rebase rotation is applied to the anchor before the depth is taken. A
+    /// straight-line distance instead of depth hard-culled every off-centre globe symbol at low tilt (UMR-239);
+    /// the globe pose tooth below pins the fix.</summary>
     [TestFixture]
     public class SymbolFarPlaneCullTests
     {
-        // Camera at the floating origin (rebased frame), so with an identity rebase the camera→anchor distance is
-        // just the anchor's offset from the scene origin — easy to reason about.
+        // Non-zero so the double-subtract has to run for a test to pass (a naive |anchor| would mis-measure).
+        // Every test's camera sits behind it, never AT it — see IsCulled's own doc for why that matters.
         private static readonly double3 Origin = new double3(1000.0, -2000.0, 3000.0);
 
-        /// <summary>An anchor within the cull distance survives; one beyond it is culled. The scene origin is
-        /// non-zero to prove the double-subtract runs (a naive |anchor| would mis-measure).</summary>
+        /// <summary>An anchor within the cull distance survives; one beyond it is culled. The camera sits 100 m
+        /// behind the look-at along −Z, so the anchors' +Z offsets are ahead of it.</summary>
         [Test]
         public void WithinDistance_Survives_BeyondDistance_Culled()
         {
-            var cam = double3.zero;               // camera at the origin in the rebased frame
-            var near = Origin + new double3(0.0, 0.0, 300.0); // 300 m from camera
-            var far  = Origin + new double3(0.0, 0.0, 700.0); // 700 m from camera
+            var cam  = new double3(0.0, 0.0, -100.0);         // 100 m behind the look-at, facing +Z
+            var near = Origin + new double3(0.0, 0.0, 300.0); // 400 m ahead of the camera
+            var far  = Origin + new double3(0.0, 0.0, 700.0); // 800 m ahead of the camera
 
             Assert.IsFalse(SymbolFarPlaneCull.IsCulled(near, Origin, float3x3.identity, cam, 500.0),
-                "300 m < 500 m cull distance ⇒ kept");
+                "400 m ahead ⇒ below the 500 m cull distance ⇒ kept");
             Assert.IsTrue(SymbolFarPlaneCull.IsCulled(far, Origin, float3x3.identity, cam, 500.0),
-                "700 m > 500 m cull distance ⇒ culled");
+                "800 m ahead ⇒ beyond the 500 m cull distance ⇒ culled");
         }
 
-        /// <summary>Distance is measured from the CAMERA, not the scene origin: shifting the camera toward a distant
-        /// anchor keeps it, and away from a near anchor culls it — the opposite of a look-at-radius measure.</summary>
+        /// <summary>Depth is measured from the CAMERA's own position and altitude, not a fixed radius around the
+        /// scene origin: the SAME nearby anchor is kept from a close orbit and culled from a far one, though it
+        /// never moves and the cull distance never changes.</summary>
         [Test]
         public void DistanceIsMeasuredFromCamera_NotOrigin()
         {
-            var anchor = Origin + new double3(0.0, 0.0, 700.0); // 700 m from the origin
-            var camNear = new double3(0.0, 0.0, 400.0);         // camera 400 m along +Z ⇒ 300 m from anchor
-            var camFar  = new double3(0.0, 0.0, -400.0);        // camera 400 m along −Z ⇒ 1100 m from anchor
+            var anchor  = Origin + new double3(0.0, 0.0, 50.0);   // 50 m ahead of the origin — close to it either way
+            var camNear = new double3(0.0, 0.0, -200.0);          // 200 m out ⇒ anchor 250 m ahead
+            var camFar  = new double3(0.0, 0.0, -1000.0);         // 1000 m out ⇒ SAME anchor now 1050 m ahead
 
             Assert.IsFalse(SymbolFarPlaneCull.IsCulled(anchor, Origin, float3x3.identity, camNear, 500.0),
-                "camera 300 m from the anchor ⇒ kept, though it is 700 m from the origin");
+                "close orbit ⇒ anchor 250 m ahead of the camera ⇒ kept, though it is only 50 m from the origin");
             Assert.IsTrue(SymbolFarPlaneCull.IsCulled(anchor, Origin, float3x3.identity, camFar, 500.0),
-                "camera 1100 m from the anchor ⇒ culled");
+                "far orbit, SAME anchor and cull distance ⇒ 1050 m ahead of the camera ⇒ culled");
         }
 
         /// <summary>A non-positive cull distance disables the cull (keep every symbol) — the safe fallback for a
@@ -1101,25 +1104,93 @@ namespace MapRenderer.Tests.Text.Placement
                 "negative ⇒ cull disabled");
         }
 
-        /// <summary>The rebase rotation is applied to the anchor before the distance is taken. A 180° rotation about
-        /// Y (unambiguous — sin = 0, no handedness question) flips the anchor's X across an off-axis camera, moving
-        /// it from inside to outside the cull distance. If the rebase were skipped the decision would not change.</summary>
+        /// <summary>The rebase rotation is applied to the anchor before the depth is taken: a 180° rotation about
+        /// Y (unambiguous — sin = 0, no handedness question) flips the anchor from behind the camera (never
+        /// culled) to ahead of it, past the cull distance. If the rebase were skipped the verdict would not
+        /// change.</summary>
         [Test]
         public void RebaseRotation_IsAppliedToAnchor()
         {
-            var cam    = new double3(100.0, 0.0, 0.0);          // off-axis camera (in the rebased frame)
+            var cam    = new double3(100.0, 0.0, 0.0);          // camera at X=100, facing −X (toward the look-at)
             var anchor = Origin + new double3(400.0, 0.0, 0.0); // local offset (400,0,0)
 
-            // Identity: rebased local (400,0,0), distance to camera (100,0,0) = 300 m.
+            // Identity: rebased local (400,0,0) ⇒ camera-relative (300,0,0) ⇒ 300 m BEHIND the camera (X=400 is
+            // past both the camera and the look-at along +X, outside the −X forward cone) ⇒ never culled.
             Assert.IsFalse(SymbolFarPlaneCull.IsCulled(anchor, Origin, float3x3.identity, cam, 400.0),
-                "identity rebase ⇒ 300 m from camera ⇒ kept");
+                "identity rebase ⇒ anchor sits behind the camera ⇒ kept");
 
-            // Ry(180°): local (400,0,0) → (−400,0,0); distance to (100,0,0) = 500 m ⇒ now culled.
+            // Ry(180°): local (400,0,0) → (−400,0,0) ⇒ camera-relative (−500,0,0) ⇒ 500 m AHEAD of the camera.
             var ry180 = new float3x3(-1f, 0f, 0f,
                                       0f, 1f, 0f,
                                       0f, 0f, -1f);
             Assert.IsTrue(SymbolFarPlaneCull.IsCulled(anchor, Origin, ry180, cam, 400.0),
-                "180° rebase ⇒ 500 m from camera ⇒ culled (proves the rebase is applied)");
+                "180° rebase ⇒ 500 m ahead of the camera ⇒ culled (proves the rebase runs before the depth is taken)");
+        }
+
+        // Reproduces RaySphereFarPlane's per-corner ray-sphere cast for an arbitrary NDC offset (so it also
+        // reaches the edge midpoints), returning the near ground hit in IsCulled's camera-relative frame.
+        private static double3 GlobeGroundHit(double3 pos, double3 forward, double3 up, double3 right,
+            double tanV, double tanH, double sx, double sy, double radius)
+        {
+            double3 dir = math.normalize(new double3(
+                forward.x + sy * tanV * up.x + sx * tanH * right.x,
+                forward.y + sy * tanV * up.y + sx * tanH * right.y,
+                forward.z + sy * tanV * up.z + sx * tanH * right.z));
+            double3 centre = new double3(0.0, -radius, 0.0);
+            double3 oc = pos - centre;
+            double cc = math.dot(oc, oc) - radius * radius;
+            double b = math.dot(dir, oc);
+            double t = -b - math.sqrt(b * b - cc); // near ground hit
+            return pos + t * dir;
+        }
+
+        /// <summary>THE globe regression (UMR-239): with a straight-line cull radius, a top-down (tilt 0) camera
+        /// keeps only a small disc around the screen centre — every viewport corner and edge sits outside it. View
+        /// depth agrees with the far plane at every tilt, so the ground point under each survives, at tilt 0 and at
+        /// a representative non-zero tilt (30°), using <see cref="RaySphereFarPlane"/> for the cull distance (the
+        /// SAME far-clip formula the camera and tile selector use).</summary>
+        [Test]
+        public void GlobeViewportGroundPoints_SurviveTheViewDepthCull_AtTilt0AndTilt30()
+        {
+            const double zoom             = 13.0;
+            const double viewportHeightPx = 1080.0;
+            const double vfovDeg          = 60.0;
+            const double aspect           = 1920.0 / 1080.0;
+            double altitude = CameraPoseMath.AltitudeForZoom(zoom, viewportHeightPx, vfovDeg);
+            double radius = SphericalProjection.Radius;
+            var farPlanePolicy = new RaySphereFarPlane(radius);
+            double tanV = math.tan(Angle.FromDegrees(vfovDeg * 0.5).Radians);
+            double tanH = tanV * aspect;
+
+            // Named viewport points: the four corners plus the four edge midpoints. The screen centre is excluded
+            // — its ground hit sits far inside the cull distance at every tilt, so it proves nothing.
+            (string Name, double Sx, double Sy)[] viewportPoints =
+            {
+                ("TopLeft", -1.0, -1.0), ("Top", 0.0, -1.0), ("TopRight", 1.0, -1.0),
+                ("Right", 1.0, 0.0), ("BottomRight", 1.0, 1.0), ("Bottom", 0.0, 1.0),
+                ("BottomLeft", -1.0, 1.0), ("Left", -1.0, 0.0),
+            };
+
+            foreach (double tiltDeg in new[] { 0.0, 30.0 })
+            {
+                Angle tilt = Angle.FromDegrees(tiltDeg);
+                CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), tilt,
+                    out double3 pos, out double3 fwd, out double3 up);
+                double3 forward = math.normalize(fwd);
+                double3 right   = math.normalize(math.cross(forward, up));
+                double3 upAxis  = math.cross(right, forward);
+
+                double cullDistance = farPlanePolicy.FarMetres(altitude, tilt, vfovDeg, aspect);
+
+                foreach (var (name, sx, sy) in viewportPoints)
+                {
+                    double3 anchor = GlobeGroundHit(pos, forward, upAxis, right, tanV, tanH, sx, sy, radius);
+                    bool culled = SymbolFarPlaneCull.IsCulled(
+                        anchor, double3.zero, float3x3.identity, pos, cullDistance);
+                    Assert.IsFalse(culled,
+                        $"tilt {tiltDeg}°, viewport {name}: the ground point under it must survive the far-plane cull");
+                }
+            }
         }
 
         /// <summary>Pins <c>float3x3</c>'s 9-scalar constructor to the real Unity.Mathematics layout

@@ -1020,7 +1020,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Camera = new MapCamera(uCam, new CameraProperties(
                     new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
                 Origin = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 });
-                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
+                // CameraRelativePosition 1 m off the look-at, never AT it (see SymbolCullJobTests.CameraRelative,
+                // SymbolGatherParityTests.cs); negligible next to the far point's 1e8 offset and the near ones.
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity, CameraRelativePosition = new double3(-1.0, 0.0, 0.0) };
                 Atlas = BuildTinyAtlasTexture();
                 // Point symbols draw through the world path — needs its own world base
                 // material for the stability tooth to observe real world-mesh content.

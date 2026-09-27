@@ -834,7 +834,9 @@ namespace MapRenderer.Tests.Text.Placement
         // Shared per-frame scalars for every record in the fixture (one job dispatch = one frame's cull).
         private static readonly double3  SceneOriginRender    = double3.zero;
         private static readonly float3x3 Rebase               = float3x3.identity;
-        private static readonly double3  CameraRelative       = double3.zero;
+        // 1 m off the look-at on -X, never AT it — IsCulled reads camera forward as -CameraRelative, so a zero
+        // camera degrades the distance cull to "keep everything" (SymbolFarPlaneCull.IsCulled's doc).
+        private static readonly double3  CameraRelative       = new double3(-1, 0, 0);
         // A globe centred 1000m "in front of" the camera along -z, radius 500 (radius² = 250,000) — chosen so the
         // Horizon/Distance fixture anchors below sit CLEARLY (not near) the threshold on each side.
         private static readonly double3  GlobeCentreRelative  = new double3(0, 0, -1000);
@@ -1295,7 +1297,9 @@ namespace MapRenderer.Tests.Text.Placement
                     new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
                 Origin = cam.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
                 Projection = cam.Projection;
-                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
+                // CameraRelativePosition 1 m off the look-at, never AT it (see SymbolCullJobTests.CameraRelative).
+                // The far label's (1e8,0,1e8) offset still reads as a huge depth; others sit at Origin, kept regardless.
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity, CameraRelativePosition = new double3(-1.0, 0.0, 0.0) };
                 Atlas = BuildTinyAtlasTexture();
                 // Point symbols draw through the world path — the demo tick needs its own
                 // world base material for a live opacity/visibility read (see MaxAlpha's header).
@@ -1754,9 +1758,9 @@ namespace MapRenderer.Tests.Text.Placement
                     new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
                 Origin = Cam.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
                 Projection = Cam.Projection;
-                // CameraRelativePosition left at (0,0,0): the camera sits at the look-at, so a symbol's distance from
-                // the camera equals its render-space offset from the scene origin — the quantity the test controls.
-                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
+                // CameraRelativePosition 1 m off the look-at, never AT it (see SymbolCullJobTests.CameraRelative);
+                // negligible next to the cull distances below, so depth still reads as the offset from the origin.
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity, CameraRelativePosition = new double3(-1.0, 0.0, 0.0) };
                 Atlas = BuildTinyAtlasTexture();
                 System = new SymbolPlacementSystem(Cam, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }

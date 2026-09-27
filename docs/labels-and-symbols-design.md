@@ -414,10 +414,11 @@ per-anchor matrix-mul cost that dominates projection when the camera moves.
 **B-3 — Far-distance label culling (in `CullJob`).** In a tilted view the far half of the frustum compresses a
 huge ground area into a thin horizon band, where labels pile up, get collision-discarded, and jitter
 (projection is numerically unstable as depth → the far plane). So labels are culled **before** projecting,
-by render-space distance from the camera beyond `SymbolMaxDistanceFraction × CurrentFarMetres`. Labels want
-their own, tighter distance cut than the tile far-plane policy (`GeometryAwareFarPlane` /
-`RaySphereFarPlane`), because they stop being legible well before tiles stop drawing. This is the per-label
-radius companion to the per-tile coverage cull ("Tile-coverage pre-cull").
+by view depth from the camera beyond `SymbolMaxDistanceFraction × CurrentFarMetres` — the quantity Unity's own
+`farClipPlane` bounds, so the cull matches the GPU clip at every tilt. Labels want their own, tighter distance
+cut than the tile far-plane policy (`GeometryAwareFarPlane` / `RaySphereFarPlane`), because they stop being
+legible well before tiles stop drawing. This is the per-label depth cut companion to the per-tile coverage
+cull ("Tile-coverage pre-cull").
 
 **B-4 — Pipelined placement — the decision is decoupled from the render (`SymbolPlacementSystem`).** The
 collision runs in the frame "loophole" (the worker-thread time after LateUpdate, while the render thread

@@ -8,17 +8,18 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The PRE-projection symbol far-distance cull: in a tilted view, symbols near the horizon pile up, lose
     /// collision and jitter, so a symbol farther from the CAMERA than the cull distance skips staging. The caller
-    /// passes the distance as a fraction of the camera's far clip, so one knob works at every tilt and zoom (a
-    /// fixed radius around the look-at would cull almost nothing at high tilt). Distance is 3-D render-space
-    /// length, valid for plane and globe; the globe also has <see cref="HorizonCull"/>.
+    /// passes the distance as a fraction of the camera's far clip. The test is VIEW DEPTH, not straight-line
+    /// distance — Unity's <c>farClipPlane</c> bounds view depth, so this matches the GPU clip (a straight-line
+    /// radius shrank to a small disc at tilt 0). Valid for plane and globe; the globe also has <see cref="HorizonCull"/>.
     /// </summary>
     public static class SymbolFarPlaneCull
     {
         /// <summary>
-        /// True when <paramref name="repAnchorRender"/> is farther from the camera than
-        /// <paramref name="cullDistanceMeters"/> and should be skipped before projection. A non-positive distance
-        /// disables the cull (returns false for every symbol) — the safe fallback for a mis-wired caller (degrades
-        /// to "cull nothing" rather than culling everything). Compares squared distances (no sqrt) via <c>dot</c>.
+        /// True when <paramref name="repAnchorRender"/>'s view depth exceeds <paramref name="cullDistanceMeters"/>
+        /// and should be skipped before projection. Forward is <c>-cameraRelative</c> unnormalized
+        /// (<c>CameraPoseMath.ComputeRelativePose</c>'s <c>fwd = -pos/|pos|</c> invariant), scaling the comparison
+        /// by <c>|cameraRelative|</c> instead — one <c>sqrt</c>, not two. A camera AT the look-at (zero) keeps
+        /// everything, the same fallback as a non-positive distance.
         /// </summary>
         /// <param name="repAnchorRender">The symbol's representative anchor, PRE-RTC render space (the space
         /// <c>projection.Project(geo)</c> emits) — <c>SymbolBatch.RepAnchor</c>.</param>
@@ -46,7 +47,8 @@ namespace MapRenderer.Core.Text.Placement
             double3 p       = new double3(rebased.x, rebased.y, rebased.z);
 
             double3 d = p - cameraRelative;
-            return math.dot(d, d) > cullDistanceMeters * cullDistanceMeters;
+            double3 toLookAt = -cameraRelative; // ComputeRelativePose's fwd, unnormalized (fwd = toLookAt / |toLookAt|)
+            return math.dot(d, toLookAt) > cullDistanceMeters * math.length(toLookAt);
         }
     }
 }
