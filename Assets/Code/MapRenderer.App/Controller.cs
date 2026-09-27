@@ -175,22 +175,11 @@ namespace MapRenderer.App
                             _dragging      = true;
                         }
 
-                        // The globe uses a BOUNDED rotation solve — the planar affine anchored pan diverges near
-                        // the sphere's limb (spins the earth at low zoom). The planar path keeps ViewInput.ApplyPan.
-                        if (projection is SphericalProjection sphere)
-                        {
-                            GeoCoordinate3D newLookAt = sphere.PanLookAtForGrab(
-                                _grabbedGround, cursor, vp, Map.Camera.CurrentProperties);
-                            patch.Longitude = newLookAt.Longitude;
-                            patch.Latitude  = newLookAt.Latitude;
-                        }
-                        else
-                        {
-                            var pi = GestureIntent.Pan(_grabbedGround, cursor);
-                            CameraPropertiesUpdate pan = ViewInput.Apply(pi, view);
-                            patch.Longitude = pan.Longitude;
-                            patch.Latitude  = pan.Latitude;
-                        }
+                        // ViewInput.Apply picks the pan solve per projection.
+                        var pi = GestureIntent.Pan(_grabbedGround, cursor);
+                        CameraPropertiesUpdate pan = ViewInput.Apply(pi, view);
+                        patch.Longitude = pan.Longitude;
+                        patch.Latitude  = pan.Latitude;
                         anyChange = true;
                     }
                 }

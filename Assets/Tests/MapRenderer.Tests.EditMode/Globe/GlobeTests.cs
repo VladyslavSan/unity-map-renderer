@@ -288,17 +288,25 @@ namespace MapRenderer.Tests.Globe
 
             // The bounded solve over the same drag stays within a modest total.
             var cSolve = c;
-            double solveTravel = 0; prevLon = cSolve.LookAt.Longitude;
+            double solveTravel = 0;
             var prevLA = cSolve.LookAt;
             for (int i = 0; i < 30; i++)
             {
                 GeoCoordinate3D nla = proj.PanLookAtForGrab(grabbedGeo, cursor, Vp, cSolve);
+
+                // Apply routes the globe to this same solve.
+                var applied = ViewInput.Apply(GestureIntent.Pan(grabbedGeo, cursor),
+                    new ViewContext { Camera = cSolve, ViewportPx = Vp, Projection = proj });
+                Assert.AreEqual(nla.Longitude, applied.Longitude.Value, 1e-9, "Apply longitude must match the solve");
+                Assert.AreEqual(nla.Latitude,  applied.Latitude.Value,  1e-9, "Apply latitude must match the solve");
+
                 solveTravel += AngleDeg(proj, prevLA, nla);
                 prevLA = nla;
                 cSolve = new CameraProperties(nla, cSolve.Zoom, cSolve.Heading.Degrees, cSolve.Tilt.Degrees);
             }
 
             TestContext.WriteLine($"affine lon travel={affineTravel:F0}°, bounded solve travel={solveTravel:F0}°");
+            Assert.Greater(affineTravel, 1000.0, "the affine path really does spin (measured ~6317° over this drag)");
             Assert.Less(solveTravel, 360.0, "the bounded solve must not spin (total rotation < one turn)");
         }
 

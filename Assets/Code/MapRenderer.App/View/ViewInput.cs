@@ -26,9 +26,9 @@ namespace MapRenderer.App.View
                                                       intent.AnchorPx, view.ViewportPx,
                                                       intent.ZoomDelta, 1.0,
                                                       intent.MinZoom, intent.MaxZoom),
-                GestureKind.PanToAnchor  => ApplyPan(view.Projection, view.Camera,
-                                                     intent.GrabbedGround, intent.CursorPx,
-                                                     view.ViewportPx),
+                GestureKind.PanToAnchor  => ApplyPanToAnchor(view.Projection, view.Camera,
+                                                             intent.GrabbedGround, intent.CursorPx,
+                                                             view.ViewportPx),
                 GestureKind.HeadingBy    => ApplyHeadingDelta(view.Camera, intent.HeadingDeltaDeg),
                 GestureKind.TiltBy       => ApplyTiltDelta(view.Camera, intent.TiltDeltaDeg, intent.MaxPitch),
                 _                        => default,
@@ -106,8 +106,25 @@ namespace MapRenderer.App.View
         }
 
         /// <summary>
+        /// Pan-to-anchor dispatch: the globe pins <paramref name="grabbedGround"/> via the bounded rotation
+        /// solve because the planar affine <c>ApplyPan</c> diverges near the limb; every other projection
+        /// uses <c>ApplyPan</c>.
+        /// </summary>
+        private static CameraPropertiesUpdate ApplyPanToAnchor(IProjection projection, in CameraProperties current,
+            GeoCoordinate3D grabbedGround, double2 cursorPx, double2 viewportPx)
+        {
+            if (projection is SphericalProjection sphere)
+            {
+                GeoCoordinate3D lookAt = sphere.PanLookAtForGrab(grabbedGround, cursorPx, viewportPx, in current);
+                return new CameraPropertiesUpdate { Longitude = lookAt.Longitude, Latitude = lookAt.Latitude };
+            }
+            return ApplyPan(projection, in current, grabbedGround, cursorPx, viewportPx);
+        }
+
+        /// <summary>
         /// Anchored pan: keeps <paramref name="grabbedGround"/> (captured once at drag-start by the caller)
         /// pinned under <paramref name="cursorPx"/>. The camera bearing is accounted for by the projection.
+        /// This is the planar solve; it diverges near the globe's limb.
         /// Screen convention: +x right, +y up, origin bottom-left.
         /// </summary>
         /// <returns>A patch that sets <see cref="CameraPropertiesUpdate.Longitude"/> and
