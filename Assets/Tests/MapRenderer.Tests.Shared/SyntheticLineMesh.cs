@@ -34,14 +34,27 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Build a <see cref="Mesh"/> from a polyline with an explicit per-vertex baked <paramref name="color"/>
-        /// and <paramref name="widthScale"/> multiplier written into the real stream-3 <c>LineWidthColor</c>
-        /// interleave. Used by the LineWidthColor-flip falsifiability tooth.
+        /// and <paramref name="widthScale"/> multiplier written into the real stream-3 <c>LineVertexPaint</c>
+        /// interleave. Used by the LineVertexPaint-flip falsifiability tooth.
         /// </summary>
         public static Mesh BuildFromPoints(IReadOnlyList<double2> pts, Vector4 color, float widthScale,
             JoinType join = JoinType.Miter, CapType cap = CapType.Butt)
         {
             var result = FlatRibbon.Build(pts, join, cap);
-            return BuildFromRibbon(result, color, widthScale);
+            return BuildFromRibbon(result, color, widthScale, paintScaleOverride: null);
+        }
+
+        /// <summary>
+        /// Build a <see cref="Mesh"/> with an explicit per-vertex <paramref name="paintScale"/> (gap,
+        /// offset, blur-reserved, spare) baked into stream-3 — the only way to exercise the SHADER's
+        /// <c>input.paintScale</c> read without the full per-feature bake pipeline (which needs an
+        /// <see cref="MapRenderer.Core.Tiles.ITileCommandStreamFeature"/> this test assembly cannot build).
+        /// </summary>
+        public static Mesh BuildFromPoints(IReadOnlyList<double2> pts, Vector4 color, float widthScale,
+            half4 paintScale, JoinType join = JoinType.Miter, CapType cap = CapType.Butt)
+        {
+            var result = FlatRibbon.Build(pts, join, cap);
+            return BuildFromRibbon(result, color, widthScale, paintScale);
         }
 
         /// <summary>
@@ -71,7 +84,7 @@ namespace MapRenderer.Tests
             var s0 = new StyledLineTileBuilder.LinePositionNormal[totalV];
             var s1 = new Vector3[totalV];
             var s2 = new Vector2[totalV];
-            var s3 = new StyledLineTileBuilder.LineWidthColor[totalV];
+            var s3 = new StyledLineTileBuilder.LineVertexPaint[totalV];
             var indices = new int[totalI];
 
             var white = new Vector4(1f, 1f, 1f, 1f);
@@ -80,7 +93,7 @@ namespace MapRenderer.Tests
             foreach (var res in results)
             {
                 for (int i = 0; i < res.Vertices.Length; i++)
-                    WriteVertex(res.Vertices[i], white, null, s0, s1, s2, s3, vOff + i);
+                    WriteVertex(res.Vertices[i], white, null, IdentityPaintScale, s0, s1, s2, s3, vOff + i);
 
                 // Winding reversal happens once in Upload() (the shared chokepoint) — keep canonical here.
                 for (int i = 0; i < res.Indices.Length; i++)
@@ -92,11 +105,19 @@ namespace MapRenderer.Tests
             return Upload(s0, s1, s2, s3, indices);
         }
 
+        // The identity PaintScale every existing caller wants: gap/offset/blur-reserved all 1 (a no-op
+        // multiplier), spare 0. Every SyntheticLineMesh caller styles a Constant/Zoom gap/offset, whose
+        // uniform already carries the whole value.
+        private static readonly half4 IdentityPaintScale = new half4((half)1f, (half)1f, (half)1f, (half)0f);
+
         /// <summary>Builds a <see cref="Mesh"/> from a <see cref="RibbonJob"/> result, with an explicit
-        /// per-vertex baked <paramref name="color"/> and an optional <paramref name="widthScaleOverride"/>
-        /// (when null, the builder's per-vertex miter factor is used). Returns null when empty.</summary>
+        /// per-vertex baked <paramref name="color"/>, an optional <paramref name="widthScaleOverride"/>
+        /// (when null, the builder's per-vertex miter factor is used) and an optional
+        /// <paramref name="paintScaleOverride"/> (when null, <see cref="IdentityPaintScale"/>). Returns null
+        /// when empty.</summary>
         private static Mesh BuildFromRibbon(
-            (LineRibbonVertex[] Vertices, int[] Indices) result, Vector4 color, float? widthScaleOverride)
+            (LineRibbonVertex[] Vertices, int[] Indices) result, Vector4 color, float? widthScaleOverride,
+            half4? paintScaleOverride = null)
         {
             if (result.Vertices == null || result.Vertices.Length == 0) return null;
             if (result.Indices  == null || result.Indices.Length  == 0) return null;
@@ -106,10 +127,11 @@ namespace MapRenderer.Tests
             var s0 = new StyledLineTileBuilder.LinePositionNormal[vCount];
             var s1 = new Vector3[vCount];
             var s2 = new Vector2[vCount];
-            var s3 = new StyledLineTileBuilder.LineWidthColor[vCount];
+            var s3 = new StyledLineTileBuilder.LineVertexPaint[vCount];
+            half4 paintScale = paintScaleOverride ?? IdentityPaintScale;
 
             for (int i = 0; i < vCount; i++)
-                WriteVertex(result.Vertices[i], color, widthScaleOverride, s0, s1, s2, s3, i);
+                WriteVertex(result.Vertices[i], color, widthScaleOverride, paintScale, s0, s1, s2, s3, i);
 
             return Upload(s0, s1, s2, s3, result.Indices);
         }
@@ -117,9 +139,9 @@ namespace MapRenderer.Tests
         /// <summary>Writes one <see cref="LineRibbonVertex"/> into the four production line streams at
         /// index <paramref name="i"/> — the single place every build path interleaves a vertex.</summary>
         private static void WriteVertex(
-            LineRibbonVertex v, Vector4 color, float? widthScaleOverride,
+            LineRibbonVertex v, Vector4 color, float? widthScaleOverride, half4 paintScale,
             StyledLineTileBuilder.LinePositionNormal[] s0, Vector3[] s1, Vector2[] s2,
-            StyledLineTileBuilder.LineWidthColor[] s3, int i)
+            StyledLineTileBuilder.LineVertexPaint[] s3, int i)
         {
             s0[i] = new StyledLineTileBuilder.LinePositionNormal
             {
@@ -128,10 +150,11 @@ namespace MapRenderer.Tests
             };
             s1[i] = new Vector3((float)v.Across.x, (float)v.Across.y, (float)v.Across.z);
             s2[i] = new Vector2(v.Side, (float)v.DistanceAlong);
-            s3[i] = new StyledLineTileBuilder.LineWidthColor
+            s3[i] = new StyledLineTileBuilder.LineVertexPaint
             {
-                Color      = color,
-                WidthScale = widthScaleOverride.HasValue ? v.WidthScale * widthScaleOverride.Value : v.WidthScale,
+                Color         = color,
+                WidthScale    = widthScaleOverride.HasValue ? v.WidthScale * widthScaleOverride.Value : v.WidthScale,
+                GapOffsetBlur = paintScale,
             };
         }
 
@@ -139,7 +162,7 @@ namespace MapRenderer.Tests
         /// API, using the production <see cref="StyledLineTileBuilder.LineVertexDescriptors"/> layout.</summary>
         private static Mesh Upload(
             StyledLineTileBuilder.LinePositionNormal[] pn, Vector3[] ex, Vector2[] sd,
-            StyledLineTileBuilder.LineWidthColor[] wc, int[] indices)
+            StyledLineTileBuilder.LineVertexPaint[] wc, int[] indices)
         {
             int vCount = pn.Length;
             int iCount = indices.Length;
@@ -150,7 +173,7 @@ namespace MapRenderer.Tests
             var s0 = md.GetVertexData<StyledLineTileBuilder.LinePositionNormal>(0);
             var s1 = md.GetVertexData<Vector3>(1);
             var s2 = md.GetVertexData<Vector2>(2);
-            var s3 = md.GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
+            var s3 = md.GetVertexData<StyledLineTileBuilder.LineVertexPaint>(3);
             for (int i = 0; i < vCount; i++) { s0[i] = pn[i]; s1[i] = ex[i]; s2[i] = sd[i]; s3[i] = wc[i]; }
 
             md.SetIndexBufferParams(iCount, IndexFormat.UInt32);

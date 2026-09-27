@@ -144,11 +144,11 @@ namespace MapRenderer.Unity.Rendering.Layers
         {
             LayerInput input = Meshing.StyledLineTileBuilder.BuildLayerInput(
                 selected, geometry, _paint, _layout, context.Zoom, context.TileOriginRender,
-                out var colors, out var widths, context.Projection);
+                out var colors, out var paintScales, context.Projection);
             // The relocated emptiness gate — see FillRenderLayer.BuildGraphRequest's own comment; line's own
             // discriminator is FeatureSelected, not RingVisitOrder (LayerInput has no such field).
             if (!input.FeatureSelected.IsCreated) return null;
-            return Meshing.LineLayerBuild.Rent(input, colors, widths, materialIndex, payloadName);
+            return Meshing.LineLayerBuild.Rent(input, colors, paintScales, materialIndex, payloadName);
         }
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);

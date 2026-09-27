@@ -125,9 +125,11 @@ Shader "Map/Line"
         _LineTranslateAnchor ("Translate Anchor", Float) = 0.0
         // line-pattern hook — 0 = solid color fallback, 1 = pattern (no pass samples it; renders solid).
         _LinePattern    ("Line Pattern (hook)", Float) = 0.0
-        // line-dasharray — on/off lengths in line-width units (up to 4 values packed into a Vector).
-        // _DashCount = 0 → solid identity (no dashing). _DashCount = 2 → [on, off] pair, etc.
-        _DashArray      ("Dash Array (4 on/off, width units)", Vector) = (0,0,0,0)
+        // line-dasharray — on/off lengths in line-width units, up to 8 values packed into two Vectors.
+        // _DashCount = 0 → solid identity (no dashing). _DashCount = 2 → [on, off] pair, etc. An odd
+        // count repeats over double its length with parity flipped (LineDash.DashCoverage).
+        _DashArray      ("Dash Array (entries 0-3, width units)", Vector) = (0,0,0,0)
+        _DashArray2     ("Dash Array 2 (entries 4-7, width units)", Vector) = (0,0,0,0)
         _DashCount      ("Dash Entry Count", Float) = 0.0
         // line-offset — perpendicular band-center shift in pixels (same units as _Width).
         // 0 = no shift (default). Positive = left of travel direction.

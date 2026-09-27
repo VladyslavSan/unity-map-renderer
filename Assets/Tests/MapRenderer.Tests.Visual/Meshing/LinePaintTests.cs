@@ -2,7 +2,7 @@
 // `Object` collisions: this file holds the UnityEngine.Rendering importers that also import System.
 //
 // Contents:
-//   LineStreamLayoutTests           — canonical vertex layout + LineWidthColor flip teeth.
+//   LineStreamLayoutTests           — canonical vertex layout + LineVertexPaint flip teeth.
 //   LinePaintSnapshotTests          — acceptance snapshot tests for line paint GPU behavior (Teeth #3, #4, #5).
 //   LineProbeSymmetrySnapshotTests  — Same load-bearing production-seam fixture shape as LineDashSnapshotTests, for _Width/_LineOffset arriving in device px via MaterialFactory.BindDevicePixelFloat.
 
@@ -28,11 +28,11 @@ namespace MapRenderer.Tests.Visual
     // NOT included in Tools/core-tests/core-tests.csproj.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LineStreamLayoutTests — canonical vertex layout + LineWidthColor flip teeth.
+    // LineStreamLayoutTests — canonical vertex layout + LineVertexPaint flip teeth.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Canonical vertex layout + LineWidthColor teeth. Tooth A renders through the REAL stream-3 interleave:
+    /// Canonical vertex layout + LineVertexPaint teeth. Tooth A renders through the REAL stream-3 interleave:
     /// a baked CYAN colour must read cyan-dominant, and WidthScale=2 must double the band. A {WidthScale;
     /// Color} struct order would read MAGENTA and a unit width. Tooth B uploads a fill and a line mesh and
     /// asserts no "non-standard order" warning (GPU-independent). Camera: top-down ortho 512×512, Y=200,
@@ -54,7 +54,7 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth A: color sub-tooth ─────────────────────────────────────────────
 
         [Test]
-        public void LineWidthColor_BakedVertexColor_RendersThroughStream3()
+        public void LineVertexPaint_BakedVertexColor_RendersThroughStream3()
         {
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Visual
                 // magenta (r max) → this fails.
                 Assert.That(g, Is.GreaterThan(r + 20),
                     $"Baked CYAN vertex colour must render green-dominant (g={g} > r={r}). " +
-                    "If r dominates, stream-3 LineWidthColor channels are scrambled (the flip regressed).");
+                    "If r dominates, stream-3 LineVertexPaint channels are scrambled (the flip regressed).");
                 Assert.That(b, Is.GreaterThan(r + 20),
                     $"Baked CYAN vertex colour must render blue-dominant (b={b} > r={r}).");
             }
@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth A: width sub-tooth (non-unit WidthScale through stream-3) ──────
 
         [Test]
-        public void LineWidthColor_NonUnitWidthScale_DoublesBandWidth()
+        public void LineVertexPaint_NonUnitWidthScale_DoublesBandWidth()
         {
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
@@ -510,6 +510,221 @@ namespace MapRenderer.Tests.Visual
                     $"(filledFraction={hollowVerdict.FilledFraction:P2} must be > 0.2%). " +
                     "With gap=20px and width=4px, the outer casing bands should be visible.");
             }
+        }
+
+        // ── Data-driven line-gap-width / line-offset reach the shader via PaintScale ─────────────────
+
+        /// <summary>Build a horizontal line with an explicit per-vertex PaintScale, mirroring the real
+        /// data-driven route: the uniform is bound to a device-px 1 (MaterialFactory's DependsOnFeature
+        /// arm) and the styled value rides the vertex lane instead — the only way to prove the SHADER
+        /// reads <c>input.paintScale</c>, not just that the CPU bake computed the right number.</summary>
+        private static (GameObject go, Material mat) BuildHorizontalLineWithPaintScale(half4 paintScale)
+        {
+            var pts = new List<double2> { new double2(-40, 0), new double2(40, 0) };
+            var mesh = SyntheticLineMesh.BuildFromPoints(
+                pts, new Vector4(1f, 1f, 1f, 1f), 1f, paintScale, JoinType.Miter, CapType.Butt);
+
+            var go = new GameObject("HLine_PaintScaleSnap");
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
+            var mat = new Material(shader) { name = "PaintScaleSnapMat" };
+            mat.SetFloat("_Width",          LineWidthPx);
+            mat.SetFloat("_WidthIsPixels",  1f);
+            mat.SetFloat("_GapWidth",       1f); // data-driven uniform base (MaterialFactory's DependsOnFeature arm)
+            mat.SetFloat("_LineOffset",     1f); // same reasoning
+            mat.SetColor("_BaseColor",       new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetFloat("_Opacity",        1f);
+            mat.SetVector("_LineTranslate", Vector4.zero);
+            mat.SetFloat("_LinePattern",    0f);
+
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            return (go, mat);
+        }
+
+        /// <summary>Coverage-weighted centroid row of the band on <paramref name="col"/>, in screen px.</summary>
+        private static float CoverageCentroidRow(Frame frame, int col, int approxCenterRow, float3 background)
+        {
+            const int span = 20;
+            int rowFrom = approxCenterRow - span, rowTo = approxCenterRow + span;
+            float3 plateau = PixelCoverage.PlateauOnColumn(frame, col, rowFrom, rowTo, background);
+            float[] profile = PixelCoverage.CoverageProfileOnColumn(frame, col, rowFrom, rowTo, background, plateau);
+            float sumW = 0f, sumWR = 0f;
+            for (int i = 0; i < profile.Length; i++) { sumW += profile[i]; sumWR += profile[i] * (rowFrom + i); }
+            Assert.Greater(sumW, 0.5f, "precondition: the coverage profile must find a real band, not pure background.");
+            return sumWR / sumW;
+        }
+
+        [Test]
+        public void DataDrivenGapWidth_ShaderMultipliesByPerVertexPaintScale()
+        {
+            // PaintScale.x is the gap lane; _GapWidth is bound to 1 (the real data-driven uniform base), so
+            // gapWorld = 1 * paintScale.x * pxToWorld — deleting `* input.paintScale.x` from the shader
+            // would leave both renders solid, because 1 alone (no vertex multiply) is not enough gap to
+            // hollow a 4px line at this scale.
+            var (cameraGo, camera) = BuildCamera();
+            Track(cameraGo);
+
+            var (goSolid, matSolid) = BuildHorizontalLineWithPaintScale(new half4((half)0f, (half)1f, (half)1f, (half)0f));
+            Track(goSolid); Track(matSolid); Track(goSolid.GetComponent<MeshFilter>().sharedMesh);
+
+            using var snapSolid  = new SnapshotRenderer(SnapW, SnapH);
+            using var snapHollow = new SnapshotRenderer(SnapW, SnapH);
+
+            snapSolid.Render(camera);
+            int col = SnapW / 2;
+            int row = FindLineCenterRow(snapSolid.Pixels, col);
+            Assert.GreaterOrEqual(row, 0, "precondition: the gap=0 line must be found on screen.");
+
+            float3 background = PixelCoverage.BackgroundLinear(snapSolid.Pixels);
+            float3 plateauSolid = PixelCoverage.PlateauOnColumn(snapSolid.Pixels, col, row - 4, row + 4, background);
+            float coverageSolid = PixelCoverage.CoverageAt(snapSolid.Pixels, col, row, background, plateauSolid);
+            Assert.GreaterOrEqual(coverageSolid, 0.9f,
+                $"PaintScale.x = 0 (no gap) must be near-fully covered at the centreline (got {coverageSolid:F3}).");
+
+            goSolid.SetActive(false);
+            var (goHollow, matHollow) = BuildHorizontalLineWithPaintScale(new half4((half)6f, (half)1f, (half)1f, (half)0f));
+            Track(goHollow); Track(matHollow); Track(goHollow.GetComponent<MeshFilter>().sharedMesh);
+
+            snapHollow.Render(camera);
+            float3 plateauHollow = PixelCoverage.PlateauOnColumn(snapHollow.Pixels, col, row - 4, row + 4, background);
+            float coverageHollow = PixelCoverage.CoverageAt(snapHollow.Pixels, col, row, background, plateauHollow);
+            Assert.LessOrEqual(coverageHollow, 0.1f,
+                $"PaintScale.x = 6 (gap) must hollow the centreline (got {coverageHollow:F3}).");
+        }
+
+        [Test]
+        public void DataDrivenOffset_ShaderMultipliesByPerVertexPaintScale()
+        {
+            // PaintScale.y is the offset lane; _LineOffset is bound to 1 (the real data-driven uniform
+            // base). BuildCamera's orthoSize/SnapH ratio equals MetersPerPx, the pushed frame constant, so
+            // 1 device px (dpr 1) == MetersPerPx world metres == exactly 1 screen px here — an 8 px offset
+            // must shift the band's coverage centroid by exactly 8 screen px.
+            var (cameraGo, camera) = BuildCamera();
+            Track(cameraGo);
+
+            var (goZero, matZero) = BuildHorizontalLineWithPaintScale(new half4((half)1f, (half)0f, (half)1f, (half)0f));
+            Track(goZero); Track(matZero); Track(goZero.GetComponent<MeshFilter>().sharedMesh);
+
+            using var snapZero  = new SnapshotRenderer(SnapW, SnapH);
+            using var snapEight = new SnapshotRenderer(SnapW, SnapH);
+
+            snapZero.Render(camera);
+            int col = SnapW / 2;
+            int rowZero = FindLineCenterRow(snapZero.Pixels, col);
+            Assert.GreaterOrEqual(rowZero, 0, "precondition: the offset=0 line must be found on screen.");
+
+            float3 background = PixelCoverage.BackgroundLinear(snapZero.Pixels);
+            float centroidZero = CoverageCentroidRow(snapZero.Pixels, col, rowZero, background);
+
+            goZero.SetActive(false);
+            var (goEight, matEight) = BuildHorizontalLineWithPaintScale(new half4((half)1f, (half)8f, (half)1f, (half)0f));
+            Track(goEight); Track(matEight); Track(goEight.GetComponent<MeshFilter>().sharedMesh);
+
+            snapEight.Render(camera);
+            int rowEight = FindLineCenterRow(snapEight.Pixels, col);
+            Assert.GreaterOrEqual(rowEight, 0, "precondition: the offset=8 line must be found on screen.");
+            float centroidEight = CoverageCentroidRow(snapEight.Pixels, col, rowEight, background);
+
+            float shiftPx = math.abs(centroidEight - centroidZero);
+            Assert.That(shiftPx, Is.EqualTo(8f).Within(0.5f),
+                $"PaintScale.y = 8 must shift the band's coverage centroid by 8 screen px (got {shiftPx:F3}).");
+        }
+
+        // ── Data-driven line-blur reaches the shader via a NOINTERPOLATION blurPx varying ────────────
+
+        // Half-width (50px) must exceed the blur test value's feather reach (~15px for blurScale=24, see
+        // below), or the ribbon runs out of room before the smoothstep saturates and the "plateau" sample
+        // near the centreline is itself dimmed — silently distorting every coverage reading off it.
+        private const float BlurLineWidthPx = 100f;
+
+        /// <summary>Build a horizontal line with an explicit per-vertex blur scale (paintScale.z), mirroring
+        /// the real data-driven route: <c>_Blur</c> is bound to a device-px 1 and the styled value rides
+        /// blurPx instead. Gap/offset stay at their true Constant defaults (0) — this tooth isolates blur.</summary>
+        private static (GameObject go, Material mat) BuildHorizontalLineWithBlur(float blurScale)
+        {
+            var pts = new List<double2> { new double2(-40, 0), new double2(40, 0) };
+            var mesh = SyntheticLineMesh.BuildFromPoints(
+                pts, new Vector4(1f, 1f, 1f, 1f), 1f,
+                new half4((half)1f, (half)1f, (half)blurScale, (half)0f), JoinType.Miter, CapType.Butt);
+
+            var go = new GameObject("HLine_BlurSnap");
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
+            var mat = new Material(shader) { name = "BlurSnapMat" };
+            mat.SetFloat("_Width",          BlurLineWidthPx);
+            mat.SetFloat("_WidthIsPixels",  1f);
+            mat.SetFloat("_GapWidth",       0f);
+            mat.SetFloat("_LineOffset",     0f);
+            mat.SetFloat("_Blur",           1f); // data-driven uniform base (MaterialFactory's DependsOnFeature arm)
+            mat.SetColor("_BaseColor",       new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetFloat("_Opacity",        1f);
+            mat.SetVector("_LineTranslate", Vector4.zero);
+            mat.SetFloat("_LinePattern",    0f);
+
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            return (go, mat);
+        }
+
+        /// <summary>Rows from <paramref name="centerRow"/> to the first ≥0.9→≤0.1 coverage crossing walking
+        /// OUTWARD (increasing row): the width, in screen px, of the outer edge's AA/blur feather.</summary>
+        private static int OuterEdgeFeatherWidthPx(Frame frame, int col, int centerRow, int searchSpan, float3 background)
+        {
+            float3 plateau = PixelCoverage.PlateauOnColumn(frame, col, centerRow - 2, centerRow + 2, background);
+            float[] profile = PixelCoverage.CoverageProfileOnColumn(frame, col, centerRow, centerRow + searchSpan, background, plateau);
+
+            int rowA = -1, rowB = -1;
+            for (int i = 0; i < profile.Length; i++)
+            {
+                if (rowA < 0 && profile[i] <= 0.9f) rowA = i;
+                else if (rowA >= 0 && profile[i] <= 0.1f) { rowB = i; break; }
+            }
+            Assert.GreaterOrEqual(rowA, 0,
+                $"precondition: must find a ≥0.9 coverage row within {searchSpan} rows of the centreline.");
+            Assert.GreaterOrEqual(rowB, 0,
+                $"precondition: must find a ≤0.1 coverage row within {searchSpan} rows of the centreline.");
+            return rowB - rowA;
+        }
+
+        [Test]
+        public void DataDrivenBlur_ShaderFeathersTheOuterEdgeByPerVertexPaintScale()
+        {
+            var (cameraGo, camera) = BuildCamera();
+            Track(cameraGo);
+
+            var (goHard, matHard) = BuildHorizontalLineWithBlur(blurScale: 0f);
+            Track(goHard); Track(matHard); Track(goHard.GetComponent<MeshFilter>().sharedMesh);
+
+            using var snapHard    = new SnapshotRenderer(SnapW, SnapH);
+            using var snapBlurred = new SnapshotRenderer(SnapW, SnapH);
+
+            snapHard.Render(camera);
+            int col = SnapW / 2;
+            int centerRow = FindLineCenterRow(snapHard.Pixels, col);
+            Assert.GreaterOrEqual(centerRow, 0, "precondition: the blur=0 line must be found on screen.");
+
+            float3 background = PixelCoverage.BackgroundLinear(snapHard.Pixels);
+            int hardSpan = OuterEdgeFeatherWidthPx(snapHard.Pixels, col, centerRow, searchSpan: 90, background);
+            Assert.LessOrEqual(hardSpan, 3, $"precondition: the un-blurred edge must be a narrow AA ramp (got {hardSpan}px).");
+
+            // The shader's blur term is coverage *= smoothstep(0, blurPx, distance-in-px-from-the-edge), and a
+            // smoothstep's 10%-90% response only covers ~61% of its nominal domain (solving 3x²-2x³ = 0.1 and
+            // 0.9 gives x ≈ 0.1958 and 0.8042, a span of 0.608) — so a blurScale of 24 reads as ≈14.6 px wide,
+            // not 24, and a small blurScale would be lost in that same compression plus the hard edge's own
+            // ~1 px ramp.
+            goHard.SetActive(false);
+            var (goBlurred, matBlurred) = BuildHorizontalLineWithBlur(blurScale: 24f);
+            Track(goBlurred); Track(matBlurred); Track(goBlurred.GetComponent<MeshFilter>().sharedMesh);
+
+            snapBlurred.Render(camera);
+            int blurredSpan = OuterEdgeFeatherWidthPx(snapBlurred.Pixels, col, centerRow, searchSpan: 90, background);
+
+            // 0.608 × 24 ≈ 14.6 px; a lane/scale mixup (e.g. reading gap's or offset's lane, or a ×2/÷2 slip)
+            // would land far outside this window rather than merely short of it.
+            Assert.That(blurredSpan, Is.InRange(10, 20),
+                $"PaintScale.z = 24 must feather the outer edge to ≈14.6 px (hard span={hardSpan}px, " +
+                $"blurred span={blurredSpan}px).");
         }
 
         // ── Tooth #4: _LineTranslate shifts ribbon position in image pixels ───

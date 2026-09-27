@@ -4,6 +4,11 @@ using MapRenderer.Core.Json;
 
 namespace MapRenderer.Unity.Style
 {
+    /// <summary>Projects an evaluated number array straight into <typeparamref name="T"/> — a dedicated
+    /// delegate, not <c>Func&lt;ReadOnlySpan&lt;double&gt;, T&gt;</c>, because a ref struct like
+    /// <see cref="ReadOnlySpan{T}"/> cannot be a generic type argument (CS0306).</summary>
+    public delegate T SpanProjector<T>(ReadOnlySpan<double> values);
+
     /// <summary>
     /// A single parsed MapLibre paint or layout property, typed to <typeparamref name="T"/>: one parsed
     /// <see cref="Expression"/>, a typed default, and a <c>Value → T</c> projection delegate. A constant
@@ -14,6 +19,11 @@ namespace MapRenderer.Unity.Style
     {
         private readonly Expression _expr;      // null when property was absent
         private readonly Func<Value, T> _project;
+        // Optional fast path for a NUMBER-ARRAY-shaped property (line-dasharray, *-translate): projects
+        // straight from the interpolated numbers, so a per-frame Zoom-kind evaluation never builds a Value
+        // array (Expression.TryEvaluateNumberArray). Null for every property that does not supply one —
+        // the general Value-based _project path is unaffected.
+        private readonly SpanProjector<T> _projectSpan;
         private readonly bool _isConstant;
         private readonly T _cached;             // cached projected value for constants
 
@@ -41,12 +51,19 @@ namespace MapRenderer.Unity.Style
         /// <param name="json">The JSON value of the paint/layout property.</param>
         /// <param name="defaultValue">The typed default to return when the property is absent.</param>
         /// <param name="project">Maps a runtime <see cref="Value"/> to <typeparamref name="T"/>.</param>
+        /// <param name="projectSpan">Optional zero-allocation fast path for a number-array-shaped property:
+        /// projects the interpolated numbers directly. Leave null for every property whose <typeparamref
+        /// name="T"/> is not built from a number array.</param>
+        /// <param name="interpolatable">The Style Spec "interpolate" marker for this property: a legacy
+        /// function with no "type" steps when false, instead of the usual exponential ramp.</param>
         /// <exception cref="ExpressionParseException">If <paramref name="json"/> is not a valid expression.</exception>
-        public StyleProperty(JsonValue json, T defaultValue, Func<Value, T> project)
+        public StyleProperty(JsonValue json, T defaultValue, Func<Value, T> project,
+            SpanProjector<T> projectSpan = null, bool interpolatable = true)
         {
             DefaultValue = defaultValue;
             _project = project;
-            _expr = ExpressionParser.Parse(json);
+            _projectSpan = projectSpan;
+            _expr = ExpressionParser.Parse(json, interpolatable);
             _isConstant = (_expr.Kind == ExpressionKind.Constant);
             if (_isConstant)
                 _cached = EvalProjected(0.0, null);
@@ -120,9 +137,21 @@ namespace MapRenderer.Unity.Style
 
         // ── Internal helpers ──────────────────────────────────────────────────────────────────
 
+        // *-translate (the only projectSpan user today) needs 2; sized generously for a future
+        // number-array-shaped property. line-dasharray does not go through StyleProperty<T> at all — see
+        // LineDash.TryEvaluatePattern, which calls Expression.TryEvaluateNumberArray directly.
+        private const int MaxSpanEntries = 8;
+
         private T EvalProjected(double zoom, IFeature feature)
         {
-            var v = _expr.Evaluate(new EvaluationContext(zoom, feature));
+            var context = new EvaluationContext(zoom, feature);
+            if (_projectSpan != null)
+            {
+                Span<double> buffer = stackalloc double[MaxSpanEntries];
+                if (_expr.TryEvaluateNumberArray(context, buffer, out int count))
+                    return _projectSpan(buffer.Slice(0, count));
+            }
+            var v = _expr.Evaluate(context);
             return _project(v);
         }
     }

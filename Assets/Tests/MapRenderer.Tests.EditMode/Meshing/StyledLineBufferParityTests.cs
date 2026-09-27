@@ -1277,5 +1277,179 @@ namespace MapRenderer.Tests.Meshing
                     MvtCommandStream.Ring(400, 2000, 1600, 2000),
                     MvtCommandStream.Ring(700, 2500, 2400, 2500))),
         };
+
+        /// <summary>
+        /// A legacy identity function on line-width classifies as Feature-kind (data-driven), so
+        /// BuildLayerInput must bake the feature's own value into the width column — the same route a
+        /// modern <c>["get","w"]</c> already takes.
+        /// </summary>
+        [Test]
+        public void WidthColumn_LegacyIdentityFunction_BakesTheFeatureValue()
+        {
+            var feature = new DictionaryFeature(
+                properties:   new Dictionary<string, Value> { ["w"] = Value.Number(7.0) },
+                geometryType: TileGeometryType.LineString,
+                geometry:     MvtCommandStream.Feature(MvtCommandStream.Ring(400, 500, 1200, 500)));
+            var features = new List<IFeature> { feature };
+
+            var paint = TestStyle.LinePaint(@"{""line-width"": {""type"":""identity"",""property"":""w""}}");
+            Assert.IsTrue(paint.Width.DependsOnFeature, "precondition: an identity function is data-driven");
+
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            try
+            {
+                LayerInput input = StyledLineTileBuilder.BuildLayerInput(
+                    TestTileMeshBuilder.Selection(features), geometry, paint, TestStyle.LineLayout(),
+                    Zoom, double3.zero, out NativeArray<Vector4> _, out NativeArray<float4> featurePaintScales);
+                try
+                {
+                    Assert.AreEqual(7f, featurePaintScales[0].x, 1e-6f);
+                }
+                finally
+                {
+                    if (featurePaintScales.IsCreated) featurePaintScales.Dispose();
+                    if (input.FeatureSelected.IsCreated) input.FeatureSelected.Dispose();
+                }
+            }
+            finally
+            {
+                geometry.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Data-driven line-gap-width/line-offset/line-blur bake into PaintScale.y/z/w: a present key bakes
+        /// its evaluated value (clamped to >= 0 for gap and blur; signed, unclamped for offset), and a MISSING
+        /// key bakes the property's own default (0), not the (1,1,1,1) uniform-identity preset — a data-driven
+        /// property whose uniform is bound to 1 must not also read 1 from the vertex on a failed per-feature eval.
+        /// </summary>
+        [Test]
+        public void GapAndOffsetColumns_DataDriven_BakePerFeatureValues_MissingKeyBakesTheirOwnDefault()
+        {
+            var withKeys = new DictionaryFeature(
+                properties:   new Dictionary<string, Value> { ["g"] = Value.Number(4.0), ["o"] = Value.Number(-3.0), ["b"] = Value.Number(2.0) },
+                geometryType: TileGeometryType.LineString,
+                geometry:     MvtCommandStream.Feature(MvtCommandStream.Ring(400, 500, 1200, 500)));
+            var missingKeys = new DictionaryFeature(
+                properties:   new Dictionary<string, Value>(),
+                geometryType: TileGeometryType.LineString,
+                geometry:     MvtCommandStream.Feature(MvtCommandStream.Ring(400, 1500, 1200, 1500)));
+            var features = new List<IFeature> { withKeys, missingKeys };
+
+            var paint = TestStyle.LinePaint(
+                @"{""line-gap-width"": [""get"",""g""], ""line-offset"": [""get"",""o""], ""line-blur"": [""get"",""b""]}");
+            Assert.IsTrue(paint.GapWidth.DependsOnFeature, "precondition: line-gap-width is data-driven");
+            Assert.IsTrue(paint.Offset.DependsOnFeature, "precondition: line-offset is data-driven");
+            Assert.IsTrue(paint.Blur.DependsOnFeature, "precondition: line-blur is data-driven");
+
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            try
+            {
+                LayerInput input = StyledLineTileBuilder.BuildLayerInput(
+                    TestTileMeshBuilder.Selection(features), geometry, paint, TestStyle.LineLayout(),
+                    Zoom, double3.zero, out NativeArray<Vector4> _, out NativeArray<float4> featurePaintScales);
+                try
+                {
+                    Assert.AreEqual(4f, featurePaintScales[0].y, 1e-6f, "gap present: bakes the evaluated value");
+                    Assert.AreEqual(-3f, featurePaintScales[0].z, 1e-6f, "offset present: signed, not clamped");
+                    Assert.AreEqual(2f, featurePaintScales[0].w, 1e-6f, "blur present: bakes the evaluated value");
+                    Assert.AreEqual(0f, featurePaintScales[1].y, 1e-6f,
+                        "gap missing: the property's OWN default (0), not the (1,1,1,1) uniform-identity preset");
+                    Assert.AreEqual(0f, featurePaintScales[1].z, 1e-6f, "offset missing: same reasoning");
+                    Assert.AreEqual(0f, featurePaintScales[1].w, 1e-6f, "blur missing: same reasoning");
+                }
+                finally
+                {
+                    if (featurePaintScales.IsCreated) featurePaintScales.Dispose();
+                    if (input.FeatureSelected.IsCreated) input.FeatureSelected.Dispose();
+                }
+            }
+            finally
+            {
+                geometry.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// A CONSTANT line-gap-width bakes the (1,1,1,1) identity on every feature — RED for a bake that
+        /// also writes constant values, which would square them against the bound uniform.
+        /// </summary>
+        [Test]
+        public void GapColumn_Constant_BakesIdentityOnEveryFeature()
+        {
+            var feature = new DictionaryFeature(
+                properties:   new Dictionary<string, Value>(),
+                geometryType: TileGeometryType.LineString,
+                geometry:     MvtCommandStream.Feature(MvtCommandStream.Ring(400, 500, 1200, 500)));
+            var features = new List<IFeature> { feature };
+
+            var paint = TestStyle.LinePaint(@"{""line-gap-width"": 5}");
+            Assert.IsFalse(paint.GapWidth.DependsOnFeature, "precondition: a constant is not data-driven");
+
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            try
+            {
+                LayerInput input = StyledLineTileBuilder.BuildLayerInput(
+                    TestTileMeshBuilder.Selection(features), geometry, paint, TestStyle.LineLayout(),
+                    Zoom, double3.zero, out NativeArray<Vector4> _, out NativeArray<float4> featurePaintScales);
+                try
+                {
+                    Assert.AreEqual(1f, featurePaintScales[0].y, 1e-6f);
+                }
+                finally
+                {
+                    if (featurePaintScales.IsCreated) featurePaintScales.Dispose();
+                    if (input.FeatureSelected.IsCreated) input.FeatureSelected.Dispose();
+                }
+            }
+            finally
+            {
+                geometry.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Through the REAL write job (<see cref="SyncMeshWrite.Line"/>, not a hand-built stream): the
+        /// mesh's GapOffsetBlur attribute on every vertex equals its feature's baked gap/offset/blur column value.
+        /// </summary>
+        [Test]
+        public void PaintScaleStream_ThroughTheRealWriteJob_MatchesTheFeatureColumn()
+        {
+            var feature = new DictionaryFeature(
+                properties:   new Dictionary<string, Value> { ["g"] = Value.Number(4.0), ["o"] = Value.Number(-3.0), ["b"] = Value.Number(2.0) },
+                geometryType: TileGeometryType.LineString,
+                geometry:     MvtCommandStream.Feature(MvtCommandStream.Ring(400, 500, 1200, 500)));
+            var features = new List<IFeature> { feature };
+            var paint = TestStyle.LinePaint(
+                @"{""line-gap-width"": [""get"",""g""], ""line-offset"": [""get"",""o""], ""line-blur"": [""get"",""b""]}");
+
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            try
+            {
+                var mda = Mesh.AllocateWritableMeshData(1);
+                try
+                {
+                    SyncMeshWrite.Line(mda[0], TestTileMeshBuilder.Selection(features), geometry, paint,
+                        TestStyle.LineLayout(), Zoom, double3.zero, out int vertexCount, out Bounds _);
+                    Assert.Greater(vertexCount, 0, "precondition: the line must produce real geometry");
+
+                    var stream3 = mda[0].GetVertexData<StyledLineTileBuilder.LineVertexPaint>(3);
+                    for (int i = 0; i < vertexCount; i++)
+                    {
+                        Assert.AreEqual(4f, (float)stream3[i].GapOffsetBlur.x, 1e-3f, $"vertex {i}: gap lane");
+                        Assert.AreEqual(-3f, (float)stream3[i].GapOffsetBlur.y, 1e-3f, $"vertex {i}: offset lane");
+                        Assert.AreEqual(2f, (float)stream3[i].GapOffsetBlur.z, 1e-3f, $"vertex {i}: blur lane");
+                    }
+                }
+                finally
+                {
+                    mda.Dispose();
+                }
+            }
+            finally
+            {
+                geometry.Dispose();
+            }
+        }
     }
 }

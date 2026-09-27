@@ -29,6 +29,8 @@
 struct LineDepthOnlyVaryings
 {
     float3 uv           : TEXCOORD0;   // LINE DELTA: (dashU, side, innerFrac) — ribbon coverage clip
+    // LINE DELTA: per-feature blur scale (device px), NOINTERPOLATION — see Line_LitForwardPass.hlsl.
+    nointerpolation float blurPx : TEXCOORD1;
     float4 positionCS   : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
@@ -42,13 +44,14 @@ LineDepthOnlyVaryings LineDepthOnlyVertex(LineAttributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     // LINE DELTA: world-space ribbon extrusion replaces the direct position transform.
-    float side, innerFrac, dashU;
+    float side, innerFrac, dashU, blurPx;
     float4 tangentOS_unused;
     float hairlineScale_unused;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale_unused);
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale_unused, blurPx);
 
     output.positionCS = TransformObjectToHClip(posOS);
     output.uv = float3(dashU, side, innerFrac);
+    output.blurPx = blurPx;
     return output;
 }
 
@@ -58,7 +61,7 @@ half LineDepthOnlyFragment(LineDepthOnlyVaryings input) : SV_TARGET
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     // LINE DELTA: ribbon-silhouette coverage clip (replaces the _ALPHATEST_ON alpha test).
-    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x) - 0.5);
+    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x, input.blurPx) - 0.5);
 
     #if defined(LOD_FADE_CROSSFADE)
         LODFadeCrossFade(input.positionCS);

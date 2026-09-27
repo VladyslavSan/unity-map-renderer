@@ -99,7 +99,9 @@ namespace MapRenderer.Tests
                 TextSizePx = textSizePx, PaddingPx = symbol.PaddingPx, SortKey = symbol.SortKey,
                 FeatureIndex = symbol.FeatureIndex, TileKey = symbol.TileKey, Slot = 0,
                 AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
-                TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
+                // TranslatePx left at its zero default: it is per-slot/per-frame (StageJob), not carried by
+                // SymbolFeature — a caller that needs one sets it on the returned PointStageInput directly.
+                TranslateAnchor = symbol.TranslateAnchor,
                 RotationAlignment = symbol.RotationAlignment, Color = new float4(1, 1, 1, 1),
                 AtlasKind = atlasKind,
                 PairOptional = symbol.PairOptional, // mirrors BuildPointInput's own carry

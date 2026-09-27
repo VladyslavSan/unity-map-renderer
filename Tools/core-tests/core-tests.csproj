@@ -159,6 +159,7 @@
 
     <!-- S60: StyleProperty<T> replaces PaintPropertyEvaluator + DataDrivenPaintEvaluator (engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/StyleProperty.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/TranslateProperty.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/InternalsVisibleTo.cs" />
 
     <!-- S09: clean-room expression evaluation engine (Core, engine-free) -->

@@ -15,6 +15,8 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Tests.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;
+using MapRenderer.Unity.Rendering.Layers;
+using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 
@@ -660,6 +662,8 @@ namespace MapRenderer.Tests.Visual
             GlyphAtlasTexture    atlas  = null;
             SymbolPlacementSystem system = null;
             TestSymbolPlan       plan   = null;
+            MapMaterialSet       settings = null;
+            SymbolRenderLayer    renderLayer = null;
             try
             {
                 scene = TiltedGroundScene.Create(sceneConfig);
@@ -681,7 +685,6 @@ namespace MapRenderer.Tests.Visual
                     up: up,
                     pitchAlignment: pitch,
                     paint: SymbolPaint.Default,
-                    translatePx: translatePx,
                     text: "T",
                     textSizePx: TextSizePx,
                     maxAngleDeg: 180f,
@@ -690,13 +693,28 @@ namespace MapRenderer.Tests.Visual
                     featureIndex: 0,
                     tileKey: tileKey);
 
+                // text-translate is per-slot/per-frame, not a buffer-build param: bake translatePx
+                // into slot 0's style layer instead of the curved symbol record.
+                settings = ScriptableObject.CreateInstance<MapMaterialSet>();
+                settings.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
+                string styleJson = @"{ ""version"": 8, ""layers"": [
+                    { ""id"": ""a"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
+                      ""paint"": { ""text-translate"": [" +
+                        translatePx.x.ToString(CultureInfo.InvariantCulture) + ", " +
+                        translatePx.y.ToString(CultureInfo.InvariantCulture) + @"] } }
+                ] }";
+                renderLayer = SymbolRenderLayer.Create(
+                    (StyleLayer)MapRenderer.Unity.Style.StyleParser.Parse(styleJson).Layers[0], settings,
+                    initialZoom: 14.0, drawIndex: 0);
+                var layers = new List<SymbolRenderLayer> { renderLayer };
+
                 system = new SymbolPlacementSystem(scene.MapCam,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
 
                 // Duplicate Update — the collision verdict is harvested one Update late.
-                system.Update(in frame, plan.Build(buffer), atlas);
-                system.Update(in frame, plan.Build(buffer), atlas);
+                system.Update(in frame, plan.Build(buffer), atlas, symbolLayers: layers);
+                system.Update(in frame, plan.Build(buffer), atlas, symbolLayers: layers);
                 Assert.That(system.LastQuadCount, Is.EqualTo(1),
                     $"W2-T7/T8 precondition ({pitch}): the label must stage exactly one quad, got " +
                     $"{system.LastQuadCount}.");
@@ -710,6 +728,12 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                renderLayer?.Dispose();
+                if (settings != null)
+                {
+                    Object.DestroyImmediate(settings.SymbolTextWorld);
+                    Object.DestroyImmediate(settings);
+                }
                 plan?.Dispose();
                 system?.Dispose();
                 atlas?.Dispose();

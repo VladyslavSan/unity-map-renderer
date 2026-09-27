@@ -17,6 +17,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
         public static readonly int LineTranslateAnchor = Shader.PropertyToID(PropertyNames.LineTranslateAnchor);
         public static readonly int LinePattern         = Shader.PropertyToID(PropertyNames.LinePattern);
         public static readonly int DashArray           = Shader.PropertyToID(PropertyNames.DashArray);
+        public static readonly int DashArray2          = Shader.PropertyToID(PropertyNames.DashArray2);
         public static readonly int DashCount           = Shader.PropertyToID(PropertyNames.DashCount);
         public static readonly int LineOffset          = Shader.PropertyToID(PropertyNames.LineOffset);
 

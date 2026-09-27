@@ -101,6 +101,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         [InstancedProp(PropKind.Float,  0f)]             public float  _LineTranslateAnchor;
         [InstancedProp(PropKind.Float,  0f)]             public float  _LinePattern;
         [InstancedProp(PropKind.Vector)]                 public float4 _DashArray;
+        [InstancedProp(PropKind.Vector)]                 public float4 _DashArray2;
         [InstancedProp(PropKind.Float,  0f)]             public float  _DashCount;
         [InstancedProp(PropKind.Float,  0f)]             public float  _LineOffset;
         [InstancedProp(PropKind.Float,  0f)]             public float  _WidthIsPixels;

@@ -210,11 +210,11 @@ namespace MapRenderer.Unity.Style.Symbol
 
                 SymbolPlacement = placementJson != null
                     ? new StyleProperty<SymbolPlacement>(placementJson, MapRenderer.Core.Text.SymbolPlacement.Point,
-                        v => ParsePlacement(v.ToDisplayString()))
+                        v => ParsePlacement(v.ToDisplayString()), interpolatable: false)
                     : new StyleProperty<SymbolPlacement>(MapRenderer.Core.Text.SymbolPlacement.Point),
 
                 SymbolSortKey = sortKeyJson != null
-                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
+                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber(), interpolatable: false)
                     : new StyleProperty<float>(0f),
 
                 SymbolSpacing = spacingJson != null
@@ -281,7 +281,7 @@ namespace MapRenderer.Unity.Style.Symbol
             try
             {
                 return new StyleProperty<string>(
-                    DesugarTokenTemplate(json), null, v => v.ToDisplayString());
+                    DesugarTokenTemplate(json), null, v => v.ToDisplayString(), interpolatable: false);
             }
             catch
             {
@@ -332,10 +332,22 @@ namespace MapRenderer.Unity.Style.Symbol
         private static readonly string[] DefaultFontStack = { "Open Sans Regular", "Arial Unicode MS Regular" };
 
         // A non-string item (["literal",[…]], a ["step",…] stop) is unambiguously an expression; an
-        // all-string array is ambiguous with a plain font-name list — see the fallback below.
+        // all-string array is ambiguous with a plain font-name list — see the fallback below. text-font has
+        // no "interpolate" marker, so a legacy function (an object, not an array) steps, not ramps.
         private static StyleProperty<string[]> ParseFontStack(JsonValue json)
         {
-            if (json == null || !json.IsArray || json.Items.Count == 0)
+            if (json == null) return new StyleProperty<string[]>(DefaultFontStack);
+
+            if (json.Kind == JsonKind.Object)
+            {
+                try { return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack, interpolatable: false); }
+                catch (System.Exception ex) when (ex is ExpressionParseException || ex is ExpressionEvaluationException)
+                {
+                    return new StyleProperty<string[]>(DefaultFontStack);
+                }
+            }
+
+            if (!json.IsArray || json.Items.Count == 0)
                 return new StyleProperty<string[]>(DefaultFontStack);
 
             bool isPlainNameArray = true;
@@ -343,13 +355,13 @@ namespace MapRenderer.Unity.Style.Symbol
                 if (json.Items[i].Kind != JsonKind.String) { isPlainNameArray = false; break; }
 
             if (!isPlainNameArray)
-                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack);
+                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack, interpolatable: false);
 
             // All-string items are ambiguous with a data-driven ["get","fontProp"]; try it as an expression
             // first — a real font name is never a recognized operator, so a genuine array falls back below.
             try
             {
-                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack);
+                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack, interpolatable: false);
             }
             catch (ExpressionParseException)
             {

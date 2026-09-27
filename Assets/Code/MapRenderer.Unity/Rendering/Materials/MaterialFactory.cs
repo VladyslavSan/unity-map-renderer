@@ -67,7 +67,7 @@ namespace MapRenderer.Unity.Rendering.Materials
             // property stays declared in the CBUFFER, which MapFillUnlitMaterialTests pins.
 
             // fill-translate: a px offset through Fill_VertexModify's MapPixelsToWorld, in line-translate's
-            // device-px space. It parses as always-Constant, so the per-frame applier cannot animate it.
+            // device-px space. Constant or Zoom; BindDevicePixelVector re-evaluates it every frame.
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Fill.PropertyId.FillTranslate);
 
             // fill-translate-anchor.
@@ -264,20 +264,28 @@ namespace MapRenderer.Unity.Rendering.Materials
             mat.SetFloat(ShaderProperties.Line.PropertyId.WidthIsPixels, 1f);
 
             // line-blur (MapLibre paint, spec default 0) → _Blur: an OPT-IN soft edge, separate from the straddle AA
-            // (default 0 = no-op). Device px: the ramp's upper edge is fwidth(side) × _Blur.
-            if (!paint.Blur.DependsOnFeature)
+            // (default 0 = no-op). Device px: the ramp's upper edge is fwidth(side) × blurPx. Data-driven bakes
+            // the LOGICAL px value into GapOffsetBlur (same reasoning as line-width above).
+            if (paint.Blur.DependsOnFeature)
+                applier.BindDevicePixelFloat(new StyleProperty<float>(1f), ShaderProperties.Line.PropertyId.Blur);
+            else
                 applier.BindDevicePixelFloat(paint.Blur, ShaderProperties.Line.PropertyId.Blur);
 
-            // line-gap-width.
-            if (!paint.GapWidth.DependsOnFeature)
+            // line-gap-width: data-driven bakes the LOGICAL px value into GapOffsetBlur (same reasoning as
+            // line-width above), so the uniform carries a device-px 1.
+            if (paint.GapWidth.DependsOnFeature)
+                applier.BindDevicePixelFloat(new StyleProperty<float>(1f), ShaderProperties.Line.PropertyId.GapWidth);
+            else
                 applier.BindDevicePixelFloat(paint.GapWidth, ShaderProperties.Line.PropertyId.GapWidth);
 
-            // line-offset.
-            if (!paint.Offset.DependsOnFeature)
+            // line-offset: same data-driven bake as line-gap-width.
+            if (paint.Offset.DependsOnFeature)
+                applier.BindDevicePixelFloat(new StyleProperty<float>(1f), ShaderProperties.Line.PropertyId.LineOffset);
+            else
                 applier.BindDevicePixelFloat(paint.Offset, ShaderProperties.Line.PropertyId.LineOffset);
 
-            // line-translate: a px offset through the SAME MapPixelsToWorld call as the widths. Parsed as
-            // always-Constant, so it cannot animate; the double2 → Vector4 cast happens inside the applier.
+            // line-translate: a px offset through the SAME MapPixelsToWorld call as the widths. Constant or
+            // Zoom; the double2 → Vector4 cast happens inside the applier.
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Line.PropertyId.LineTranslate);
 
             // line-translate-anchor.
@@ -293,23 +301,25 @@ namespace MapRenderer.Unity.Rendering.Materials
 
         /// <summary>
         /// Evaluates the line-dasharray expression at <paramref name="zoom"/> and sets
-        /// <c>_DashArray</c>/<c>_DashCount</c> on the material. Called at bind time and — only for a
-        /// zoom-dependent dasharray (see <see cref="RenderLayerSet"/>) — per frame. When absent or
+        /// <c>_DashArray</c>/<c>_DashArray2</c>/<c>_DashCount</c> on the material. Called at bind time and —
+        /// only for a zoom-dependent dasharray (see <see cref="RenderLayerSet"/>) — per frame. When absent or
         /// degenerate, sets _DashCount=0 (solid identity — no change to rendering path).
         /// </summary>
         public static void ApplyLineDashArray(Line.PaintProperties paint, Material mat, double zoom)
         {
-            if (Line.LineDash.TryEvaluatePattern(paint.DashArray, zoom, out var packed, out int count))
+            if (Line.LineDash.TryEvaluatePattern(paint.DashArray, zoom, out var lo, out var hi, out int count))
             {
                 // Unity boundary cast: float4 → Vector4 (at the SetVector call site, not upstream).
-                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray, new Vector4(packed.x, packed.y, packed.z, packed.w));
-                mat.SetFloat(ShaderProperties.Line.PropertyId.DashCount,  count);
+                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray,  new Vector4(lo.x, lo.y, lo.z, lo.w));
+                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray2, new Vector4(hi.x, hi.y, hi.z, hi.w));
+                mat.SetFloat(ShaderProperties.Line.PropertyId.DashCount,   count);
             }
             else
             {
                 // No / unsupported / degenerate dasharray: solid identity.
-                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray, Vector4.zero);
-                mat.SetFloat(ShaderProperties.Line.PropertyId.DashCount,  0f);
+                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray,  Vector4.zero);
+                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray2, Vector4.zero);
+                mat.SetFloat(ShaderProperties.Line.PropertyId.DashCount,   0f);
             }
         }
     }

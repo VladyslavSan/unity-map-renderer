@@ -27,8 +27,12 @@ namespace MapRenderer.Tests.Text.Placement
     /// <item><term><c>tileKey</c></term><description><c>0L</c></description></item>
     /// <item><term><c>textSizePx</c>/<c>paddingPx</c>/<c>sortKey</c>/<c>maxAngleDeg</c>/<c>iconRotateRadians</c></term><description><c>0f</c></description></item>
     /// <item><term><c>allowOverlap</c>/<c>ignorePlacement</c>/<c>keepUpright</c>/<c>pairOptional</c></term><description><c>false</c></description></item>
-    /// <item><term><c>translatePx</c></term><description><c>float2.zero</c></description></item>
-    /// <item><term><c>translateAnchor</c></term><description><see cref="TextTranslateAnchor.Map"/> (the zero value)</description></item>
+    /// <item><term><c>translateAnchor</c></term><description><see cref="TextTranslateAnchor.Map"/> (the zero value) —
+    /// <c>text-translate</c> itself is not a <see cref="ShapedSymbol"/> field; it is per-slot, per-frame
+    /// (<c>StageJob</c>), which OVERWRITES any value set directly on a stage input. Through
+    /// <c>SymbolPlacementSystem.Tick</c>, set it on the style layer passed as <c>symbolLayers</c> instead;
+    /// only a caller that stages via <c>SymbolStagingMath</c> directly (bypassing <c>StageJob</c>) can set a
+    /// <c>PointStageInput</c>/<c>CurvedStageInput</c>'s <c>TranslatePx</c> after building</description></item>
     /// <item><term><c>rotationAlignment</c>/<c>pitchAlignment</c></term><description><see cref="AlignmentMode.Auto"/> (the zero value)</description></item>
     /// <item><term><c>pairRole</c></term><description><see cref="SymbolPairRole.None"/> (the zero value)</description></item>
     /// <item><term><c>paint</c></term><description><c>default(SymbolPaint)</c> — all-zero, NOT <see cref="SymbolPaint.Default"/></description></item>
@@ -54,7 +58,7 @@ namespace MapRenderer.Tests.Text.Placement
             string text = default, double3 up = default, string iconImage = default, SymbolKind kind = default,
             int materialIndex = default, float textSizePx = default, float paddingPx = default, float sortKey = default,
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
-            float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
+            TextTranslateAnchor translateAnchor = default,
             AlignmentMode rotationAlignment = default, float iconRotateRadians = default,
             SymbolPairRole pairRole = default, int pairId = default, bool pairOptional = default,
             SymbolPaint paint = default, SymbolStringTable stringTable = null)
@@ -71,7 +75,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TextSizePx = textSizePx, PaddingPx = paddingPx, SortKey = sortKey,
                 FeatureIndex = featureIndex, TileKey = tileKey,
                 AllowOverlap = allowOverlap, IgnorePlacement = ignorePlacement,
-                TranslatePx = translatePx, TranslateAnchor = translateAnchor, RotationAlignment = rotationAlignment,
+                TranslateAnchor = translateAnchor, RotationAlignment = rotationAlignment,
                 IconRotateRadians = iconRotateRadians, Paint = paint,
                 PairRole = pairRole, PairId = pairId, PairOptional = pairOptional,
             });
@@ -93,7 +97,7 @@ namespace MapRenderer.Tests.Text.Placement
             int materialIndex = default, float textSizePx = default, float paddingPx = default, float sortKey = default,
             float maxAngleDeg = default, bool keepUpright = default,
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
-            float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
+            TextTranslateAnchor translateAnchor = default,
             AlignmentMode pitchAlignment = default, float iconRotateRadians = default,
             SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
@@ -114,7 +118,7 @@ namespace MapRenderer.Tests.Text.Placement
                 MaxAngleDeg = maxAngleDeg, KeepUpright = keepUpright,
                 FeatureIndex = featureIndex, TileKey = tileKey,
                 AllowOverlap = allowOverlap, IgnorePlacement = ignorePlacement,
-                TranslatePx = translatePx, TranslateAnchor = translateAnchor, PitchAlignment = pitchAlignment,
+                TranslateAnchor = translateAnchor, PitchAlignment = pitchAlignment,
                 IconRotateRadians = iconRotateRadians, Paint = paint,
             });
         }
@@ -126,14 +130,14 @@ namespace MapRenderer.Tests.Text.Placement
             string text = default, double3 up = default, string iconImage = default, SymbolKind kind = default,
             int materialIndex = default, float textSizePx = default, float paddingPx = default, float sortKey = default,
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
-            float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
+            TextTranslateAnchor translateAnchor = default,
             AlignmentMode rotationAlignment = default, float iconRotateRadians = default,
             SymbolPairRole pairRole = default, int pairId = default, bool pairOptional = default,
             SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, anchorRender, quads, boundsMin, boundsMax, text, up, iconImage, kind, materialIndex,
-                textSizePx, paddingPx, sortKey, featureIndex, tileKey, allowOverlap, ignorePlacement, translatePx,
+                textSizePx, paddingPx, sortKey, featureIndex, tileKey, allowOverlap, ignorePlacement,
                 translateAnchor, rotationAlignment, iconRotateRadians, pairRole, pairId, pairOptional, paint, stringTable);
             return buffer;
         }
@@ -147,14 +151,14 @@ namespace MapRenderer.Tests.Text.Placement
             int materialIndex = default, float textSizePx = default, float paddingPx = default, float sortKey = default,
             float maxAngleDeg = default, bool keepUpright = default,
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
-            float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
+            TextTranslateAnchor translateAnchor = default,
             AlignmentMode pitchAlignment = default, float iconRotateRadians = default,
             SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
             var buffer = new SymbolTileBuffer();
             AddCurved(buffer, glyphs, anchors, path, pathUp, anchorRender, placement, text, up, iconImage, kind,
                 materialIndex, textSizePx, paddingPx, sortKey, maxAngleDeg, keepUpright, featureIndex, tileKey,
-                allowOverlap, ignorePlacement, translatePx, translateAnchor, pitchAlignment, iconRotateRadians, paint,
+                allowOverlap, ignorePlacement, translateAnchor, pitchAlignment, iconRotateRadians, paint,
                 stringTable);
             return buffer;
         }
@@ -189,7 +193,7 @@ namespace MapRenderer.Tests.Text.Placement
                 AnchorStart = anchorStart, AnchorCount = r.AnchorCount, PathStart = pathStart, PathCount = r.PathCount,
                 TextSizePx = r.TextSizePx, PaddingPx = r.PaddingPx, SortKey = r.SortKey, FeatureIndex = r.FeatureIndex,
                 TileKey = r.TileKey, AllowOverlap = r.AllowOverlap, IgnorePlacement = r.IgnorePlacement,
-                TranslatePx = r.TranslatePx, TranslateAnchor = r.TranslateAnchor, RotationAlignment = r.RotationAlignment,
+                TranslateAnchor = r.TranslateAnchor, RotationAlignment = r.RotationAlignment,
                 MaxAngleDeg = r.MaxAngleDeg, KeepUpright = r.KeepUpright, IconRotateRadians = r.IconRotateRadians,
                 PitchAlignment = r.PitchAlignment, Paint = r.Paint, PairRole = r.PairRole, PairId = r.PairId,
                 PairOptional = r.PairOptional,

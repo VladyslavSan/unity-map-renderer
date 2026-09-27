@@ -1,7 +1,7 @@
 namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
 {
     /// <summary>
-    /// Canonical string names for the <c>Map/Line</c>-specific shader properties — 10 CBUFFER members (in
+    /// Canonical string names for the <c>Map/Line</c>-specific shader properties — 11 CBUFFER members (in
     /// <c>Line_LitInput.hlsl</c> but not <c>Fill_LitInput.hlsl</c>) plus two editor-only keyword drivers
     /// declared in <c>Properties{}</c>. Non-local invariant: the two groups are separated by region
     /// markers, because the CBUFFER↔registry parity test reads only the CBUFFER region and must still hold
@@ -20,6 +20,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
         public const string LineTranslateAnchor = "_LineTranslateAnchor";
         public const string LinePattern         = "_LinePattern";
         public const string DashArray           = "_DashArray";
+        public const string DashArray2          = "_DashArray2"; // entries 4-7 (LineDash.N = 8 total)
         public const string DashCount           = "_DashCount";
         public const string LineOffset          = "_LineOffset";
 

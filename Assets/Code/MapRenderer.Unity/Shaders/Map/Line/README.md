@@ -53,7 +53,7 @@ is one of the two sanctioned shapes (`Shaders/README.md` "Include rules").
 
 ## Coverage clip in depth passes
 
-Each non-forward pass calls `LineCoverage(side, innerFrac, dashU)` and `clip(coverage - 0.5)`.
+Each non-forward pass calls `LineCoverage(side, innerFrac, dashU, blurPx)` and `clip(coverage - 0.5)`.
 `LineCoverage` takes screen-space derivatives of `side` and `dashU` — a fragment-stage operation — so
 `side/innerFrac/dashU` must be **interpolated varyings** in every pass, never per-vertex constants; a
 by-value constant has a zero derivative and every ramp collapses to a hard edge. That is why the line

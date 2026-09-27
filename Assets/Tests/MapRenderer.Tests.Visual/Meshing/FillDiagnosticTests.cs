@@ -468,7 +468,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         [Test]
-        public void MapView_Tick_CallsApplyZoom_Structurally()
+        public void MapView_Update_CallsApplyZoom_Structurally()
         {
             // Structural: a zoom-opacity style builds one fill bundle that survives a LateUpdate. The
             // ZoomStyleApplier test above pins the value change itself.

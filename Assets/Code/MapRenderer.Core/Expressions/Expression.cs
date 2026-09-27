@@ -37,5 +37,46 @@ namespace MapRenderer.Core.Expressions
                 return false;
             }
         }
+
+        /// <summary>
+        /// The zero-allocation fast path for a per-frame numeric-array consumer (line-dasharray,
+        /// <c>*-translate</c>): writes this expression's array-shaped result straight into
+        /// <paramref name="destination"/>, never building a <see cref="Value"/> array. Returns <c>false</c> —
+        /// never throwing, with <paramref name="count"/> left at 0 — on a spec error, a non-array or
+        /// non-numeric result, or more entries than <paramref name="destination"/> holds; the caller falls
+        /// back to <see cref="Evaluate"/> in every one of those cases.
+        /// </summary>
+        public bool TryEvaluateNumberArray(in EvaluationContext context, System.Span<double> destination, out int count)
+        {
+            try
+            {
+                return EvaluateNumberArrayCore(context, destination, out count);
+            }
+            catch (ExpressionEvaluationException)
+            {
+                count = 0;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Default: evaluate normally and unpack the resulting <see cref="Value"/> — allocation-free already
+        /// for a literal or <c>step</c> result, neither of which builds a new array. Overridden only by
+        /// <see cref="Ops.InterpolateExpression"/>, the one node whose general array path allocates.
+        /// </summary>
+        protected virtual bool EvaluateNumberArrayCore(in EvaluationContext context, System.Span<double> destination, out int count)
+        {
+            count = 0;
+            Value v = Evaluate(context);
+            if (v.Type != ValueType.Array) return false;
+            var arr = v.AsArray();
+            if (arr.Count > destination.Length) return false;
+            // Strict AsNumber, matching InterpolateExpression's override: a malformed entry (e.g. [true, 3])
+            // throws, which the caller's try/catch turns into the same "fall back to default" as before.
+            for (int i = 0; i < arr.Count; i++)
+                destination[i] = arr[i].AsNumber();
+            count = arr.Count;
+            return true;
+        }
     }
 }

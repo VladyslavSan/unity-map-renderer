@@ -77,7 +77,8 @@ Shader "Map/LineUnlit"
         _LineTranslate  ("Line Translate (px xy)", Vector) = (0, 0, 0, 0)
         _LineTranslateAnchor ("Translate Anchor", Float) = 0.0
         _LinePattern    ("Line Pattern (hook)", Float) = 0.0
-        _DashArray      ("Dash Array (4 on/off, width units)", Vector) = (0,0,0,0)
+        _DashArray      ("Dash Array (entries 0-3, width units)", Vector) = (0,0,0,0)
+        _DashArray2     ("Dash Array 2 (entries 4-7, width units)", Vector) = (0,0,0,0)
         _DashCount      ("Dash Entry Count", Float) = 0.0
         _LineOffset     ("Line Offset (px)", Float) = 0.0
 

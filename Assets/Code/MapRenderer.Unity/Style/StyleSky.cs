@@ -32,8 +32,8 @@ namespace MapRenderer.Unity.Style
         private StyleSky() { }
 
         /// <summary>Parse the root <c>sky</c> block. Each color falls back to its spec default when
-        /// <paramref name="sky"/> is null, non-object, or the key is absent. A malformed color value
-        /// throws <see cref="MapRenderer.Core.Expressions.ExpressionEvaluationException"/>, like any paint property.</summary>
+        /// <paramref name="sky"/> is null, non-object, or the key is absent. A malformed OR data-driven
+        /// color throws <see cref="MapRenderer.Core.Expressions.ExpressionEvaluationException"/>.</summary>
         public static StyleSky Parse(JsonValue sky)
         {
             return new StyleSky
@@ -44,12 +44,17 @@ namespace MapRenderer.Unity.Style
             };
         }
 
+        // Sky colors ride Evaluate(zoom) (SkyGradient, DistanceHaze), which throws for a Feature/Composite
+        // property anyway — fail the parse instead of at the first apply.
         private static StyleProperty<Color> ParseColor(JsonValue sky, string key, Color defaultValue)
         {
             JsonValue json = sky?.Get(key);
             if (json == null)
                 return new StyleProperty<Color>(defaultValue);
-            return new StyleProperty<Color>(json, defaultValue, v => v.AsColorCoerced());
+            var color = new StyleProperty<Color>(json, defaultValue, v => v.AsColorCoerced());
+            if (color.DependsOnFeature)
+                throw new ExpressionEvaluationException($"sky.{key} may not be data-driven.");
+            return color;
         }
     }
 }

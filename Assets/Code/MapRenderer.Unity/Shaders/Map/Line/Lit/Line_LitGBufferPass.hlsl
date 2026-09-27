@@ -71,6 +71,9 @@ struct LineGBufferVaryings
 
     half4  vColor                   : TEXCOORD10;   // LINE DELTA: per-feature data-driven color
 
+    // LINE DELTA: per-feature blur scale (device px), NOINTERPOLATION — see Line_LitForwardPass.hlsl.
+    nointerpolation float blurPx    : TEXCOORD11;
+
     float4 positionCS               : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
@@ -152,10 +155,10 @@ LineGBufferVaryings LineGBufferPassVertex(LineAttributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     // LINE DELTA: world-space ribbon extrusion + derived tangent (real tangent frame).
-    float side, innerFrac, dashU;
+    float side, innerFrac, dashU, blurPx;
     float4 tangentOS;
     float hairlineScale_unused;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale_unused);
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale_unused, blurPx);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
     VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS, tangentOS);
@@ -196,6 +199,7 @@ LineGBufferVaryings LineGBufferPassVertex(LineAttributes input)
     output.positionCS = vertexInput.positionCS;
     output.uv         = float3(dashU, side, innerFrac);   // LINE DELTA: coverage + surface uv
     output.vColor     = input.color;                      // LINE DELTA: per-feature data-driven color
+    output.blurPx     = blurPx;                           // LINE DELTA: per-feature blur scale
 
     return output;
 }
@@ -206,7 +210,7 @@ GBufferFragOutput LineGBufferPassFragment(LineGBufferVaryings input)
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     // LINE DELTA: ribbon-silhouette coverage clip (replaces the _ALPHATEST_ON alpha test).
-    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x) - 0.5);
+    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x, input.blurPx) - 0.5);
 
     float2 baseUV = input.uv.xy;   // LINE DELTA: surface UV from the line uv channel
 

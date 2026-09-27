@@ -91,22 +91,55 @@ namespace MapRenderer.Core.Expressions.Ops
         public override Value Evaluate(in EvaluationContext context)
         {
             double x = _input.Evaluate(context).AsNumber();
-
-            if (x <= _stops[0]) return _outputs[0].Evaluate(context);
-            int last = _stops.Length - 1;
-            if (x >= _stops[last]) return _outputs[last].Evaluate(context);
-
-            int hi = 1;
-            while (hi < _stops.Length && _stops[hi] < x) hi++;
-            int lo = hi - 1;
-
-            double loStop = _stops[lo];
-            double hiStop = _stops[hi];
-            double t = Progress(x, loStop, hiStop);
+            if (!TryBracket(x, out int lo, out int hi, out double t))
+                return _outputs[lo].Evaluate(context); // at or past an end stop: lo == hi, no Lerp needed
 
             Value a = _outputs[lo].Evaluate(context);
             Value b = _outputs[hi].Evaluate(context);
             return Lerp(a, b, t);
+        }
+
+        /// <summary>
+        /// Finds the stops bracketing <paramref name="x"/>. Returns <c>false</c> with <c>lo == hi</c> and
+        /// <c>t = 0</c> when <paramref name="x"/> is at or past an end stop — the caller reads that single
+        /// output directly, with no <see cref="Lerp"/> call. Shared by <see cref="Evaluate"/> and
+        /// <see cref="EvaluateNumberArrayCore"/> so the bracket-search algorithm cannot drift between them.
+        /// </summary>
+        private bool TryBracket(double x, out int lo, out int hi, out double t)
+        {
+            if (x <= _stops[0]) { lo = hi = 0; t = 0.0; return false; }
+            int last = _stops.Length - 1;
+            if (x >= _stops[last]) { lo = hi = last; t = 0.0; return false; }
+
+            hi = 1;
+            while (hi < _stops.Length && _stops[hi] < x) hi++;
+            lo = hi - 1;
+            t = Progress(x, _stops[lo], _stops[hi]);
+            return true;
+        }
+
+        /// <summary>Zero-allocation fast path for a number-array-shaped result: same bracket search as
+        /// <see cref="Evaluate"/>, but writes straight into <paramref name="destination"/> instead of
+        /// building a <see cref="Value"/> array via <see cref="Lerp"/>.</summary>
+        protected override bool EvaluateNumberArrayCore(
+            in EvaluationContext context, System.Span<double> destination, out int count)
+        {
+            count = 0;
+            double x = _input.Evaluate(context).AsNumber();
+            if (!TryBracket(x, out int lo, out int hi, out double t))
+                return base.EvaluateNumberArrayCore(context, destination, out count); // unpack the one stop's Value
+
+            Value a = _outputs[lo].Evaluate(context);
+            Value b = _outputs[hi].Evaluate(context);
+            if (a.Type != ValueType.Array || b.Type != ValueType.Array) return false;
+
+            var arr = a.AsArray();
+            var barr = b.AsArray();
+            if (arr.Count != barr.Count || arr.Count > destination.Length) return false;
+            for (int i = 0; i < arr.Count; i++)
+                destination[i] = arr[i].AsNumber() + (barr[i].AsNumber() - arr[i].AsNumber()) * t;
+            count = arr.Count;
+            return true;
         }
 
         private double Progress(double x, double lo, double hi)
@@ -143,6 +176,9 @@ namespace MapRenderer.Core.Expressions.Ops
                 var barr = b.AsArray();
                 if (array.Count != barr.Count)
                     throw new ExpressionEvaluationException("interpolate: array stop lengths differ.");
+
+                // Allocates a fresh Value[] per call; never reuse a buffer: the returned Value would alias
+                // it. Per-frame callers use TryEvaluateNumberArray.
                 var result = new Value[array.Count];
                 for (int i = 0; i < array.Count; i++)
                     result[i] = Value.Number(

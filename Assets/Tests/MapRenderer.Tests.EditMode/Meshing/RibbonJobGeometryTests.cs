@@ -59,7 +59,7 @@ namespace MapRenderer.Tests.Meshing
     /// <summary>
     /// Data-driven per-feature color baking through <see cref="StyledLineTileBuilder.BuildMeshData"/> over the
     /// fixture's "geolines" layer (CPU only). A per-feature match bakes ≥2 distinct colours into
-    /// <see cref="StyledLineTileBuilder.LineWidthColor.Color"/>; a constant-input match bakes exactly one,
+    /// <see cref="StyledLineTileBuilder.LineVertexPaint.Color"/>; a constant-input match bakes exactly one,
     /// the WHITE identity, because a constant line-color rides the _BaseColor uniform.
     /// </summary>
     [TestFixture]
@@ -172,7 +172,7 @@ namespace MapRenderer.Tests.Meshing
                     "WriteMeshData must produce geometry for geolines features with a match expression.");
 
                 // Collect distinct (linearized) colors from Stream3, read back straight from the MeshData.
-                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineVertexPaint>(3);
                 var distinctColors = new HashSet<(int r, int g, int b)>();
                 for (int i = 0; i < vertexCount; i++)
                 {
@@ -234,7 +234,7 @@ namespace MapRenderer.Tests.Meshing
                     "WriteMeshData must produce geometry for geolines features with a constant color.");
 
                 // All vertices should have the same baked color (within 1-unit quantization).
-                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineVertexPaint>(3);
                 var distinctColors = new HashSet<(int r, int g, int b)>();
                 for (int i = 0; i < vertexCount; i++)
                 {
@@ -313,7 +313,7 @@ namespace MapRenderer.Tests.Meshing
                     "WriteMeshData must produce geometry for geolines features with a data-driven width.");
 
                 // Collect distinct quantized WidthScale values from Stream3 (thin=2, thick=10 well-separated).
-                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineVertexPaint>(3);
                 var distinctWidths = new HashSet<int>();
                 for (int i = 0; i < vertexCount; i++)
                 {
@@ -382,7 +382,7 @@ namespace MapRenderer.Tests.Meshing
                     "WriteMeshData must produce geometry for geolines features with a data-driven opacity.");
 
                 // Collect distinct quantized alpha values from Stream3 Color.w (0.2→~51/255; 1.0→255/255).
-                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineVertexPaint>(3);
                 var distinctAlphas = new HashSet<int>();
                 for (int i = 0; i < vertexCount; i++)
                 {

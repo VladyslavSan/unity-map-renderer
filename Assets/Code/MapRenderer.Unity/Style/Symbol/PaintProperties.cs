@@ -30,10 +30,11 @@ namespace MapRenderer.Unity.Style.Symbol
         public StyleProperty<float> HaloBlur { get; init; }
 
         /// <summary>text-translate: [x, y] pixel offset applied to the symbol's placed screen anchor (y-down,
-        /// as authored). Default [0, 0]. A plain constant <see cref="float2"/> (px offsets are small — no
-        /// need for double precision or the zoom/expression machinery; mirrors <c>LayoutProperties.TextOffset</c>).
-        /// Consumed per-frame by <c>SymbolPlacementSystem</c> via <see cref="MapRenderer.Core.Text.Placement.SymbolTranslate"/>.</summary>
-        public float2 Translate { get; init; }
+        /// as authored). Default [0, 0]. Constant or Zoom, parsed through the expression engine like
+        /// <c>Line</c>/<c>Fill</c>'s own translate. Read per-frame, per-slot by <c>SymbolPlacementSystem</c>
+        /// (never baked onto a symbol) and applied via
+        /// <see cref="MapRenderer.Core.Text.Placement.SymbolTranslate"/>.</summary>
+        public StyleProperty<double2> Translate { get; init; }
 
         /// <summary>text-translate-anchor: the frame of reference for <see cref="Translate"/>. Default
         /// <see cref="MapRenderer.Core.Text.TextTranslateAnchor.Map"/>. Constant only. Under <c>Map</c> the offset rotates
@@ -82,17 +83,12 @@ namespace MapRenderer.Unity.Style.Symbol
                 ? new StyleProperty<float>(haloBlurJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
-            // text-translate: [x, y] in pixels (constant — the components are scalars, not expressions).
-            // Narrow to float at the JSON boundary (px offsets are small; double is pointless here).
+            // text-translate: [x, y] px offset, parsed through the expression engine via TranslateProperty
+            // (Constant AND Zoom both survive — mirrors Line/Fill's own translate).
             JsonValue translateJson = paint?.Get(PropertyNames.TextTranslate);
-            float tx = 0f;
-            float ty = 0f;
-            if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
-            {
-                tx = (float)translateJson.Items[0].AsDouble(0.0);
-                ty = (float)translateJson.Items[1].AsDouble(0.0);
-            }
-            float2 translate = new float2(tx, ty);
+            StyleProperty<double2> translate = translateJson != null
+                ? TranslateProperty.Parse(translateJson)
+                : new StyleProperty<double2>(new double2(0.0, 0.0));
 
             // text-translate-anchor: "viewport" → Viewport, else map (default/unrecognized).
             JsonValue translateAnchorJson = paint?.Get(PropertyNames.TextTranslateAnchor);

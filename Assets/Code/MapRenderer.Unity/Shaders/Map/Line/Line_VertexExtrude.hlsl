@@ -9,7 +9,7 @@
 // Include order: Line_LitInput.hlsl → Line_VertexExtrude.hlsl → Line_<Pass>.hlsl.
 //
 // Line_LitInput.hlsl must be included BEFORE this file (reads CBUFFER props:
-//   _Width, _WidthIsPixels, _GapWidth, _LineOffset, _LineTranslate; plus
+//   _Width, _WidthIsPixels, _GapWidth, _LineOffset, _Blur, _LineTranslate; plus
 //   _MapFrameMetersPerDevicePixel, which is a per-frame GLOBAL declared there, not a CBUFFER member).
 //
 // Authored for URP 17.5 / Unity 6000.x. Clean-room map logic, not MapLibre or Unity source.
@@ -35,6 +35,7 @@ struct LineAttributes
     float3 extrudeN     : TEXCOORD0;  // 3D across-direction (tangent-plane; Y=0 Mercator); miter factor in |n|
     float2 sideAndDist  : TEXCOORD1;  // (side ∈ {+1,−1}, distanceAlong)
     float  widthScale   : TEXCOORD2;  // per-feature width scale (default=1)
+    half4  paintScale   : TEXCOORD3;  // per-feature (gap, offset, blur, spare) scale (default=1,1,1,0)
     float4 color        : COLOR;      // per-vertex baked color (data-driven); white=identity
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -49,6 +50,12 @@ struct LineAttributes
 #define HAIRLINE_MIN_RAMP_PX    0.05  // narrowest ramp; 0 would divide by zero
 #define HAIRLINE_MIN_WIDTH_PX   2.0   // _HAIRLINE_SOLID_CORE: floor for the RENDERED band, device px
 
+// ── Dash constants (compile-time; mirrors LineDash.N) ─────────────────────────────────────────
+// An odd-length pattern walks its own entries TWICE (parity flips automatically because the walk's
+// on/off comes from the VIRTUAL index's parity, not the physical slot) — hence double the entries.
+#define DASH_MAX_ENTRIES       8
+#define DASH_MAX_VIRTUAL_SLOTS 16
+
 // ── Line_VertexExtrude ────────────────────────────────────────────────────────
 // Performs the world-space extrusion. Called by the vertex entry point of EVERY line pass
 // so all five passes (ForwardLit, ShadowCaster, DepthOnly, DepthNormals, GBuffer) share exactly
@@ -57,6 +64,8 @@ struct LineAttributes
 // Returns: extruded OBJECT-SPACE position (ready for GetVertexPositionInputs or TransformObjectToHClip).
 // Out params: the per-vertex coverage inputs that must be interpolated across every pass's Varyings
 //             (LineCoverage takes screen-space derivatives of them), plus the hairline energy scalar.
+//             blurPx is the one exception: every pass carries it NOINTERPOLATION, since it is constant
+//             per feature and LineCoverage does not take its derivative.
 //
 // Signature intentionally does NOT follow MapVertexModify(inout float3) — the line must emit
 // three additional per-vertex outputs that a simple inout-position hook cannot express.
@@ -66,7 +75,8 @@ float3 Line_VertexExtrude(
     out float innerFrac,
     out float dashU,
     out float4 tangentOS,
-    out float hairlineScale)
+    out float hairlineScale,
+    out float blurPx)
 {
     // ── Miter / unit extrusion direction ─────────────────────────────────────
     // extrudeN: 3D across-direction in the surface tangent plane (Y=0 for the flat Mercator frame;
@@ -163,7 +173,7 @@ float3 Line_VertexExtrude(
     float aaPadWorld = 0.5 * metresPerDevicePx;
 #endif
 
-    // Width / gap / outer radius in world metres (widthScale = per-feature; gap is layer-level).
+    // Width / gap / outer radius in world metres (widthScale, paintScale = per-feature).
     // widthWorld is the STYLED width as a WORLD length, identical at every vertex of the frame.
     float widthWorld = _Width * input.widthScale * pxToWorld;
 
@@ -223,7 +233,7 @@ float3 Line_VertexExtrude(
 
     // Clamping the BAND rather than outerWorld is what keeps a hollow line's gap the size the style asked
     // for; the gap term below is untouched.
-    float gapWorld   = _GapWidth * pxToWorld;
+    float gapWorld   = _GapWidth * input.paintScale.x * pxToWorld;
     float outerWorld = (gapWorld > 1e-6) ? (0.5 * gapWorld + renderWidthWorld) : (0.5 * renderWidthWorld);
 
     // Min-width floor (pixel widths only): half-width never below 0.5 DEVICE px AT THIS VERTEX ⇒ a stable
@@ -258,8 +268,9 @@ float3 Line_VertexExtrude(
 
     // ── line-offset ───────────────────────────────────────────────────────────
     // Shift the band centre perpendicular to the centerline. ×sideAndDist.x so both station vertices shift by
-    // the same world vector. Layer-level (not per-feature). CPU mirror: LineOffset (Unity/Style/Line/LineOffset.cs).
-    offsetWS += unitDir_WS * input.sideAndDist.x * (miter * _LineOffset * pxToWorld);
+    // the same world vector. paintScale.y = per-feature offset scale (default 1). CPU mirror: LineOffset
+    // (Unity/Style/Line/LineOffset.cs).
+    offsetWS += unitDir_WS * input.sideAndDist.x * (miter * _LineOffset * input.paintScale.y * pxToWorld);
 
     // ── Surface-normal lift (0.001 world-meters) ─────────────────────────────
     // Lift along the per-vertex surface up (NOT world +Y) to avoid coplanar z-fighting with fills under
@@ -347,6 +358,9 @@ float3 Line_VertexExtrude(
     // Mirror of LineDash.DashCoverage's "u = distanceAlong / metersPerDashUnit" (the CPU formula).
     dashU = (dashMetersPerUnit > 1e-6) ? (input.sideAndDist.y / dashMetersPerUnit) : 0.0;
 
+    // paintScale.z = per-feature blur scale (default 1); CPU mirror: StyledLineTileBuilder.BuildLayerInput.
+    blurPx = _Blur * input.paintScale.z;
+
     // ── Tangent (along the line) — derived, projection-agnostic ───────────────
     // Built from the surface up (normalOS) and the across-direction — no extra vertex stream and no
     // flat-ground assumption. sideAndDist.x keeps it consistent across the ribbon (extrudeN flips per
@@ -361,18 +375,19 @@ float3 Line_VertexExtrude(
 }
 
 // ── LineCoverage ──────────────────────────────────────────────────────────────
-// Computes the ribbon alpha from the three interpolated coverage inputs: a one-pixel STRADDLE on the outer
+// Computes the ribbon alpha from the four interpolated coverage inputs: a one-pixel STRADDLE on the outer
 // edge, a matching straddle on the gap-hole cut, opt-in line-blur, and dash coverage. Used as the alpha
 // multiplier in the forward pass and as the binary clip threshold (clip(LineCoverage(...) - 0.5)) in every
 // depth-writing pass.
 //
-// FRAGMENT-STAGE function: takes screen-space derivatives of `side` and `dashU`. This is WHY all three
-// inputs MUST be interpolated Varyings in every pass that calls this, never by-value constants — a constant
-// has a zero derivative and the ramps would collapse to a hard edge.
+// FRAGMENT-STAGE function: takes screen-space derivatives of `side` and `dashU`. This is WHY side/innerFrac/
+// dashU MUST be interpolated Varyings in every pass that calls this, never by-value constants — a constant
+// has a zero derivative and the ramps would collapse to a hard edge. blurPx is the one exception: it rides a
+// NOINTERPOLATION varying (see Line_VertexExtrude), because it is constant per feature.
 //
-// The two AA coverage ramps use the EUCLIDEAN gradient of `side`; `_Blur` and dash keep `fwidth`, which is
+// The two AA coverage ramps use the EUCLIDEAN gradient of `side`; blur and dash keep `fwidth`, which is
 // their own features' business and not antialiasing.
-float LineCoverage(float side, float innerFrac, float dashU)
+float LineCoverage(float side, float innerFrac, float dashU, float blurPx)
 {
     // ── Outer + inner edges: a strict one-pixel STRADDLE + opt-in line-blur ─────────────────────────────
     // Coverage ramps linearly 1 → 0 across exactly one device pixel CENTRED on the styled edge: half a
@@ -452,30 +467,46 @@ float LineCoverage(float side, float innerFrac, float dashU)
 #endif
     }
 
-    // line-blur (MapLibre line-blur; opt-in soft edge): feathers the outer _Blur px inward. 0 ⇒ no-op (hard).
-    if (_Blur > 1e-6)
+    // line-blur (MapLibre line-blur; opt-in soft edge): feathers the outer blurPx inward. 0 ⇒ no-op (hard).
+    if (blurPx > 1e-6)
     {
         float feather = max(fwidth(side), 1e-6);
-        coverage *= smoothstep(0.0, feather * _Blur, 1.0 - absSide);
+        coverage *= smoothstep(0.0, feather * blurPx, 1.0 - absSide);
     }
 
     // ── Dash coverage ─────────────────────────────────────────────────────────
     // _DashCount == 0: identity guard (solid line, no dashing). Coverage passes through unchanged.
     // _DashCount >= 2: walk on/off runs (even index=on, odd=off); AA-feather transitions with fwidth.
+    // An ODD count repeats over double its own sum, walking its entries TWICE — the on/off value comes
+    // from the VIRTUAL walk index's parity, not the physical slot, so the second pass reads flipped
+    // without any special-cased branch (and the final wrap is always "on", because the virtual slot
+    // count is always even — count itself for an even pattern, 2×count for an odd one).
     //
     // dashU = distanceAlong / dashMetersPerUnit (set in vertex, interpolated — NOT a constant).
-    // period = sum of all _DashArray entries (in line-width units).
+    // period = sum of all active entries (even count) or double that sum (odd count), in line-width units.
     // phase  = fmod(dashU, period) — position within one dash cycle.
     //
     // CPU mirror: LineDash.DashCoverage (Assets/Code/MapRenderer.Unity/Style/Line/LineDash.cs).
     if (_DashCount >= 0.5)
     {
-        // Compute period from the active entries only (unused slots are 0, contribute 0).
-        float da0 = (_DashCount > 0.5) ? _DashArray.x : 0.0;
-        float da1 = (_DashCount > 1.5) ? _DashArray.y : 0.0;
-        float da2 = (_DashCount > 2.5) ? _DashArray.z : 0.0;
-        float da3 = (_DashCount > 3.5) ? _DashArray.w : 0.0;
-        float period = da0 + da1 + da2 + da3;
+        // Clamped to DASH_MAX_ENTRIES: _DashCount always arrives from LineDash.TryEvaluatePattern's own
+        // 1-N range, but a stale or hand-set material property must not walk past the spans[] array below.
+        int  count = min((int)(_DashCount + 0.5), DASH_MAX_ENTRIES);
+        bool isOdd = (count % 2) != 0;
+
+        float spans[DASH_MAX_ENTRIES];
+        spans[0] = _DashArray.x;  spans[1] = _DashArray.y;  spans[2] = _DashArray.z;  spans[3] = _DashArray.w;
+        spans[4] = _DashArray2.x; spans[5] = _DashArray2.y; spans[6] = _DashArray2.z; spans[7] = _DashArray2.w;
+
+        // Sum of the active entries only (unused slots are 0, contribute 0).
+        float p = 0.0;
+        [unroll]
+        for (int s = 0; s < DASH_MAX_ENTRIES; s++)
+        {
+            if (s >= count) break;
+            p += spans[s];
+        }
+        float period = isOdd ? 2.0 * p : p;
 
         if (period > 1e-5)
         {
@@ -484,22 +515,22 @@ float LineCoverage(float side, float innerFrac, float dashU)
             if (phase < 0.0) phase += period;
 
             // Walk on/off runs, accumulating the coverage value.
-            // Even slots (0,2) = on-run (value=1), odd slots (1,3) = off-run (value=0).
+            // Even VIRTUAL index = on-run (value=1), odd = off-run (value=0).
             // At each boundary we smoothstep from the previous run's value to the current.
             float dashCoverage = 1.0;
-            float cursor = 0.0;
-            float prevVal = 0.0; // last slot is always odd=off for even-count patterns
+            float cursor  = 0.0;
+            float prevVal = 0.0;
 
-            float spans[4];
-            spans[0] = da0; spans[1] = da1; spans[2] = da2; spans[3] = da3;
+            int virtualSlots = isOdd ? 2 * count : count;
 
             bool found = false;
             [unroll]
-            for (int k = 0; k < 4; k++)
+            for (int k = 0; k < DASH_MAX_VIRTUAL_SLOTS; k++)
             {
-                if ((float)k >= _DashCount) break;
-                float segEnd = cursor + spans[k];
-                float onVal = (k % 2 == 0) ? 1.0 : 0.0;
+                if (k >= virtualSlots) break;
+                float span   = spans[k % count];
+                float segEnd = cursor + span;
+                float onVal  = (k % 2 == 0) ? 1.0 : 0.0;
 
                 // Is phase in this run (including feather overlap from neighbors)?
                 if (!found && phase < segEnd + dfw)
@@ -508,9 +539,9 @@ float LineCoverage(float side, float innerFrac, float dashU)
                     float entryBlend = smoothstep(cursor - dfw, cursor + dfw, phase);
                     float val = lerp(prevVal, onVal, entryBlend);
 
-                    // Feather at exit edge (transition from onVal to next run's value).
+                    // Feather at exit edge (transition from onVal to the next run's value). virtualSlots
+                    // is always even, so the wrap (k+1 == virtualSlots) always lands back on "on".
                     float nextVal = ((k + 1) % 2 == 0) ? 1.0 : 0.0;
-                    if ((float)(k + 1) >= _DashCount) nextVal = 1.0; // wrap to slot 0 = on
                     float exitBlend = smoothstep(segEnd - dfw, segEnd + dfw, phase);
                     val = lerp(val, nextVal, exitBlend);
 
@@ -518,7 +549,7 @@ float LineCoverage(float side, float innerFrac, float dashU)
                     found = true;
                 }
                 prevVal = onVal;
-                cursor = segEnd;
+                cursor  = segEnd;
             }
 
             // If phase was not found (e.g. precision edge past all runs), treat as on.

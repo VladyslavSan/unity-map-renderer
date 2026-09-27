@@ -32,29 +32,28 @@ namespace MapRenderer.Unity.Style.Line
 
         /// <summary>
         /// line-blur: Gaussian blur radius in pixels applied to the stroke edges. Default 0.0.
-        /// Constant/Zoom only (data-driven is uncommon; rejected at <see cref="StyleProperty{T}.Evaluate(double)"/>
-        /// if supplied — callers can widen via the bake path if needed in future).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Blur { get; init; }
 
         /// <summary>
         /// line-gap-width: half-width of a gap opened in the centre of the stroke, creating a hollow
         /// double-line effect. 0 = solid. Units: pixels. Default 0.
-        /// Constant/Zoom only.
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> GapWidth { get; init; }
 
         /// <summary>
         /// line-offset: signed pixel shift perpendicular to the line direction.
         /// Positive values shift left of the travel direction; negative shift right.
-        /// Default 0. Constant/Zoom only.
+        /// Default 0. Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Offset { get; init; }
 
         /// <summary>
         /// line-translate: pixel-space [x, y] translation offset applied in
-        /// <c>TranslateAnchor</c>-space coordinates. Default [0, 0]. Constant only: an expression
-        /// value reads as [0, 0].
+        /// <c>TranslateAnchor</c>-space coordinates. Default [0, 0]. Constant or Zoom;
+        /// Feature/Composite (data-driven) falls back to the default.
         /// </summary>
         public StyleProperty<double2> Translate { get; init; }
 
@@ -68,8 +67,10 @@ namespace MapRenderer.Unity.Style.Line
         /// line-dasharray: dash/gap lengths in line-width units, alternating on/off starting with on.
         /// Stays as a raw <see cref="Expression"/> (variable-length per spec AND zoom-dependent — a
         /// step/interpolate yields a different array per zoom, so it cannot be a static scalar T).
-        /// Capped at <see cref="LineDash.MaxEntries"/> = 4 entries at evaluation time; extras truncated.
-        /// Evaluated per-zoom by <see cref="LineDash.TryEvaluatePattern"/>. Null when absent/malformed.
+        /// Past <see cref="LineDash.N"/> = 8 entries the line draws solid (never truncated); an odd count
+        /// repeats over double its length with on/off parity flipped in the second half — see
+        /// <see cref="LineDash.DashCoverage"/>. Evaluated per-zoom by <see cref="LineDash.TryEvaluatePattern"/>.
+        /// Null when absent/malformed.
         /// </summary>
         public Expression DashArray { get; init; }
 
@@ -125,16 +126,11 @@ namespace MapRenderer.Unity.Style.Line
                 ? new StyleProperty<float>(offsetJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
-            // line-translate: [x, y] in pixels. Collapse to StyleProperty<double2>.
+            // line-translate: [x, y] px offset, parsed through the expression engine via TranslateProperty.
             JsonValue translateJson = paint?.Get(PropertyNames.LineTranslate);
-            double txVal = 0.0, tyVal = 0.0;
-            if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
-            {
-                txVal = translateJson.Items[0].AsDouble(0.0);
-                tyVal = translateJson.Items[1].AsDouble(0.0);
-            }
-            // Translate is always constant (the array components are scalars, not expressions).
-            StyleProperty<double2> translate = new StyleProperty<double2>(new double2(txVal, tyVal));
+            StyleProperty<double2> translate = translateJson != null
+                ? TranslateProperty.Parse(translateJson)
+                : new StyleProperty<double2>(new double2(0.0, 0.0));
 
             // line-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.LineTranslateAnchor);

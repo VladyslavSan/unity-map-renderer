@@ -37,7 +37,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// Streams (Unity's cap is 4): 0 — Position + Normal (Float32x3 each; Normal is surface up, +Y for
     /// Mercator), <see cref="LinePositionNormal"/>. 1 — TexCoord0, across-direction (Float32x3; Y=0 for
     /// Mercator). 2 — TexCoord1, side + distanceAlong (Float32x2). 3 — Color (Float32x4) + TexCoord2
-    /// widthScale (Float32x1), <see cref="LineWidthColor"/>. Index buffer UInt32.
+    /// widthScale (Float32x1) + TexCoord3 paintScale (Float16x4: gap, offset, blur, spare),
+    /// <see cref="LineVertexPaint"/>. Index buffer UInt32.
     /// </remarks>
     public static partial class StyledLineTileBuilder
     {
@@ -52,19 +53,24 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// Color + WidthScale interleaved on stream 3. Canonical field order matches the canonical
-        /// descriptor order (Color enum=3 before TexCoord2 enum=6), so stream-3 byte offsets are Color@0,
-        /// WidthScale@16. Stride = 16 (float4) + 4 (float) = 20 bytes.
+        /// Color + WidthScale + GapOffsetBlur interleaved on stream 3. Field order matches the canonical
+        /// ascending descriptor order (Color enum=3, TexCoord2 enum=6, TexCoord3 enum=7), so byte offsets
+        /// are Color@0, WidthScale@16, GapOffsetBlur@20. Stride = 16 + 4 + 8 = 28 bytes.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
-        public struct LineWidthColor
+        public struct LineVertexPaint
         {
             public Vector4 Color;
             public float   WidthScale;
+
+            /// <summary>Per-vertex gap/offset/blur scale (x=gap, y=offset, z=blur, w=spare). Named for its
+            /// lanes, not "PaintScale", because <see cref="BuildLayerInput"/>'s per-feature column of the
+            /// same shape orders width first.</summary>
+            public half4 GapOffsetBlur;
         }
 
         // Canonical ascending VertexAttribute order avoids Unity's "non-standard order" warning; stream 3 matches
-        // LineWidthColor. Internal so the SyntheticLineMesh test helper reuses the production layout.
+        // LineVertexPaint. Internal so the SyntheticLineMesh test helper reuses the production layout.
         internal static readonly VertexAttributeDescriptor[] LineVertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
@@ -73,6 +79,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 3, stream: 1),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 2, stream: 2),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 1, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float16, 4, stream: 3),
         };
 
         // Skip main-thread index validation + redundant intermediate bounds compute (see StyledFillTileBuilder).
@@ -92,14 +99,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
         /// <summary>
         /// The per-feature bake that precedes the ring gather, the line half of
-        /// <c>StyledFillTileBuilder.BuildLayerInput</c>. Bakes the selection, colour and width columns, indexed by
-        /// feature ORDINAL (the index <c>RingFeatureIdx</c> names), into a <see cref="LayerInput"/>. Returns
-        /// <c>default</c>, with both out columns uncreated, when there are no selected features or
+        /// <c>StyledFillTileBuilder.BuildLayerInput</c>. Bakes the selection, colour and paint-scale columns,
+        /// indexed by feature ORDINAL (the index <c>RingFeatureIdx</c> names), into a <see cref="LayerInput"/>.
+        /// Returns <c>default</c>, with both out columns uncreated, when there are no selected features or
         /// <paramref name="geometry"/> is uncreated; the caller tests <c>Input.FeatureSelected.IsCreated</c>.
         /// </summary>
         /// <param name="featureColors">Per-feature linear colour, Persistent-allocated and owned by the
         /// caller from here on — created iff the return value is (both share one fate).</param>
-        /// <param name="featureWidths">Per-feature width scale, same ownership as <paramref name="featureColors"/>.</param>
+        /// <param name="featurePaintScales">Per-feature (width, gap, offset, blur) scale, same
+        /// ownership as <paramref name="featureColors"/>. Baked in LOGICAL px, with the matching uniform
+        /// bound to a device-px 1: non-local invariant, because a baked RATIO would force a mesh rebuild
+        /// on every dpr change, which <c>PreparedTileCache</c> would then serve stale.</param>
         internal static LayerInput BuildLayerInput(
             IReadOnlyList<SelectedTileFeature> selectedFeatures,
             TileGeometryBuffers                geometry, // BORROWED — the store owns it; never disposed here
@@ -108,11 +118,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
             double                             zoom,
             double3                            tileOriginRender,
             out NativeArray<Vector4>           featureColors,
-            out NativeArray<float>             featureWidths,
+            out NativeArray<float4>            featurePaintScales,
             IProjection                        projection = null) // null ⇒ WebMercator (launch-time config threads this in)
         {
             featureColors = default;
-            featureWidths = default;
+            featurePaintScales = default;
 
             if (selectedFeatures == null || selectedFeatures.Count == 0 || !geometry.IsCreated)
                 return default;
@@ -120,13 +130,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
             projection ??= DefaultProjection; // null ⇒ WebMercator; the launch-time projection is threaded via BuildGraphRequest
 
             // The columns are indexed by Ordinal, the index RingFeatureIdx names. A slot-indexed column would
-            // permute colours and widths as soon as this layer's filter rejects a feature.
+            // permute colours and scales as soon as this layer's filter rejects a feature.
 
             // Persistent, not TempJob: an off-main build can outlive TempJob's 4-frame limit. The arrays are
             // returned to the caller, so they are not `using`; the catch disposes them on a throw.
-            NativeArray<Vector4> colors   = new(geometry.FeatureCount, Allocator.Persistent);
-            NativeArray<float>   widths   = new(geometry.FeatureCount, Allocator.Persistent);
-            NativeArray<bool>    selected = new(geometry.FeatureCount, Allocator.Persistent);
+            NativeArray<Vector4> colors      = new(geometry.FeatureCount, Allocator.Persistent);
+            NativeArray<float4>  paintScales = new(geometry.FeatureCount, Allocator.Persistent);
+            NativeArray<bool>    selected    = new(geometry.FeatureCount, Allocator.Persistent);
             try
             {
                 for (int si = 0; si < selectedFeatures.Count; si++)
@@ -135,9 +145,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     IFeature            feature = sel.Feature;
                     int                 ordinal = sel.Ordinal;
 
-                    selected[ordinal] = true;
-                    colors[ordinal]   = WhiteColor;
-                    widths[ordinal]   = 1f;
+                    selected[ordinal]    = true;
+                    colors[ordinal]      = WhiteColor;
+                    paintScales[ordinal] = new float4(1f, 1f, 1f, 1f);
 
                     // The paint bakes stay LINE-ONLY: a non-LineString feature's rings are dropped by the kind
                     // gate, so evaluating its expressions would be new work with no output.
@@ -166,17 +176,34 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         }
                     }
 
-                    // Bake data-driven width in LOGICAL px into WidthScale; _Width is then a device-px 1. A ratio
-                    // in the bake would force a mesh rebuild on a dpr change, and PreparedTileCache would serve it stale.
+                    // Gap/offset write TryEvaluate's result whether it succeeds or not — width stays gated
+                    // because its own default (1) already matches the (1,1,1,1) preset above; gap/offset's does not.
+                    float4 scale = paintScales[ordinal];
                     if (paint.Width.DependsOnFeature)
                     {
                         if (paint.Width.TryEvaluate(zoom, feature, out float widthVal))
-                            widths[ordinal] = math.max(0f, widthVal);
+                            scale.x = math.max(0f, widthVal);
                     }
+                    if (paint.GapWidth.DependsOnFeature)
+                    {
+                        paint.GapWidth.TryEvaluate(zoom, feature, out float gapVal);
+                        scale.y = math.max(0f, gapVal);
+                    }
+                    if (paint.Offset.DependsOnFeature)
+                    {
+                        paint.Offset.TryEvaluate(zoom, feature, out float offsetVal); // signed; not clamped
+                        scale.z = offsetVal;
+                    }
+                    if (paint.Blur.DependsOnFeature)
+                    {
+                        paint.Blur.TryEvaluate(zoom, feature, out float blurVal);
+                        scale.w = math.max(0f, blurVal);
+                    }
+                    paintScales[ordinal] = scale;
                 }
 
                 featureColors = colors;
-                featureWidths = widths;
+                featurePaintScales = paintScales;
                 return new LayerInput
                 {
                     Geometry          = geometry,
@@ -194,7 +221,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             catch
             {
                 colors.Dispose();
-                widths.Dispose();
+                paintScales.Dispose();
                 selected.Dispose();
                 throw;
             }
@@ -211,14 +238,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <param name="output">A layer's completed measure-graph output — caller-verified non-empty
         /// (<c>Vertices.Length &gt; 0 &amp;&amp; Indices.Length &gt; 0</c>) and error-free.</param>
         /// <param name="featureColors">Per-feature linear colour, indexed by <c>output.VertexFeatureIdx</c>.</param>
-        /// <param name="featureWidths">Per-feature width scale, same indexing.</param>
+        /// <param name="featurePaintScales">Per-feature (width, gap, offset, blur) scale, same indexing.</param>
         /// <remarks><c>internal</c>, not <c>private</c>:
         /// <c>TestTileMeshBuilder.BuildLineFromLayer{TProj}</c> (the generic, Burst-unregistered-projection
         /// entry point) completes the write step through this method directly, reached across the assembly
         /// boundary via <c>MapRenderer.Unity</c>'s own <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c>
         /// grant.</remarks>
         internal static (JobHandle Handle, NativeArray<float3x2> Bounds) ScheduleStreamWrite(
-            Mesh.MeshData md, LineGraphOutput output, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths)
+            Mesh.MeshData md, LineGraphOutput output, NativeArray<Vector4> featureColors,
+            NativeArray<float4> featurePaintScales)
         {
             int vertexCount = output.Vertices.Length;
             int indexCount  = output.Indices.Length;
@@ -233,7 +261,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JobHandle handle = new LineStreamWriteJob
             {
                 Vertices = output.Vertices, VertexFeatureIdx = output.VertexFeatureIdx, Indices = output.Indices,
-                FeatureColors = featureColors, FeatureWidths = featureWidths,
+                FeatureColors = featureColors, FeaturePaintScales = featurePaintScales,
                 Md = md, OutBounds = bounds,
             }.Schedule();
 
@@ -248,13 +276,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <param name="output">A layer's completed measure-graph output — caller-verified non-empty
         /// (<c>Vertices.Length &gt; 0 &amp;&amp; Indices.Length &gt; 0</c>) and error-free.</param>
         /// <param name="featureColors">Per-feature linear colour, indexed by <c>output.VertexFeatureIdx</c>.</param>
-        /// <param name="featureWidths">Per-feature width scale, same indexing.</param>
+        /// <param name="featurePaintScales">Per-feature (width, gap, offset, blur) scale, same indexing.</param>
         internal static MeshWriteOutput ScheduleWrite(
-            LineGraphOutput output, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths)
+            LineGraphOutput output, NativeArray<Vector4> featureColors, NativeArray<float4> featurePaintScales)
         {
             Mesh.MeshDataArray mda = MeshDataPayload.AllocateTracked(1);
             (JobHandle handle, NativeArray<float3x2> bounds) =
-                ScheduleStreamWrite(mda[0], output, featureColors, featureWidths);
+                ScheduleStreamWrite(mda[0], output, featureColors, featurePaintScales);
 
             return new MeshWriteOutput
             {

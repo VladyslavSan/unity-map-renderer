@@ -299,7 +299,7 @@ namespace MapRenderer.Tests
 
             LayerInput input = StyledLineTileBuilder.BuildLayerInput(
                 selection, layer.Geometry, paint, layout, zoom, renderOrigin,
-                out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
+                out NativeArray<Vector4> featureColors, out NativeArray<float4> featurePaintScales, projection);
 
             var mda = Mesh.AllocateWritableMeshData(1);
             int    vertexCount = 0;
@@ -310,7 +310,7 @@ namespace MapRenderer.Tests
 
             using var featSelected = input.FeatureSelected;
             using var featColors   = featureColors;
-            using var featWidths   = featureWidths;
+            using var featPaintScales = featurePaintScales;
 
             LineGraphOutput output = LineMeshGraph.ScheduleTyped(input, projection, default);
             output.Handle.Complete();
@@ -320,7 +320,7 @@ namespace MapRenderer.Tests
                     && output.Vertices.Length > 0 && output.Indices.Length > 0)
                 {
                     (JobHandle handle, NativeArray<float3x2> boundsArr) =
-                        StyledLineTileBuilder.ScheduleStreamWrite(mda[0], output, featColors, featWidths);
+                        StyledLineTileBuilder.ScheduleStreamWrite(mda[0], output, featColors, featPaintScales);
                     handle.Complete();
                     try
                     {

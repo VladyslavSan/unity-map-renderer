@@ -42,6 +42,8 @@ struct Varyings
     // LINE DELTA: per-feature data-driven color (white = identity), baked by StyledLineTileBuilder.
     half4  vColor       : TEXCOORD1;
     float  fogCoord     : TEXCOORD2;
+    // LINE DELTA: per-feature blur scale (device px), NOINTERPOLATION — see Line_LitForwardPass.hlsl.
+    nointerpolation float blurPx : TEXCOORD3;
     float4 positionCS   : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
@@ -72,10 +74,10 @@ Varyings LineUnlitPassVertex(LineAttributes input)
     // [MAP DELTA] World-space ribbon extrusion — IDENTICAL call to the Lit twin's LinePassVertex. Line AA
     // is preserved because these coverage inputs (side/innerFrac/dashU/hairlineScale) are interpolated
     // Varyings, fed to the SAME LineCoverage() in the fragment below.
-    float side, innerFrac, dashU;
+    float side, innerFrac, dashU, blurPx;
     float4 tangentOS_unused;
     float hairlineScale;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale);
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale, blurPx);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
 
@@ -87,6 +89,7 @@ Varyings LineUnlitPassVertex(LineAttributes input)
     // LINE DELTA: uv carries the line parameterization, NOT TRANSFORM_TEX'd (coverage needs raw dashU).
     output.uv = float4(dashU, side, innerFrac, hairlineScale);
     output.vColor = input.color;
+    output.blurPx = blurPx;
 
     return output;
 }
@@ -105,7 +108,7 @@ void LineUnlitPassFragment(
     // because it is computed by the reused Line_VertexExtrude.hlsl, not reimplemented here.
     half3 albedo = _BaseColor.rgb * input.vColor.rgb;
 
-    float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x);
+    float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x, input.blurPx);
 #if defined(_HAIRLINE_SOLID_CORE)
     // Energy compensation for the vertex-stage band clamp (see Line_VertexExtrude). 1.0 on every other
     // path, so this multiply is compiled out.

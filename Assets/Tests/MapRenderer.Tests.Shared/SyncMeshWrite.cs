@@ -204,14 +204,14 @@ namespace MapRenderer.Tests
 
             LayerInput input = StyledLineTileBuilder.BuildLayerInput(
                 selectedFeatures, geometry, paint, layout, zoom, tileOriginRender,
-                out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
+                out NativeArray<Vector4> featureColors, out NativeArray<float4> featurePaintScales, projection);
 
             if (!input.FeatureSelected.IsCreated)
                 return; // no line geometry — md left untouched; caller disposes the unused MeshData
 
             using var featSelected = input.FeatureSelected;
             using var featColors   = featureColors;
-            using var featWidths   = featureWidths;
+            using var featPaintScales = featurePaintScales;
 
             // `using var` disposes in REVERSE declaration order (boundsArr, then output), so a mid-method
             // throw cannot strand either.
@@ -223,7 +223,7 @@ namespace MapRenderer.Tests
                 return;
 
             (JobHandle handle, NativeArray<float3x2> boundsArr) =
-                StyledLineTileBuilder.ScheduleStreamWrite(md, output, featColors, featWidths);
+                StyledLineTileBuilder.ScheduleStreamWrite(md, output, featColors, featPaintScales);
             using var ownedBounds = boundsArr;
             handle.Complete();
 

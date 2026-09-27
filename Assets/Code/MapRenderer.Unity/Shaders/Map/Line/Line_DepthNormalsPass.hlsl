@@ -46,6 +46,8 @@ struct LineDepthNormalsVaryings
 #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
     half3 viewDirTS    : TEXCOORD8;
 #endif
+    // LINE DELTA: per-feature blur scale (device px), NOINTERPOLATION — see Line_LitForwardPass.hlsl.
+    nointerpolation float blurPx : TEXCOORD9;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -58,12 +60,13 @@ LineDepthNormalsVaryings LineDepthNormalsVertex(LineAttributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     // LINE DELTA: world-space ribbon extrusion + derived tangent (real tangent frame).
-    float side, innerFrac, dashU;
+    float side, innerFrac, dashU, blurPx;
     float4 tangentOS;
     float hairlineScale_unused;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale_unused);
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale_unused, blurPx);
     output.positionCS = TransformObjectToHClip(posOS);
     output.uv = float3(dashU, side, innerFrac);
+    output.blurPx = blurPx;
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
     VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS, tangentOS);
@@ -98,7 +101,7 @@ void LineDepthNormalsFragment(
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     // LINE DELTA: ribbon-silhouette coverage clip (replaces the _ALPHATEST_ON alpha test).
-    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x) - 0.5);
+    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x, input.blurPx) - 0.5);
 
     #if defined(LOD_FADE_CROSSFADE)
         LODFadeCrossFade(input.positionCS);

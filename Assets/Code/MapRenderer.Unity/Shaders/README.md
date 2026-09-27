@@ -48,7 +48,7 @@ Projection choice therefore lives entirely upstream of the shader: the mesh jobs
 silhouettes cannot diverge between passes. It emits the line's native parameterization in the
 standard `uv` channel: `uv.x` = distance-along in line-width units (`dashU`), `uv.y` = signed cross
 `∈[-1,1]` (`side`), `uv.z` = gap inner-fraction. `uv.xy` doubles as the surface UV fed to
-`InitializeStandardLitSurfaceData`; `LineCoverage(uv.y, uv.z, uv.x)` produces the
+`InitializeStandardLitSurfaceData`; `LineCoverage(uv.y, uv.z, uv.x, blurPx)` produces the
 feathered ribbon coverage that drives the forward-pass alpha and the depth/shadow/gbuffer `clip()`.
 
 `uv.xy` is `(dashU, side)`, not a conventional surface UV. A layer that binds a uv-dependent line
@@ -279,10 +279,10 @@ no scene enables fog and Automatic stripping would drop the variants the haze tu
 
 Line keeps its own input header and forward pass — not because Line is special-cased, but because
 each kind is self-contained. Specifically: the line's TEXCOORD attribute set (TEXCOORD0 = extrudeN,
-TEXCOORD1 = side+dist, TEXCOORD2 = widthScale) clashes with the fill input's UV set, so they cannot
-share an input header. `InitializeStandardLitSurfaceData` is duplicated verbatim across them — this
-is the honest duplication, co-located and visible, rather than a speculative `Common/` abstraction
-that never actually shared.
+TEXCOORD1 = side+dist, TEXCOORD2 = widthScale, TEXCOORD3 = paintScale) clashes with the fill input's
+UV set, so they cannot share an input header. `InitializeStandardLitSurfaceData` is duplicated
+verbatim across them — this is the honest duplication, co-located and visible, rather than a
+speculative `Common/` abstraction that never actually shared.
 
 ## Shared px→world include
 

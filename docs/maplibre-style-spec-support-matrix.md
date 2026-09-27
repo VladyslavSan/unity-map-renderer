@@ -23,24 +23,27 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 55 supported, 56 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 61 supported, 50 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
 camera zooms. The renderer does this for layer paint that rides a material uniform: constant and zoom forms
 of background, fill, line and fill-extrusion paint, `line-dasharray`, and constant `text-color` /
-`text-halo-color`. It evaluates the following values once, at the zoom the tile is built at, and keeps
-them until the tile is rebuilt: every data-driven paint value (baked into the mesh), every symbol layout
-value, symbol paint other than a constant text or halo colour, `fill-sort-key`, `fill-antialias`. A row
-marked † is otherwise complete; its status does not count this limit. The design and the open work are in
+`text-halo-color`. `text-translate` is also re-evaluated every frame, but not through a uniform: it rides
+no material property, and `SymbolPlacementSystem` reads it straight off the live style layer's paint,
+per slot, into the CPU-side vertex math. It evaluates the following values once, at the zoom the tile is
+built at, and keeps them until the tile is rebuilt: every data-driven paint value (baked into the mesh),
+every symbol layout value, symbol paint other than a constant text/halo colour or `text-translate`,
+`fill-sort-key`, `fill-antialias`. A row marked † is otherwise complete; its status does not count this
+limit. The design and the open work are in
 [`smooth-transitions-design.md`](smooth-transitions-design.md) § "Camera-driven property re-evaluation".
 
 **What an unsupported expression does.** It depends on where it is:
 
 - In an expression-capable property, or in `light.color`, `light.intensity` or `sky`, it fails the style
-  parse. `MapView.SetStyle` logs the error and keeps the previous style. Four properties are exceptions:
-  `fill-antialias`, `fill-extrusion-translate`, `fill-extrusion-vertical-gradient` and `line-dasharray`
-  catch the error and use their default.
+  parse. `MapView.SetStyle` logs the error and keeps the previous style. Seven properties are exceptions:
+  `fill-antialias`, `fill-extrusion-translate`, `fill-extrusion-vertical-gradient`, `line-dasharray`,
+  `fill-translate`, `line-translate` and `text-translate` catch the error and use their default.
 - In a property whose note starts with "Constant only", or in a pattern name, any expression gives that
   property's default.
 - In a layer `filter`, the style load checks it once and logs one warning if it does not compile (an
@@ -192,7 +195,7 @@ Owning design: [`fill-parity-design.md`](fill-parity-design.md).
 | `fill-layer-opacity` | `not supported` | Not built. |
 | `fill-color` | `supported` | Data-driven values are †. On a pattern layer it tints the pattern; see `fill-pattern`. |
 | `fill-outline-color` | `parsed, inert` | Bound to a uniform that no shader pass reads. It needs line geometry: [`fill-parity-design.md`](fill-parity-design.md) § 7. |
-| `fill-translate` | `partial` | Constant only. A zoom expression reads as `[0, 0]`. |
+| `fill-translate` | `supported` | Constant or Zoom. A data-driven value is spec-invalid for a layer-level property and falls back to `[0, 0]`. |
 | `fill-translate-anchor` | `partial` | Constant only. |
 | `fill-pattern` | `partial` | Constant sprite name only; the spec also allows data-driven. Known deviation: `fill-color` tints the pattern, and an absent `fill-color` is white. See [`fill-parity-design.md`](fill-parity-design.md) § 2. |
 
@@ -211,13 +214,13 @@ Owning designs: [`line-rendering-design.md`](line-rendering-design.md),
 | `line-opacity` | `supported` | Data-driven values are †. |
 | `line-layer-opacity` | `not supported` | Not built. |
 | `line-color` | `supported` | Data-driven values are †. |
-| `line-translate` | `partial` | Constant only. A zoom expression reads as `[0, 0]`. |
+| `line-translate` | `supported` | Constant or Zoom. A data-driven value is spec-invalid for a layer-level property and falls back to `[0, 0]`. |
 | `line-translate-anchor` | `partial` | Constant only. `"map"` is approximate near the limb of a zoomed-out globe: [`line-translate-parity-design.md`](line-translate-parity-design.md) § "The residual". |
 | `line-width` | `supported` | Data-driven values are †. |
-| `line-gap-width` | `partial` | Constant and zoom only. A data-driven value is ignored. |
-| `line-offset` | `partial` | Constant and zoom only. A data-driven value is ignored. |
-| `line-blur` | `partial` | Constant and zoom only. A data-driven value is ignored. |
-| `line-dasharray` | `partial` | Constant and zoom only; a data-driven value draws a solid line. Up to 4 entries; extra entries are dropped. An odd number of entries among the first four draws a solid line. |
+| `line-gap-width` | `supported` | Data-driven values are †. |
+| `line-offset` | `supported` | Data-driven values are †. |
+| `line-blur` | `supported` | Data-driven values are †. |
+| `line-dasharray` | `partial` | Constant and zoom only; a data-driven value draws a solid line. Up to 8 entries; more than 8 draws a solid line (never truncated). An odd-length pattern repeats over double its own length with on/off parity flipped in the second half. A zoom-dependent dasharray switches at the exact fractional zoom, where the spec says it should switch only at integer zoom levels. |
 | `line-pattern` | `parsed, inert` | The shader draws a solid line. |
 | `line-gradient` | `not supported` | Not built. |
 
@@ -241,7 +244,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `icon-size` | `supported` | |
 | `icon-text-fit` | `not supported` | Not built. |
 | `icon-text-fit-padding` | `not supported` | Not built. |
-| `icon-image` | `partial` | The `image` operator is not built. |
+| `icon-image` | `partial` | The `image` operator is not built. A legacy function object is not supported, so it resolves to no icon, the same as an unrecognised value. |
 | `icon-rotate` | `supported` | |
 | `icon-padding` | `partial` | A number, or the spec's `[top,right,bottom,left]` array (1-4 entries), parse and evaluate. Collision applies one isotropic value: the largest entry. It does not apply a value per side. A zoom expression with mismatched stop lengths falls back to the spec default (2px) for that feature, instead of failing the tile's whole label build. |
 | `icon-keep-upright` | `not supported` | Always `false`, the spec default. |
@@ -250,8 +253,8 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `icon-pitch-alignment` | `partial` | Constant only. Used only for icons that follow a line. Point icons always stand upright (`viewport`). |
 | `text-pitch-alignment` | `partial` | Constant only. Used only for curved line text. Point text always stands upright (`viewport`). |
 | `text-rotation-alignment` | `partial` | Constant only. `viewport-glyph` is not built and reads as `auto`. Under line placement, `viewport` gives upright text at each anchor instead of curved text: [`road-shields-design.md`](road-shields-design.md) § 3 (D4). |
-| `text-field` | `partial` | `format` is not built, so that feature gets no text. |
-| `text-font` | `partial` | Constant and zoom expressions evaluate correctly. In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there fails the style parse. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
+| `text-field` | `partial` | `format` is not built, so that feature gets no text. A legacy function object is not supported: a `{token}` string still expands, but a `{"stops": …}` object resolves to no text. |
+| `text-font` | `partial` | Constant and zoom expressions evaluate correctly, including a legacy `{"stops": …}` function (it steps, not ramps: `text-font` has no "interpolate" marker). In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there fails the style parse. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
 | `text-size` | `supported` | |
 | `text-max-width` | `supported` | |
 | `text-line-height` | `supported` | |
@@ -277,7 +280,8 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 
 ### `symbol` — paint
 
-Every value in this table is †, except a constant `text-color` or `text-halo-color`.
+Every value in this table is †, except a constant `text-color`, a constant `text-halo-color`, or
+`text-translate`.
 
 | Property | Status | Note |
 |---|---|---|
@@ -293,7 +297,7 @@ Every value in this table is †, except a constant `text-color` or `text-halo-c
 | `text-halo-color` | `supported` | |
 | `text-halo-width` | `supported` | |
 | `text-halo-blur` | `supported` | |
-| `text-translate` | `partial` | Constant only; the spec also allows zoom. |
+| `text-translate` | `supported` | Constant or zoom. |
 | `text-translate-anchor` | `partial` | Constant only. |
 
 ### `fill-extrusion`
@@ -367,7 +371,7 @@ an unsupported expression does" at the top says what that does to a style.
 
 | Form | Status | Note |
 |---|---|---|
-| Legacy zoom function (`{"stops": …, "base": …}`) | `partial` | Always read as a zoom interpolation. `type` (`interval`, `categorical`, `identity`) and `property` (data functions) are ignored. |
+| Legacy function (`{"stops": …}`, or a bare `"type":"identity"`) | `partial` | `type` (`exponential`/`interval`/`categorical`/`identity`), `property`, `default`, `colorSpace` and zoom-and-property stops are honoured. An `identity` function's `default` covers a MISSING property only, not a value of the wrong type. `text-field` and `icon-image` do not support this form: an object resolves to no text / no icon (see those rows). |
 | Color strings | `partial` | Hex, `rgb()`/`rgba()`, `hsl()`/`hsla()` and `transparent`. Only a subset of the CSS named colours. |
 
 **Filters**

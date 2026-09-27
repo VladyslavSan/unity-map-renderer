@@ -6,6 +6,7 @@
 //   StylePropertyTests          — StyleProperty<T>: parse, classify, evaluate (uniform + bake), GC-allocation gate.
 //   StyleLayerEagerParseTests   — the eight style property types parse eagerly via a static Parse factory.
 //   FillLayoutTests             — Fill.LayoutProperties: parsing fill-sort-key.
+//   FillPaintTranslateTests     — Fill.PaintProperties.Translate: the shared TranslateProperty route.
 //   FillPatternTests            — Fill.FillPattern: resolving a fill-pattern sprite name against a sheet.
 //   FillExtrusionPaintTests     — FillExtrusion.PaintProperties: classification + spec defaults.
 //   LinePaintTests              — Line.PaintProperties/LayoutProperties: classification, translate, join/cap layout.
@@ -717,6 +718,19 @@ namespace MapRenderer.Tests.Style
                 () => ColProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,[\"get\",\"w\"],10,\"#ff0000\"]"),
                 "Composite-kind must not throw at construction.");
         }
+
+        // ── Legacy categorical function: no "default" degrades to the STYLE PROPERTY's default ──────
+
+        [Test]
+        public void Categorical_NoDefault_UnmatchedKey_TryEvaluateFailsToPropertyDefault()
+        {
+            // No "default": the fallback is null, which a numeric project cannot read — TryEvaluate must
+            // catch that and hand back NumProp's own default (0), not throw out of the bake path.
+            var prop = NumProp("{\"property\":\"class\",\"type\":\"categorical\",\"stops\":[[\"motorway\",8]]}");
+            bool ok = prop.TryEvaluate(0.0, MakeFeature(("class", "primary")), out float value);
+            Assert.IsFalse(ok, "an unmatched category with no default is a spec error, not a value");
+            Assert.AreEqual(0f, value);
+        }
     }
 
 
@@ -762,6 +776,16 @@ namespace MapRenderer.Tests.Style
             var fill = (Fill.StyleLayer)doc.Layers[0];
             Assert.AreEqual(expected, fill.Paint.Antialias.Evaluate(0.0),
                 $"antialias={antialias}, hostDefault={hostDefault} must evaluate to {expected}.");
+        }
+
+        [Test]
+        public void FillAntialias_LegacyZoomFunction_StepsBetweenBooleans()
+        {
+            // fill-antialias has no "interpolate" marker (and is a bool, not a number): an absent "type"
+            // steps between the literal bool outputs.
+            var paint = TestStyle.FillPaint(@"{""fill-antialias"": {""stops"": [[10, true], [14, false]]}}");
+            Assert.IsTrue(paint.Antialias.Evaluate(12.0), "z12 is below the second stop (14)");
+            Assert.IsFalse(paint.Antialias.Evaluate(15.0));
         }
 
         // ── the laziness cannot come back (reflection, never text) ─────────────────────────────────
@@ -979,6 +1003,63 @@ namespace MapRenderer.Tests.Style
             var fillLayer = (Fill.StyleLayer)style.Layers[0];
             Assert.IsNotNull(fillLayer.Layout.SortKey, "the parser must route layout onto the typed layer");
             Assert.AreEqual(3f, fillLayer.Layout.SortKey.Evaluate(0.0), 1e-9);
+        }
+
+        [Test]
+        public void SortKey_LegacyZoomFunction_DefaultsToInterval_NotRamp()
+        {
+            // fill-sort-key has no "interpolate" marker: an absent "type" steps (interval), it does not ramp.
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": {""stops"": [[10, 1], [14, 5]]}}");
+
+            Assert.AreEqual(1f, layout.SortKey.Evaluate(12.0), 1e-9, "z12 is below the second stop (14)");
+            Assert.AreEqual(5f, layout.SortKey.Evaluate(15.0), 1e-9);
+        }
+
+        [Test]
+        public void SortKey_ZoomAndPropertyCategorical_OuterAxisSteps()
+        {
+            // fill-sort-key is non-interpolatable, so the OUTER zoom axis of a zoom-and-property function
+            // steps between its inner (categorical) groups, instead of ramping between them.
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": {""property"":""cls"",""type"":""categorical"",
+                ""stops"":[[{""zoom"":10,""value"":""a""},1],[{""zoom"":10,""value"":""b""},2],
+                           [{""zoom"":14,""value"":""a""},3],[{""zoom"":14,""value"":""b""},4]]}}");
+
+            var b = new DictionaryFeature(new System.Collections.Generic.Dictionary<string, Value>
+                { ["cls"] = Value.String("b") });
+
+            Assert.AreEqual(2f, layout.SortKey.Evaluate(12.0, b), 1e-9, "z12 is below the second zoom group (14)");
+            Assert.AreEqual(4f, layout.SortKey.Evaluate(15.0, b), 1e-9);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // FillPaintTranslateTests — Fill.PaintProperties.Translate: the shared TranslateProperty route
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Its own fixture (not <see cref="FillPaintTests"/> in StyleRestyleTests.cs, which needs
+    /// Unity.Collections for other siblings): every type named here is Core/Unity.Mathematics-engine-free,
+    /// so it lives in this file for core-tests coverage.</summary>
+    [TestFixture]
+    public class FillPaintTranslateTests
+    {
+        [Test]
+        public void Translate_ZoomExpression_ClassifiesAsZoom_NotCollapsedToDefault()
+        {
+            var paint = TestStyle.FillPaint(
+                "{\"fill-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}");
+
+            Assert.AreEqual(ExpressionKind.Zoom, paint.Translate.Kind,
+                "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
+
+            var atMin = paint.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, atMin.x, 0.01);
+            Assert.AreEqual(0.0, atMin.y, 0.01);
+
+            var atMax = paint.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, atMax.x, 0.01,
+                "at zoom=16 the interpolated translate must reach its second stop, NOT stay at [0,0].");
+            Assert.AreEqual(-10.0, atMax.y, 0.01);
         }
     }
 
@@ -1685,7 +1766,11 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(8.0f, v, 1e-6f, "line-gap-width must be 8.0.");
         }
 
-        /// <summary>line-translate parses a bare [x,y] constant.</summary>
+        /// <summary>line-translate parses or falls back across every input shape: a bare [x,y] constant
+        /// pins, a zoom-interpolate expression ramps (not collapsing to the default), a legacy
+        /// <c>{"stops":…}</c> function gives the same two values as its modern equivalent, and a
+        /// data-driven value or a too-short array (constant OR zoom-kind) all fall back to the default
+        /// rather than throwing.</summary>
         [Test]
         public void LinePaint_Translate_ParsesOrFallsBackAcrossInputShapes()
         {
@@ -1694,6 +1779,54 @@ namespace MapRenderer.Tests.Style
             var constantT = constant.Translate.Evaluate(0.0);
             Assert.AreEqual(16.0, constantT.x, 1e-6, "line-translate x must be 16.");
             Assert.AreEqual(-8.0, constantT.y, 1e-6, "line-translate y must be -8.");
+
+            var zoom = MakeLineLayer("{\"line-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Translate.Kind,
+                "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
+            var zoomAtMin = zoom.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, zoomAtMin.x, 0.01);
+            Assert.AreEqual(0.0, zoomAtMin.y, 0.01);
+            var zoomAtMax = zoom.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, zoomAtMax.x, 0.01,
+                "at zoom=16 the interpolated translate must reach its second stop, NOT stay at [0,0].");
+            Assert.AreEqual(-10.0, zoomAtMax.y, 0.01);
+
+            // The shared TranslateProperty route also parses a legacy {"stops": …} function, through the
+            // same WrapBareArrayLiterals + ExpressionParser path as the modern form above.
+            var legacyStops = MakeLineLayer("{\"line-translate\":{\"stops\":[[10,[0,0]],[16,[20,-10]]]}}").Paint;
+            var legacyAtMin = legacyStops.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, legacyAtMin.x, 0.01);
+            Assert.AreEqual(0.0, legacyAtMin.y, 0.01);
+            var legacyAtMax = legacyStops.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, legacyAtMax.x, 0.01);
+            Assert.AreEqual(-10.0, legacyAtMax.y, 0.01);
+
+            var dataDriven = MakeLineLayer("{\"line-translate\":[\"get\",\"t\"]}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, dataDriven.Translate.Kind,
+                "a data-driven translate must fall back to the Constant default, not classify as Feature.");
+            var dataDrivenT = dataDriven.Translate.Evaluate(0.0);
+            Assert.AreEqual(0.0, dataDrivenT.x, 1e-6);
+            Assert.AreEqual(0.0, dataDrivenT.y, 1e-6);
+
+            var shortArray = MakeLineLayer("{\"line-translate\":[5]}").Paint;
+            var shortArrayT = shortArray.Translate.Evaluate(0.0);
+            Assert.AreEqual(0.0, shortArrayT.x, 1e-6);
+            Assert.AreEqual(0.0, shortArrayT.y, 1e-6);
+
+            // A CONSTANT short array is caught once, at parse/construction time. A ZOOM-kind one is evaluated
+            // through the per-frame span fast path instead (StyleProperty.EvalProjected), uncaught at that
+            // call site — a short array there must still fall back to Default, not throw IndexOutOfRange.
+            var zoomLayer = MakeLineLayer("{\"line-translate\":[\"step\",[\"zoom\"],[5],10,[1,2]]}");
+            var zoomLp    = zoomLayer.Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoomLp.Translate.Kind,
+                "precondition: a step-by-zoom translate must classify as Zoom, or this exercises the constant path.");
+            var zoomShort = zoomLp.Translate.Evaluate(5.0); // below the "10" step: the short [5] branch
+            Assert.AreEqual(0.0, zoomShort.x, 1e-6);
+            Assert.AreEqual(0.0, zoomShort.y, 1e-6);
+            var zoomLong = zoomLp.Translate.Evaluate(12.0); // at/past "10": the well-formed [1,2] branch
+            Assert.AreEqual(1.0, zoomLong.x, 1e-6);
+            Assert.AreEqual(2.0, zoomLong.y, 1e-6);
         }
 
         /// <summary>line-translate-anchor encodes viewport as 1.0 and map (including absence, defaulting to
@@ -1958,7 +2091,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0f, sym.Paint.HaloWidth.Evaluate(0.0), 1e-6, "text-halo-width default is 0");
             Assert.AreEqual(new Color(0, 0, 0, 1), sym.Paint.Color.Evaluate(0.0), "text-color default is opaque black");
             Assert.AreEqual(1f, sym.Paint.Opacity.Evaluate(0.0), 1e-6, "text-opacity default is 1");
-            Assert.AreEqual(new float2(0, 0), sym.Paint.Translate, "text-translate default is [0,0]");
+            Assert.AreEqual(new double2(0.0, 0.0), sym.Paint.Translate.Evaluate(0.0), "text-translate default is [0,0]");
             Assert.AreEqual(TextTranslateAnchor.Map, sym.Paint.TranslateAnchor, "text-translate-anchor default is map");
 
             // Slice A layout defaults.
@@ -1986,6 +2119,18 @@ namespace MapRenderer.Tests.Style
 
             // icon-opacity paint default.
             Assert.AreEqual(1f, sym.Paint.IconOpacity.Evaluate(0.0), 1e-6, "icon-opacity default is 1");
+        }
+
+        [Test]
+        public void SymbolLayer_SymbolSortKey_LegacyStopsFunction_DefaultsToInterval_NotRamp()
+        {
+            // symbol-sort-key has no "interpolate" marker: an absent "type" steps, it does not ramp.
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'symbol-sort-key':{'stops':[[10,1],[14,5]]} } } ] }").Layers[0];
+
+            Assert.AreEqual(1f, sym.Layout.SymbolSortKey.Evaluate(12.0), 1e-6, "z12 is below the second stop (14)");
+            Assert.AreEqual(5f, sym.Layout.SymbolSortKey.Evaluate(15.0), 1e-6);
         }
 
         [Test]
@@ -2166,8 +2311,20 @@ namespace MapRenderer.Tests.Style
                 { 'id':'a','type':'symbol','source':'s','source-layer':'c','paint':{
                     'text-translate':[4,6],'text-translate-anchor':'viewport' } } ] }").Layers[0];
 
-            Assert.AreEqual(new float2(4, 6), sym.Paint.Translate, "text-translate parses to [x,y] px (raw y-down)");
+            Assert.AreEqual(new double2(4, 6), sym.Paint.Translate.Evaluate(0.0),
+                "text-translate parses to [x,y] px (raw y-down)");
+            Assert.AreEqual(ExpressionKind.Constant, sym.Paint.Translate.Kind);
             Assert.AreEqual(TextTranslateAnchor.Viewport, sym.Paint.TranslateAnchor);
+
+            // Zoom-capable: text-translate is re-evaluated per frame (SymbolPlacementSystem), so an
+            // interpolate expression must be honoured, not collapsed to the constant default.
+            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','paint':{
+                    'text-translate':['interpolate',['linear'],['zoom'],0,[0,0],10,[20,10]] } } ] }").Layers[0];
+            Assert.AreEqual(ExpressionKind.Zoom, zoomed.Paint.Translate.Kind);
+            Assert.AreEqual(new double2(0, 0), zoomed.Paint.Translate.Evaluate(0.0), "z0 -> [0,0]");
+            Assert.AreEqual(new double2(10, 5), zoomed.Paint.Translate.Evaluate(5.0), "z5 -> the linear midpoint");
+            Assert.AreEqual(new double2(20, 10), zoomed.Paint.Translate.Evaluate(10.0), "z10 -> [20,10]");
         }
 
         [Test]
@@ -2198,6 +2355,18 @@ namespace MapRenderer.Tests.Style
                 .Layers[0];
             CollectionAssert.AreEqual(new[] { "Low Font" }, zoomed.Layout.TextFont.Evaluate(0.0));
             CollectionAssert.AreEqual(new[] { "High Font" }, zoomed.Layout.TextFont.Evaluate(12.0));
+        }
+
+        [Test]
+        public void SymbolLayer_TextFont_LegacyStopsFunction_StepsNotRamps()
+        {
+            // text-font has no "interpolate" marker, so a legacy stops function steps between stacks
+            // instead of ramping.
+            var stepped = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-font':{'stops':[[10,['Low Font']],[14,['High Font']]]} } } ] }").Layers[0];
+            CollectionAssert.AreEqual(new[] { "Low Font" }, stepped.Layout.TextFont.Evaluate(0.0));
+            CollectionAssert.AreEqual(new[] { "High Font" }, stepped.Layout.TextFont.Evaluate(14.0));
         }
 
         [Test]
@@ -2406,7 +2575,7 @@ namespace MapRenderer.Tests.Style
     /// <see cref="Line.LineDash"/>: dash coverage function, zoom-stability, width
     /// coupling, dasharray parse/eval, and shader structure (tooth 4 — greppable assertion).
     ///
-    /// <c>TryEvaluatePattern</c> returns <c>float4 packed + int count</c> (alloc-free);
+    /// <c>TryEvaluatePattern</c> returns two <c>float4</c>s + <c>int count</c> (alloc-free);
     /// <c>DashCoverage(float[])</c> is the CPU mirror.
     /// </summary>
     [TestFixture]
@@ -2436,19 +2605,13 @@ namespace MapRenderer.Tests.Style
                 $"Expected on:off ratio ≈ 2:1 for [2,1], got {ratio:F4} (on={onCount}, off={offCount})");
         }
 
-        /// <summary>Every degenerate DashCoverage input is always-on (coverage 1.0): an odd-length ("solid
-        /// control") pattern, a null pattern, an empty pattern, and a zero/negative dash-width-in-metres.</summary>
+        /// <summary>Every degenerate DashCoverage input is always-on (coverage 1.0): a null pattern, an
+        /// empty pattern, and a zero/negative dash-width-in-metres. An odd-length pattern is NOT degenerate
+        /// under N=8 — it repeats with a parity flip; see
+        /// <see cref="DashCoverage_OddLength_RepeatsWithParityFlip_PastNIsSolid"/>.</summary>
         [Test]
         public void DashCoverage_DegenerateInputs_AlwaysOn()
         {
-            float[] solidControl = new float[] { 1f };
-            for (int i = 0; i < 100; i++)
-            {
-                float cov = Line.LineDash.DashCoverage(i * 0.17, 1.0, solidControl);
-                Assert.That(cov, Is.EqualTo(1.0f),
-                    $"[1] (odd-length) must be solid identity, got {cov} at dist={i * 0.17}");
-            }
-
             for (int i = 0; i < 20; i++)
                 Assert.That(Line.LineDash.DashCoverage(i * 0.5, 1.0, null), Is.EqualTo(1.0f));
 
@@ -2549,65 +2712,109 @@ namespace MapRenderer.Tests.Style
                 "At 2x width, dist=3.9 still in on-run (boundary)");
         }
 
-        // ── non-regression: solid control via DashCount=0 identity ───────────────────────────
+        // ── Odd-length repeats over 2P with parity flip; past N=8 entries is solid, never truncated ──
 
         [Test]
-        public void DashCoverage_OddLength_Is_SolidIdentity()
+        public void DashCoverage_OddLength_RepeatsWithParityFlip_PastNIsSolid()
         {
-            float[] odd1 = new float[] { 1f };
-            float[] odd3 = new float[] { 2f, 1f, 3f };
+            // [2,1,3]: P=6, period=12. Second half (phase>=6) re-walks the same entries with parity flipped.
+            float[] threeEntry = { 2f, 1f, 3f };
+            double[] us        = { 1, 2.5, 4, 7, 8.5, 10, 13 };
+            float[]  expected  = { 1f, 0f, 1f, 0f, 1f, 0f, 1f };
+            for (int i = 0; i < us.Length; i++)
+                Assert.That(Line.LineDash.DashCoverage(us[i], 1.0, threeEntry), Is.EqualTo(expected[i]),
+                    $"[2,1,3] at u={us[i]}");
 
+            // [2] alone: P=2, period=4 — a lone dash behaves like [2,2], never doubling its own array.
+            float[] oneEntry = { 2f };
+            Assert.That(Line.LineDash.DashCoverage(1, 1.0, oneEntry), Is.EqualTo(1f), "[2] at u=1: on");
+            Assert.That(Line.LineDash.DashCoverage(3, 1.0, oneEntry), Is.EqualTo(0f), "[2] at u=3: off (flipped half)");
+            Assert.That(Line.LineDash.DashCoverage(5, 1.0, oneEntry), Is.EqualTo(1f), "[2] at u=5: on (next period)");
+
+            // 7 ones: P=7, period=14. u=7.5 falls just past the P boundary — the flipped half.
+            float[] sevenOnes = { 1f, 1f, 1f, 1f, 1f, 1f, 1f };
+            Assert.That(Line.LineDash.DashCoverage(7.5, 1.0, sevenOnes), Is.EqualTo(0f),
+                "[1x7] at u=7.5 is in the flipped half: off");
+
+            // 8 (even) entries fit whole — N=8 must not truncate its own boundary case.
+            float[] eight = { 1f, 1f, 1f, 1f, 1f, 1f, 2f, 2f };
+            Assert.That(Line.LineDash.DashCoverage(7.5, 1.0, eight), Is.EqualTo(1f),
+                "8 entries must not be truncated (period sums to 10; u=7.5 is inside the 7th, on, entry)");
+
+            // Past N=8: solid at every phase, not a truncated 8-entry read.
+            float[] nine = { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f };
             for (int i = 0; i < 20; i++)
-            {
-                Assert.That(Line.LineDash.DashCoverage(i * 0.7, 1.0, odd1), Is.EqualTo(1.0f),
-                    "[1] must be solid identity");
-                Assert.That(Line.LineDash.DashCoverage(i * 0.7, 1.0, odd3), Is.EqualTo(1.0f),
-                    "[2,1,3] (odd) must be solid identity");
-            }
+                Assert.That(Line.LineDash.DashCoverage(i * 0.7, 1.0, nine), Is.EqualTo(1.0f), "> N entries must be solid");
         }
 
-        // ── TryEvaluatePattern → float4 + count (alloc-free) ─────────────────────────────────
+        // ── TryEvaluatePattern → two float4s + count (alloc-free) ────────────────────────────
 
-        /// <summary>TryEvaluatePattern packs or degrades across every dash-array shape: a two-entry and a
-        /// four-entry pattern pack correctly into float4+count; an odd-length pattern (solid identity) and a
-        /// null expression both return false with count 0; a 5-entry pattern truncates to 4 (even).</summary>
+        /// <summary>TryEvaluatePattern packs or degrades across every dash-array shape: two-, four- and
+        /// eight-entry patterns pack into lo/hi + count; an odd-length pattern packs too (it repeats — it
+        /// is not solid identity) and a negative entry clamps to 0; a null expression returns false with
+        /// count 0. The N=8 entry-count boundary itself is
+        /// <see cref="TryEvaluatePattern_EntryCountBoundary"/>.</summary>
         [Test]
         public void TryEvaluatePattern_PacksOrDegrades()
         {
-            // [2, 1] → packed.x=2, packed.y=1, count=2
+            // [2, 1] → lo.x=2, lo.y=1, count=2, hi unused
             var twoEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, 1]"));
             Assert.IsNotNull(twoEntry, "ParseDashArray must succeed for [2,1].");
-            bool twoOk = Line.LineDash.TryEvaluatePattern(twoEntry, 14.0, out float4 twoPacked, out int twoCount);
+            bool twoOk = Line.LineDash.TryEvaluatePattern(twoEntry, 14.0, out float4 twoLo, out float4 twoHi, out int twoCount);
             Assert.IsTrue(twoOk, "TryEvaluatePattern must return true for a valid [2,1] pattern.");
             Assert.AreEqual(2, twoCount, "Count must be 2 for a two-entry pattern.");
-            Assert.AreEqual(2f, twoPacked.x, 1e-6f, "packed.x must be 2 (first dash length).");
-            Assert.AreEqual(1f, twoPacked.y, 1e-6f, "packed.y must be 1 (first gap length).");
-            Assert.AreEqual(0f, twoPacked.z, 1e-6f, "packed.z must be 0 (unused).");
-            Assert.AreEqual(0f, twoPacked.w, 1e-6f, "packed.w must be 0 (unused).");
+            Assert.AreEqual(2f, twoLo.x, 1e-6f, "lo.x must be 2 (first dash length).");
+            Assert.AreEqual(1f, twoLo.y, 1e-6f, "lo.y must be 1 (first gap length).");
+            Assert.AreEqual(0f, twoLo.z, 1e-6f, "lo.z must be 0 (unused).");
+            Assert.AreEqual(0f, twoLo.w, 1e-6f, "lo.w must be 0 (unused).");
+            Assert.AreEqual(float4.zero, twoHi, "hi must be 0 (unused) for a two-entry pattern.");
 
             var fourEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[4, 1, 1, 1]"));
-            bool fourOk = Line.LineDash.TryEvaluatePattern(fourEntry, 10.0, out float4 fourPacked, out int fourCount);
+            bool fourOk = Line.LineDash.TryEvaluatePattern(fourEntry, 10.0, out float4 fourLo, out float4 fourHi, out int fourCount);
             Assert.IsTrue(fourOk);
             Assert.AreEqual(4, fourCount);
-            Assert.AreEqual(4f, fourPacked.x, 1e-6f);
-            Assert.AreEqual(1f, fourPacked.y, 1e-6f);
-            Assert.AreEqual(1f, fourPacked.z, 1e-6f);
-            Assert.AreEqual(1f, fourPacked.w, 1e-6f);
+            Assert.AreEqual(new float4(4f, 1f, 1f, 1f), fourLo);
+            Assert.AreEqual(float4.zero, fourHi, "hi must stay zero for a 4-entry pattern.");
 
-            // [2, 1, 3] is odd-length → solid identity → false, count=0
+            // Nothing above exercises the hi half at all.
+            var eightEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[1, 2, 3, 4, 5, 6, 7, 8]"));
+            bool eightOk = Line.LineDash.TryEvaluatePattern(eightEntry, 10.0, out float4 eightLo, out float4 eightHi, out int eightCount);
+            Assert.IsTrue(eightOk);
+            Assert.AreEqual(8, eightCount);
+            Assert.AreEqual(new float4(1f, 2f, 3f, 4f), eightLo);
+            Assert.AreEqual(new float4(5f, 6f, 7f, 8f), eightHi);
+
+            // [2, 1, 3] is odd-length — it now repeats (DashCoverage), it is not solid identity.
             var oddEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, 1, 3]"));
-            bool oddOk = Line.LineDash.TryEvaluatePattern(oddEntry, 10.0, out _, out int oddCount);
-            Assert.IsFalse(oddOk, "Odd-length must return false (solid identity).");
-            Assert.AreEqual(0, oddCount, "Count must be 0 for odd-length (solid identity sentinel).");
+            bool oddOk = Line.LineDash.TryEvaluatePattern(oddEntry, 10.0, out float4 oddLo, out float4 oddHi, out int oddCount);
+            Assert.IsTrue(oddOk, "Odd-length must return true — it repeats, not falls back to solid.");
+            Assert.AreEqual(3, oddCount);
+            Assert.AreEqual(new float4(2f, 1f, 3f, 0f), oddLo);
+            Assert.AreEqual(float4.zero, oddHi);
 
-            bool nullOk = Line.LineDash.TryEvaluatePattern(null, 10.0, out _, out int nullCount);
+            // A negative entry packs as 0, matching DashCoverage's own clamp (LineDash.cs), so the CPU
+            // mirror and what the shader reads never disagree over a malformed negative span.
+            var negEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, -1, 3]"));
+            bool negOk = Line.LineDash.TryEvaluatePattern(negEntry, 10.0, out float4 negLo, out _, out int negCount);
+            Assert.IsTrue(negOk);
+            Assert.AreEqual(3, negCount);
+            Assert.AreEqual(new float4(2f, 0f, 3f, 0f), negLo, "the negative entry must clamp to 0, not pack as -1.");
+
+            bool nullOk = Line.LineDash.TryEvaluatePattern(null, 10.0, out _, out _, out int nullCount);
             Assert.IsFalse(nullOk, "Null expression must return false.");
             Assert.AreEqual(0, nullCount);
+        }
 
-            // 5-entry → truncated to 4 (even) → count=4, ok=true
-            var fiveEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[1, 1, 1, 1, 1]"));
-            Line.LineDash.TryEvaluatePattern(fiveEntry, 10.0, out _, out int fiveCount);
-            Assert.AreEqual(4, fiveCount, "5 entries truncated to 4 (even) → count=4");
+        [TestCase(5, true, 5)]   // odd, well within N — survives whole, not truncated
+        [TestCase(8, true, 8)]   // exactly N — still valid
+        [TestCase(9, false, 0)]  // past N — solid, never truncated to N
+        public void TryEvaluatePattern_EntryCountBoundary(int entries, bool expectOk, int expectCount)
+        {
+            string json = "[" + string.Join(",", Enumerable.Repeat("1", entries)) + "]";
+            var expr = Line.LineDash.ParseDashArray(JsonParser.Parse(json));
+            bool ok = Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 lo, out float4 hi, out int count);
+            Assert.AreEqual(expectOk, ok, $"{entries} entries");
+            Assert.AreEqual(expectCount, count, $"{entries} entries");
         }
 
         // ── ParseDashArray + TryEvaluatePattern: expression system integration ────────────────
@@ -2616,8 +2823,9 @@ namespace MapRenderer.Tests.Style
             => Line.LineDash.ParseDashArray(JsonParser.Parse(json));
 
         /// <summary>ParseDashArray classifies and evaluates every VALID expression form: constant/literal,
-        /// zoom-step, and zoom-interpolate over a colour-shaped array (never colour-coerced). Degenerate
-        /// inputs are <see cref="ParseDashArray_NullOrDataDriven_DegradesToSolid"/>.</summary>
+        /// zoom-step, a legacy stops function (interval, not ramp), and zoom-interpolate over a
+        /// colour-shaped array (never colour-coerced). Degenerate inputs are
+        /// <see cref="ParseDashArray_NullOrDataDriven_DegradesToSolid"/>.</summary>
         [Test]
         public void ParseDashArray_ClassifiesAndEvaluatesAcrossExpressionForms()
         {
@@ -2625,7 +2833,7 @@ namespace MapRenderer.Tests.Style
             Assert.That(constantBareArray, Is.Not.Null);
             Assert.That(constantBareArray.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant),
                 "A bare constant dasharray must classify as Constant.");
-            bool constantOk = Line.LineDash.TryEvaluatePattern(constantBareArray, 14.0, out float4 constantPacked, out int constantCount);
+            bool constantOk = Line.LineDash.TryEvaluatePattern(constantBareArray, 14.0, out float4 constantPacked, out _, out int constantCount);
             Assert.That(constantOk, Is.True);
             Assert.That(constantCount, Is.EqualTo(2));
             Assert.That(constantPacked.x, Is.EqualTo(2f));
@@ -2633,7 +2841,7 @@ namespace MapRenderer.Tests.Style
 
             var literalExpr = DashExpr("[\"literal\", [4, 2]]");
             Assert.That(literalExpr.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant));
-            Line.LineDash.TryEvaluatePattern(literalExpr, 10.0, out float4 literalPacked, out int literalCount);
+            Line.LineDash.TryEvaluatePattern(literalExpr, 10.0, out float4 literalPacked, out _, out int literalCount);
             Assert.That(literalCount, Is.EqualTo(2));
             Assert.That(literalPacked.x, Is.EqualTo(4f));
             Assert.That(literalPacked.y, Is.EqualTo(2f));
@@ -2641,19 +2849,29 @@ namespace MapRenderer.Tests.Style
             var zoomStep = DashExpr("[\"step\", [\"zoom\"], [1,1], 10, [2,1], 14, [4,1]]");
             Assert.That(zoomStep.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Zoom),
                 "A zoom-step dasharray must classify as Zoom.");
-            Line.LineDash.TryEvaluatePattern(zoomStep, 9.0,  out float4 p9, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 9.0,  out float4 p9, out _, out _);
             Assert.That(p9.x, Is.EqualTo(1f), "zoom=9: default [1,1]");
-            Line.LineDash.TryEvaluatePattern(zoomStep, 10.0, out float4 p10, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 10.0, out float4 p10, out _, out _);
             Assert.That(p10.x, Is.EqualTo(2f), "zoom=10: [2,1]");
-            Line.LineDash.TryEvaluatePattern(zoomStep, 14.0, out float4 p14, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 14.0, out float4 p14, out _, out _);
             Assert.That(p14.x, Is.EqualTo(4f), "zoom=14: [4,1]");
-            Line.LineDash.TryEvaluatePattern(zoomStep, 15.0, out float4 p15, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 15.0, out float4 p15, out _, out _);
             Assert.That(p15.x, Is.EqualTo(4f), "zoom=15: still [4,1]");
+
+            // line-dasharray has no "interpolate" marker, so an absent "type" steps; each stop output is an
+            // array, wrapped as a literal (the spec's stop-output rule) rather than parsed as an operator call.
+            var legacyStops = DashExpr("{\"stops\":[[10,[2,1]],[14,[4,2]]]}");
+            Line.LineDash.TryEvaluatePattern(legacyStops, 13.0, out float4 p13, out _, out int c13);
+            Assert.AreEqual(new float4(2, 1, 0, 0), p13);
+            Assert.AreEqual(2, c13);
+            Line.LineDash.TryEvaluatePattern(legacyStops, 15.0, out float4 p15b, out _, out int c15);
+            Assert.AreEqual(new float4(4, 2, 0, 0), p15b);
+            Assert.AreEqual(2, c15);
 
             // A 4-entry dash pattern also looks like an rgb()/rgba() colour; Ramps.Lerp must take the
             // array branch first, or this silently draws solid (a non-array TryEvaluatePattern result).
             var zoomInterpolate = DashExpr("[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2,1,2,1],10,[4,2,4,2]]");
-            bool interpOk = Line.LineDash.TryEvaluatePattern(zoomInterpolate, 5.0, out float4 interpPacked, out int interpCount);
+            bool interpOk = Line.LineDash.TryEvaluatePattern(zoomInterpolate, 5.0, out float4 interpPacked, out _, out int interpCount);
             Assert.IsTrue(interpOk, "a matching-length zoom-interpolated dash array must evaluate, not fall back to solid");
             Assert.AreEqual(4, interpCount);
             Assert.AreEqual(new float4(3f, 1.5f, 3f, 1.5f), interpPacked);
@@ -2666,13 +2884,13 @@ namespace MapRenderer.Tests.Style
         public void ParseDashArray_NullOrDataDriven_DegradesToSolid()
         {
             Assert.That(Line.LineDash.ParseDashArray(null), Is.Null);
-            bool nullOk = Line.LineDash.TryEvaluatePattern(null, 10.0, out _, out int nullCount);
+            bool nullOk = Line.LineDash.TryEvaluatePattern(null, 10.0, out _, out _, out int nullCount);
             Assert.That(nullOk, Is.False);
             Assert.That(nullCount, Is.EqualTo(0));
 
             var dataDriven = DashExpr("[\"match\", [\"get\", \"cls\"], \"a\", [2,1], [4,2]]");
             Assert.That(MapRenderer.Core.Expressions.ExpressionKinds.DependsOnFeature(dataDriven.Kind), Is.True);
-            Assert.That(Line.LineDash.TryEvaluatePattern(dataDriven, 10.0, out _, out int dataDrivenCount), Is.False,
+            Assert.That(Line.LineDash.TryEvaluatePattern(dataDriven, 10.0, out _, out _, out int dataDrivenCount), Is.False,
                 "Data-driven dasharray must not crash — it degrades to solid (no pattern).");
             Assert.That(dataDrivenCount, Is.EqualTo(0));
         }
@@ -2855,8 +3073,8 @@ namespace MapRenderer.Tests.Style
 
     /// <summary>
     /// <see cref="StyleLight.Parse"/> and <see cref="StyleSky.Parse"/>: spec defaults when the block or a key is
-    /// absent, explicit values parse, and malformed values fall back rather than throw (except a
-    /// malformed color/number expression, which throws at eager parse like every other paint property).
+    /// absent, explicit values parse, and malformed values fall back rather than throw (except a malformed
+    /// or data-driven color/number expression, which throws at eager parse like every other paint property).
     /// </summary>
     [TestFixture]
     public class LightSkyTests
@@ -2946,14 +3164,33 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(ExpressionKind.Zoom, light.Color.Kind);
         }
 
-        /// <summary>Light.color is expression-backed: a bad value throws at eager parse, like any other
-        /// paint color, instead of falling back to the default.</summary>
+        /// <summary>Light.color and Light.intensity are both expression-backed, each behind its own guard
+        /// call, so an invalid value fails at eager parse rather than deferring to an apply-time throw or a
+        /// default fallback.</summary>
         [Test]
+        // Unlike position, color is expression-backed: a bad value throws at eager parse, like any other
+        // paint color, instead of falling back to the default.
         [TestCase("\"color\":\"notacolor\"", TestName = "Light_InvalidValue_FailsParse(Color_Malformed)")]
+        // A legacy identity function on a feature property is data-driven (Feature kind): SunLight has no
+        // feature to evaluate against, so the parse must fail rather than defer to a throw at apply.
+        [TestCase("\"color\":{\"type\":\"identity\",\"property\":\"c\"}", TestName = "Light_InvalidValue_FailsParse(Color_LegacyPropertyFunction)")]
+        // A modern ["get",...] color is data-driven too, and the guard covers it the same as identity.
+        [TestCase("\"color\":[\"get\",\"c\"]", TestName = "Light_InvalidValue_FailsParse(Color_ModernGet)")]
+        // Intensity gets its own guard call, independent of color's.
+        [TestCase("\"intensity\":[\"get\",\"i\"]", TestName = "Light_InvalidValue_FailsParse(DataDrivenIntensity)")]
         public void Light_InvalidValue_FailsParse(string lightProperty)
         {
             var root = Root($"{{\"light\":{{{lightProperty}}}}}");
             Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
+        }
+
+        [Test]
+        public void Sky_LegacyPropertyFunctionFogColor_FailsParse()
+        {
+            // SkyGradient/DistanceHaze evaluate sky colors with no feature — a data-driven value must fail
+            // the parse, the same guard as light.color.
+            var root = Root("{\"sky\":{\"fog-color\":{\"type\":\"identity\",\"property\":\"c\"}}}");
+            Assert.Throws<ExpressionEvaluationException>(() => StyleSky.Parse(root.Get("sky")));
         }
 
         // ── sky: defaults ─────────────────────────────────────────────────────────

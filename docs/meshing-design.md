@@ -349,13 +349,20 @@ semi-transparent overlapping layers are actually in use.
 - **Data-driven paint: one side carries the value, the other holds the identity.** The shader multiplies a
   paint uniform by its vertex-stream counterpart, so writing the value into both applies it twice (a colour
   renders squared). A constant or zoom-only value rides the uniform, and the tile builder leaves the vertex at
-  identity (a white `COLOR`; for a line, only the ribbon's own `WidthScale` factor). A data-driven value is
-  baked per feature into the vertex stream (`fill-color` and `fill-opacity` into `COLOR`, `line-width` into
-  `WidthScale`), and the uniform holds the identity base:
-  `_BaseColor` white from the painter contract, `_Opacity` bound to a constant 1, `_Width` bound to a
-  device-px constant 1. The base is a binding, not a direct `SetFloat`, so the layer-fade gate stays the only
-  writer of `_Opacity`. The device-pixel ratio rides the uniform, never the bake
-  (`docs/device-pixel-ratio-design.md` § "The px-valued surface").
+  identity (a white `COLOR`; for a line, the ribbon's own `WidthScale`/`GapOffsetBlur` factors, default
+  `(1,1,1,·)`). A data-driven value is baked per feature into the vertex stream (`fill-color` and
+  `fill-opacity` into `COLOR`; `line-width`, `line-gap-width`, `line-offset` and `line-blur` into
+  `WidthScale`/`GapOffsetBlur`, the latter a `half4` — gap, offset and blur carry about 0.0005 px of
+  half-precision error near 1 px, rising to about 0.03 px near 64 px; no test observes this), and the uniform
+  holds the identity base: `_BaseColor` white from the painter contract, `_Opacity` bound to a constant 1,
+  `_Width`/`_GapWidth`/`_LineOffset`/`_Blur` bound to a device-px 1. The base is a binding, not a direct
+  `SetFloat`, so the layer-fade gate stays the only writer of `_Opacity`. The device-pixel ratio rides the
+  uniform, never the bake (`docs/device-pixel-ratio-design.md` § "The px-valued surface").
+- **Blur's baked value rides a `nointerpolation` varying, not the interpolated `uv`.** It is constant per
+  feature, and `LineCoverage` takes no screen-space derivative of it, so every one of the line's six passes
+  carries it in its own free `TEXCOORD` slot. The worst-case pass (`Line_LitForwardPass`/`Line_LitGBufferPass`,
+  every keyword on) occupies 11 slots before this one, leaving headroom under both WebGL2's guaranteed
+  `gl_MaxVaryingVectors >= 15` and WebGPU's guaranteed `maxInterStageShaderVariables >= 16`.
 - **Per-layer variation: use a separate Material instance per layer** (`material.SetFloat(...)` restyles live).
   **NEVER `MaterialPropertyBlock`** on batched renderers — it silently disables the SRP Batcher + GPU instancing.
 - **Adopt the DOTS-instanced-property pattern from the start** (the BatchRendererGroup path the project targets):

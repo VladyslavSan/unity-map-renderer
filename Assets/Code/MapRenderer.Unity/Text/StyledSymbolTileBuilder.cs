@@ -334,7 +334,6 @@ namespace MapRenderer.Unity.Text
                                 AllowOverlap = s.AllowOverlap,
                                 IgnorePlacement = s.IgnorePlacement,
                                 MaterialIndex = materialIndex,
-                                TranslatePx = s.TranslatePx,
                                 TranslateAnchor = s.TranslateAnchor,
                                 RotationAlignment = s.RotationAlignment,
                                 PairRole = s.PairRole,
@@ -370,7 +369,6 @@ namespace MapRenderer.Unity.Text
                                 AllowOverlap = s.AllowOverlap,
                                 IgnorePlacement = s.IgnorePlacement,
                                 MaterialIndex = materialIndex,
-                                TranslatePx = s.TranslatePx,
                                 TranslateAnchor = s.TranslateAnchor,
                                 // The resolved text-pitch-alignment — the curved arm's world-arc predicate.
                                 PitchAlignment = s.PitchAlignment,

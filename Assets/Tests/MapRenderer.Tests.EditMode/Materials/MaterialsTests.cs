@@ -478,6 +478,7 @@ namespace MapRenderer.Tests.Materials
                 (ShaderProperties.Line.PropertyId.LineTranslateAnchor, nameof(ShaderProperties.Line.PropertyId.LineTranslateAnchor), ShaderProperties.Line.PropertyNames.LineTranslateAnchor),
                 (ShaderProperties.Line.PropertyId.LinePattern,         nameof(ShaderProperties.Line.PropertyId.LinePattern),         ShaderProperties.Line.PropertyNames.LinePattern),
                 (ShaderProperties.Line.PropertyId.DashArray,           nameof(ShaderProperties.Line.PropertyId.DashArray),           ShaderProperties.Line.PropertyNames.DashArray),
+                (ShaderProperties.Line.PropertyId.DashArray2,          nameof(ShaderProperties.Line.PropertyId.DashArray2),          ShaderProperties.Line.PropertyNames.DashArray2),
                 (ShaderProperties.Line.PropertyId.DashCount,           nameof(ShaderProperties.Line.PropertyId.DashCount),           ShaderProperties.Line.PropertyNames.DashCount),
             };
 
@@ -515,7 +516,7 @@ namespace MapRenderer.Tests.Materials
             // own tangent frame.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
-                "POSITION", "NORMAL", "COLOR", "TEXCOORD0", "TEXCOORD1", "TEXCOORD2",
+                "POSITION", "NORMAL", "COLOR", "TEXCOORD0", "TEXCOORD1", "TEXCOORD2", "TEXCOORD3",
             };
 
             // LineAttributes is defined ONCE, in Line_VertexExtrude.hlsl — every line pass (Lit and Unlit)

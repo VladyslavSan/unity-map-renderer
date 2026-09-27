@@ -54,6 +54,16 @@ namespace MapRenderer.Tests.Style
     ]
 }";
 
+        /// <summary>Data-driven gap/offset/blur: same base-uniform reasoning as <see cref="DataDrivenWidthStyleJson"/>.</summary>
+        private const string DataDrivenGapOffsetBlurStyleJson = @"{
+    ""version"": 8,
+    ""layers"": [
+        { ""id"": ""road"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""l"",
+          ""paint"": { ""line-gap-width"": [""get"", ""g""], ""line-offset"": [""get"", ""o""],
+                       ""line-blur"": [""get"", ""b""] } }
+    ]
+}";
+
         private const string FillTranslateStyleJson = @"{
     ""version"": 8,
     ""layers"": [
@@ -147,6 +157,38 @@ namespace MapRenderer.Tests.Style
             }
         }
 
+        /// <summary>Same reasoning as <see cref="DataDrivenLineWidth_BaseUniform_IsTheRatioNotOne"/>, for
+        /// line-gap-width, line-offset and line-blur, baked the same way.</summary>
+        [Test]
+        public void DataDrivenGapAndOffset_BaseUniformsAreTheRatioNotOne()
+        {
+            var paint = FirstLayer<Line.StyleLayer>(DataDrivenGapOffsetBlurStyleJson).Paint;
+            Assert.IsTrue(paint.GapWidth.DependsOnFeature, "precondition: line-gap-width must parse as data-driven");
+            Assert.IsTrue(paint.Offset.DependsOnFeature, "precondition: line-offset must parse as data-driven");
+            Assert.IsTrue(paint.Blur.DependsOnFeature, "precondition: line-blur must parse as data-driven");
+
+            Material mat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
+            {
+                var applier = new ZoomStyleApplier(mat);
+                MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
+                int gapId = ShaderProperties.Line.PropertyId.GapWidth;
+                int offsetId = ShaderProperties.Line.PropertyId.LineOffset;
+                int blurId = ShaderProperties.Line.PropertyId.Blur;
+
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
+                Assert.That(mat.GetFloat(gapId), Is.EqualTo(1f).Within(1e-4f),
+                    "data-driven gap: the base must be 1 at dpr 1 so the baked per-vertex gap passes through unchanged.");
+                Assert.That(mat.GetFloat(offsetId), Is.EqualTo(1f).Within(1e-4f), "same reasoning for offset.");
+                Assert.That(mat.GetFloat(blurId), Is.EqualTo(1f).Within(1e-4f), "same reasoning for blur.");
+
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
+                Assert.That(mat.GetFloat(gapId), Is.EqualTo(2f).Within(1e-4f),
+                    "data-driven gap: the base must be 2 at dpr 2. Reading 1 means the else-arm was never added.");
+                Assert.That(mat.GetFloat(offsetId), Is.EqualTo(2f).Within(1e-4f), "same reasoning for offset.");
+                Assert.That(mat.GetFloat(blurId), Is.EqualTo(2f).Within(1e-4f), "same reasoning for blur.");
+            }
+        }
+
         // ── The two translates ───────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -191,6 +233,63 @@ namespace MapRenderer.Tests.Style
                 // Both are consumed by the same MapPixelsToWorld call the widths are, so they are device px.
                 AssertTranslate(lineMat, lineId, "line-translate", 10f, -14f, 2.0);
                 AssertTranslate(fillMat, fillId, "fill-translate", 18f, -22f, 2.0);
+            }
+        }
+
+        private const string LineZoomTranslateStyleJson = @"{
+    ""version"": 8,
+    ""layers"": [
+        { ""id"": ""road"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""l"",
+          ""paint"": { ""line-translate"": [""interpolate"",[""linear""],[""zoom""],
+                                             10,[""literal"",[0,0]],16,[""literal"",[20,-10]]] } }
+    ]
+}";
+
+        private const string FillZoomTranslateStyleJson = @"{
+    ""version"": 8,
+    ""layers"": [
+        { ""id"": ""ground"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""l"",
+          ""paint"": { ""fill-translate"": [""interpolate"",[""linear""],[""zoom""],
+                                             10,[""literal"",[0,0]],16,[""literal"",[20,-10]]] } }
+    ]
+}";
+
+        /// <summary>
+        /// A zoom-interpolated <c>line-translate</c>/<c>fill-translate</c> re-evaluates every frame at the
+        /// live zoom, THEN scales by dpr — the same uniform, now Zoom-kind instead of Constant.
+        /// </summary>
+        [Test]
+        public void TranslateUniforms_ZoomExpression_TracksZoomAtDpr2()
+        {
+            Material lineMat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
+            Material fillMat = Track(MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load()));
+            {
+                var lineApplier = new ZoomStyleApplier(lineMat);
+                MaterialFactory.BindLinePaintToApplier(
+                    FirstLayer<Line.StyleLayer>(LineZoomTranslateStyleJson).Paint, lineApplier, lineMat);
+                var fillApplier = new ZoomStyleApplier(fillMat);
+                MaterialFactory.BindFillPaintToApplier(
+                    FirstLayer<Fill.StyleLayer>(FillZoomTranslateStyleJson).Paint, fillApplier, fillMat);
+
+                int lineId = ShaderProperties.Line.PropertyId.LineTranslate;
+                int fillId = ShaderProperties.Fill.PropertyId.FillTranslate;
+
+                void AssertTranslate(Material mat, int id, string what, float x, float y, double zoom)
+                {
+                    Vector4 v = mat.GetVector(id);
+                    Assert.That(v.x, Is.EqualTo(x).Within(1e-3f), $"{what}.x must be {x} at zoom {zoom}, dpr 2.");
+                    Assert.That(v.y, Is.EqualTo(y).Within(1e-3f), $"{what}.y must be {y} at zoom {zoom}, dpr 2.");
+                }
+
+                lineApplier.ApplyZoom(new StyleFrameInputs(10.0, 2.0, 0.0));
+                fillApplier.ApplyZoom(new StyleFrameInputs(10.0, 2.0, 0.0));
+                AssertTranslate(lineMat, lineId, "line-translate", 0f, 0f, 10.0);
+                AssertTranslate(fillMat, fillId, "fill-translate", 0f, 0f, 10.0);
+
+                lineApplier.ApplyZoom(new StyleFrameInputs(16.0, 2.0, 0.0));
+                fillApplier.ApplyZoom(new StyleFrameInputs(16.0, 2.0, 0.0));
+                AssertTranslate(lineMat, lineId, "line-translate", 40f, -20f, 16.0);
+                AssertTranslate(fillMat, fillId, "fill-translate", 40f, -20f, 16.0);
             }
         }
 

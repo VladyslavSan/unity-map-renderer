@@ -331,11 +331,12 @@ namespace MapRenderer.Tests.Style
             string hlsl = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
 
             // The offset term must multiply by sideAndDist.x (the per-vertex side), so it shifts the band
-            // CENTER rather than widening the half-width.
-            Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * _LineOffset * pxToWorld)"),
+            // CENTER rather than widening the half-width. paintScale.y is the per-feature offset scale
+            // (default 1, identity for a Constant/Zoom value).
+            Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * _LineOffset * input.paintScale.y * pxToWorld)"),
                 "Line_VertexExtrude.hlsl offset term must multiply by sideAndDist.x " +
                 "to achieve a side-consistent shift (band center shift, not symmetric widening). " +
-                "Grep: 'sideAndDist.x * (miter * _LineOffset * pxToWorld)'");
+                "Grep: 'sideAndDist.x * (miter * _LineOffset * input.paintScale.y * pxToWorld)'");
 
             // Also confirm _LineOffset is declared in Line_LitInput.hlsl (resolved by name — move-proof).
             string inputHlsl = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_LitInput.hlsl"));

@@ -37,14 +37,14 @@ namespace MapRenderer.Unity.Text.Placement
 
             return new PointStageInput
             {
-                // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame) left default — patched per frame.
+                // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame/TranslatePx) left default — patched per frame.
                 BoundsMin = symbol.BoundsMin,
                 BoundsMax = symbol.BoundsMax,
                 TextSizePx = symbol.TextSizePx, PaddingPx = symbol.PaddingPx, SortKey = symbol.SortKey,
                 FeatureIndex = symbol.FeatureIndex, TileKey = symbol.TileKey,
                 Slot = SymbolPlacementSystem.ClampSlot(symbol.MaterialIndex, slotCount),
                 AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
-                TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
+                TranslateAnchor = symbol.TranslateAnchor,
                 RotationAlignment = symbol.RotationAlignment, Color = color,
                 HaloColor = halo, HaloWidthPx = symbol.Paint.HaloWidthPx, HaloBlurPx = symbol.Paint.HaloBlurPx,
                 IconRotateRadians = symbol.IconRotateRadians,
@@ -71,7 +71,8 @@ namespace MapRenderer.Unity.Text.Placement
                 FeatureIndex = symbol.FeatureIndex, TileKey = symbol.TileKey,
                 Slot = SymbolPlacementSystem.ClampSlot(symbol.MaterialIndex, slotCount),
                 AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
-                TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
+                // TranslatePx left default — patched per frame, like MetresPerLogicalPixel below.
+                TranslateAnchor = symbol.TranslateAnchor,
                 MaxAngleDeg = symbol.MaxAngleDeg, KeepUpright = symbol.KeepUpright,
                 Color = SymbolPlacementSystem.LinearColor(symbol.Paint),
                 HaloColor = SymbolPlacementSystem.LinearHaloColor(symbol.Paint),

@@ -100,12 +100,10 @@ namespace MapRenderer.Core.Text.Placement
         /// the placed quads.</summary>
         public TextLayoutOptions LayoutOptions { get; init; }
 
-        /// <summary>Evaluated <c>text-translate</c> — the paint-time pixel offset (y-down, as authored)
-        /// applied to the placed screen anchor per frame by <c>SymbolPlacementSystem</c>.</summary>
-        public float2 TranslatePx { get; init; }
-
-        /// <summary><c>text-translate-anchor</c> — whether <see cref="TranslatePx"/> is a screen-space
-        /// (viewport) or map-space (rotates with bearing) offset. Default <see cref="TextTranslateAnchor.Map"/>.</summary>
+        /// <summary><c>text-translate-anchor</c> — whether <c>text-translate</c> is a screen-space (viewport)
+        /// or map-space (rotates with bearing) offset. Default <see cref="TextTranslateAnchor.Map"/>. The
+        /// offset itself is not carried here: it is per-LAYER, not per-feature, so <c>SymbolPlacementSystem</c>
+        /// reads it straight off the style layer's paint, per frame, per slot.</summary>
         public TextTranslateAnchor TranslateAnchor { get; init; }
 
         /// <summary><c>text-rotation-alignment</c> — whether the billboard rotates with the map bearing

@@ -87,10 +87,6 @@ namespace MapRenderer.Unity.Text
             LayoutProperties layout = symbolLayer.Layout;
             PaintProperties  paint  = symbolLayer.Paint;
 
-            // text-translate is a constant px offset (not feature-dependent) — stamp it onto every symbol.
-            // Stored y-down (as authored); the y-flip happens at placement.
-            float2 translatePx = paint.Translate;
-
             // Limitation: symbol-placement is evaluated once, at build zoom, never per frame. TryEvaluate
             // degrades to Point on a malformed or data-driven expression instead of throwing.
             SymbolPlacement placement = layout.SymbolPlacement.TryEvaluate(zoom, null, out SymbolPlacement evaluatedPlacement)
@@ -333,7 +329,6 @@ namespace MapRenderer.Unity.Text
                                 FeatureIndex    = ordinal++,
                                 TileKey         = tileKey,
                                 Paint           = symbolPaint,
-                                TranslatePx     = translatePx,
                                 TranslateAnchor = paint.TranslateAnchor,
                                 PitchAlignment  = textPitch, // RESOLVED — selects the world-metre arc walk
                             });
@@ -377,7 +372,6 @@ namespace MapRenderer.Unity.Text
                                 IconOptional = layout.IconOptional,
                                 TextOptional = layout.TextOptional,
                                 SortKey = sortKey,
-                                TranslatePx = translatePx,
                                 TranslateAnchor = paint.TranslateAnchor,
                                 // Re-gated on both suppressions, so EmitAtAnchor never pairs a half that this
                                 // branch dropped (a Rider with no Owner, or an Owner with no Rider).
@@ -419,7 +413,6 @@ namespace MapRenderer.Unity.Text
                         IconOptional = layout.IconOptional,
                         TextOptional = layout.TextOptional,
                         SortKey = sortKey,
-                        TranslatePx = translatePx,
                         TranslateAnchor = paint.TranslateAnchor,
                         PairedInstance = pairedInstance,
                     };
@@ -509,7 +502,6 @@ namespace MapRenderer.Unity.Text
             public bool               TextOptional { get; init; }
             // shared
             public float              SortKey { get; init; }
-            public float2             TranslatePx { get; init; }
             public TextTranslateAnchor TranslateAnchor { get; init; }
             /// <summary>True when both a text and an icon are emitted at this anchor as ONE placement instance:
             /// the icon is the <see cref="SymbolPairRole.Owner"/> (emitted first), the text the
@@ -665,7 +657,6 @@ namespace MapRenderer.Unity.Text
                 TileKey           = tileKey,
                 Paint             = ctx.Paint,
                 LayoutOptions     = ctx.LayoutOptions,
-                TranslatePx       = ctx.TranslatePx,
                 TranslateAnchor   = ctx.TranslateAnchor,
                 RotationAlignment = ctx.TextRotationAlignment,
                 PairRole          = pairRole,

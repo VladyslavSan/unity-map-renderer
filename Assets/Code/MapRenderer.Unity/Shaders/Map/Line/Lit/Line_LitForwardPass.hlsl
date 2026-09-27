@@ -22,7 +22,7 @@
 //   • Vertex      → position from Line_VertexExtrude (shared world-space ribbon extrusion); constant
 //                   +Y lighting normal + placeholder tangent; uv = (dashU, side, innerFrac).
 //   • Fragment    → albedo *= vColor; alpha replaced by the fwidth ribbon coverage:
-//                   LineCoverage(uv.y, uv.z, uv.x) * _Opacity * vColor.a * _BaseColor.a (makes
+//                   LineCoverage(uv.y, uv.z, uv.x, blurPx) * _Opacity * vColor.a * _BaseColor.a (makes
 //                   _Opacity functional, carries gap/dash AA). Both COLOR sources participate in alpha
 //                   exactly as they do in rgb: a constant line-color's alpha rides _BaseColor.a, a
 //                   data-driven one's rides vColor.a, and the other side is 1. SurfaceData still comes from the stock
@@ -70,6 +70,11 @@ struct LineVaryings
 
     // LINE DELTA: per-feature data-driven color (white = identity). TEXCOORD4 is free in stock Lit.
     float4 vColor                   : TEXCOORD4;
+
+    // LINE DELTA: per-feature blur scale (device px), NOINTERPOLATION — constant per feature, and
+    // LineCoverage takes no derivative of it. TEXCOORD11 is free in stock Lit even with every keyword on
+    // (see docs/meshing-design.md's varying-budget note).
+    nointerpolation float blurPx    : TEXCOORD11;
 
 #ifdef _ADDITIONAL_LIGHTS_VERTEX
     half4 fogFactorAndVertexLight   : TEXCOORD5; // x: fogFactor, yzw: vertex light
@@ -206,10 +211,10 @@ LineVaryings LinePassVertex(LineAttributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     // LINE DELTA: world-space ribbon extrusion (the one helper every line pass shares → identical silhouettes).
-    float side, innerFrac, dashU;
+    float side, innerFrac, dashU, blurPx;
     float4 tangentOS;
     float hairlineScale;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale);
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale, blurPx);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
 
@@ -227,6 +232,7 @@ LineVaryings LinePassVertex(LineAttributes input)
     // LINE DELTA: uv carries the line parameterization, NOT TRANSFORM_TEX'd (coverage needs raw dashU).
     output.uv     = float4(dashU, side, innerFrac, hairlineScale);
     output.vColor = input.color;
+    output.blurPx = blurPx;
 
     // already normalized from normal transform to WS.
     output.normalWS = normalInput.normalWS;
@@ -317,7 +323,7 @@ void LinePassFragment(
     // LINE DELTA: replace surface alpha with the fwidth ribbon coverage × _Opacity × vColor.a × _BaseColor.a
     // Replacing — not multiplying — is why _BaseColor.a has to be re-applied here: the surface alpha
     // Line_LitInput computed from it is discarded.
-    float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x);
+    float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x, input.blurPx);
 #if defined(_HAIRLINE_SOLID_CORE)
     // Energy compensation for the vertex-stage band clamp (see Line_VertexExtrude). 1.0 on every other
     // path, so this multiply is compiled out.

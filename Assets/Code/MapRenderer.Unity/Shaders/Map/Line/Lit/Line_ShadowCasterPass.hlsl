@@ -34,17 +34,20 @@ float3 _LightPosition;
 struct LineShadowVaryings
 {
     float3 uv           : TEXCOORD0;   // LINE DELTA: (dashU, side, innerFrac) — ribbon coverage clip
+    // LINE DELTA: per-feature blur scale (device px), NOINTERPOLATION — see Line_LitForwardPass.hlsl.
+    nointerpolation float blurPx : TEXCOORD1;
     float4 positionCS   : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 // LINE DELTA: world-space ribbon extrusion replaces the direct position transform; also emits the
 // coverage coordinates the fragment needs.
-float4 LineShadowGetPositionHClip(LineAttributes input, out float side, out float innerFrac, out float dashU)
+float4 LineShadowGetPositionHClip(
+    LineAttributes input, out float side, out float innerFrac, out float dashU, out float blurPx)
 {
     float4 tangentOS_unused;
     float hairlineScale_unused;
-    float3 posOS      = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale_unused);
+    float3 posOS      = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale_unused, blurPx);
     float3 positionWS = TransformObjectToWorld(posOS);
     float3 normalWS   = TransformObjectToWorldNormal(input.normalOS);
 
@@ -65,9 +68,10 @@ LineShadowVaryings LineShadowPassVertex(LineAttributes input)
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_TRANSFER_INSTANCE_ID(input, output);
 
-    float side, innerFrac, dashU;
-    output.positionCS = LineShadowGetPositionHClip(input, side, innerFrac, dashU);
+    float side, innerFrac, dashU, blurPx;
+    output.positionCS = LineShadowGetPositionHClip(input, side, innerFrac, dashU, blurPx);
     output.uv = float3(dashU, side, innerFrac);
+    output.blurPx = blurPx;
     return output;
 }
 
@@ -76,7 +80,7 @@ half4 LineShadowPassFragment(LineShadowVaryings input) : SV_TARGET
     UNITY_SETUP_INSTANCE_ID(input);
 
     // LINE DELTA: ribbon-silhouette coverage clip (replaces the _ALPHATEST_ON alpha test).
-    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x) - 0.5);
+    clip(LineCoverage(input.uv.y, input.uv.z, input.uv.x, input.blurPx) - 0.5);
 
     #if defined(LOD_FADE_CROSSFADE)
         LODFadeCrossFade(input.positionCS);

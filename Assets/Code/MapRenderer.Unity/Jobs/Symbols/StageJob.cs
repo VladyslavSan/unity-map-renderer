@@ -62,6 +62,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
         // This frame's metres per LOGICAL screen pixel, already recombined by SymbolPlacementSystem.Update
         // (MetresPerDevicePixel × DevicePixelRatio). Patched into each curved record below.
         public float   MetresPerLogicalPixel;
+        // Per-slot text-translate, patched into each TEXT record below. Read below SlotTranslateCount
+        // only (see CullJob.SlotVisible).
+        public NativeArray<float2> SlotTranslate;
+        public int     SlotTranslateCount;
         // This frame's view transform, which projects render-space points for the map-pitched collision box.
         // StageCurved only; a default value selects the screen-space box (SymbolViewTransform.IsUsable).
         public SymbolViewTransform View;
@@ -122,6 +126,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
                     s.Projected = Valid[off] != 0;
                     s.SurfaceUp = WorldUpsRender[off]; // per-frame patched, like ScreenPx/Depth/Projected
                     s.WasPlacedLastFrame = Placed.Contains(s.FadeId); // s is the Points[d] copy; FadeId is never patched
+                    s.TranslatePx = TranslateForSlot(s.Slot, s.AtlasKind);
 
                     ReadOnlySpan<SymbolQuad> quadSpan = Quads.AsSpan().Slice(PointQuadStart[d], PointQuadCount[d]);
 
@@ -130,6 +135,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
                     if (s.PairRole == SymbolPairRole.Owner && d + 1 < Points.Length && Points[d + 1].PairRole == SymbolPairRole.Rider)
                     {
                         PointStageInput rider = Points[d + 1];
+                        rider.TranslatePx = TranslateForSlot(rider.Slot, rider.AtlasKind);
                         ReadOnlySpan<SymbolQuad> riderQuadSpan = Quads.AsSpan().Slice(PointQuadStart[d + 1], PointQuadCount[d + 1]);
                         // Only an optional pair can carry a per-half verdict, so the hash probe is gated on
                         // the flags rather than run for every pair.
@@ -154,6 +160,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
                     int fadeStart   = CurvedAnchorFadeStart[d];
                     CurvedStageInput s = Curveds[d];
                     s.MetresPerLogicalPixel = MetresPerLogicalPixel; // per-frame patch (see the field's doc)
+                    s.TranslatePx = TranslateForSlot(s.Slot, s.AtlasKind);
 
                     ReadOnlySpan<float2>  screen = Screen.AsSpan().Slice(off, wc);
                     ReadOnlySpan<float>   depth  = Depth.AsSpan().Slice(off, wc);
@@ -175,6 +182,14 @@ namespace MapRenderer.Unity.Jobs.Symbols
             OutCounts[1] = boxCount;
             OutCounts[2] = quadCount;
             OutCounts[3] = emitCount;
+        }
+
+        /// <summary>This frame's <c>text-translate</c> for one record: zero for an icon (the spec property
+        /// is text-only), and zero when <paramref name="slot"/> falls outside this frame's live slots.</summary>
+        private float2 TranslateForSlot(int slot, SymbolKind atlasKind)
+        {
+            if (atlasKind != SymbolKind.Text) return float2.zero;
+            return (slot >= 0 && slot < SlotTranslateCount) ? SlotTranslate[slot] : float2.zero;
         }
     }
 }

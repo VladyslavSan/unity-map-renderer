@@ -339,6 +339,13 @@ namespace MapRenderer.Tests.Style
         // ── 13-15. Alloc-free at every phase — the loop the 5 per-commit teeth cannot see ────
         // MinimalStyle() arms no transition; these run ApplyZoom with >=3 colour, >=2 float, >=1 device-px easing.
 
+        /// <summary>A zoom-interpolated [x,y] translate, stops bracketing zoom 0 so <c>ApplyZoom</c>'s
+        /// zoom=0.0 frames actually interpolate (not snap to an edge stop) — this is the UMR-222 array-Lerp
+        /// path (InterpolateExpression.Lerp's array branch), which must not allocate per frame.</summary>
+        private static StyleProperty<double2> ZoomInterpolatedTranslate(double x0, double y0, double x1, double y1)
+            => TranslateProperty.Parse(JsonParser.Parse(
+                $"[\"interpolate\",[\"linear\"],[\"zoom\"],-5,[{x0},{y0}],10,[{x1},{y1}]]"));
+
         private static ZoomStyleApplier MixedApplier(out Material mat, bool retarget, double now,
             double duration = 1.0)
         {
@@ -349,7 +356,7 @@ namespace MapRenderer.Tests.Style
             applier.BindColor(new StyleProperty<CoreColor>(ColorA), ShaderProperties.PropertyId.EmissionColor);
             applier.BindFloat(new StyleProperty<float>(0.2f), ShaderProperties.PropertyId.Opacity);
             applier.BindFloat(new StyleProperty<float>(0.3f), ShaderProperties.PropertyId.Smoothness);
-            applier.BindDevicePixelVector(new StyleProperty<double2>(new double2(1.0, 2.0)),
+            applier.BindDevicePixelVector(ZoomInterpolatedTranslate(1.0, 2.0, 7.0, 8.0),
                 ShaderProperties.Fill.PropertyId.FillTranslate);
 
             if (retarget)
@@ -360,7 +367,7 @@ namespace MapRenderer.Tests.Style
                 applier.BindColor(new StyleProperty<CoreColor>(ColorB), ShaderProperties.PropertyId.EmissionColor);
                 applier.BindFloat(new StyleProperty<float>(0.8f), ShaderProperties.PropertyId.Opacity);
                 applier.BindFloat(new StyleProperty<float>(0.9f), ShaderProperties.PropertyId.Smoothness);
-                applier.BindDevicePixelVector(new StyleProperty<double2>(new double2(3.0, 4.0)),
+                applier.BindDevicePixelVector(ZoomInterpolatedTranslate(3.0, 4.0, 9.0, 10.0),
                     ShaderProperties.Fill.PropertyId.FillTranslate);
             }
             return applier;

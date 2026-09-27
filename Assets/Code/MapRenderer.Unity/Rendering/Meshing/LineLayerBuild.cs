@@ -1,6 +1,7 @@
 using UnityEngine;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using MapRenderer.Unity.Jobs.Lines;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Layers;
@@ -16,7 +17,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     {
         private LayerInput       _input;
         private NativeArray<Vector4> _featureColors;
-        private NativeArray<float>   _featureWidths;
+        private NativeArray<float4>  _featurePaintScales;
         private int                  _materialIndex;
         private string               _payloadName;
 
@@ -31,11 +32,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <see cref="FillLayerBuild.Rent"/>'s own doc for why <see cref="LayerMeshBuildCounters.RecordRented"/> is
         /// unconditional here.</summary>
         internal static LineLayerBuild Rent(
-            LayerInput input, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths,
+            LayerInput input, NativeArray<Vector4> featureColors, NativeArray<float4> featurePaintScales,
             int materialIndex, string payloadName)
         {
             LineLayerBuild build = LayerMeshBuildPool<LineLayerBuild>.Rent();
-            build.Reset(input, featureColors, featureWidths, materialIndex, payloadName);
+            build.Reset(input, featureColors, featurePaintScales, materialIndex, payloadName);
             LayerMeshBuildCounters.RecordRented();
             return build;
         }
@@ -43,17 +44,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <summary>Re-initializes a pooled (or freshly-minted) instance — every field <see cref="Dispose"/>
         /// reads, so a reused instance never leaks a prior build's state into the next one.</summary>
         private void Reset(
-            LayerInput input, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths,
+            LayerInput input, NativeArray<Vector4> featureColors, NativeArray<float4> featurePaintScales,
             int materialIndex, string payloadName)
         {
-            _input         = input;
-            _featureColors = featureColors;
-            _featureWidths = featureWidths;
-            _materialIndex = materialIndex;
-            _payloadName   = payloadName;
-            _measure       = default;
-            _write         = default;
-            _disposed      = false;
+            _input              = input;
+            _featureColors      = featureColors;
+            _featurePaintScales = featurePaintScales;
+            _materialIndex      = materialIndex;
+            _payloadName        = payloadName;
+            _measure            = default;
+            _write              = default;
+            _disposed           = false;
         }
 
         public JobHandle ScheduleMeasure(JobHandle deps)
@@ -78,7 +79,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (_measure.Vertices.Length == 0 || _measure.Indices.Length == 0)
                 return false;
 
-            _write = StyledLineTileBuilder.ScheduleWrite(_measure, _featureColors, _featureWidths);
+            _write = StyledLineTileBuilder.ScheduleWrite(_measure, _featureColors, _featurePaintScales);
             if (!_write.IsCreated) return false;
 
             writeHandle = _write.Handle;
@@ -99,7 +100,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             _measure.Dispose();
             _input.FeatureSelected.Dispose();
             _featureColors.Dispose();
-            _featureWidths.Dispose();
+            _featurePaintScales.Dispose();
 
             LayerMeshBuildCounters.RecordDisposed();
             LayerMeshBuildPool<LineLayerBuild>.Return(this);

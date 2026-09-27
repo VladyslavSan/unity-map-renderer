@@ -763,7 +763,8 @@ namespace MapRenderer.Tests.Visual
     ""layers"": [
         { ""id"": ""test-line"", ""type"": ""line"",
           ""source"": ""s"", ""source-layer"": ""geolines"",
-          ""paint"": { ""line-color"": [""rgba"", 80, 200, 80, 1], ""line-width"": 40 } }
+          ""paint"": { ""line-color"": [""rgba"", 80, 200, 80, 1], ""line-width"": 40,
+                       ""line-dasharray"": [1, 1, 1, 1, 1, 1, 1, 2] } }
     ]
 }";
 
@@ -787,13 +788,26 @@ namespace MapRenderer.Tests.Visual
             Assert.IsNotNull(mat, "Line material must be non-null after RenderLayerSet.Build.");
 
             // Pre-check: styler must have applied line-width=40 to the material.
-            int widthId = ShaderProperties.Line.PropertyId.Width;
+            int widthId       = ShaderProperties.Line.PropertyId.Width;
+            int dashArray2Id  = ShaderProperties.Line.PropertyId.DashArray2;
 
             float matWidth = mat.HasProperty(widthId) ? mat.GetFloat(widthId) : float.NaN;
 
             Assert.That(matWidth, Is.EqualTo(40f).Within(1e-3f),
                 "Pre-check: mat._Width must be 40 after RenderLayerSet.Build with line-width:40. " +
                 "If NaN, the Line shader does not declare _Width in Properties{}.");
+
+            // Pre-check: the 8-entry dasharray's last 4 entries pack into _DashArray2 (LineDash.N = 8:
+            // _DashArray holds entries 0-3, _DashArray2 holds 4-7).
+            Assert.That(mat.HasProperty(dashArray2Id), Is.True,
+                "Pre-check: the Line shader does not declare _DashArray2 in Properties{}.");
+            Vector4 matDashArray2 = mat.GetVector(dashArray2Id);
+            Assert.That(matDashArray2.x, Is.EqualTo(1f).Within(1e-3f));
+            Assert.That(matDashArray2.y, Is.EqualTo(1f).Within(1e-3f));
+            Assert.That(matDashArray2.z, Is.EqualTo(1f).Within(1e-3f));
+            Assert.That(matDashArray2.w, Is.EqualTo(2f).Within(1e-3f),
+                "Pre-check: mat._DashArray2 must be (1,1,1,2) after RenderLayerSet.Build with " +
+                "line-dasharray:[1,1,1,1,1,1,1,2].");
 
             var mesh = Track(new Mesh());
             using var brg  = new BrgTileRenderer(new[] { set[0].Material });
@@ -818,6 +832,29 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.That(packedWidth, Is.EqualTo(40f).Within(1e-3f),
                     $"Packed _Width must be 40.0 (the style's line-width). Got {packedWidth}.");
+
+                // ── _DashArray2 readback (proves the new Vector prop is actually packed, not just planned) ──
+                float packedDashArray2X = brg.GetInstancePropValue(h, dashArray2Id, component: 0);
+                float packedDashArray2Y = brg.GetInstancePropValue(h, dashArray2Id, component: 1);
+                float packedDashArray2Z = brg.GetInstancePropValue(h, dashArray2Id, component: 2);
+                float packedDashArray2W = brg.GetInstancePropValue(h, dashArray2Id, component: 3);
+
+                Assert.That(packedDashArray2X, Is.Not.NaN,
+                    "GetInstancePropValue(_DashArray2) returned NaN — no plan entry for _DashArray2. " +
+                    "MapInstanceData must declare _DashArray2 as a field so InstancePropPlan creates its entry.");
+
+                Assert.That(packedDashArray2X, Is.EqualTo(matDashArray2.x).Within(1e-3f),
+                    "Packed _DashArray2.x must equal mat.GetVector(_DashArray2).x. " +
+                    "If they differ, the pack gate is broken for _DashArray2.");
+                Assert.That(packedDashArray2Y, Is.EqualTo(matDashArray2.y).Within(1e-3f));
+                Assert.That(packedDashArray2Z, Is.EqualTo(matDashArray2.z).Within(1e-3f));
+                Assert.That(packedDashArray2W, Is.EqualTo(matDashArray2.w).Within(1e-3f));
+
+                Assert.That(packedDashArray2X, Is.EqualTo(1f).Within(1e-3f));
+                Assert.That(packedDashArray2Y, Is.EqualTo(1f).Within(1e-3f));
+                Assert.That(packedDashArray2Z, Is.EqualTo(1f).Within(1e-3f));
+                Assert.That(packedDashArray2W, Is.EqualTo(2f).Within(1e-3f),
+                    "Packed _DashArray2 must be (1,1,1,2) (the style's line-dasharray entries 4-7).");
             }
         }
     }

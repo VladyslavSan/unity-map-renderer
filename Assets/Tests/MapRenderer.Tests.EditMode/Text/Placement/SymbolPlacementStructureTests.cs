@@ -17,12 +17,16 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Layers;
+using MapRenderer.Unity.Rendering.Materials;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Unity.Jobs.Symbols;
 using MapRenderer.Unity.View;
+using SymbolStyle = MapRenderer.Unity.Style.Symbol;
 
 
 namespace MapRenderer.Tests.Text.Placement
@@ -134,8 +138,10 @@ namespace MapRenderer.Tests.Text.Placement
 
         // AnchorRender is render-space PRE-RTC (the space projection.Project(geo) emits), so it is built from
         // SceneOriginRender; a small local offset lands outside the viewport and every symbol is culled.
+        // text-translate is per-slot/per-frame, not a buffer-build param — a caller that needs one
+        // passes a symbolLayers list with the offset baked into the style layer's paint instead.
         private static void AddSymbol(SymbolTileBuffer buffer, int featureIndex, double3 sceneOriginRender,
-            float2 translatePx = default, AlignmentMode rotationAlignment = AlignmentMode.Auto)
+            AlignmentMode rotationAlignment = AlignmentMode.Auto)
         {
             var quads = new List<SymbolQuad>
             {
@@ -155,7 +161,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // AllowOverlap: without it, whether the two nearby anchors collide depends on the projection,
                 // which makes the rebuild quad counts flaky. SymbolCollisionTests covers collision.
                 allowOverlap: true,
-                translatePx: translatePx, rotationAlignment: rotationAlignment);
+                rotationAlignment: rotationAlignment);
         }
 
         [Test]
@@ -223,17 +229,29 @@ namespace MapRenderer.Tests.Text.Placement
             };
             using var atlasTexture = BuildTinyAtlasTexture();
 
-            // MapLibre text-translate [7,3] = right 7, DOWN 3 → screen (y-up) delta (+7, -3), depth unchanged.
+            // [7,3] px, right/down — zoom-dependent, not constant: at the live zoom (5) this interpolates
+            // to exactly [7,3]; at initialZoom (0, deliberately mismatched) it would read [0,0].
             var translate = new float2(7f, 3f);
             var baseline = new SymbolTileBuffer();
             AddSymbol(baseline, 0, frame.SceneOriginRender);
             var moved = new SymbolTileBuffer();
-            AddSymbol(moved, 0, frame.SceneOriginRender, translate);
+            AddSymbol(moved, 0, frame.SceneOriginRender);
+
+            var settings = Track(ScriptableObject.CreateInstance<MapMaterialSet>());
+            settings.SymbolTextWorld = Track(new Material(Shader.Find("Map/Symbol/TextWorld")));
+            const string styleJson = @"{ ""version"": 8, ""layers"": [
+                { ""id"": ""a"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
+                  ""paint"": { ""text-translate"": [""interpolate"",[""linear""],[""zoom""],0,[0,0],10,[14,6]] } }
+            ] }";
+            var renderLayer = SymbolRenderLayer.Create(
+                (SymbolStyle.StyleLayer)StyleParser.Parse(styleJson).Layers[0], settings, initialZoom: 0.0, drawIndex: 0);
+            var movedLayers = new List<SymbolRenderLayer> { renderLayer };
 
             // A POINT draws through the world path: the translate is an additive, unrotated Offset delta
             // (BillboardMath.BuildWorldQuad) with the same Y-negation as the glyph corner.
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            try
             {
                 // The collision verdict a Update's emit reads is harvested from the PREVIOUS Update —
                 // duplicate each candidate-set's Update call before reading its placement.
@@ -243,8 +261,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh mesh0), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mesh0, out WorldBillboardVertex[] v0, out _);
 
-                system.TickSymbols(in frame, moved, atlasTexture, mapCamera.Projection);
-                system.TickSymbols(in frame, moved, atlasTexture, mapCamera.Projection);
+                system.TickSymbols(in frame, moved, atlasTexture, mapCamera.Projection, symbolLayers: movedLayers);
+                system.TickSymbols(in frame, moved, atlasTexture, mapCamera.Projection, symbolLayers: movedLayers);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh mesh1), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mesh1, out WorldBillboardVertex[] v1, out _);
 
@@ -256,6 +274,10 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.AreEqual(translate.y, v1[i].Offset.y - v0[i].Offset.y, 1e-3f, $"vertex {i}: +ty in Offset.y (the SAME Y-negation as the corner, applied to both — the two negations cancel back to +ty)");
                     Assert.AreEqual(v0[i].AnchorLocal, v1[i].AnchorLocal, "the anchor itself is untouched by a screen-space translate — only Offset moves");
                 }
+            }
+            finally
+            {
+                renderLayer.Dispose();
             }
         }
 
@@ -279,9 +301,9 @@ namespace MapRenderer.Tests.Text.Placement
             using var atlasTexture = BuildTinyAtlasTexture();
 
             var viewportSymbols = new SymbolTileBuffer();
-            AddSymbol(viewportSymbols, 0, frame.SceneOriginRender, default, AlignmentMode.Viewport);
+            AddSymbol(viewportSymbols, 0, frame.SceneOriginRender, AlignmentMode.Viewport);
             var mapSymbols = new SymbolTileBuffer();
-            AddSymbol(mapSymbols, 0, frame.SceneOriginRender, default, AlignmentMode.Map);
+            AddSymbol(mapSymbols, 0, frame.SceneOriginRender, AlignmentMode.Map);
 
             // A POINT draws through the world path, which bakes the rotation into Offset, so this reads Offset
             // off the world mesh. BuildWorldQuad emits the corners in TL/TR/BR/BL order.
@@ -755,6 +777,9 @@ namespace MapRenderer.Tests.Text.Placement
             // The per-half drop carry. A curved symbol never reads it, but every NativeContainer job field must
             // be constructed at schedule time, so it is allocated empty.
             var droppedHalves = new NativeHashMap<long, byte>(1, alloc);
+            // Per-slot text-translate: this harness never sets it, so SlotTranslateCount stays 0 and
+            // TranslateForSlot always reads zero — same NativeContainer-must-be-constructed reasoning as above.
+            var slotTranslate = new NativeArray<float2>(0, alloc);
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<SymbolBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
             var oCands = new NativeArray<SymbolCandidate>(anchors.Length + 1, alloc); var oEmit = new NativeArray<CandidateEmit>(anchors.Length + 1, alloc);
@@ -770,6 +795,7 @@ namespace MapRenderer.Tests.Text.Placement
                 PointOffset = pointOffset, Screen = nScreen, Depth = nDepth, Valid = nValid, WorldPointsRender = nWorld,
                 WorldUpsRender = nWorldUps,
                 AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), DroppedHalves = droppedHalves.AsReadOnly(),
+                SlotTranslate = slotTranslate, SlotTranslateCount = 0,
                 Bearing = bearing, Viewport = new double2(1920, 1080), View = view,
                 // StageJob overwrites s.MetresPerLogicalPixel from this field, while the managed arm reads it off
                 // `s`; set only on `s`, the arms take different branches. Default 0 serves the bend cases.
@@ -786,7 +812,7 @@ namespace MapRenderer.Tests.Text.Placement
             kinds.Dispose(); detail.Dispose(); worldCount.Dispose(); points.Dispose(); pqs.Dispose(); pqc.Dispose();
             curveds.Dispose(); cgs.Dispose(); cgc.Dispose(); cas.Dispose(); cac.Dispose(); cafs.Dispose();
             nQuads.Dispose(); nGlyphs.Dispose(); nAnchors.Dispose(); nFade.Dispose();
-            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); nWorldUps.Dispose(); awp.Dispose(); placed.Dispose(); droppedHalves.Dispose();
+            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); nWorldUps.Dispose(); awp.Dispose(); placed.Dispose(); droppedHalves.Dispose(); slotTranslate.Dispose();
             path.Dispose(); cum.Dispose(); oBoxes.Dispose(); oQuads.Dispose(); oCands.Dispose(); oEmit.Dispose(); counts.Dispose();
             return r;
         }

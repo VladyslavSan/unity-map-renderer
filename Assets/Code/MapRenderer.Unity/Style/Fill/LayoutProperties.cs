@@ -32,7 +32,7 @@ namespace MapRenderer.Unity.Style.Fill
             return new LayoutProperties
             {
                 SortKey = sortKeyJson != null
-                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
+                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber(), interpolatable: false)
                     : null,
             };
         }

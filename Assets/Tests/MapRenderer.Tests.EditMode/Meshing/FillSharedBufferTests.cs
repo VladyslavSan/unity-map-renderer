@@ -2536,7 +2536,7 @@ namespace MapRenderer.Tests.Meshing
             double3 origin = TileRenderOrigin.Project(id, projection);
             LayerInput input = StyledLineTileBuilder.BuildLayerInput(
                 selected, mvtLayer.Geometry, layer.Paint, layer.Layout, z, origin,
-                out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
+                out NativeArray<Vector4> featureColors, out NativeArray<float4> featurePaintScales, projection);
             Assert.IsTrue(input.FeatureSelected.IsCreated, "precondition: real line geometry must be selected");
 
             LineGraphOutput output = default;
@@ -2577,7 +2577,7 @@ namespace MapRenderer.Tests.Meshing
                 {
                     int f = output.VertexFeatureIdx[i];
                     Vector4 c = featureColors[f];
-                    float widthScale = output.Vertices[i].WidthScale * featureWidths[f];
+                    float widthScale = output.Vertices[i].WidthScale * featurePaintScales[f].x;
                     stream3Bytes.AddRange(BitConverter.GetBytes(c.x));
                     stream3Bytes.AddRange(BitConverter.GetBytes(c.y));
                     stream3Bytes.AddRange(BitConverter.GetBytes(c.z));
@@ -2659,7 +2659,7 @@ namespace MapRenderer.Tests.Meshing
             {
                 output.Dispose();
                 if (featureColors.IsCreated) featureColors.Dispose();
-                if (featureWidths.IsCreated) featureWidths.Dispose();
+                if (featurePaintScales.IsCreated) featurePaintScales.Dispose();
             }
         }
 

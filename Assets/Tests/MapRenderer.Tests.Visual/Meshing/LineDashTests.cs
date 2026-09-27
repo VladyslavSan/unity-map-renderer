@@ -79,14 +79,15 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>line-width is a plain CONSTANT on purpose: a feature-dependent width is bound as a
         /// constant 1 through the same device-px path (MaterialFactory), which would silently make every
-        /// measurement here about something else.</summary>
-        private const string DashStyleJson = @"{
+        /// measurement here about something else. <paramref name="dashArrayJson"/> defaults to the fixture's
+        /// [3,3] pattern; the tooth below overrides it for an odd-length and an 8-entry pattern.</summary>
+        private static string DashStyleJson(string dashArrayJson = "[3, 3]") => @"{
             ""version"": 8,
             ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
                 { ""id"": ""dashed-road"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""l"",
                   ""paint"": { ""line-color"": [""rgba"", 242, 153, 38, 1], ""line-width"": 16,
-                               ""line-dasharray"": [3, 3] } }
+                               ""line-dasharray"": " + dashArrayJson + @" } }
             ]
         }";
 
@@ -129,7 +130,8 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        private static DashScene BuildScene(double tiltDeg, double devicePixelRatio)
+        private static DashScene BuildScene(
+            double tiltDeg, double devicePixelRatio, string dashArrayJson = "[3, 3]", int expectedDashCount = 2)
         {
             var camGo = new GameObject("Dash_TestCamera");
             var uCam  = camGo.AddComponent<Camera>();
@@ -153,7 +155,7 @@ namespace MapRenderer.Tests.Visual
                 $"physical viewport height must stay {Size} at dpr {devicePixelRatio}.");
 
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(DashStyleJson), Zoom, MapMaterialSetTestUtil.Load());
+            set.Build(StyleParser.Parse(DashStyleJson(dashArrayJson)), Zoom, MapMaterialSetTestUtil.Load());
             Assert.That(set.Count, Is.EqualTo(1), "the dashed-road style must yield exactly one render layer.");
             Assert.IsNotNull(set[0].Material, "Map/Line base material must be configured for this fixture.");
 
@@ -162,9 +164,9 @@ namespace MapRenderer.Tests.Visual
             set.ApplyZoom(new StyleFrameInputs(Zoom, devicePixelRatio, 0.0));
 
             Material mat = set[0].Material;
-            Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.DashCount), Is.EqualTo(2f),
-                "precondition: _DashCount must be 2, or the shader's dash branch is dead and every edge " +
-                "count below would be zero for a reason that has nothing to do with what is under test.");
+            Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.DashCount), Is.EqualTo((float)expectedDashCount),
+                $"precondition: _DashCount must be {expectedDashCount}, or the shader's dash branch is dead " +
+                "and every edge count below would be zero for a reason that has nothing to do with what is under test.");
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.Width),
                 Is.EqualTo(StyledLineWidthPx * (float)devicePixelRatio).Within(1e-3f),
                 $"precondition: _Width must reach the shader in DEVICE px ({StyledLineWidthPx}×dpr).");
@@ -828,6 +830,118 @@ namespace MapRenderer.Tests.Visual
                 double measured = from + transitions[0] - centreSp.x;
                 return (measured, expected, transitions.Count);
             }
+        }
+
+        // ── Odd-length repeat and N=8, against the CPU mirror ────────────────────────────────────
+
+        /// <summary>Walks <paramref name="pattern"/> (in dashU, via <c>DashCoverage(u, 1.0, pattern)</c>) over
+        /// <paramref name="totalU"/> units, returning the MIDPOINT dashU of every on/off run — points the AA
+        /// feather cannot reach, so a rendered pixel there must read the CPU mirror's classification exactly.
+        /// </summary>
+        private static List<(double u, bool on)> RunMidpoints(float[] pattern, double totalU)
+        {
+            const double step = 0.01;
+            var midpoints = new List<(double u, bool on)>();
+            double runStart = 0.0;
+            bool   runOn    = MapRenderer.Unity.Style.Line.LineDash.DashCoverage(0.0, 1.0, pattern) >= 0.5f;
+            for (double u = step; u <= totalU; u += step)
+            {
+                bool on = MapRenderer.Unity.Style.Line.LineDash.DashCoverage(u, 1.0, pattern) >= 0.5f;
+                if (on != runOn)
+                {
+                    midpoints.Add(((runStart + u) * 0.5, runOn));
+                    runStart = u;
+                    runOn    = on;
+                }
+            }
+            midpoints.Add(((runStart + totalU) * 0.5, runOn));
+            return midpoints;
+        }
+
+        /// <summary>
+        /// <b>Odd-length repeat and N=8, rendered.</b> An odd-length pattern (which now repeats instead of
+        /// degrading to solid) and an 8-entry pattern (which N=8 must carry whole, not truncated to 4) must
+        /// render on/off exactly where <see cref="MapRenderer.Unity.Style.Line.LineDash.DashCoverage"/> says,
+        /// at every sample away from a feathered edge.
+        /// </summary>
+        [TestCase("[3, 2, 1]", 3, TestName = "OddLengthPattern")]
+        [TestCase("[1, 1, 1, 1, 1, 1, 2]", 7, TestName = "SevenEntryPattern")]
+        [TestCase("[1, 1, 1, 1, 1, 1, 2, 2]", 8, TestName = "EightEntryPattern")]
+        public void DashCoverage_RenderedCentreline_MatchesCpuMirror(string dashArrayJson, int entryCount)
+        {
+            float[] pattern = Array.ConvertAll(dashArrayJson.Trim('[', ']').Split(','), s => float.Parse(s.Trim()));
+            Assert.That(pattern.Length, Is.EqualTo(entryCount), "precondition: the TestCase's own array literal.");
+
+            using var snap = new SnapshotRenderer(Size, Size);
+            var lightGo = Track(BuildDirectionalLight());
+            using var scene = BuildScene(tiltDeg: 0.0, devicePixelRatio: 1.0,
+                dashArrayJson: dashArrayJson, expectedDashCount: entryCount);
+
+            const double totalU = 20.0; // several periods of either pattern (P=6/period=12, or P=10/period=10)
+            double roadLengthM = (totalU + 2.0) * DashUnitMetres;
+            var pts = new List<double2> { new double2(0.0, 0.0), new double2(roadLengthM, 0.0) };
+            Mesh mesh = Track(SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt));
+            GameObject go = Track(AttachMesh(mesh, scene.Material, "Dash_Repeat_Road"));
+
+            snap.Render(scene.UnityCamera);
+            snap.WritePng($"s110-dash-repeat-{entryCount}entry.png");
+
+            Frame pixels     = snap.Pixels;
+            float3 background = PixelCoverage.BackgroundLinear(pixels);
+            float3 plateau    = GlobalPlateau(pixels, background);
+            Assert.That(math.distance(plateau, background), Is.GreaterThan(0.02f), "the road did not render.");
+
+            Vector3 centreSp = scene.UnityCamera.WorldToScreenPoint(Vector3.zero);
+
+            var midpoints = RunMidpoints(pattern, totalU);
+            Assert.That(midpoints.Count, Is.GreaterThanOrEqualTo(4),
+                $"precondition: too few on/off runs ({midpoints.Count}) to make this tooth meaningful.");
+
+            int mismatches = 0, checkedCount = 0;
+            foreach ((double u, bool wantOn) in midpoints)
+            {
+                Vector3 sp = scene.UnityCamera.WorldToScreenPoint(new Vector3((float)(u * DashUnitMetres), 0f, 0f));
+                if (sp.z <= 0f || sp.x < 0f || sp.x >= Size || sp.y < 0f || sp.y >= Size) continue; // off-screen
+                checkedCount++;
+                int col = (int)math.round(sp.x), row = (int)math.round(sp.y);
+                float cov = CoverageAtPixel(pixels, col, row, background, plateau);
+                bool gotOn = cov >= 0.5f;
+                if (gotOn != wantOn)
+                {
+                    mismatches++;
+                    TestContext.WriteLine($"mismatch at dashU={u:F3} (col={col}): want " +
+                                          $"{(wantOn ? "on" : "off")}, got {(gotOn ? "on" : "off")} (coverage={cov:F3})");
+                }
+            }
+            Assert.That(checkedCount, Is.GreaterThanOrEqualTo(4),
+                $"precondition: only {checkedCount} of {midpoints.Count} samples were on-screen — the road " +
+                "must be framed widely enough for this tooth to mean anything.");
+            Assert.That(mismatches, Is.EqualTo(0),
+                $"{mismatches} of {checkedCount} on-screen run-midpoint samples disagreed with DashCoverage's " +
+                "CPU classification — see TestContext output above for which dashU values and why.");
+        }
+
+        // ── UMR-222: a zoom-dependent dasharray's per-frame re-apply must not allocate ────────────
+
+        /// <summary>
+        /// <see cref="MapRenderer.Unity.Rendering.Layers.LineRenderLayer.ApplyZoom"/> re-evaluates a
+        /// zoom-dependent line-dasharray on EVERY frame (not gated like other paint), so
+        /// <see cref="MapRenderer.Unity.Style.Line.LineDash.TryEvaluatePattern"/>'s old <c>new float[n]</c>
+        /// would allocate every frame the camera moves. Constructing the constraint directly avoids a second,
+        /// colliding <c>Is</c> import (see BackendTests.cs for the same idiom).
+        /// </summary>
+        [Test]
+        public void ApplyZoom_ZoomInterpolatedDashArray_AllocatesNothing()
+        {
+            using var scene = BuildScene(tiltDeg: 0.0, devicePixelRatio: 1.0,
+                dashArrayJson: "[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2,1],20,[4,2]]", expectedDashCount: 2);
+
+            scene.Layers.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0)); // warm up (JIT + first-apply)
+
+            var allocates = new UnityEngine.TestTools.Constraints.AllocatingGCMemoryConstraint();
+            Assert.That(() => scene.Layers.ApplyZoom(new StyleFrameInputs(Zoom + 0.5, 1.0, 0.0)),
+                new NUnit.Framework.Constraints.NotConstraint(allocates),
+                "a zoom-interpolated line-dasharray must not allocate on every ApplyZoom.");
         }
     }
 }

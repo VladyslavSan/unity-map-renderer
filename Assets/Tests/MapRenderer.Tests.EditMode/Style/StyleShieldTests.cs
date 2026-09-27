@@ -828,7 +828,8 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(first.KeepUpright, "text-keep-upright default is true");
             Assert.IsFalse(first.AllowOverlap, "text-allow-overlap default is false");
             Assert.IsFalse(first.IgnorePlacement, "text-ignore-placement default is false");
-            Assert.AreEqual(float2.zero, first.TranslatePx, "text-translate default is [0,0]");
+            // text-translate's own default is StyleTests.SymbolLayer_EmptyLayoutAndPaint_YieldsSpecDefaults'
+            // ground truth (the offset is per-slot/per-frame, not a SymbolFeature field).
             Assert.AreEqual(TextTranslateAnchor.Map, first.TranslateAnchor, "text-translate-anchor default is map");
             Assert.AreEqual(0f, first.SortKey, 1e-6, "symbol-sort-key default is 0");
             Assert.Greater(first.PathRender.Length, 0, "PathRender must be non-empty");

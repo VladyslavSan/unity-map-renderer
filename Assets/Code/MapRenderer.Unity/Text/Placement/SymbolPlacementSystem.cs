@@ -156,6 +156,11 @@ namespace MapRenderer.Unity.Text.Placement
         /// symbol loop. Index == material slot == <see cref="ShapedSymbol.MaterialIndex"/>.</summary>
         private NativeList<bool> _slotVisibleThisFrame; // not readonly — allocated in the ctor
 
+        /// <summary>Per-frame slot → live <c>text-translate</c> lookup: the offset is per-layer, resolved
+        /// here off the live style layer's paint, never baked onto <see cref="ShapedSymbol"/>.
+        /// <see cref="StageJob"/> patches it into each TEXT record.</summary>
+        private NativeList<float2> _slotTranslateThisFrame; // not readonly — allocated in the ctor
+
         /// <summary>Per-symbol cull verdict from <c>GatherSymbolPoints</c>' Cull pass, consumed by its Compact pass.</summary>
         private NativeList<GatherTrigger> _gatherTrigger; // not readonly — allocated in the ctor
 
@@ -401,6 +406,7 @@ namespace MapRenderer.Unity.Text.Placement
             _fadeSweepKeys = new NativeList<long>(FadeMapInitialCapacity, Allocator.Persistent);
             _gatherTrigger = new NativeList<GatherTrigger>(Allocator.Persistent);
             _slotVisibleThisFrame = new NativeList<bool>(Allocator.Persistent);
+            _slotTranslateThisFrame = new NativeList<float2>(Allocator.Persistent);
             _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, Allocator.Persistent);
             // _debugFadeIdSeen isn't allocated here — see its field doc; AssertFadeIdsUnique allocates it lazily.
             _stageBoxes = new NativeList<SymbolBox>(Allocator.Persistent);
@@ -522,7 +528,8 @@ namespace MapRenderer.Unity.Text.Placement
                         {
                             // Stages the whole mirror in one Burst job (StageJob); its output feeds collision and emit directly.
                             PreSizeStageOutputs();
-                            RunStageJob(bearingRadians, viewportLogicalPx, metresPerLogicalPixel, in view);
+                            RunStageJob(bearingRadians, viewportLogicalPx, metresPerLogicalPixel, in view,
+                                symbolLayers?.Count ?? 0);
                             candidateCount = _stageCounts[0]; boxCount = _stageCounts[1];
                             LastBoxCount = boxCount;
                         }
@@ -602,10 +609,19 @@ namespace MapRenderer.Unity.Text.Placement
             int slotCount = symbolLayers?.Count ?? 0;
             if (_slotVisibleThisFrame.Length < slotCount)
                 _slotVisibleThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
+            if (_slotTranslateThisFrame.Length < slotCount)
+                _slotTranslateThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
             for (int s = 0; s < slotCount; s++)
             {
                 var sl = symbolLayers[s]?.StyleLayer;
                 _slotVisibleThisFrame[s] = sl == null || sl.IsVisibleAtZoom(zoom);
+
+                // text-translate is per-layer: read straight off the live paint every frame, not baked
+                // onto a symbol.
+                var symbolLayer = symbolLayers[s]?.SymbolLayer;
+                _slotTranslateThisFrame[s] = symbolLayer != null
+                    ? (float2)symbolLayer.Paint.Translate.Evaluate(zoom)
+                    : float2.zero;
             }
 
             _gatherTrigger.ResizeUninitialized(_mirrorCount);
@@ -1076,10 +1092,11 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         private void RunStageJob(float bearingRadians, double2 viewportLogicalPx, float metresPerLogicalPixel,
-            in SymbolViewTransform view)
+            in SymbolViewTransform view, int slotCount)
         {
             new StageJob
             {
+                SlotTranslate = _slotTranslateThisFrame.AsArray(), SlotTranslateCount = slotCount,
                 Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(), WorldCount = _mirrorWorldCount.AsArray(), Count = _mirrorCount,
                 Points = _mirrorPoints.AsArray(), PointQuadStart = _mirrorPointQuadStart.AsArray(), PointQuadCount = _mirrorPointQuadCount.AsArray(),
                 Curveds = _mirrorCurveds.AsArray(),
@@ -1250,6 +1267,7 @@ namespace MapRenderer.Unity.Text.Placement
             _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeSweepKeys.Dispose(); // fade collections, same lifetime
             _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict scratch
             _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, CullJob input
+            _slotTranslateThisFrame.Dispose(); // per-slot text-translate lookup, StageJob input
             _gatherCulledCounts.Dispose(); // per-trigger culled tally, CompactJob output bridge
             // AssertFadeIdsUnique's scratch set may be a default (never-created) value here; Dispose() no-ops on that.
             _debugFadeIdSeen.Dispose();

@@ -26,7 +26,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             [ReadOnly] public NativeList<int>               Indices;
 
             [ReadOnly] public NativeArray<Vector4> FeatureColors;
-            [ReadOnly] public NativeArray<float>   FeatureWidths;
+            [ReadOnly] public NativeArray<float4>  FeaturePaintScales;
 
             /// <summary>The layer's own <c>Mesh.MeshData</c> — already sized (<c>SetVertexBufferParams</c>/
             /// <c>SetIndexBufferParams</c>) by <see cref="ScheduleStreamWrite"/> on the main thread. Every
@@ -43,11 +43,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 NativeArray<LinePositionNormal> stream0 = Md.GetVertexData<LinePositionNormal>(0);
                 NativeArray<Vector3>            stream1 = Md.GetVertexData<Vector3>(1);
                 NativeArray<Vector2>            stream2 = Md.GetVertexData<Vector2>(2);
-                NativeArray<LineWidthColor>     stream3 = Md.GetVertexData<LineWidthColor>(3);
+                NativeArray<LineVertexPaint>    stream3 = Md.GetVertexData<LineVertexPaint>(3);
                 NativeArray<int>                indices = Md.GetIndexData<int>();
 
                 float3 bMin = new float3(float.MaxValue);
                 float3 bMax = new float3(float.MinValue);
+
+                // Gap/offset/blur ride a half lane (±65504); clamp before the cast so a runaway style value
+                // becomes the largest representable half instead of Infinity.
+                float halfMax = (float)half.MaxValueAsHalf;
 
                 for (int i = 0; i < Vertices.Length; i++)
                 {
@@ -67,10 +71,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     stream2[i] = new Vector2(rv.Side, (float)rv.DistanceAlong);
 
                     int f = VertexFeatureIdx[i];
-                    stream3[i] = new LineWidthColor
+                    float4 scale = FeaturePaintScales[f];
+                    float  gap    = math.clamp(scale.y, -halfMax, halfMax);
+                    float  offset = math.clamp(scale.z, -halfMax, halfMax);
+                    float  blur   = math.clamp(scale.w, -halfMax, halfMax);
+                    stream3[i] = new LineVertexPaint
                     {
-                        WidthScale = rv.WidthScale * FeatureWidths[f],
-                        Color      = FeatureColors[f],
+                        WidthScale    = rv.WidthScale * scale.x,
+                        Color         = FeatureColors[f],
+                        GapOffsetBlur = new half4((half)gap, (half)offset, (half)blur, (half)0f),
                     };
                 }
 

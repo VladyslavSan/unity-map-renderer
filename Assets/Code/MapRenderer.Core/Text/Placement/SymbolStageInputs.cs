@@ -49,6 +49,10 @@ namespace MapRenderer.Core.Text.Placement
         public double3 TileOriginRender;
         public bool AllowOverlap;
         public bool IgnorePlacement;
+
+        /// <summary><c>text-translate</c>, PER-FRAME PATCHED by <see cref="StageJob"/> from the owning
+        /// layer's live paint (like <see cref="ScreenPx"/>/<see cref="SurfaceUp"/>) — it is per-LAYER, not
+        /// per-symbol, so the baker never sets it. Zero for a non-text record (<see cref="AtlasKind"/>).</summary>
         public float2 TranslatePx;
         public TextTranslateAnchor TranslateAnchor;
         public AlignmentMode       RotationAlignment;
@@ -102,6 +106,9 @@ namespace MapRenderer.Core.Text.Placement
         public int    Slot;                         // pre-clamped material/mesh slot
         public bool AllowOverlap;
         public bool IgnorePlacement;
+
+        /// <summary>The mirror of <see cref="PointStageInput.TranslatePx"/>: PER-FRAME PATCHED by
+        /// <see cref="StageJob"/>, zero for a non-text record.</summary>
         public float2 TranslatePx;
         public TextTranslateAnchor TranslateAnchor;
         public float  MaxAngleDeg;                  // text-max-angle

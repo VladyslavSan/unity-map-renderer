@@ -88,10 +88,9 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary><c>text-ignore-placement</c>.</summary>
         public bool IgnorePlacement { get; init; }
 
-        /// <summary><c>text-translate</c> (y-down, as authored).</summary>
-        public float2 TranslatePx { get; init; }
-
-        /// <summary><c>text-translate-anchor</c>.</summary>
+        /// <summary><c>text-translate-anchor</c>. The offset itself is not baked here — <c>StageJob</c> patches
+        /// it into <c>PointStageInput</c>/<c>CurvedStageInput</c> per frame, per slot. This field stays baked,
+        /// though it too is a per-layer constant, not a per-symbol one.</summary>
         public TextTranslateAnchor TranslateAnchor { get; init; }
 
         /// <summary><c>text-rotation-alignment</c> — point placement only.</summary>

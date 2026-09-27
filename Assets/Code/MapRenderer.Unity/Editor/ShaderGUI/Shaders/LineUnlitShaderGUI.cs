@@ -54,7 +54,8 @@ namespace MapRenderer.Unity.Editor
             Prop(ShaderProperties.Line.PropertyNames.Blur,                  "Line Blur (line-blur)");
             Prop(ShaderProperties.Line.PropertyNames.GapWidth,              "Gap Width (line-gap-width)");
             Prop(ShaderProperties.Line.PropertyNames.LineOffset,            "Line Offset (line-offset)");
-            Prop(ShaderProperties.Line.PropertyNames.DashArray,             "Dash Array (line-dasharray)");
+            Prop(ShaderProperties.Line.PropertyNames.DashArray,             "Dash Array (line-dasharray, entries 0-3)");
+            Prop(ShaderProperties.Line.PropertyNames.DashArray2,            "Dash Array 2 (entries 4-7)");
             Prop(ShaderProperties.Line.PropertyNames.DashCount,             "Dash Count");
             Prop(ShaderProperties.Line.PropertyNames.LinePattern,           "Line Pattern (hook)");
             Prop(ShaderProperties.Line.PropertyNames.LineTranslate,         "Line Translate (line-translate)");

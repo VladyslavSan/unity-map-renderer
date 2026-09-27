@@ -72,8 +72,9 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // _LineTranslate       — line-translate: float4(x, y, 0, 0) in pixels.
 // _LineTranslateAnchor — line-translate-anchor: 0 = "map" (world), 1 = "viewport" (clip approx).
 // _LinePattern         — line-pattern hook flag: 0 = solid color; 1 = pattern (renders solid).
-// _DashArray           — line-dasharray: on/off lengths (up to 4) in line-width units. Unused slots = 0.
-// _DashCount           — # valid _DashArray entries (0 = solid identity, no dashing).
+// _DashArray, _DashArray2 — line-dasharray: on/off lengths (entries 0-3, 4-7) in line-width units, up to
+//                       LineDash.N = 8 total. Unused slots = 0. An odd count repeats (see LineDash.DashCoverage).
+// _DashCount           — # valid entries across _DashArray/_DashArray2 (0 = solid identity, no dashing).
 // _LineOffset          — line-offset: perpendicular band-center shift in px. 0 = none; + = left of travel.
 float  _Opacity;
 float  _Width;
@@ -83,6 +84,7 @@ float4 _LineTranslate;
 float  _LineTranslateAnchor;
 float  _LinePattern;
 float4 _DashArray;
+float4 _DashArray2;
 float  _DashCount;
 float  _LineOffset;
 
@@ -162,6 +164,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _LineTranslateAnchor)
     UNITY_DOTS_INSTANCED_PROP(float , _LinePattern)
     UNITY_DOTS_INSTANCED_PROP(float4, _DashArray)
+    UNITY_DOTS_INSTANCED_PROP(float4, _DashArray2)
     UNITY_DOTS_INSTANCED_PROP(float , _DashCount)
     UNITY_DOTS_INSTANCED_PROP(float , _LineOffset)
     // Line — (B) internal render params (not style):
@@ -190,6 +193,7 @@ static float4 unity_DOTS_Sampled_LineTranslate;
 static float  unity_DOTS_Sampled_LineTranslateAnchor;
 static float  unity_DOTS_Sampled_LinePattern;
 static float4 unity_DOTS_Sampled_DashArray;
+static float4 unity_DOTS_Sampled_DashArray2;
 static float  unity_DOTS_Sampled_DashCount;
 static float  unity_DOTS_Sampled_LineOffset;
 // Line — (B) internal render param statics:
@@ -219,6 +223,7 @@ void SetupDOTSMapLineMaterialPropertyCaches()
     unity_DOTS_Sampled_LineTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineTranslateAnchor);
     unity_DOTS_Sampled_LinePattern          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LinePattern);
     unity_DOTS_Sampled_DashArray            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _DashArray);
+    unity_DOTS_Sampled_DashArray2           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _DashArray2);
     unity_DOTS_Sampled_DashCount            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DashCount);
     unity_DOTS_Sampled_LineOffset           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineOffset);
     // (B) internal render params:
@@ -250,6 +255,7 @@ void SetupDOTSMapLineMaterialPropertyCaches()
 #define _LineTranslateAnchor    unity_DOTS_Sampled_LineTranslateAnchor
 #define _LinePattern            unity_DOTS_Sampled_LinePattern
 #define _DashArray              unity_DOTS_Sampled_DashArray
+#define _DashArray2             unity_DOTS_Sampled_DashArray2
 #define _DashCount              unity_DOTS_Sampled_DashCount
 #define _LineOffset             unity_DOTS_Sampled_LineOffset
 // Line — (B) internal render param redirects:

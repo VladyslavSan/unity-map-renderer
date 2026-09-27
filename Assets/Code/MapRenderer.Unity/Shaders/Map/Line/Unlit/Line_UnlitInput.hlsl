@@ -60,6 +60,7 @@ float4 _LineTranslate;
 float  _LineTranslateAnchor;
 float  _LinePattern;
 float4 _DashArray;
+float4 _DashArray2;
 float  _DashCount;
 float  _LineOffset;
 // (B) Internal render params — NOT style properties; the styler never writes these:
@@ -88,6 +89,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _LineTranslateAnchor)
     UNITY_DOTS_INSTANCED_PROP(float , _LinePattern)
     UNITY_DOTS_INSTANCED_PROP(float4, _DashArray)
+    UNITY_DOTS_INSTANCED_PROP(float4, _DashArray2)
     UNITY_DOTS_INSTANCED_PROP(float , _DashCount)
     UNITY_DOTS_INSTANCED_PROP(float , _LineOffset)
     // Line — (B) internal render params (not style):
@@ -104,6 +106,7 @@ static float4 unity_DOTS_Sampled_LineTranslate;
 static float  unity_DOTS_Sampled_LineTranslateAnchor;
 static float  unity_DOTS_Sampled_LinePattern;
 static float4 unity_DOTS_Sampled_DashArray;
+static float4 unity_DOTS_Sampled_DashArray2;
 static float  unity_DOTS_Sampled_DashCount;
 static float  unity_DOTS_Sampled_LineOffset;
 static float  unity_DOTS_Sampled_WidthIsPixels;
@@ -120,6 +123,7 @@ void SetupDOTSMapUnlitLineMaterialPropertyCaches()
     unity_DOTS_Sampled_LineTranslateAnchor = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineTranslateAnchor);
     unity_DOTS_Sampled_LinePattern         = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LinePattern);
     unity_DOTS_Sampled_DashArray           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _DashArray);
+    unity_DOTS_Sampled_DashArray2          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _DashArray2);
     unity_DOTS_Sampled_DashCount           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DashCount);
     unity_DOTS_Sampled_LineOffset          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineOffset);
     unity_DOTS_Sampled_WidthIsPixels       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _WidthIsPixels);
@@ -138,6 +142,7 @@ void SetupDOTSMapUnlitLineMaterialPropertyCaches()
 #define _LineTranslateAnchor    unity_DOTS_Sampled_LineTranslateAnchor
 #define _LinePattern            unity_DOTS_Sampled_LinePattern
 #define _DashArray              unity_DOTS_Sampled_DashArray
+#define _DashArray2             unity_DOTS_Sampled_DashArray2
 #define _DashCount              unity_DOTS_Sampled_DashCount
 #define _LineOffset             unity_DOTS_Sampled_LineOffset
 #define _WidthIsPixels          unity_DOTS_Sampled_WidthIsPixels

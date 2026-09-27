@@ -738,11 +738,22 @@ namespace MapRenderer.Tests.Style
                     "two DIFFERENT data-driven fill-colors both skip the bind — without clause (c) the gate " +
                     "would accept and every tile would keep the previous style's baked colour forever.")
                 .SetName("NonTransitionableChange_RefusesTheGate(DataDrivenPaintChange)");
+
+            yield return new TestCaseData(
+                    (Func<StyleDocument>)(() => FillStyle(
+                        @"""fill-color"": {""property"":""class"",""type"":""categorical"",""stops"":[[1,""#ff0000""],[2,""#00ff00""]]}")),
+                    (Func<StyleDocument>)(() => FillStyle(
+                        @"""fill-color"": {""property"":""class"",""type"":""categorical"",""stops"":[[1,""#0000ff""],[2,""#ffff00""]]}")),
+                    "a legacy categorical function is data-driven (Feature kind) once \"property\" is honoured, " +
+                    "so two different mappings must refuse the gate, exactly like a modern [\"get\",...] pair.")
+                .SetName("NonTransitionableChange_RefusesTheGate(LegacyCategoricalPaintChange)");
         }
 
         /// <summary>Every non-transitionable restyle refuses the gate: a changed filter or source-layer, a
         /// changed fill-antialias (selects a meshing path, fill-parity-design.md § "`fill-antialias`"), and
-        /// a data-driven <c>["get",...]</c> paint change.</summary>
+        /// two data-driven paint changes — a modern <c>["get",...]</c> pair and a legacy categorical function
+        /// (an ascending-numeric-key stops object also matches the legacy ZOOM-function shape, so this pins
+        /// that "property" wins the dispatch).</summary>
         [Test]
         [TestCaseSource(nameof(NonTransitionableChangeCases))]
         public void NonTransitionableChange_RefusesTheGate(

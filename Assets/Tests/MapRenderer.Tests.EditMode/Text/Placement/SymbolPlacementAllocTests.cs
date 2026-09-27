@@ -57,11 +57,16 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolPairWiringTests
     {
-        private const string StyleJson = @"{
+        // text-translate lives on the STYLE layer, per-slot/per-frame, not baked onto a symbol — a test
+        // that needs the rider's box moved bakes the offset into the layer it builds its SymbolRenderLayer
+        // from. The icon (Kind.Icon) never reads it, only the rider (Kind.Text).
+        private static string BuildStyleJson(float textTranslatePx = 0f) => @"{
             ""version"": 8,
             ""layers"": [
                 { ""id"": ""shield"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
-                  ""layout"": { ""icon-image"": ""shield"" } }
+                  ""layout"": { ""icon-image"": ""shield"" },
+                  ""paint"": { ""text-translate"": [" + (int)textTranslatePx + @", 0],
+                               ""text-translate-anchor"": ""viewport"" } }
             ]
         }";
 
@@ -94,9 +99,10 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // A centred pair: Owner (icon) immediately followed by its Rider (text), the adjacency the baker keeps.
-        // textTranslatePx pushes the text's box clear of the icon's, so a blocker can hit one half alone.
+        // A caller that needs the text box clear of the icon's (so a blocker can hit one half alone) bakes a
+        // text-translate into the style layer it builds its SymbolRenderLayer from — see BuildStyleJson.
         private static void AddPairSymbols(SymbolTileBuffer buffer, double3 sceneOriginRender,
-            bool textOptional = false, float textTranslatePx = 0f)
+            bool textOptional = false)
         {
             var iconQuads = new List<SymbolQuad>
             {
@@ -137,8 +143,7 @@ namespace MapRenderer.Tests.Text.Placement
                 pairRole: SymbolPairRole.Rider,
                 pairId: 0,
                 pairOptional: textOptional,
-                translatePx: new float2(textTranslatePx, 0f),
-                translateAnchor: TextTranslateAnchor.Viewport);
+                translateAnchor: TextTranslateAnchor.Viewport); // agrees with BuildStyleJson's text-translate-anchor
         }
 
         private static (GameObject camGo, MapCamera mapCamera, SceneFrame frame) BuildScene()
@@ -157,13 +162,13 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void CentredPair_Tick_DrawsBothTextAndIconMeshes_OneCandidateBothHalves()
+        public void CentredPair_Update_DrawsBothTextAndIconMeshes_OneCandidateBothHalves()
         {
             var (camGo, mapCamera, frame) = BuildScene();
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(BuildStyleJson()).Layers[0], settings, 5.0, drawIndex: 0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -213,14 +218,15 @@ namespace MapRenderer.Tests.Text.Placement
         // ── At the Update level: text-optional lets the ICON survive its text's collision loss ─────────────────
         //    The two runs differ ONLY by the property; the blocker, translate and tile split stay constant.
         [Test]
-        public void TextOptional_Tick_TextLosesCollision_IconMeshStillBuilds_TextMeshDoesNot(
+        public void TextOptional_Update_TextLosesCollision_IconMeshStillBuilds_TextMeshDoesNot(
             [Values(false, true)] bool textOptional)
         {
             var (camGo, mapCamera, frame) = BuildScene();
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+            const float TextOffsetPx = 200f;
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(BuildStyleJson(TextOffsetPx)).Layers[0], settings, 5.0, drawIndex: 0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -229,9 +235,8 @@ namespace MapRenderer.Tests.Text.Placement
 
             try
             {
-                const float TextOffsetPx = 200f;
                 var mixedBuffer = new SymbolTileBuffer();
-                AddPairSymbols(mixedBuffer, frame.SceneOriginRender, textOptional, TextOffsetPx);
+                AddPairSymbols(mixedBuffer, frame.SceneOriginRender, textOptional);
 
                 // A higher-priority blocker on the TEXT half's translated box only. Its own tile key puts its text
                 // quads in a different world slot, so a non-empty text mesh stays attributable.
@@ -250,9 +255,8 @@ namespace MapRenderer.Tests.Text.Placement
                     textSizePx: 24f,
                     sortKey: -1f,
                     featureIndex: 99,
-                    tileKey: blockerTileKey,
-                    translatePx: new float2(TextOffsetPx, 0f),
-                    translateAnchor: TextTranslateAnchor.Viewport);
+                    tileKey: blockerTileKey, // shares slot 0's style-driven text-translate (see BuildStyleJson)
+                    translateAnchor: TextTranslateAnchor.Viewport); // agrees with BuildStyleJson's text-translate-anchor
 
                 // Two Updates: the first schedules the collision, the second harvests its verdict — and,
                 // for the optional case, seeds the per-half drop mask the emit loop reads.
@@ -295,13 +299,13 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── At the Update level: a real collision loss drops BOTH halves, not just the icon ────────────────────
         [Test]
-        public void CentredPair_Tick_BlockedByHigherPrioritySymbol_BothHalvesDropTogether_NoBareNumber()
+        public void CentredPair_Update_BlockedByHigherPrioritySymbol_BothHalvesDropTogether_NoBareNumber()
         {
             var (camGo, mapCamera, frame) = BuildScene();
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(BuildStyleJson()).Layers[0], settings, 5.0, drawIndex: 0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -746,11 +750,11 @@ namespace MapRenderer.Tests.Text.Placement
                 pairRole: SymbolPairRole.Rider,
                 pairId: 0,
                 pairOptional: true, // text-optional
-                translatePx: new float2(TextOffsetPx, 0f),
-                translateAnchor: TextTranslateAnchor.Viewport);
+                translateAnchor: TextTranslateAnchor.Viewport); // agrees with styleJson's text-translate-anchor
 
             // A higher-priority blocker over the text half's box only, so every steady Update re-decides
             // "place the icon, drop the text" and the dropped-halves map is written and read every frame.
+            // It shares slot 0's style-driven text-translate below (same tileKey, default materialIndex).
             var blockerQuads = new List<SymbolQuad>
             {
                 new SymbolQuad
@@ -766,8 +770,24 @@ namespace MapRenderer.Tests.Text.Placement
                 sortKey: -1f,
                 featureIndex: 99,
                 tileKey: tileKey,
-                translatePx: new float2(TextOffsetPx, 0f),
-                translateAnchor: TextTranslateAnchor.Viewport);
+                translateAnchor: TextTranslateAnchor.Viewport); // agrees with styleJson's text-translate-anchor
+
+            // text-translate is per-slot/per-frame, not baked onto the symbol — and a ZOOM-kind expression
+            // here (equal stops, so it evaluates to the SAME [TextOffsetPx,0] at the fixed z=5 this test
+            // runs at) is what proves SymbolPlacementSystem's per-frame re-evaluation costs nothing, not
+            // just a Constant's cached value.
+            var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
+            settings.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
+            string styleJson = @"{ ""version"": 8, ""layers"": [
+                { ""id"": ""shield"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
+                  ""paint"": { ""text-translate"": [""interpolate"",[""linear""],[""zoom""],
+                                                     5,[" + (int)TextOffsetPx + @",0],
+                                                     10,[" + (int)TextOffsetPx + @",0]],
+                               ""text-translate-anchor"": ""viewport"" } }
+            ] }";
+            var renderLayer = SymbolRenderLayer.Create(
+                (SymbolStyle.StyleLayer)StyleParser.Parse(styleJson).Layers[0], settings, initialZoom: 5.0, drawIndex: 0);
+            var layers = new List<SymbolRenderLayer> { renderLayer };
 
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")),
@@ -776,18 +796,27 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             SymbolGatherPlan builtPlan = plan.Build(buffer);
 
-            for (int i = 0; i < 3; i++) system.Update(in frame, builtPlan, atlasTexture);
-            Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair.");
-            Assert.AreEqual(2, system.LastQuadCount,
-                "precondition: the blocker's quad and the pair's ICON quad — the text half must be dropped, " +
-                "or this measures the ordinary all-or-nothing path rather than the optional-half one.");
+            try
+            {
+                for (int i = 0; i < 3; i++) system.Update(in frame, builtPlan, atlasTexture, symbolLayers: layers);
+                Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair.");
+                Assert.AreEqual(2, system.LastQuadCount,
+                    "precondition: the blocker's quad and the pair's ICON quad — the text half must be dropped, " +
+                    "or this measures the ordinary all-or-nothing path rather than the optional-half one.");
 
-            AllocationDiagnostics.AssertNotAllocating(() =>
-                {
-                    for (int i = 0; i < 65; i++) system.Update(in frame, builtPlan, atlasTexture);
-                },
-                "65 steady-state Updates over a text-optional pair placing WITHOUT its text must allocate ZERO " +
-                "managed garbage.");
+                AllocationDiagnostics.AssertNotAllocating(() =>
+                    {
+                        for (int i = 0; i < 65; i++) system.Update(in frame, builtPlan, atlasTexture, symbolLayers: layers);
+                    },
+                    "65 steady-state Updates over a text-optional pair placing WITHOUT its text must allocate ZERO " +
+                    "managed garbage.");
+            }
+            finally
+            {
+                renderLayer.Dispose();
+                Object.DestroyImmediate(settings.SymbolTextWorld);
+                Object.DestroyImmediate(settings);
+            }
         }
 
         // ── A WARM cross-tile dedup allocates ZERO: interning runs once at CompleteBuild, and the IEquatable
