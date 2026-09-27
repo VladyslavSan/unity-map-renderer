@@ -218,6 +218,9 @@ Each mechanism was fired at startup and logged the thread it ran on + the elapse
 The dead ones do not throw and do not hang the tab — the main thread keeps running; their work simply never
 progresses.
 
+The matrix confirms `SendWebRequest()` itself resumes on web; it is unverified whether the web build also
+honours `UnityWebRequest.timeout` specifically — Unity's web backend, not this repo, owns that behaviour.
+
 #### Two "multi-threaded" signals that are lies here
 
 - `JobsUtility.JobWorkerCount` reported `5` and `SystemInfo.processorCount` reported `8`, while an
@@ -278,8 +281,8 @@ a successful fetch, purely as a **sync-completion ordering guard** (so a synchro
 couldn't race its own cleanup against `Request()`'s bookkeeping) — dead on web for the same reason as row 5
 above. Only the *success* path hung; the exception path runs before the hop, so a failed fetch completed and
 faulted correctly. Nothing surfaced the hang: `TileManager` polls `Status.IsCompleted()` with no timeout
-(`:1753`), so a hung fetch just meant a tile that never appeared, with no log. `FileDataSource.cs` had the
-same call independently, reachable on web through a `file://` tile template.
+(`TileManager.cs:1300`), so a hung fetch just meant a tile that never appeared, with no log.
+`FileDataSource.cs` had the same call independently, reachable on web through a `file://` tile template.
 
 Fixed by ordering the `_inFlight` registration under `TileScheduler`'s own lock, conditional on the CTS
 reservation still being live, instead of behind a thread-pool hop — no platform branch needed; the ordering

@@ -156,18 +156,21 @@ Properties that make this correct:
 **The deadline bound, and what it changes about the invariant.** "No tile ever commits icon-starved" holds
 **while the fetch is still in flight** — true for every normal terminal path, all of which settle in well
 under the bound. It does not hold once the fetch has been waited on past
-`SymbolSubsystem.SpriteFetchDeadlineSeconds` (an `internal const`, 8 s): `HttpTransport` sets
-no timeout, so a hung endpoint (connects, never responds) would otherwise park every affected build
-forever, holding an unbounded pending queue. Once the deadline trips — measured against a test-overridable
-clock, `SymbolSubsystem.NowSecondsOverride` — `SpritesSettled` goes true regardless of the fetch's own
-status, and the pending drain dispatches every parked build with whatever atlas state exists: a bounded
-fallback to an unguarded build (possibly icon-starved, never self-healing for that tile) instead of a
-permanent stall. So the invariant is: no tile commits icon-starved before the deadline; after it, an
-icon-starved commit is the accepted degradation for a fetch that never terminates.
+`SymbolSubsystem.SpriteFetchDeadlineSeconds` (an `internal const`, 8 s). This bounds the WHOLE two-request
+sprite load (`.json` then `.png`, and a retry on an absent `@2x` sheet), not one HTTP leg: `HttpTransport`
+puts its own timeout only on the `.png` fetch, so a hung `.json` response would otherwise park every
+affected build forever, holding an unbounded pending queue. Once the deadline trips — measured against a
+test-overridable clock, `SymbolSubsystem.NowSecondsOverride` — `SpritesSettled` goes true regardless of the
+fetch's own status, and the pending drain dispatches every parked build with whatever atlas state exists: a
+bounded fallback to an unguarded build (possibly icon-starved, never self-healing for that tile) instead of
+a permanent stall. So the invariant is: no tile commits icon-starved before the deadline; after it, an
+icon-starved commit is the accepted degradation for a fetch that has not yet terminated.
 
-**Tuning the deadline.** 8 s is a starting value, not a measured one. It may be raised (10–15 s) for a
-slow sprite endpoint — over-waiting only costs the already-broken hung-endpoint case. It must not be
-lowered: under-waiting costs the normal-but-slightly-slow case, which is the case D6 exists for.
+**Tuning the deadline.** 8 s is a starting value, not a measured one, and matches `HttpTransport`'s own
+per-request timeout band. It may be raised (10–15 s) for a slow sprite endpoint — over-waiting only costs
+the still-hung-`.json` case, since a hung `.png` already self-terminates at `HttpTransport`'s own timeout.
+It must not be lowered: under-waiting costs the normal-but-slightly-slow case, which is the case D6 exists
+for.
 
 ---
 

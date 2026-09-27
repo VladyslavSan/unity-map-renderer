@@ -8,8 +8,9 @@ namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
     /// The single HTTP transport over <see cref="UnityWebRequest"/> and UniTask (no <c>Task.Run</c>).
-    /// HTTP 404/204 → <c>null</c> (absent); 5xx and connection errors throw
-    /// <see cref="UnityWebRequestException"/>. The <see cref="CancellationToken"/> aborts the fetch.
+    /// HTTP 404/204 → <c>null</c> (absent); 5xx, a connection error, and (on <see cref="FetchAsync"/> only)
+    /// a request that exceeds <see cref="TimeoutSeconds"/> all throw <see cref="UnityWebRequestException"/>.
+    /// The <see cref="CancellationToken"/> aborts the fetch.
     /// </summary>
     internal static class HttpTransport
     {
@@ -18,17 +19,24 @@ namespace MapRenderer.Unity.Rendering.Source
         private static int _requestCount;
         internal static int DebugRequestCount => Volatile.Read(ref _requestCount);
 
+        /// <summary>The <see cref="FetchAsync"/> deadline (UMR-150): tile/glyph/sprite-image byte fetches
+        /// hold an admission slot, so a hung endpoint must not hold it forever. One band with
+        /// <c>SymbolSubsystem.SpriteFetchDeadlineSeconds</c>. <see cref="FetchTextAsync"/> (one-shot
+        /// documents: style/TileJSON/GeoJSON) has none — a large document on a slow link must keep loading.</summary>
+        internal const int TimeoutSeconds = 8;
+
         /// <summary>Fetches raw bytes from <paramref name="uri"/>. Returns <c>null</c> for a 204/404
-        /// response; throws for any other error.</summary>
+        /// response; throws for any other error, including exceeding <see cref="TimeoutSeconds"/>.</summary>
         public static async UniTask<byte[]> FetchAsync(string uri, CancellationToken ct)
         {
             using var req = UnityWebRequest.Get(uri);
             req.downloadHandler = new DownloadHandlerBuffer();
+            req.timeout = TimeoutSeconds; // the slot-holding byte path only — see the constant's doc.
             return await SendAsync(req, ct) ? req.downloadHandler.data : null;
         }
 
         /// <summary>Fetches text from <paramref name="uri"/>. Returns <c>null</c> for a 204/404
-        /// response; throws for any other error.</summary>
+        /// response; throws for any other error. No deadline — see <see cref="TimeoutSeconds"/>.</summary>
         public static async UniTask<string> FetchTextAsync(string uri, CancellationToken ct)
         {
             using var req = UnityWebRequest.Get(uri);
@@ -37,14 +45,13 @@ namespace MapRenderer.Unity.Rendering.Source
         }
 
         /// <summary>Sends <paramref name="req"/>. Returns <c>false</c> for a 204/404 response (absent);
-        /// throws for any other error. The single copy of the HTTP status mapping every public method
-        /// shares.</summary>
+        /// throws for any other error. The single copy of the HTTP status mapping both public methods share.</summary>
         private static async UniTask<bool> SendAsync(UnityWebRequest req, CancellationToken ct)
         {
             Interlocked.Increment(ref _requestCount);
 
-            // ToUniTask() throws on any non-2xx before responseCode is readable, so 404/204 map to absent in
-            // the catch. Other errors re-throw to the caller; OperationCanceledException passes through.
+            // ToUniTask() throws before responseCode is readable, so 404/204 map to absent below. Every
+            // other error — including FetchAsync's timeout — re-throws like a 5xx; cancellation passes through.
             try
             {
                 await req.SendWebRequest().ToUniTask(cancellationToken: ct);

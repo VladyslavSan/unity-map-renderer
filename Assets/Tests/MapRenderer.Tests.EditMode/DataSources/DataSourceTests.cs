@@ -4,7 +4,7 @@
 // Contents:
 //   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>
 //                                     interface, EditMode async-Task unit teeth.
-//   HttpTileSourceTests             — TemplatedTileSource over HttpTransport against a loopback HttpListener, including the 404 -> Absent mapping.
+//   HttpTileSourceTests             — TemplatedTileSource over HttpTransport against a loopback HttpListener, including the 404 -> Absent mapping and a hung endpoint -> req.timeout.
 //   TileUrlTemplateTests            — the scheme:"tms" Y-flip addressing: TileUrlTemplate.Resolve and the TemplatedTileSource composition tooth.
 //   StyleDocumentLoaderTests        — StyleDocumentLoader.LoadTextAsync over HttpTransport/FileTransport, including the 404/204 -> FileNotFoundException mapping.
 //   DataSourceRenderPathTests       — TemplatedTileSource (file://) through the render pipeline.
@@ -193,6 +193,21 @@ namespace MapRenderer.Tests.DataSources
             return hl;
         }
 
+        /// <summary>Starts an HttpListener that accepts one connection and never replies — for a test that
+        /// needs a request to hang until cancelled or timed out. Shared by the cancel and timeout teeth.</summary>
+        internal static HttpListener StartHungLoopbackServer(string prefix)
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add(prefix);
+            listener.Start();
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { listener.GetContext(); /* accept, never respond */ }
+                catch { }
+            });
+            return listener;
+        }
+
         // ── Tests ─────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -352,14 +367,7 @@ namespace MapRenderer.Tests.DataSources
         {
             int port = FindFreePort();
             string url = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
-            var hl = new HttpListener();
-            hl.Prefixes.Add($"http://127.0.0.1:{port}/");
-            hl.Start();
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                try { hl.GetContext(); /* never respond */ }
-                catch { }
-            });
+            var listener = StartHungLoopbackServer($"http://127.0.0.1:{port}/");
 
             using var cts = new CancellationTokenSource();
             UniTask<TileResponse> task;
@@ -374,7 +382,7 @@ namespace MapRenderer.Tests.DataSources
                 int frames = 0;
                 while (!task.Status.IsCompleted() && frames++ < 300) yield return null;
             }
-            finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
+            finally { try { listener.Stop(); } catch { } try { listener.Close(); } catch { } }
 
             Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the frame bound.");
 
@@ -384,6 +392,63 @@ namespace MapRenderer.Tests.DataSources
 
             Assert.IsInstanceOf<OperationCanceledException>(caught,
                 "a mid-flight cancel must surface as OperationCanceledException.");
+        }
+
+        /// <summary>A hung endpoint (accepts the connection, never replies) must terminate via
+        /// <c>req.timeout</c> instead of holding the fetch — and the caller's admission slot — forever
+        /// (UMR-150). The wait is stopwatch-bounded, never a frame count, since EditMode's
+        /// <c>EditorApplication.update</c> rate is not tied to wall clock.</summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_HungEndpoint_ThrowsWithinTheTimeout()
+        {
+            var bailAfter = System.TimeSpan.FromSeconds(HttpTransport.TimeoutSeconds + 4); // margin, still bounded
+
+            int port = FindFreePort();
+            string url = $"http://127.0.0.1:{port}/";
+            var listener = StartHungLoopbackServer(url);
+
+            UniTask<byte[]> task = default;
+            System.TimeSpan elapsed;
+            try
+            {
+                task = HttpTransport.FetchAsync(url, default).Preserve();
+
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                while (!task.Status.IsCompleted() && stopwatch.Elapsed < bailAfter) yield return null;
+                elapsed = stopwatch.Elapsed;
+            }
+            finally
+            {
+                try { listener.Stop(); } catch { }
+                try { listener.Close(); } catch { }
+                // Observe a still-pending task on the bail path too, so a later fault can't publish to
+                // UniTaskScheduler.UnobservedTaskException and poison the next test.
+                if (!task.Status.IsCompleted()) task.Forget(_ => { });
+            }
+
+            Assert.IsTrue(task.Status.IsCompleted(),
+                "a hung fetch must terminate within the stopwatch bound instead of hanging forever — " +
+                "req.timeout is not being honoured.");
+
+            // Positive control: proves the measurement is of the timeout deadline, not of some earlier,
+            // faster failure (e.g. a refused connection) that would pass a bare "it terminated" vacuously.
+            Assert.GreaterOrEqual(elapsed.TotalSeconds, HttpTransport.TimeoutSeconds - 1,
+                $"the fetch terminated after only {elapsed.TotalSeconds:F1}s — too fast to be the " +
+                $"{HttpTransport.TimeoutSeconds}s timeout; something else failed it first.");
+
+            Exception caught = null;
+            try { task.GetAwaiter().GetResult(); }
+            catch (Exception ex) { caught = ex; }
+
+            Assert.IsInstanceOf<UnityWebRequestException>(caught,
+                "a timeout must surface as UnityWebRequestException, the same path a 5xx takes — never " +
+                "silently absent.");
+
+            // Second positive control: pins that this is the timeout, not a 404/204 the transport already
+            // maps to absent through a different path.
+            var webEx = (UnityWebRequestException)caught;
+            Assert.That(webEx.ResponseCode, Is.Not.EqualTo((long)HttpStatusCode.NotFound).And.Not.EqualTo((long)HttpStatusCode.NoContent),
+                "a timeout's ResponseCode must not read as 404/204 — that would mean it was silently mapped to absent.");
         }
 
         /// <summary>A 200 response must yield the served body as text, over the same loopback helper the

@@ -39,8 +39,8 @@ namespace MapRenderer.Unity.Text
         /// <summary>Target atlas edge in px, clamped to the GPU's max texture size. R8, so 4096² ≈ 16 MB.</summary>
         private const int AtlasDimension = 4096;
 
-        // Without this, a hung endpoint (never responds, no upstream HTTP timeout) would leave the fetch Pending
-        // forever, parking every build permanently. Once elapsed, SpritesSettled goes true so parks dispatch.
+        // Bounds the WHOLE two-request sprite load (.json then .png, and a retry on an absent @2x sheet);
+        // HttpTransport.TimeoutSeconds alone only covers the .png leg. Once elapsed, SpritesSettled goes true.
         internal const double SpriteFetchDeadlineSeconds = 8.0;
 
         // Teardown-drain backstop: the worker is finite pure-CPU, so exceeding this means the completion signal
