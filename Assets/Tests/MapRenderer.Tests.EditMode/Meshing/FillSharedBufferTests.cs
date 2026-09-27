@@ -170,36 +170,34 @@ namespace MapRenderer.Tests.Meshing
     /// </summary>
     public class EarcutDegenerateTriangleTests
     {
+        /// <summary>
+        /// Degenerate (collinear) triangles are the segment hull of their corners, not the whole plane, and
+        /// the ordinary (non-degenerate) path stays untouched by the fix.
+        /// </summary>
         [Test]
-        public void DegenerateTriangle_PointFarOnSharedLine_IsNotContained()
+        public void PointInTriangle_DegenerateAndOrdinaryCases()
         {
-            // A=(3,-8) B=(3,-8) C=(-3,-8): collinear, so the point set is the segment [-3,3] x {-8}.
+            // A=(3,-8) B=(3,-8) C=(-3,-8): collinear, point set is the segment [-3,3] x {-8}.
             // P=(-11,-8) lies on that line but well outside the segment — the lead's witness.
-            Assert.IsFalse(EarcutJob.PointInTriangle(3, -8, 3, -8, -3, -8, -11, -8));
-        }
+            Assert.IsFalse(EarcutJob.PointInTriangle(3, -8, 3, -8, -3, -8, -11, -8),
+                "a point on the degenerate line but outside the segment must not be contained.");
 
-        [Test]
-        public void DegenerateTriangle_PointOnTheHullSegment_IsContained()
-        {
             // P=(0,-8) lies ON the segment: this rules out "a degenerate candidate is always an ear".
-            Assert.IsTrue(EarcutJob.PointInTriangle(3, -8, 3, -8, -3, -8, 0, -8));
-        }
+            Assert.IsTrue(EarcutJob.PointInTriangle(3, -8, 3, -8, -3, -8, 0, -8),
+                "a point on the segment hull of a degenerate triangle must be contained.");
 
-        [Test]
-        public void NonDegenerateTriangle_InsideAndOutsidePoints_AreUnchanged()
-        {
             // A proper triangle (0,0) (4,0) (0,4): the fix must not touch the ordinary path.
-            Assert.IsTrue(EarcutJob.PointInTriangle(0, 0, 4, 0, 0, 4, 1, 1));
-            Assert.IsFalse(EarcutJob.PointInTriangle(0, 0, 4, 0, 0, 4, 5, 5));
-        }
+            Assert.IsTrue(EarcutJob.PointInTriangle(0, 0, 4, 0, 0, 4, 1, 1),
+                "a point inside a non-degenerate triangle must still be contained.");
+            Assert.IsFalse(EarcutJob.PointInTriangle(0, 0, 4, 0, 0, 4, 5, 5),
+                "a point outside a non-degenerate triangle must still not be contained.");
 
-        [Test]
-        public void DegenerateTriangle_OnDiagonalHull_BoundingBoxIsTwoDimensional()
-        {
             // A=(0,0) B=(2,2) C=(4,4): collinear on y=x, so both the x- and y-bounds of the box are live —
             // an axis-aligned witness alone can't catch a bug in either comparison.
-            Assert.IsFalse(EarcutJob.PointInTriangle(0, 0, 2, 2, 4, 4, 10, 10));
-            Assert.IsTrue(EarcutJob.PointInTriangle(0, 0, 2, 2, 4, 4, 1, 1));
+            Assert.IsFalse(EarcutJob.PointInTriangle(0, 0, 2, 2, 4, 4, 10, 10),
+                "a point outside a diagonal degenerate hull must not be contained.");
+            Assert.IsTrue(EarcutJob.PointInTriangle(0, 0, 2, 2, 4, 4, 1, 1),
+                "a point on a diagonal degenerate hull must be contained.");
         }
     }
 
@@ -354,7 +352,9 @@ namespace MapRenderer.Tests.Meshing
             };
 
             var result = EarcutJobPolygonRunner.Run(square);
-            Assert.AreEqual(6, result.Indices.Length, "Square should produce 6 indices (2 triangles).");
+            Assert.AreEqual(3 * (square.Count - 2), result.Indices.Length,
+                "any triangulation of a simple polygon with no holes produces (vertexCount - 2) triangles, " +
+                "whatever the algorithm.");
 
             // All indices must be in range.
             foreach (int idx in result.Indices)
@@ -377,7 +377,9 @@ namespace MapRenderer.Tests.Meshing
             }
 
             var result = EarcutJobPolygonRunner.Run(pentagon);
-            Assert.AreEqual(9, result.Indices.Length, "Pentagon should produce 9 indices (3 triangles).");
+            Assert.AreEqual(3 * (pentagon.Count - 2), result.Indices.Length,
+                "any triangulation of a simple polygon with no holes produces (vertexCount - 2) triangles, " +
+                "whatever the algorithm.");
 
             foreach (int idx in result.Indices)
                 Assert.That(idx, Is.GreaterThanOrEqualTo(0).And.LessThan(result.Vertices.Length));
@@ -410,7 +412,11 @@ namespace MapRenderer.Tests.Meshing
             };
 
             var result = EarcutJobPolygonRunner.Run(outer, hole);
-            Assert.AreEqual(24, result.Indices.Length, "Square+hole should produce 24 indices (8 triangles).");
+            // Bridging a hole into the outer ring adds 2 duplicate vertices (the bridge's out-and-back edge).
+            int totalVerts = outer.Count + hole.Count + 2;
+            Assert.AreEqual(3 * (totalVerts - 2), result.Indices.Length,
+                "any triangulation of a polygon with holes produces (V + 2H - 2) triangles, where V is the " +
+                "outer+hole vertex count and H the hole count (each hole's bridge adds 2 vertex copies).");
 
             foreach (int idx in result.Indices)
                 Assert.That(idx, Is.GreaterThanOrEqualTo(0).And.LessThan(result.Vertices.Length),
@@ -500,20 +506,21 @@ namespace MapRenderer.Tests.Meshing
         // Degenerate input
         // -----------------------------------------------------------------------------------------
 
-        [Test]
-        public void NullOuter_ReturnsEmpty()
+        private static IEnumerable<TestCaseData> DegenerateOuterCases()
         {
-            var result = EarcutJobPolygonRunner.Run(null);
-            Assert.AreEqual(0, result.Indices.Length);
-            Assert.AreEqual(0, result.Vertices.Length);
+            yield return new TestCaseData((object)null)
+                .SetName("Run_WithDegenerateOuter_ReturnsEmpty(NullOuter)");
+            yield return new TestCaseData(new List<double2> { new double2(0, 0), new double2(1, 1) })
+                .SetName("Run_WithDegenerateOuter_ReturnsEmpty(TooFewVerts)");
         }
 
         [Test]
-        public void TooFewVerts_ReturnsEmpty()
+        [TestCaseSource(nameof(DegenerateOuterCases))]
+        public void Run_WithDegenerateOuter_ReturnsEmpty(List<double2> outer)
         {
-            var ring = new List<double2> { new double2(0, 0), new double2(1, 1) };
-            var result = EarcutJobPolygonRunner.Run(ring);
+            var result = EarcutJobPolygonRunner.Run(outer);
             Assert.AreEqual(0, result.Indices.Length);
+            Assert.AreEqual(0, result.Vertices.Length);
         }
     }
 
@@ -918,39 +925,33 @@ namespace MapRenderer.Tests.Meshing
     [TestFixture]
     public class FillMeshPipelineBoundsTests
     {
+        /// <summary><see cref="FillMeshPipeline.EnsureCapacity"/> does not throw while count is within (or
+        /// exactly at) capacity — including the boundary case (capacity N admits exactly N).</summary>
         [Test]
-        public void EnsureCapacity_CountWithinCapacity_DoesNotThrow()
+        [TestCase(0, 0, "empty", TestName = "EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(Zero)")]
+        [TestCase(5, 10, "ring", TestName = "EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(WithinCapacity)")]
+        [TestCase(10, 10, "exact-fit", TestName = "EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(ExactFit)")]
+        [TestCase(100, 100, "vertex", TestName = "EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(BoundaryExactFit)")]
+        public void EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(int count, int capacity, string label)
         {
-            Assert.DoesNotThrow(() => FillMeshPipeline.EnsureCapacity(0, 0, "empty"));
-            Assert.DoesNotThrow(() => FillMeshPipeline.EnsureCapacity(5, 10, "ring"));
-            Assert.DoesNotThrow(() => FillMeshPipeline.EnsureCapacity(10, 10, "exact-fit"));
+            Assert.DoesNotThrow(() => FillMeshPipeline.EnsureCapacity(count, capacity, label));
         }
 
+        /// <summary><see cref="FillMeshPipeline.EnsureCapacity"/> throws once count exceeds capacity — from
+        /// exactly one over (the boundary: capacity N rejects N+1) through a large overflow — and the message
+        /// names the overflowing quantity, the actual count, and the capacity.</summary>
         [Test]
-        public void EnsureCapacity_CountExceedsCapacity_ThrowsLoudly()
+        [TestCase(11, 10, "ring", null, TestName = "EnsureCapacity_CountExceedsCapacity_ThrowsWithMessage(OneOver)")]
+        [TestCase(101, 100, "vertex", "count == capacity + 1 must throw (the first out-of-range write).",
+            TestName = "EnsureCapacity_CountExceedsCapacity_ThrowsWithMessage(BoundaryOffByOne)")]
+        [TestCase(int.MaxValue, 4096, "polygon", null, TestName = "EnsureCapacity_CountExceedsCapacity_ThrowsWithMessage(LargeOverflow)")]
+        public void EnsureCapacity_CountExceedsCapacity_ThrowsWithMessage(int count, int capacity, string label, string throwReason)
         {
             var ex = Assert.Throws<InvalidOperationException>(
-                () => FillMeshPipeline.EnsureCapacity(11, 10, "ring"));
-            StringAssert.Contains("ring", ex.Message, "message must name the overflowing quantity");
-            StringAssert.Contains("11", ex.Message, "message must report the actual count");
-            StringAssert.Contains("10", ex.Message, "message must report the capacity");
-        }
-
-        [Test]
-        public void EnsureCapacity_OffByOne_Throws()
-        {
-            // The boundary: capacity N admits exactly N, rejects N+1.
-            Assert.DoesNotThrow(() => FillMeshPipeline.EnsureCapacity(100, 100, "vertex"));
-            Assert.Throws<InvalidOperationException>(
-                () => FillMeshPipeline.EnsureCapacity(101, 100, "vertex"),
-                "count == capacity + 1 must throw (the first out-of-range write).");
-        }
-
-        [Test]
-        public void EnsureCapacity_LargeOverflow_Throws()
-        {
-            Assert.Throws<InvalidOperationException>(
-                () => FillMeshPipeline.EnsureCapacity(int.MaxValue, 4096, "polygon"));
+                () => FillMeshPipeline.EnsureCapacity(count, capacity, label), throwReason);
+            StringAssert.Contains(label, ex.Message, "message must name the overflowing quantity");
+            StringAssert.Contains(count.ToString(), ex.Message, "message must report the actual count");
+            StringAssert.Contains(capacity.ToString(), ex.Message, "message must report the capacity");
         }
 
         // ── Exact pre-count. ─────────────────────────────────────────────────────────────────────

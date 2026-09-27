@@ -492,26 +492,36 @@ namespace MapRenderer.Tests.Cameras
                 }
         }
 
-        // ── 512 selects exactly one level coarser than 256, over the SAME span ───────
+        // ── 512 selects exactly one level coarser than 256, over the SAME span; the parameterless
+        // ctor IS the 512 convention (no inspector change needed) ─────────────────────────────────
 
         [Test]
         public void Selector_TDensity_512IsOneLevelCoarserThan256()
         {
-            var sel512 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 512);
-            var sel256 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 256);
+            var selDefault = (IVisibleTileSelector)new FrustumTileSelector(0, 22);                  // default 512
+            var sel512     = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 512);
+            var sel256     = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 256);
+            var bDefault = new List<TileId>();
             var b512 = new List<TileId>();
             var b256 = new List<TileId>();
+            int checkedFrames = 0;
+            bool anyStrictlyFewer = false;
 
             foreach (var fc in FrameCases())
             {
-                var cam = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
-                sel256.SelectVisibleTiles(View(cam, fc.Aspect), b256);
-                sel512.SelectVisibleTiles(View(cam, fc.Aspect), b512);
+                var cam  = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
+                var view = View(cam, fc.Aspect);
+                sel256.SelectVisibleTiles(view, b256);
+                sel512.SelectVisibleTiles(view, b512);
+                selDefault.SelectVisibleTiles(view, bDefault);
                 if (b256.Count == 0 || b512.Count == 0) continue;
 
                 int z256 = b256[0].Z;
                 int z512 = b512[0].Z;
                 if (z256 == 0) continue; // offset would clamp at minZoom — not an interior case
+
+                checkedFrames++;
+                if (b512.Count < b256.Count) anyStrictlyFewer = true;
 
                 Assert.AreEqual(z256 - 1, z512,
                     $"[{fc.Name}] 512 convention must select exactly one integer level coarser than 256 " +
@@ -519,26 +529,17 @@ namespace MapRenderer.Tests.Cameras
                 Assert.LessOrEqual(b512.Count, b256.Count,
                     $"[{fc.Name}] the coarser 512 selection must not select MORE tiles than 256 " +
                     $"(got {b512.Count} vs {b256.Count}).");
+                CollectionAssert.AreEqual(b512, bDefault,
+                    $"[{fc.Name}] the parameterless ctor (no onScreenTilePx arg) must match an explicit " +
+                    "512 selector exactly — the DEFAULT is the 512 convention.");
             }
-        }
 
-        // ── A fresh selector is the 512 convention (no inspector change needed) ───────
-
-        [Test]
-        public void Selector_TDefault_IsThe512Convention()
-        {
-            var selDefault = (IVisibleTileSelector)new FrustumTileSelector(0, 22);      // default 512
-            var sel256     = (IVisibleTileSelector)new FrustumTileSelector(0, 22, 256);
-            var cam = Cam(0, 0, 10.0);
-            var bDef = new List<TileId>();
-            var b256 = new List<TileId>();
-            selDefault.SelectVisibleTiles(View(cam, 16.0 / 9.0), bDef);
-            sel256.SelectVisibleTiles(View(cam, 16.0 / 9.0), b256);
-
-            Assert.AreEqual(b256[0].Z - 1, bDef[0].Z,
-                "The DEFAULT selector must be the 512 convention — one level coarser than an explicit 256.");
-            Assert.Less(bDef.Count, b256.Count,
-                $"The 512 default must select fewer tiles than 256 (got {bDef.Count} vs {b256.Count}).");
+            Assert.Greater(checkedFrames, 0,
+                "precondition: at least one frame must reach the interior comparison, or every assertion " +
+                "above passed vacuously.");
+            Assert.IsTrue(anyStrictlyFewer,
+                "the 512 convention must select STRICTLY fewer tiles than 256 in at least one frame — " +
+                "else LessOrEqual alone would let the coarser convention buy nothing.");
         }
 
         // ── The ScreenSpaceLod strategy: mixed-zoom, fewer tiles than flat, still gap-free ──
@@ -1110,26 +1111,6 @@ namespace MapRenderer.Tests.Cameras
                 double altNew       = CameraPoseMath.AltitudeForZoom(z, 1080.0, 60.0);
                 double altOldZPlus1 = (1080.0 * gr256AtZPlus1) / (2.0 * math.tan(Angle.FromDegrees(30.0).Radians));
                 Assert.AreEqual(altOldZPlus1, altNew, altNew * 1e-9, $"altitude_512({z}) == altitude_256({z}+1)");
-            }
-        }
-
-        [Test]
-        public void T_DENSITY_REBASED_DefaultSelectorKeepsThe512Density_AndIsAligned()
-        {
-            // The default selector is one level COARSER than onScreenTilePx=256 over the same span (~4× fewer
-            // tiles), at Z == cameraZoom. Z is asserted on both, because a count alone misses a misaligned Z.
-            var def  = (IVisibleTileSelector)new FrustumTileSelector(0, 22);                    // default 512
-            var e256 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 256);
-            var bDef = new List<TileId>();
-            var b256 = new List<TileId>();
-            foreach (int z in new[] { 4, 6, 9 })
-            {
-                def .SelectVisibleTiles(View(Cam(0, 0, z, 0), 16.0 / 9.0), bDef);
-                e256.SelectVisibleTiles(View(Cam(0, 0, z, 0), 16.0 / 9.0), b256);
-                Assert.IsNotEmpty(bDef); Assert.IsNotEmpty(b256);
-                Assert.AreEqual(z,     bDef[0].Z, $"default (512) aligned: camera z{z} → tile z{z}");
-                Assert.AreEqual(z + 1, b256[0].Z, $"explicit 256 is one level finer at camera z{z}");
-                Assert.Less(bDef.Count, b256.Count, $"512 density win preserved (fewer, larger tiles) at z{z}");
             }
         }
 

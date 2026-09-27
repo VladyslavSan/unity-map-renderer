@@ -91,38 +91,16 @@ namespace MapRenderer.Tests.Expressions
         }
 
         [Test]
-        public void HexParse()
+        [TestCase("#00ff00", 0.0, 255.0, 0.0, TestName = "ToColor_ParsesStringFormat(Hex)")]
+        [TestCase("#0f0", 0.0, 255.0, 0.0, TestName = "ToColor_ParsesStringFormat(ShortHex)")]
+        [TestCase("blue", 0.0, 0.0, 255.0, TestName = "ToColor_ParsesStringFormat(NamedColor)")]
+        [TestCase("rgb(255, 0, 0)", 255.0, 0.0, 0.0, TestName = "ToColor_ParsesStringFormat(RgbFunction)")]
+        public void ToColor_ParsesStringFormat(string cssString, double expectedR, double expectedG, double expectedB)
         {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"#00ff00\"]"));
-            Assert.AreEqual(0.0, rgba[0], 1e-9);
-            Assert.AreEqual(255.0, rgba[1], 1e-9);
-            Assert.AreEqual(0.0, rgba[2], 1e-9);
-        }
-
-        [Test]
-        public void ShortHexParse()
-        {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"#0f0\"]"));
-            Assert.AreEqual(0.0, rgba[0], 1e-9);
-            Assert.AreEqual(255.0, rgba[1], 1e-9);
-            Assert.AreEqual(0.0, rgba[2], 1e-9);
-        }
-
-        [Test]
-        public void NamedColorParse()
-        {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"blue\"]"));
-            Assert.AreEqual(0.0, rgba[0], 1e-9);
-            Assert.AreEqual(0.0, rgba[1], 1e-9);
-            Assert.AreEqual(255.0, rgba[2], 1e-9);
-        }
-
-        [Test]
-        public void RgbFunctionStringParse()
-        {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(255, 0, 0)\"]"));
-            Assert.AreEqual(255.0, rgba[0], 1e-9);
-            Assert.AreEqual(0.0, rgba[1], 1e-9);
+            var rgba = Rgba(Expr.Eval($"[\"to-color\", \"{cssString}\"]"));
+            Assert.AreEqual(expectedR, rgba[0], 1e-9);
+            Assert.AreEqual(expectedG, rgba[1], 1e-9);
+            Assert.AreEqual(expectedB, rgba[2], 1e-9);
         }
 
         [Test]
@@ -141,44 +119,29 @@ namespace MapRenderer.Tests.Expressions
         // ---- CSS out-of-range components are CLIPPED, not rejected (CSS Color 4 §4.1) ----------------
         // The EXPRESSION constructors raise on a 300 (tests above); the CSS-string path clamps it.
 
+        /// <summary>Every CSS-string clamp case, all four channels asserted (rgb/rgba channels 0-255,
+        /// alpha 0-1). The hsl row is the sharpest: unclamped, l=1.5 drives q = l+s-l*s past 1 and HueToRgb
+        /// returns p = 2l-q &lt; 0 for the off-hue channels, so the colour would otherwise come out with
+        /// NEGATIVE components, not merely too bright.</summary>
         [Test]
-        public void CssRgbString_ChannelAboveRange_ClampsTo255()
+        [TestCase("rgb(300, 0, 0)", 255.0, 0.0, 0.0, 1.0, "rgb(300,…) must clip to 255, not produce R > 1.0",
+            TestName = "CssColorString_OutOfRangeComponent_Clamps(Rgb_ChannelAboveRange)")]
+        [TestCase("rgb(0, -20, 0)", 0.0, 0.0, 0.0, 1.0, "a negative channel must clip to 0, not to a negative G",
+            TestName = "CssColorString_OutOfRangeComponent_Clamps(Rgb_NegativeChannel)")]
+        [TestCase("rgb(150%, 0%, 0%)", 255.0, 0.0, 0.0, 1.0, "the percent channel path needs its own clamp",
+            TestName = "CssColorString_OutOfRangeComponent_Clamps(Rgb_PercentAboveRange)")]
+        [TestCase("rgba(0, 0, 0, 5)", 0.0, 0.0, 0.0, 1.0, "alpha is opacity in [0,1]; 5 must clip to fully opaque",
+            TestName = "CssColorString_OutOfRangeComponent_Clamps(Rgba_AlphaAboveRange)")]
+        [TestCase("hsl(0, 100%, 150%)", 255.0, 255.0, 255.0, 1.0, "l > 100% must clip to white",
+            TestName = "CssColorString_OutOfRangeComponent_Clamps(Hsl_LightnessAboveRange)")]
+        public void CssColorString_OutOfRangeComponent_Clamps(
+            string cssString, double expectedR, double expectedG, double expectedB, double expectedA, string message)
         {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(300, 0, 0)\"]"));
-            Assert.AreEqual(255.0, rgba[0], 1e-9, "rgb(300,…) must clip to 255, not produce R > 1.0");
-            Assert.AreEqual(0.0, rgba[1], 1e-9);
-        }
-
-        [Test]
-        public void CssRgbString_NegativeChannel_ClampsToZero()
-        {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(0, -20, 0)\"]"));
-            Assert.AreEqual(0.0, rgba[1], 1e-9, "a negative channel must clip to 0, not to a negative G");
-        }
-
-        [Test]
-        public void CssRgbString_PercentAboveRange_ClampsTo255()
-        {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(150%, 0%, 0%)\"]"));
-            Assert.AreEqual(255.0, rgba[0], 1e-9, "the percent channel path needs its own clamp");
-        }
-
-        [Test]
-        public void CssRgbaString_AlphaAboveRange_ClampsToOne()
-        {
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgba(0, 0, 0, 5)\"]"));
-            Assert.AreEqual(1.0, rgba[3], 1e-9, "alpha is opacity in [0,1]; 5 must clip to fully opaque");
-        }
-
-        [Test]
-        public void CssHslString_LightnessAboveRange_ClampsToWhite()
-        {
-            // Unclamped, l = 1.5 drives q = l + s - l*s past 1 and HueToRgb returns p = 2l - q < 0 for the
-            // off-hue channels — the colour comes out with NEGATIVE components, not merely too bright.
-            var rgba = Rgba(Expr.Eval("[\"to-color\", \"hsl(0, 100%, 150%)\"]"));
-            Assert.AreEqual(255.0, rgba[0], 1e-9, "l > 100% must clip to white");
-            Assert.AreEqual(255.0, rgba[1], 1e-9);
-            Assert.AreEqual(255.0, rgba[2], 1e-9);
+            var rgba = Rgba(Expr.Eval($"[\"to-color\", \"{cssString}\"]"));
+            Assert.AreEqual(expectedR, rgba[0], 1e-9, message);
+            Assert.AreEqual(expectedG, rgba[1], 1e-9, message);
+            Assert.AreEqual(expectedB, rgba[2], 1e-9, message);
+            Assert.AreEqual(expectedA, rgba[3], 1e-9, message);
         }
     }
 
@@ -236,50 +199,37 @@ namespace MapRenderer.Tests.Expressions
 
         // ---- comparisons ---------------------------------------------------------------------------
 
+        /// <summary>== and != across numbers, strings, and mismatched types: no implicit coercion, so a
+        /// number and a string are never equal (deliberate — deep value-equality checks the type first) —
+        /// a runtime false, not an error.</summary>
         [Test]
-        public void Equality_Numbers()
+        public void Equality_ByOperandTypes()
         {
-            Assert.IsTrue(Expr.Eval("[\"==\", 1, 1]").AsBool());
-            Assert.IsFalse(Expr.Eval("[\"==\", 1, 2]").AsBool());
-            Assert.IsTrue(Expr.Eval("[\"!=\", 1, 2]").AsBool());
+            Assert.IsTrue(Expr.Eval("[\"==\", 1, 1]").AsBool(), "numbers: 1 == 1");
+            Assert.IsFalse(Expr.Eval("[\"==\", 1, 2]").AsBool(), "numbers: 1 != 2");
+            Assert.IsTrue(Expr.Eval("[\"!=\", 1, 2]").AsBool(), "numbers: 1 != 2");
+
+            Assert.IsTrue(Expr.Eval("[\"==\", \"a\", \"a\"]").AsBool(), "strings: a == a");
+            Assert.IsFalse(Expr.Eval("[\"==\", \"a\", \"b\"]").AsBool(), "strings: a != b");
+
+            Assert.IsFalse(Expr.Eval("[\"==\", 1, \"1\"]").AsBool(), "across types: 1 != \"1\", not an error");
+            Assert.IsTrue(Expr.Eval("[\"!=\", 1, \"1\"]").AsBool(), "across types: 1 != \"1\"");
         }
 
+        /// <summary>&lt; &lt;= &gt; &gt;= across numbers and strings; comparing mismatched types is a spec
+        /// error, not a crash.</summary>
         [Test]
-        public void Equality_Strings()
+        public void OrderedComparison_ByOperandTypes()
         {
-            Assert.IsTrue(Expr.Eval("[\"==\", \"a\", \"a\"]").AsBool());
-            Assert.IsFalse(Expr.Eval("[\"==\", \"a\", \"b\"]").AsBool());
-        }
+            Assert.IsTrue(Expr.Eval("[\"<\", 1, 2]").AsBool(), "numbers: 1 < 2");
+            Assert.IsTrue(Expr.Eval("[\"<=\", 2, 2]").AsBool(), "numbers: 2 <= 2");
+            Assert.IsTrue(Expr.Eval("[\">\", 3, 2]").AsBool(), "numbers: 3 > 2");
+            Assert.IsTrue(Expr.Eval("[\">=\", 2, 2]").AsBool(), "numbers: 2 >= 2");
+            Assert.IsFalse(Expr.Eval("[\">\", 1, 2]").AsBool(), "numbers: 1 is not > 2");
 
-        [Test]
-        public void Equality_AcrossTypes_IsFalse_NotError()
-        {
-            // No implicit coercion: a number and a string are never equal (deliberate — deep value-equality
-            // checks the type first). This is a runtime false, not an error.
-            Assert.IsFalse(Expr.Eval("[\"==\", 1, \"1\"]").AsBool());
-            Assert.IsTrue(Expr.Eval("[\"!=\", 1, \"1\"]").AsBool());
-        }
+            Assert.IsTrue(Expr.Eval("[\"<\", \"a\", \"b\"]").AsBool(), "strings: a < b");
+            Assert.IsFalse(Expr.Eval("[\"<\", \"b\", \"a\"]").AsBool(), "strings: b is not < a");
 
-        [Test]
-        public void OrderedComparisons_Numbers()
-        {
-            Assert.IsTrue(Expr.Eval("[\"<\", 1, 2]").AsBool());
-            Assert.IsTrue(Expr.Eval("[\"<=\", 2, 2]").AsBool());
-            Assert.IsTrue(Expr.Eval("[\">\", 3, 2]").AsBool());
-            Assert.IsTrue(Expr.Eval("[\">=\", 2, 2]").AsBool());
-            Assert.IsFalse(Expr.Eval("[\">\", 1, 2]").AsBool());
-        }
-
-        [Test]
-        public void OrderedComparisons_Strings()
-        {
-            Assert.IsTrue(Expr.Eval("[\"<\", \"a\", \"b\"]").AsBool());
-            Assert.IsFalse(Expr.Eval("[\"<\", \"b\", \"a\"]").AsBool());
-        }
-
-        [Test]
-        public void OrderedComparison_TypeMismatch_IsError()
-        {
             bool ok = Expr.TryEval("[\"<\", 1, \"a\"]", out _, out _);
             Assert.IsFalse(ok, "comparing a number with a string must be a spec error.");
         }
@@ -326,36 +276,16 @@ namespace MapRenderer.Tests.Expressions
     public class LetVarTests
     {
         [Test]
-        public void Let_BindsAndVarResolves()
+        // let x = 5 in x + 1
+        [TestCase("[\"let\", \"x\", 5, [\"+\", [\"var\", \"x\"], 1]]", 6.0, TestName = "Let_BindingSemantics(BindsAndVarResolves)")]
+        [TestCase("[\"let\", \"a\", 2, \"b\", 3, [\"*\", [\"var\", \"a\"], [\"var\", \"b\"]]]", 6.0, TestName = "Let_BindingSemantics(MultipleBindings)")]
+        // a=2, b=a+1 -> 3 ; result a+b = 5
+        [TestCase("[\"let\", \"a\", 2, \"b\", [\"+\", [\"var\", \"a\"], 1], [\"+\", [\"var\", \"a\"], [\"var\", \"b\"]]]", 5.0, TestName = "Let_BindingSemantics(LaterBindingReferencesEarlier)")]
+        // outer x=1; inner let shadows x=10; inner body uses 10.
+        [TestCase("[\"let\", \"x\", 1, [\"let\", \"x\", 10, [\"var\", \"x\"]]]", 10.0, TestName = "Let_BindingSemantics(NestedShadowing)")]
+        public void Let_BindingSemantics(string json, double expected)
         {
-            // let x = 5 in x + 1
-            string e = "[\"let\", \"x\", 5, [\"+\", [\"var\", \"x\"], 1]]";
-            Assert.AreEqual(6.0, Expr.Eval(e).AsNumber(), 1e-9);
-        }
-
-        [Test]
-        public void Let_MultipleBindings()
-        {
-            string e = "[\"let\", \"a\", 2, \"b\", 3, [\"*\", [\"var\", \"a\"], [\"var\", \"b\"]]]";
-            Assert.AreEqual(6.0, Expr.Eval(e).AsNumber(), 1e-9);
-        }
-
-        [Test]
-        public void Let_LaterBindingReferencesEarlier()
-        {
-            // a=2, b=a+1 -> 3 ; result a+b = 5
-            string e = "[\"let\", \"a\", 2, \"b\", [\"+\", [\"var\", \"a\"], 1], " +
-                       "[\"+\", [\"var\", \"a\"], [\"var\", \"b\"]]]";
-            Assert.AreEqual(5.0, Expr.Eval(e).AsNumber(), 1e-9);
-        }
-
-        [Test]
-        public void Let_NestedShadowing()
-        {
-            // outer x=1; inner let shadows x=10; inner body uses 10.
-            string e = "[\"let\", \"x\", 1, " +
-                       "[\"let\", \"x\", 10, [\"var\", \"x\"]]]";
-            Assert.AreEqual(10.0, Expr.Eval(e).AsNumber(), 1e-9);
+            Assert.AreEqual(expected, Expr.Eval(json).AsNumber(), 1e-9);
         }
 
         [Test]
@@ -409,17 +339,12 @@ namespace MapRenderer.Tests.Expressions
         }
 
         [Test]
-        public void At_OutOfRange_IsError()
+        [TestCase("[\"at\", 5, [\"literal\", [10, 20, 30]]]", TestName = "At_IndexValidity(OutOfRange_IsError)")]
+        [TestCase("[\"at\", -1, [\"literal\", [10]]]", TestName = "At_IndexValidity(NegativeIndex_IsError)")]
+        public void At_IndexValidity(string json)
         {
-            bool ok = Expr.TryEval("[\"at\", 5, [\"literal\", [10, 20, 30]]]", out _, out _);
-            Assert.IsFalse(ok, "at out-of-range must be a spec error, not a crash.");
-        }
-
-        [Test]
-        public void At_NegativeIndex_IsError()
-        {
-            bool ok = Expr.TryEval("[\"at\", -1, [\"literal\", [10]]]", out _, out _);
-            Assert.IsFalse(ok);
+            bool ok = Expr.TryEval(json, out _, out _);
+            Assert.IsFalse(ok, "an invalid at index must be a spec error, not a crash.");
         }
 
         [Test]
@@ -437,11 +362,12 @@ namespace MapRenderer.Tests.Expressions
         }
 
         [Test]
-        public void Length_String() => Assert.AreEqual(6.0, Expr.Eval("[\"length\", \"Berlin\"]").AsNumber());
-
-        [Test]
-        public void Length_Array()
-            => Assert.AreEqual(3.0, Expr.Eval("[\"length\", [\"literal\", [1, 2, 3]]]").AsNumber());
+        [TestCase("\"Berlin\"", 6.0, TestName = "Length_ByOperandType(String)")]
+        [TestCase("[\"literal\", [1, 2, 3]]", 3.0, TestName = "Length_ByOperandType(Array)")]
+        public void Length_ByOperandType(string operand, double expected)
+        {
+            Assert.AreEqual(expected, Expr.Eval($"[\"length\", {operand}]").AsNumber());
+        }
 
         [Test]
         public void Length_OnNumber_IsError()
@@ -462,26 +388,17 @@ namespace MapRenderer.Tests.Expressions
     {
         // ---- step ----------------------------------------------------------------------------------
 
+        // step: input, default, stop0->out0, stop1->out1 (stops fixed at 0->"a", 10->"b", default "d").
         [Test]
-        public void Step_BelowFirstStop_ReturnsDefault()
+        [TestCase(-1.0, "d", TestName = "Step_PicksOutputForInput(BelowFirstStop_ReturnsDefault)")]
+        [TestCase(10.0, "b", TestName = "Step_PicksOutputForInput(ExactStop_PicksThatOutput)")]
+        [TestCase(5.0, "a", TestName = "Step_PicksOutputForInput(BetweenStops_PicksLower)")]
+        public void Step_PicksOutputForInput(double input, string expected)
         {
-            // step: input, default, stop0->out0, stop1->out1
-            string e = "[\"step\", -1, \"d\", 0, \"a\", 10, \"b\"]";
-            Assert.AreEqual("d", Expr.Eval(e).AsString());
-        }
-
-        [Test]
-        public void Step_ExactStop_PicksThatOutput()
-        {
-            string e = "[\"step\", 10, \"d\", 0, \"a\", 10, \"b\"]";
-            Assert.AreEqual("b", Expr.Eval(e).AsString());
-        }
-
-        [Test]
-        public void Step_BetweenStops_PicksLower()
-        {
-            string e = "[\"step\", 5, \"d\", 0, \"a\", 10, \"b\"]";
-            Assert.AreEqual("a", Expr.Eval(e).AsString());
+            // Invariant culture: some cultures format a negative number with U+2212 MINUS SIGN instead of
+            // ASCII '-', which would emit invalid JSON for the -1.0 case.
+            string e = $"[\"step\", {input.ToString(System.Globalization.CultureInfo.InvariantCulture)}, \"d\", 0, \"a\", 10, \"b\"]";
+            Assert.AreEqual(expected, Expr.Eval(e).AsString());
         }
 
         [Test]
@@ -706,25 +623,15 @@ namespace MapRenderer.Tests.Expressions
             Assert.AreEqual("big", Expr.Eval(e, zoom: 12.0).AsString());
         }
 
+        // zoom is legal ONLY as a ramp's direct top-level input — nested inside another op, bare at
+        // top level, or inside a generic op are all a parse error.
         [Test]
-        public void Zoom_NestedDeeperThanInput_IsParseError()
+        [TestCase("[\"interpolate\", [\"linear\"], [\"+\", [\"zoom\"], 1], 0, 0, 10, 100]", TestName = "Zoom_MisplacedOutsideRampInput_IsParseError(NestedDeeperThanInput)")]
+        [TestCase("[\"zoom\"]", TestName = "Zoom_MisplacedOutsideRampInput_IsParseError(AsTopLevelExpression)")]
+        [TestCase("[\"+\", [\"zoom\"], 1]", TestName = "Zoom_MisplacedOutsideRampInput_IsParseError(InGenericOp)")]
+        public void Zoom_MisplacedOutsideRampInput_IsParseError(string json)
         {
-            // zoom nested inside an arithmetic input (not the direct top-level input) is invalid.
-            Assert.Throws<ExpressionParseException>(
-                () => Expr.Parse("[\"interpolate\", [\"linear\"], [\"+\", [\"zoom\"], 1], 0, 0, 10, 100]"));
-        }
-
-        [Test]
-        public void Zoom_AsTopLevelExpression_IsParseError()
-        {
-            // a bare ["zoom"] outside any ramp is not allowed.
-            Assert.Throws<ExpressionParseException>(() => Expr.Parse("[\"zoom\"]"));
-        }
-
-        [Test]
-        public void Zoom_InGenericOp_IsParseError()
-        {
-            Assert.Throws<ExpressionParseException>(() => Expr.Parse("[\"+\", [\"zoom\"], 1]"));
+            Assert.Throws<ExpressionParseException>(() => Expr.Parse(json));
         }
     }
 
@@ -741,155 +648,84 @@ namespace MapRenderer.Tests.Expressions
     [TestFixture]
     public class AssertionTests
     {
-        // ── boolean ─────────────────────────────────────────────────────────────
+        // ── boolean / number / string / object: matching-type input returns the same value ────────
 
-        [Test]
-        public void Boolean_TrueInput_ReturnsSame()
+        private static IEnumerable<TestCaseData> MatchingTypeCases()
         {
-            Value v = ExpressionParser.Parse("[\"boolean\", true]").Evaluate(default);
-            Assert.AreEqual(ExprValueType.Boolean, v.Type);
-            Assert.IsTrue(v.AsBool());
+            yield return new TestCaseData("[\"boolean\", true]", ExprValueType.Boolean, Value.Bool(true))
+                .SetName("AssertionOp_MatchingType_ReturnsInput(Boolean_True)");
+            yield return new TestCaseData("[\"boolean\", false]", ExprValueType.Boolean, Value.Bool(false))
+                .SetName("AssertionOp_MatchingType_ReturnsInput(Boolean_False)");
+            yield return new TestCaseData("[\"number\", 42]", ExprValueType.Number, Value.Number(42.0))
+                .SetName("AssertionOp_MatchingType_ReturnsInput(Number)");
+            yield return new TestCaseData("[\"string\", \"hi\"]", ExprValueType.String, Value.String("hi"))
+                .SetName("AssertionOp_MatchingType_ReturnsInput(String)");
+            yield return new TestCaseData("[\"object\", {\"k\": 1}]", ExprValueType.Object,
+                    Value.Object(new Dictionary<string, Value> { ["k"] = Value.Number(1) }))
+                .SetName("AssertionOp_MatchingType_ReturnsInput(Object)");
         }
 
         [Test]
-        public void Boolean_FalseInput_ReturnsSame()
+        [TestCaseSource(nameof(MatchingTypeCases))]
+        public void AssertionOp_MatchingType_ReturnsInput(string json, ExprValueType expectedType, Value expected)
         {
-            Value v = ExpressionParser.Parse("[\"boolean\", false]").Evaluate(default);
-            Assert.AreEqual(ExprValueType.Boolean, v.Type);
-            Assert.IsFalse(v.AsBool());
+            Value v = ExpressionParser.Parse(json).Evaluate(default);
+            Assert.AreEqual(expectedType, v.Type);
+            Assert.AreEqual(expected, v, json);
+        }
+
+        // ── boolean / number: the multi-arg first-match form ──────────────────────────────────────
+
+        private static IEnumerable<TestCaseData> MultiArgFirstMatchCases()
+        {
+            // Multi-arg first-match form: the first argument that matches the asserted type wins.
+            yield return new TestCaseData("[\"boolean\", 42, true]", Value.Bool(true))
+                .SetName("AssertionOp_MultiArg_FirstMatchWins(Boolean)");
+            yield return new TestCaseData("[\"number\", \"hello\", 7]", Value.Number(7.0))
+                .SetName("AssertionOp_MultiArg_FirstMatchWins(Number)");
         }
 
         [Test]
-        public void Boolean_NumberInput_ThrowsEvaluationError()
+        [TestCaseSource(nameof(MultiArgFirstMatchCases))]
+        public void AssertionOp_MultiArg_FirstMatchWins(string json, Value expected)
         {
-            var expr = ExpressionParser.Parse("[\"boolean\", 42]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
-        }
-
-        [Test]
-        public void Boolean_MultiArg_FirstMatchWins()
-        {
-            // Multi-arg first-match form: second arg is boolean.
-            var expr = ExpressionParser.Parse("[\"boolean\", 42, true]");
-            Value v = expr.Evaluate(default);
-            Assert.AreEqual(ExprValueType.Boolean, v.Type);
-            Assert.IsTrue(v.AsBool());
-        }
-
-        [Test]
-        public void Boolean_MultiArg_NoneMatch_ThrowsEvaluationError()
-        {
-            var expr = ExpressionParser.Parse("[\"boolean\", 1, 2, 3]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
-        }
-
-        // ── number ──────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Number_NumberInput_ReturnsSame()
-        {
-            Value v = ExpressionParser.Parse("[\"number\", 42]").Evaluate(default);
-            Assert.AreEqual(ExprValueType.Number, v.Type);
-            Assert.AreEqual(42.0, v.AsNumber(), 1e-15);
-        }
-
-        [Test]
-        public void Number_StringInput_ThrowsEvaluationError()
-        {
-            var expr = ExpressionParser.Parse("[\"number\", \"hello\"]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
-        }
-
-        [Test]
-        public void Number_MultiArg_FirstMatchWins()
-        {
-            var expr = ExpressionParser.Parse("[\"number\", \"hello\", 7]");
-            Value v = expr.Evaluate(default);
-            Assert.AreEqual(7.0, v.AsNumber(), 1e-15);
-        }
-
-        // ── string ──────────────────────────────────────────────────────────────
-
-        [Test]
-        public void String_StringInput_ReturnsSame()
-        {
-            Value v = ExpressionParser.Parse("[\"string\", \"hi\"]").Evaluate(default);
-            Assert.AreEqual(ExprValueType.String, v.Type);
-            Assert.AreEqual("hi", v.AsString());
-        }
-
-        [Test]
-        public void String_NumberInput_ThrowsEvaluationError()
-        {
-            var expr = ExpressionParser.Parse("[\"string\", 99]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
-        }
-
-        // ── object ──────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Object_ObjectInput_ReturnsSame()
-        {
-            var expr = ExpressionParser.Parse("[\"object\", {\"k\": 1}]");
-            Value v = expr.Evaluate(default);
-            Assert.AreEqual(ExprValueType.Object, v.Type);
-        }
-
-        [Test]
-        public void Object_StringInput_ThrowsEvaluationError()
-        {
-            var expr = ExpressionParser.Parse("[\"object\", \"x\"]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
+            Value v = ExpressionParser.Parse(json).Evaluate(default);
+            Assert.AreEqual(expected, v, json);
         }
 
         // ── array ───────────────────────────────────────────────────────────────
 
+        /// <summary>The array assert form, with and without an element-type/length constraint: it resolves
+        /// to the Array type and reports the expected element count.</summary>
         [Test]
-        public void Array_AnyElementType_AnyLength_Passes()
+        [TestCase("[\"array\", [\"literal\", [1, 2, 3]]]", 3, TestName = "Array_Assertion_PassesWithCount(AnyElementType_AnyLength)")]
+        [TestCase("[\"array\", \"number\", 2, [\"literal\", [10, 20]]]", 2, TestName = "Array_Assertion_PassesWithCount(NumberType_ExactLength)")]
+        [TestCase("[\"array\", \"number\", [\"literal\", [1, 2, 3]]]", 3, TestName = "Array_Assertion_PassesWithCount(NumberType_AnyLength)")]
+        public void Array_Assertion_PassesWithCount(string json, int expectedCount)
         {
-            // ["array", v] — any element type, any length.
-            var expr = ExpressionParser.Parse("[\"array\", [\"literal\", [1, 2, 3]]]");
-            Value v = expr.Evaluate(default);
+            Value v = ExpressionParser.Parse(json).Evaluate(default);
             Assert.AreEqual(ExprValueType.Array, v.Type);
-            Assert.AreEqual(3, v.AsArray().Count);
+            Assert.AreEqual(expectedCount, v.AsArray().Count);
         }
 
-        [Test]
-        public void Array_AnyElementType_NonArrayInput_Throws()
-        {
-            var expr = ExpressionParser.Parse("[\"array\", 42]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
-        }
+        // ── assert: a wrong-typed/malformed value throws at evaluation ───────────
 
+        /// <summary>Each malformed <c>assert</c> form throws at evaluation: a boolean multi-arg none-match,
+        /// a wrong-typed value for boolean/number/string/object, and each array element-type/length
+        /// mismatch.</summary>
         [Test]
-        public void Array_NumberElementType_AllNumbers_Passes()
+        [TestCase("[\"boolean\", 42]", TestName = "TypeAssertion_WrongInput_Throws(Boolean_NumberInput)")]
+        [TestCase("[\"boolean\", 1, 2, 3]", TestName = "TypeAssertion_WrongInput_Throws(Boolean_MultiArg_NoneMatch)")]
+        [TestCase("[\"number\", \"hello\"]", TestName = "TypeAssertion_WrongInput_Throws(Number_StringInput)")]
+        [TestCase("[\"string\", 99]", TestName = "TypeAssertion_WrongInput_Throws(String_NumberInput)")]
+        [TestCase("[\"object\", \"x\"]", TestName = "TypeAssertion_WrongInput_Throws(Object_StringInput)")]
+        [TestCase("[\"array\", 42]", TestName = "TypeAssertion_WrongInput_Throws(Array_AnyElementType_NonArrayInput)")]
+        // Evaluates ["array","number", literal [1, "x"]] — second element is string -> error.
+        [TestCase("[\"array\", \"number\", [\"literal\", [1, \"x\"]]]", TestName = "TypeAssertion_WrongInput_Throws(Array_NumberElementType_MixedElements)")]
+        [TestCase("[\"array\", \"number\", 3, [\"literal\", [10, 20]]]", TestName = "TypeAssertion_WrongInput_Throws(Array_ExactLength_WrongLength)")]
+        public void TypeAssertion_WrongInput_Throws(string json)
         {
-            var expr = ExpressionParser.Parse("[\"array\", \"number\", [\"literal\", [1, 2, 3]]]");
-            Value v = expr.Evaluate(default);
-            Assert.AreEqual(ExprValueType.Array, v.Type);
-        }
-
-        [Test]
-        public void Array_NumberElementType_MixedElements_Throws()
-        {
-            // Evaluates ["array","number", literal [1, "x"]] — second element is string → error.
-            var expr = ExpressionParser.Parse("[\"array\", \"number\", [\"literal\", [1, \"x\"]]]");
-            Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
-        }
-
-        [Test]
-        public void Array_NumberType_ExactLength_Passes()
-        {
-            var expr = ExpressionParser.Parse("[\"array\", \"number\", 2, [\"literal\", [10, 20]]]");
-            Value v = expr.Evaluate(default);
-            Assert.AreEqual(ExprValueType.Array, v.Type);
-            Assert.AreEqual(2, v.AsArray().Count);
-        }
-
-        [Test]
-        public void Array_ExactLength_WrongLength_Throws()
-        {
-            var expr = ExpressionParser.Parse("[\"array\", \"number\", 3, [\"literal\", [10, 20]]]");
+            var expr = ExpressionParser.Parse(json);
             Assert.Throws<ExpressionEvaluationException>(() => expr.Evaluate(default));
         }
 
@@ -961,57 +797,24 @@ namespace MapRenderer.Tests.Expressions
         private static ExpressionKind Kind(string json) => Expr.Parse(json).Kind;
 
         [Test]
-        public void Literal_IsConstant() => Assert.AreEqual(ExpressionKind.Constant, Kind("5"));
-
-        [Test]
-        public void PureArithmetic_IsConstant()
-            => Assert.AreEqual(ExpressionKind.Constant, Kind("[\"+\", 1, 2]"));
-
-        [Test]
-        public void ZoomRamp_IsZoom()
+        [TestCase("5", ExpressionKind.Constant, TestName = "ExpressionKind_ClassifiesAsExpected(Literal)")]
+        [TestCase("[\"+\", 1, 2]", ExpressionKind.Constant, TestName = "ExpressionKind_ClassifiesAsExpected(PureArithmetic)")]
+        // data-driven == "zoom" classification per the brief (camera expression).
+        [TestCase("[\"interpolate\", [\"linear\"], [\"zoom\"], 0, 0, 10, 100]", ExpressionKind.Zoom, TestName = "ExpressionKind_ClassifiesAsExpected(ZoomRamp)")]
+        // data-driven == "Feature" classification.
+        [TestCase("[\"get\", \"x\"]", ExpressionKind.Feature, TestName = "ExpressionKind_ClassifiesAsExpected(Get)")]
+        [TestCase("[\"has\", \"x\"]", ExpressionKind.Feature, TestName = "ExpressionKind_ClassifiesAsExpected(Has)")]
+        [TestCase("[\"geometry-type\"]", ExpressionKind.Feature, TestName = "ExpressionKind_ClassifiesAsExpected(GeometryType)")]
+        [TestCase("[\"id\"]", ExpressionKind.Feature, TestName = "ExpressionKind_ClassifiesAsExpected(Id)")]
+        // ["+", ["zoom-ramp"], ["get"]] would be invalid (zoom not at ramp input); instead use a ramp over
+        // zoom whose stop OUTPUTS depend on a feature -> composite.
+        [TestCase("[\"interpolate\", [\"linear\"], [\"zoom\"], 0, [\"get\", \"a\"], 10, [\"get\", \"b\"]]", ExpressionKind.Composite, TestName = "ExpressionKind_ClassifiesAsExpected(MixedZoomAndFeature)")]
+        [TestCase("[\"==\", [\"get\", \"x\"], 5]", ExpressionKind.Feature, TestName = "ExpressionKind_ClassifiesAsExpected(FeatureDrivenComparison)")]
+        // body uses a feature get -> Feature.
+        [TestCase("[\"let\", \"x\", [\"get\", \"a\"], [\"var\", \"x\"]]", ExpressionKind.Feature, TestName = "ExpressionKind_ClassifiesAsExpected(Let_InheritsBodyKind)")]
+        public void ExpressionKind_ClassifiesAsExpected(string json, ExpressionKind expected)
         {
-            // data-driven == "zoom" classification per the brief (camera expression).
-            Assert.AreEqual(ExpressionKind.Zoom,
-                Kind("[\"interpolate\", [\"linear\"], [\"zoom\"], 0, 0, 10, 100]"));
-        }
-
-        [Test]
-        public void Get_IsFeature()
-        {
-            // data-driven == "Feature" classification.
-            Assert.AreEqual(ExpressionKind.Feature, Kind("[\"get\", \"x\"]"));
-        }
-
-        [Test]
-        public void Has_IsFeature() => Assert.AreEqual(ExpressionKind.Feature, Kind("[\"has\", \"x\"]"));
-
-        [Test]
-        public void GeometryType_IsFeature()
-            => Assert.AreEqual(ExpressionKind.Feature, Kind("[\"geometry-type\"]"));
-
-        [Test]
-        public void Id_IsFeature() => Assert.AreEqual(ExpressionKind.Feature, Kind("[\"id\"]"));
-
-        [Test]
-        public void MixedZoomAndFeature_IsComposite()
-        {
-            // ["+", ["zoom-ramp"], ["get"]] would be invalid (zoom not at ramp input); instead use a ramp
-            // over zoom whose stop OUTPUTS depend on a feature -> composite.
-            string e = "[\"interpolate\", [\"linear\"], [\"zoom\"], " +
-                       "0, [\"get\", \"a\"], 10, [\"get\", \"b\"]]";
-            Assert.AreEqual(ExpressionKind.Composite, Kind(e));
-        }
-
-        [Test]
-        public void FeatureDrivenComparison_IsFeature()
-            => Assert.AreEqual(ExpressionKind.Feature, Kind("[\"==\", [\"get\", \"x\"], 5]"));
-
-        [Test]
-        public void Let_InheritsBodyKind()
-        {
-            // body uses a feature get -> Feature.
-            Assert.AreEqual(ExpressionKind.Feature,
-                Kind("[\"let\", \"x\", [\"get\", \"a\"], [\"var\", \"x\"]]"));
+            Assert.AreEqual(expected, Kind(json), json);
         }
     }
 
@@ -1400,36 +1203,28 @@ namespace MapRenderer.Tests.Expressions
         [TestCase("\"x\"", "string")]
         [TestCase("true", "boolean")]
         [TestCase("null", "null")]
-        public void TypeOf_Scalars(string json, string expected)
+        [TestCase("[\"to-color\", \"#ff0000\"]", "color")]
+        [TestCase("[\"literal\", [1, 2]]", "array")]
+        public void TypeOf_ReturnsSpecName(string json, string expected)
         {
             Assert.AreEqual(expected, Expr.Eval($"[\"typeof\", {json}]").AsString());
-        }
-
-        [Test]
-        public void TypeOf_Color()
-        {
-            Assert.AreEqual("color", Expr.Eval("[\"typeof\", [\"to-color\", \"#ff0000\"]]").AsString());
-        }
-
-        [Test]
-        public void TypeOf_Array()
-        {
-            Assert.AreEqual("array", Expr.Eval("[\"typeof\", [\"literal\", [1, 2]]]").AsString());
         }
 
         // ---- to-number -----------------------------------------------------------------------------
 
         [Test]
-        public void ToNumber_String() => Assert.AreEqual(3.5, Expr.Eval("[\"to-number\", \"3.5\"]").AsNumber());
-
-        [Test]
-        public void ToNumber_TrueIsOne() => Assert.AreEqual(1.0, Expr.Eval("[\"to-number\", true]").AsNumber());
-
-        [Test]
-        public void ToNumber_FalseAndNullAreZero()
+        [TestCase("\"3.5\"", 3.5, TestName = "ToNumber_CoercesInput(String)")]
+        [TestCase("true", 1.0, TestName = "ToNumber_CoercesInput(TrueIsOne)")]
+        [TestCase("false", 0.0, TestName = "ToNumber_CoercesInput(FalseIsZero)")]
+        [TestCase("null", 0.0, TestName = "ToNumber_CoercesInput(NullIsZero)")]
+        // First arg fails ("x"), second succeeds ("7") — multi-arg first-success form.
+        [TestCase("\"x\", \"7\"", 7.0, TestName = "ToNumber_CoercesInput(MultiArg_FirstSuccess)")]
+        // Spec: a string converts via ECMAScript ToNumber; ToNumber("") and all-whitespace are 0, NOT an error.
+        [TestCase("\"\"", 0.0, TestName = "ToNumber_CoercesInput(EmptyString)")]
+        [TestCase("\"   \"", 0.0, TestName = "ToNumber_CoercesInput(WhitespaceString)")]
+        public void ToNumber_CoercesInput(string args, double expected)
         {
-            Assert.AreEqual(0.0, Expr.Eval("[\"to-number\", false]").AsNumber());
-            Assert.AreEqual(0.0, Expr.Eval("[\"to-number\", null]").AsNumber());
+            Assert.AreEqual(expected, Expr.Eval($"[\"to-number\", {args}]").AsNumber());
         }
 
         [Test]
@@ -1438,22 +1233,6 @@ namespace MapRenderer.Tests.Expressions
             bool ok = Expr.TryEval("[\"to-number\", \"x\"]", out _, out string error);
             Assert.IsFalse(ok, "to-number of a non-numeric string must be a spec error, not a crash.");
             Assert.IsNotNull(error);
-        }
-
-        [Test]
-        public void ToNumber_MultiArg_FirstSuccess()
-        {
-            // First arg fails ("x"), second succeeds ("7").
-            Assert.AreEqual(7.0, Expr.Eval("[\"to-number\", \"x\", \"7\"]").AsNumber());
-        }
-
-        [Test]
-        public void ToNumber_EmptyAndWhitespaceString_IsZero()
-        {
-            // Spec: a string converts via ECMAScript ToNumber; ToNumber("") and all-whitespace are 0,
-            // NOT an error.
-            Assert.AreEqual(0.0, Expr.Eval("[\"to-number\", \"\"]").AsNumber());
-            Assert.AreEqual(0.0, Expr.Eval("[\"to-number\", \"   \"]").AsNumber());
         }
 
         // ---- to-boolean ----------------------------------------------------------------------------
@@ -1473,24 +1252,14 @@ namespace MapRenderer.Tests.Expressions
         // ---- to-string -----------------------------------------------------------------------------
 
         [Test]
-        public void ToString_Null_IsEmpty() => Assert.AreEqual("", Expr.Eval("[\"to-string\", null]").AsString());
-
-        [Test]
-        public void ToString_Bool() => Assert.AreEqual("true", Expr.Eval("[\"to-string\", true]").AsString());
-
-        [Test]
-        public void ToString_IntegerNumber_NoTrailingPointZero()
-            => Assert.AreEqual("5", Expr.Eval("[\"to-string\", 5]").AsString());
-
-        [Test]
-        public void ToString_FractionalNumber()
-            => Assert.AreEqual("3.5", Expr.Eval("[\"to-string\", 3.5]").AsString());
-
-        [Test]
-        public void ToString_Color_IsRgba()
+        [TestCase("null", "", TestName = "ToString_ConvertsInput(Null_IsEmpty)")]
+        [TestCase("true", "true", TestName = "ToString_ConvertsInput(Bool)")]
+        [TestCase("5", "5", TestName = "ToString_ConvertsInput(IntegerNumber_NoTrailingPointZero)")]
+        [TestCase("3.5", "3.5", TestName = "ToString_ConvertsInput(FractionalNumber)")]
+        [TestCase("[\"to-color\", \"#ff0000\"]", "rgba(255,0,0,1)", TestName = "ToString_ConvertsInput(Color_IsRgba)")]
+        public void ToString_ConvertsInput(string arg, string expected)
         {
-            string s = Expr.Eval("[\"to-string\", [\"to-color\", \"#ff0000\"]]").AsString();
-            Assert.AreEqual("rgba(255,0,0,1)", s);
+            Assert.AreEqual(expected, Expr.Eval($"[\"to-string\", {arg}]").AsString());
         }
 
         // ---- to-color / to-rgba round-trip ---------------------------------------------------------

@@ -1281,15 +1281,21 @@ namespace MapRenderer.Tests.Visual
 
         // ── Hierarchy naming: layer GameObject is named after its style layer, not the material ────
 
+        /// <summary>
+        /// The layer GameObject's name comes from the per-layer style-layer id when one is supplied — even
+        /// when two layers share one material — and falls back to the (shared, generic) material name only
+        /// when no layer names are supplied at all (back-compat).
+        /// </summary>
         [Test]
-        public void AddTileLayer_NamesObjectAfterStyleLayer_NotMaterial()
+        public void AddTileLayer_NamingPolicy_UsesLayerIdWhenSupplied_FallsBackToMaterialNameOtherwise()
         {
             var (mesh, mat) = FixtureFill();                         // mat.name == "MapView_Fill" (shared, generic)
-            // Two layers sharing one material — the GO name must come from the per-layer id, not the mat.
-            using var r = new GameObjectTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" });
+            var tid = new TileId { Z = 0, X = 0, Y = 0 };
+            double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
+
+            // ── Names supplied: two layers sharing one material still get distinct, layer-specific names ──
+            using (var r = new GameObjectTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
             {
-                var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
                 r.AddTileLayer(mesh, o, 0, tid);
                 r.AddTileLayer(mesh, o, 1, tid);
 
@@ -1301,18 +1307,14 @@ namespace MapRenderer.Tests.Visual
                 Assert.AreNotEqual(mat.name, container.GetChild(0).name,
                     "Regression: the GameObject must NOT fall back to the material name when an id is supplied.");
             }
-        }
 
-        [Test]
-        public void AddTileLayer_FallsBackToMaterialName_WhenNoLayerNames()
-        {
-            var (mesh, mat) = FixtureFill();
-            using var r = new GameObjectTileRenderer(new[] { mat });       // no names supplied
-            var tid = new TileId { Z = 0, X = 0, Y = 0 };
-            double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-            r.AddTileLayer(mesh, o, 0, tid);
-            Assert.AreEqual(mat.name, r.Container(tid).GetChild(0).name,
-                "With no layer names, the GameObject name falls back to the material name (back-compat).");
+            // ── No names supplied: falls back to the material name ──
+            using (var r = new GameObjectTileRenderer(new[] { mat }))
+            {
+                r.AddTileLayer(mesh, o, 0, tid);
+                Assert.AreEqual(mat.name, r.Container(tid).GetChild(0).name,
+                    "With no layer names, the GameObject name falls back to the material name (back-compat).");
+            }
         }
 
         [Test]

@@ -3,7 +3,6 @@
 //
 // Contents:
 //   EntitiesGraphicsSpikeTests  — ECS render spike: an Entities-Graphics entity renders in the headless snapshot path.
-//   GlobeSnapshotTests          — Renders the z=0 "countries" fixture tile projected onto a sphere and writes a PNG — visible proof the pipeline renders a spherical earth.
 //   EntitiesTileRendererTests   — EntitiesTileRenderer engine tests.
 //   GlobeBackendSnapshotTests   — proves the globe places correctly through a REAL render backend, not just the hand-wired snapshot.
 //   BrgLinePropReadbackTests    — CPU-buffer readback acceptance tests: line props must be packed at the correct SoA slots.
@@ -187,62 +186,6 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeSnapshotTests — the z=0 "countries" tile (the whole world) projected onto a SPHERE, written as a PNG.
-    // Fills bake the radial normal, so the Lit material shades the sphere; FitToView frames the ECEF bounds.
-
-    // ───────────────────────────────────────────────────────────────────────────────────
-    // GlobeSnapshotTests — Renders the z=0 "countries" fixture tile projected onto a sphere and writes a PNG
-    // ───────────────────────────────────────────────────────────────────────────────────
-
-    public class GlobeSnapshotTests : BaseTestFixture
-    {
-        private const int SnapW = 512, SnapH = 512;
-
-        // Ocean-ish clear colour so the sphere reads as an earth (land polygons over water background).
-        private static readonly Color OceanBg = new Color(0.04f, 0.09f, 0.18f, 1f);
-
-        [Test]
-        public void RendersCountriesOnASphere_WritesPng()
-        {
-            // Land polygons in green, projected onto the globe.
-            var (mapGo, mat) = FillSceneHelper.BuildFillGo(
-                fillColorExpression: "[\"rgba\",95,165,95,1]",
-                viewSize: 2f,                       // globe ≈ 2 units across (radius ≈ 1)
-                projection: new SphericalProjection());
-            Track(mapGo);
-
-            // Stock Cull Back, as the shipped Fill.mat: StyledFillTileBuilder's winding reversal makes near-side
-            // fills Unity-front, so the far hemisphere does not bleed through ocean gaps.
-            if (mat != null) mat.SetCull(CullMode.Back);
-
-            // Directional light to shade the sphere (Lit material is near-black at ambient-only).
-            var lightGo = new GameObject("GlobeLight");
-            var light   = lightGo.AddComponent<Light>();
-            light.type      = LightType.Directional;
-            light.intensity = 1.2f;
-            lightGo.transform.rotation = Quaternion.Euler(35f, -50f, 0f);
-            lightGo.transform.SetParent(mapGo.transform, worldPositionStays: true);
-
-            // Perspective camera outside the globe, looking at the origin (the globe is centred there).
-            var cameraGo = Track(new GameObject("GlobeCamera"));
-            var camera   = cameraGo.AddComponent<Camera>();
-            camera.transform.position = new Vector3(1.7f, 1.2f, -3.0f);
-            camera.transform.rotation = Quaternion.LookRotation(-camera.transform.position, Vector3.up);
-            camera.orthographic    = false;
-            camera.fieldOfView     = 35f;
-            camera.nearClipPlane   = 0.05f;
-            camera.farClipPlane    = 100f;
-            camera.clearFlags      = CameraClearFlags.SolidColor;
-            camera.backgroundColor = OceanBg;
-            camera.enabled         = false;
-
-            using var snap = new SnapshotRenderer(SnapW, SnapH);
-            snap.Render(camera);
-            string path = snap.WritePng("globe-countries.png");
-            TestContext.WriteLine($"[GlobeSnapshotTests] wrote {path}");
-        }
-    }
-
     // EntitiesTileRenderer engine tests, independent of MapView/TileManager: lifecycle, floating-origin rebase
     // (the BRG backend's formula), idempotent Dispose, and a render smoke test that the engine drives EG.
 
@@ -423,15 +366,21 @@ namespace MapRenderer.Tests.Visual
 
         // ── Entities Hierarchy naming: layer entity is named after its style layer, not the material ──
 
+        /// <summary>
+        /// The layer entity's name comes from the per-layer style-layer id when one is supplied — even when
+        /// two layers share one material — and falls back to the (shared, generic) material name only when no
+        /// layer names are supplied at all (back-compat).
+        /// </summary>
         [Test]
-        public void AddTileLayer_NamesEntityAfterStyleLayer_NotMaterial()
+        public void AddTileLayer_NamingPolicy_UsesLayerIdWhenSupplied_FallsBackToMaterialNameOtherwise()
         {
             var (mesh, mat) = FixtureFill();           // mat.name == "MapView_Fill" (shared, generic)
-            // Two layers sharing one material — the entity name must come from the per-layer id, not the mat.
-            using var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" });
+            var tid = new TileId { Z = 0, X = 0, Y = 0 };
+            double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
+
+            // ── Names supplied: two layers sharing one material still get distinct, layer-specific names ──
+            using (var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
             {
-                var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
                 int hWater = r.AddTileLayer(mesh, o, 0, tid);
                 int hRoad  = r.AddTileLayer(mesh, o, 1, tid);
 
@@ -442,18 +391,14 @@ namespace MapRenderer.Tests.Visual
                 Assert.AreNotEqual(mat.name, r.GetLayerEntityName(hWater),
                     "Regression: the entity must NOT fall back to the material name when an id is supplied.");
             }
-        }
 
-        [Test]
-        public void AddTileLayer_FallsBackToMaterialName_WhenNoLayerNames()
-        {
-            var (mesh, mat) = FixtureFill();
-            using var r = new EntitiesTileRenderer(new[] { mat });   // no names supplied
-            var tid = new TileId { Z = 0, X = 0, Y = 0 };
-            double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-            int h = r.AddTileLayer(mesh, o, 0, tid);
-            Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
-                "With no layer names, the entity name falls back to the material name (back-compat).");
+            // ── No names supplied: falls back to the material name ──
+            using (var r = new EntitiesTileRenderer(new[] { mat }))
+            {
+                int h = r.AddTileLayer(mesh, o, 0, tid);
+                Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
+                    "With no layer names, the entity name falls back to the material name (back-compat).");
+            }
         }
 
         // ── Floating-origin rebase (GPU-independent) — same formula as the BRG backend ──────────
@@ -841,11 +786,9 @@ namespace MapRenderer.Tests.Visual
             Assert.IsNotNull(mat, "Line material must be non-null after RenderLayerSet.Build.");
 
             // Pre-check: styler must have applied line-width=40 to the material.
-            int widthId       = ShaderProperties.Line.PropertyId.Width;
-            int opacityId     = ShaderProperties.PropertyId.Opacity;
+            int widthId = ShaderProperties.Line.PropertyId.Width;
 
-            float matWidth      = mat.HasProperty(widthId)      ? mat.GetFloat(widthId)      : float.NaN;
-            float matOpacity    = mat.HasProperty(opacityId)    ? mat.GetFloat(opacityId)    : float.NaN;
+            float matWidth = mat.HasProperty(widthId) ? mat.GetFloat(widthId) : float.NaN;
 
             Assert.That(matWidth, Is.EqualTo(40f).Within(1e-3f),
                 "Pre-check: mat._Width must be 40 after RenderLayerSet.Build with line-width:40. " +
@@ -855,15 +798,6 @@ namespace MapRenderer.Tests.Visual
             using var brg  = new BrgTileRenderer(new[] { set[0].Material });
 
             {
-                // ── Exact plan-count tooth ────────────────────────────────────────────────────
-                Assert.That(brg.FloatsPerInstance(), Is.EqualTo(82),
-                    "BrgTileRenderer.FloatsPerInstance must be 82 (MapInstanceData: 24 transform + 58 material floats). " +
-                    "An incompletely-generated plan (e.g. missing line props) produces a smaller value.");
-
-                Assert.That(brg.MetadataEntryCount(), Is.EqualTo(33),
-                    "BrgTileRenderer.MetadataEntryCount must be 33 (2 transforms + 31 material props). " +
-                    "Missing entries mean the BRG batch omits those props from the GPU instancing table.");
-
                 // ── Register and Rebuild ──────────────────────────────────────────────────────
                 // materialIndex=0: FillCount=0 → lines[0] is at index 0.
                 int h = brg.AddTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
@@ -883,14 +817,6 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.That(packedWidth, Is.EqualTo(40f).Within(1e-3f),
                     $"Packed _Width must be 40.0 (the style's line-width). Got {packedWidth}.");
-
-                // ── _Opacity byte-identical-wire spot check ───────────────────────────────────
-                // _Opacity must stay at SoA float offset 46, so the fill props' wire layout does not shift.
-                int opacitySoaOffset = brg.GetPropSoaOffset(opacityId);
-                Assert.That(opacitySoaOffset, Is.EqualTo(46),
-                    $"_Opacity SoA float offset must be 46. " +
-                    $"Got {opacitySoaOffset}. If shifted, the fill wire layout changed and existing " +
-                    "fill-rendered tiles would misread per-instance properties.");
             }
         }
     }

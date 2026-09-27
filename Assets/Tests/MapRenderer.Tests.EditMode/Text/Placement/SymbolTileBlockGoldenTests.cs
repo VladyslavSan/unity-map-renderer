@@ -4,7 +4,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
@@ -34,25 +36,71 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolTileBlockGoldenTests
     {
-        // ── field-count guard: BlockColumnHash's hashers are hand-written, one line per field, so a field added
-        // without a matching hash/compare line goes unhashed. Pinning the count makes that drift fail the gate.
+        /// <summary>BlockColumnHash's hashers and their <c>Assert*Equal</c> compare companions are
+        /// hand-written, one line per field: a field added without a matching line goes silently unhashed
+        /// and/or uncompared. This reads BlockColumnHash's own source (comments stripped, so a mention in
+        /// prose can never satisfy a check about code) and confirms every public field/property of each
+        /// hashed type is referenced by name in BOTH its <c>Hash&lt;Type&gt;</c> method and its
+        /// <c>Assert&lt;Type&gt;Equal</c> companion.</summary>
         [Test]
-        public void HashedStructs_FieldCounts_MatchHasherCoverage()
+        public void HashedStructs_EveryMemberIsReferencedByTheHasher()
         {
-            Assert.AreEqual(29, PublicFieldCount<PointStageInput>(),
-                "PointStageInput gained/lost a field — update BlockColumnHash.HashPointStageInput/AssertPointStageInputEqual to match, THEN update this count");
-            Assert.AreEqual(21, PublicFieldCount<CurvedStageInput>(),
-                "CurvedStageInput gained/lost a field — update BlockColumnHash.HashCurvedStageInput/AssertCurvedStageInputEqual to match, THEN update this count");
-            Assert.AreEqual(6, PublicPropertyCount<SymbolQuad>(),
-                "SymbolQuad gained/lost a property — update BlockColumnHash.HashSymbolQuad/AssertSymbolQuadEqual to match, THEN update this count");
-            Assert.AreEqual(3, PublicPropertyCount<CurvedGlyph>(),
-                "CurvedGlyph gained/lost a property — update BlockColumnHash.HashCurvedGlyph/AssertCurvedGlyphEqual to match, THEN update this count");
-            Assert.AreEqual(2, PublicFieldCount<LineAnchor>(),
-                "LineAnchor gained/lost a field — update BlockColumnHash.HashLineAnchor/AssertLineAnchorEqual to match, THEN update this count");
+            string path = Path.Combine(Application.dataPath, "Tests", "MapRenderer.Tests.EditMode",
+                "Text", "Placement", "BlockColumnHash.cs");
+            FileAssert.Exists(path);
+            string source = File.ReadAllText(path);
+
+            AssertHasherCoversEveryMember<PointStageInput>(source, "HashPointStageInput", "p");
+            AssertHasherCoversEveryMember<CurvedStageInput>(source, "HashCurvedStageInput", "c");
+            AssertHasherCoversEveryMember<SymbolQuad>(source, "HashSymbolQuad", "q");
+            AssertHasherCoversEveryMember<CurvedGlyph>(source, "HashCurvedGlyph", "g");
+            AssertHasherCoversEveryMember<LineAnchor>(source, "HashLineAnchor", "l");
         }
 
-        private static int PublicFieldCount<T>() => typeof(T).GetFields(BindingFlags.Public | BindingFlags.Instance).Length;
-        private static int PublicPropertyCount<T>() => typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance).Length;
+        /// <summary>Confirms every public field/property of <typeparamref name="T"/> is referenced by name
+        /// in BOTH <paramref name="hashMethodName"/> (as <c>paramPrefix.MemberName</c>) and its
+        /// <c>Assert*Equal</c> companion (as <c>a.MemberName</c> or <c>b.MemberName</c> — the companion's own
+        /// two compared-struct parameter names — never a bare <c>.MemberName</c>, which a message string
+        /// like <c>msg + ".MemberName"</c> could satisfy without any real comparison existing).</summary>
+        private static void AssertHasherCoversEveryMember<T>(string source, string hashMethodName, string paramPrefix)
+        {
+            string companionName = "Assert" + hashMethodName.Substring("Hash".Length) + "Equal";
+
+            AssertBodyReferencesEveryMember<T>(ExtractMethodBody(source, hashMethodName), hashMethodName,
+                $@"\b{Regex.Escape(paramPrefix)}\.");
+            AssertBodyReferencesEveryMember<T>(ExtractMethodBody(source, companionName), companionName, @"\b[ab]\.");
+        }
+
+        /// <summary>Extracts <paramref name="methodName"/>'s body (block- or expression-bodied) from
+        /// <paramref name="source"/>, with <c>//</c> line comments stripped.</summary>
+        private static string ExtractMethodBody(string source, string methodName)
+        {
+            var bodyMatch = Regex.Match(source,
+                $@"{methodName}\s*\([^)]*\)\s*(?:=>\s*(?<expr>.*?);|\{{(?<block>.*?)\n\s*\}})",
+                RegexOptions.Singleline);
+            Assert.That(bodyMatch.Success, Is.True,
+                $"could not find {methodName}'s body in BlockColumnHash.cs — the anchor drifted.");
+            string body = bodyMatch.Groups["expr"].Success ? bodyMatch.Groups["expr"].Value : bodyMatch.Groups["block"].Value;
+            return Regex.Replace(body, "//[^\n]*", "");
+        }
+
+        /// <summary>Every public field/property of <typeparamref name="T"/> must match
+        /// <paramref name="dotPrefixPattern"/> + the member name + a word boundary, somewhere in
+        /// <paramref name="body"/>.</summary>
+        private static void AssertBodyReferencesEveryMember<T>(string body, string methodName, string dotPrefixPattern)
+        {
+            var members = typeof(T).GetFields(BindingFlags.Public | BindingFlags.Instance).Select(f => f.Name)
+                .Concat(typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name));
+
+            var uncovered = new List<string>();
+            foreach (string name in members)
+                if (!Regex.IsMatch(body, dotPrefixPattern + Regex.Escape(name) + @"\b"))
+                    uncovered.Add(name);
+
+            Assert.That(uncovered, Is.Empty,
+                $"{typeof(T).Name} has field(s)/property(ies) not referenced in BlockColumnHash.{methodName}: " +
+                $"{string.Join(", ", uncovered)}. Add a line for each — no count to hand-edit here.");
+        }
 
         // ── the hand-built hazard fixture ──
         // Non-obvious why: each of the 8 dense slots plants one hazard the golden must cover, unambiguously:

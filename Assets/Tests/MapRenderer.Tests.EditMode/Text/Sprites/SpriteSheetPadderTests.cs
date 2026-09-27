@@ -95,18 +95,14 @@ namespace MapRenderer.Tests.Text.Sprites
         }
 
         [Test]
-        public void Malformed_DoesNotThrow_EmptyIndex()
+        [TestCase("{ not json", TestName = "Parse_MalformedOrWrongRootShape_YieldsEmptyIndex_NeverThrows(Malformed)")]
+        [TestCase("[]", TestName = "Parse_MalformedOrWrongRootShape_YieldsEmptyIndex_NeverThrows(ArrayRoot)")]
+        [TestCase("42", TestName = "Parse_MalformedOrWrongRootShape_YieldsEmptyIndex_NeverThrows(NumberRoot)")]
+        public void Parse_MalformedOrWrongRootShape_YieldsEmptyIndex_NeverThrows(string json)
         {
             SpriteIndex index = null;
-            Assert.DoesNotThrow(() => index = SpriteIndex.Parse("{ not json"));
+            Assert.DoesNotThrow(() => index = SpriteIndex.Parse(json));
             Assert.AreEqual(0, index.Count);
-        }
-
-        [Test]
-        public void RootNotObject_EmptyIndex()
-        {
-            Assert.AreEqual(0, SpriteIndex.Parse("[]").Count);
-            Assert.AreEqual(0, SpriteIndex.Parse("42").Count);
         }
 
         [Test]

@@ -759,40 +759,6 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── A NON-centred icon+text feature (text-offset != 0) PAIRS like any other: the predicate is
-        //    "both halves resolved", not "both halves coincide". ──
-        [Test]
-        public void NonCentredPair_NowEmitsIconThenText_OwnerRider()
-        {
-            var feature = new DictionaryFeature(
-                properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
-                geometryType: TileGeometryType.Point,
-                geometry: SinglePointGeometry(new double2(2000, 2000)));
-            var tile = TestDecodedTiles.Of("points", SyntheticTileId, new List<IFeature> { feature }, Extent);
-            var styleLayer = new SymbolStyle.StyleLayer
-            {
-                Id = "non-centred-pair-probe",
-                LayerType = StyleLayerType.Symbol,
-                Source = "s",
-                SourceLayer = "points",
-                Paint = TestStyle.SymbolPaint(),
-                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"text-offset\":[0,0.6]}"),
-            };
-            var symbols = new List<SymbolFeature>();
-            SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
-                new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
-
-            Assert.AreEqual(2, symbols.Count, "precondition: text + icon must both be emitted");
-            Assert.AreEqual(SymbolKind.Icon, symbols[0].Kind, "a pair emits its OWNER (the icon) first");
-            Assert.AreEqual(SymbolKind.Text, symbols[1].Kind, "the rider text follows immediately");
-            Assert.AreEqual(SymbolPairRole.Owner, symbols[0].PairRole, "the icon is the pair owner");
-            Assert.AreEqual(SymbolPairRole.Rider, symbols[1].PairRole, "the offset text still rides its icon");
-            Assert.AreEqual(symbols[0].FeatureIndex, symbols[0].PairId, "PairId is the owner's own FeatureIndex");
-            Assert.AreEqual(symbols[0].PairId, symbols[1].PairId, "both halves share one PairId");
-            Assert.AreEqual(symbols[0].FeatureIndex + 1, symbols[1].FeatureIndex,
-                "the rider's ordinal must immediately follow its owner's (SymbolPairing's adjacency contract)");
-        }
-
         // ───────────────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void MapAlignedLineLayer_StillCurves_FieldForField()
@@ -1149,7 +1115,7 @@ namespace MapRenderer.Tests.Style
             UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1),
         };
 
-        // ── P3 ────────────────────────────────────────────────────────────────────────────────────────────
+        // ── Atomic placement: one candidate covers both boxes, or the pair drops together ────────────────
         [Test]
         public void CentredPair_AtomicPlacement_OneCandidateBothBoxes_PairDropsTogether_NoBareNumber()
         {
@@ -1207,10 +1173,10 @@ namespace MapRenderer.Tests.Style
             }
             Assert.IsTrue(blockerPlaced, "the higher-priority blocker must place");
             Assert.IsFalse(pairPlaced,
-                "the pair must be DROPPED TOGETHER — this is the inverse of the withdrawn T12's accepted bare number");
+                "the pair must be DROPPED TOGETHER — a bare number is not accepted");
         }
 
-        // ── P4 — a PLACED pair blocks through BOTH boxes ─────────────────────────────────────────────────
+        // ── A placed pair blocks through BOTH boxes ──────────────────────────────────────────────────────
         [Test]
         public void CentredPair_Placed_BlocksThroughBothBoxes_LaterSymbolOverlappingOnlyTextIsDropped()
         {
@@ -1268,7 +1234,7 @@ namespace MapRenderer.Tests.Style
                 "(today's un-fixed extractor forces the passenger's IgnorePlacement=true, so this would incorrectly survive)");
         }
 
-        // ── P5 — one FadeId per pair, from the OWNER ─────────────────────────────────────────────────────
+        // ── One FadeId per pair, from the OWNER ──────────────────────────────────────────────────────────
         [Test]
         public void CentredPair_OneFadeId_FromTheOwner_NotTheRider()
         {
@@ -1296,7 +1262,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(42L, candidates[0].FadeId, "the pair's ONE FadeId must be the OWNER's — the text contributes no candidate/fade record of its own");
         }
 
-        // ── C2 — the flags land on the right HALF, and the pair still FORMS in every case ─────────────────
+        // ── The flags land on the right HALF, and the pair still FORMS in every case ─────────────────────
         [Test]
         public void IconAndTextOptional_StampTheMatchingHalf_AndThePairStillForms()
         {
@@ -1432,48 +1398,49 @@ namespace MapRenderer.Tests.Style
             return outcome;
         }
 
-        // ── C3 — text-optional: the ICON places without its text ──────────────────────────────────────────
+        /// <summary>
+        /// text-optional (RIDER droppable): the pair survives on its icon alone, the dropped text box
+        /// reserves nothing, and the surviving icon box still blocks. icon-optional (OWNER droppable) is
+        /// the mirror. Neither optional (the all-or-nothing regression): both properties defaulted still
+        /// drop the pair TOGETHER, and a dropped pair reserves no box at all.
+        /// </summary>
         [Test]
-        public void TextOptional_TextBoxBlocked_IconStillPlaces_AndTheTextBoxReservesNothing()
+        public void OptionalPair_DropsOnlyTheOptionalHalf_OrTheWholePair()
         {
-            OptionalPairOutcome o = RunOptionalPairScene("\"text-optional\":true", SymbolKind.Text);
-
-            Assert.AreEqual(0b10, o.OptionalBoxMask, "text-optional marks the RIDER (bit 1) droppable, not the owner");
-            Assert.IsTrue(o.PairPlaced,
-                "the pair must SURVIVE on its icon alone — un-fixed, all-or-nothing drops the whole candidate");
-            Assert.AreEqual(0b10, o.DroppedBoxMask, "exactly the text half was dropped");
-            Assert.IsTrue(o.ProbeOverTextPlaced,
-                "a later label over the DROPPED text box must place — a dropped half reserves nothing");
-            Assert.IsFalse(o.ProbeOverIconPlaced,
-                "the surviving icon half must still block: only the dropped box is released");
-        }
-
-        // ── C4 — icon-optional: the TEXT places without its icon (the mirror of C3) ───────────────────────
-        [Test]
-        public void IconOptional_IconBoxBlocked_TextStillPlaces_AndTheIconBoxReservesNothing()
-        {
-            OptionalPairOutcome o = RunOptionalPairScene("\"icon-optional\":true", SymbolKind.Icon);
-
-            Assert.AreEqual(0b01, o.OptionalBoxMask, "icon-optional marks the OWNER (bit 0) droppable, not the rider");
-            Assert.IsTrue(o.PairPlaced, "the pair must SURVIVE on its text alone");
-            Assert.AreEqual(0b01, o.DroppedBoxMask, "exactly the icon half was dropped");
-            Assert.IsTrue(o.ProbeOverIconPlaced,
-                "a later label over the DROPPED icon box must place — a dropped half reserves nothing");
-            Assert.IsFalse(o.ProbeOverTextPlaced, "the surviving text half must still block");
-        }
-
-        // ── C5 — the both-false regression: P3's all-or-nothing is UNCHANGED ──────────────────────────────
-        [Test]
-        public void NeitherOptional_TextBoxBlocked_TheWholePairDrops_AndReservesNothing()
-        {
-            OptionalPairOutcome o = RunOptionalPairScene(null, SymbolKind.Text);
-
-            Assert.AreEqual(0, o.OptionalBoxMask, "the spec default leaves NEITHER half optional");
-            Assert.IsFalse(o.PairPlaced,
-                "with both properties defaulted the pair must still drop TOGETHER (P3) — no bare badge");
-            Assert.AreEqual(0, o.DroppedBoxMask, "a dropped candidate records no per-half verdict");
-            Assert.IsTrue(o.ProbeOverIconPlaced, "a dropped pair reserves NO box, so both probes place");
-            Assert.IsTrue(o.ProbeOverTextPlaced);
+            // Scenario: text-optional.
+            {
+                OptionalPairOutcome o = RunOptionalPairScene("\"text-optional\":true", SymbolKind.Text);
+                Assert.AreEqual(0b10, o.OptionalBoxMask, "text-optional marks the RIDER (bit 1) droppable, not the owner");
+                Assert.IsTrue(o.PairPlaced,
+                    "the pair must SURVIVE on its icon alone — un-fixed, all-or-nothing drops the whole candidate");
+                Assert.AreEqual(0b10, o.DroppedBoxMask, "exactly the text half was dropped");
+                Assert.IsTrue(o.ProbeOverTextPlaced,
+                    "a later label over the DROPPED text box must place — a dropped half reserves nothing");
+                Assert.IsFalse(o.ProbeOverIconPlaced,
+                    "the surviving icon half must still block: only the dropped box is released");
+            }
+            // Scenario: icon-optional.
+            {
+                OptionalPairOutcome o = RunOptionalPairScene("\"icon-optional\":true", SymbolKind.Icon);
+                Assert.AreEqual(0b01, o.OptionalBoxMask, "icon-optional marks the OWNER (bit 0) droppable, not the rider");
+                Assert.IsTrue(o.PairPlaced, "the pair must SURVIVE on its text alone");
+                Assert.AreEqual(0b01, o.DroppedBoxMask, "exactly the icon half was dropped");
+                Assert.IsTrue(o.ProbeOverIconPlaced,
+                    "a later label over the DROPPED icon box must place — a dropped half reserves nothing");
+                Assert.IsFalse(o.ProbeOverTextPlaced, "the surviving text half must still block");
+            }
+            // Scenario: neither optional.
+            {
+                OptionalPairOutcome o = RunOptionalPairScene(null, SymbolKind.Text);
+                Assert.AreEqual(0, o.OptionalBoxMask, "the spec default leaves NEITHER half optional");
+                Assert.IsFalse(o.PairPlaced,
+                    "with both properties defaulted the pair must still drop TOGETHER — no bare badge");
+                Assert.AreEqual(0, o.DroppedBoxMask, "a dropped candidate records no per-half verdict");
+                Assert.IsTrue(o.ProbeOverIconPlaced,
+                    "a dropped pair reserves NO box, so both probes place (icon probe)");
+                Assert.IsTrue(o.ProbeOverTextPlaced,
+                    "a dropped pair reserves NO box, so both probes place (text probe)");
+            }
         }
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -1773,10 +1740,12 @@ namespace MapRenderer.Tests.Style
                 unclippedWorld.Add(Extent + SeamAnchorStride * k);           // tile B, X = 1
             }
             unclippedWorld.RemoveAll(x => x < 0.0 || x >= 2.0 * Extent);
-            Assert.AreEqual(33, unclippedWorld.Count,
-                "precondition: unclipped, the two tiles emit 33 anchors inside [0, 8192)");
-            Assert.AreEqual(32, DistinctCount(unclippedWorld),
-                "precondition: exactly one of those world positions (the seam, 4096) is claimed TWICE — " +
+            Assert.AreEqual(2 * SeamPreClipAnchors - 1, unclippedWorld.Count,
+                "precondition: unclipped, the two tiles emit (2 * SeamPreClipAnchors - 1) anchors inside " +
+                "[0, 8192) — tile B's own last anchor lands exactly on world x=8192 (its far edge), one past " +
+                "the half-open range, so the raw 2x drops by one before the seam duplicate is even counted.");
+            Assert.AreEqual(2 * SeamPreClipAnchors - 2, DistinctCount(unclippedWorld),
+                "precondition: exactly one of those world positions (the seam) is claimed TWICE — " +
                 "without this the tooth below could pass over a geometry that never doubled anything");
         }
 

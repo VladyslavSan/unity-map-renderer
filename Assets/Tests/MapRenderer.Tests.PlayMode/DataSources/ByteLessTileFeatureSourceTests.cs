@@ -126,12 +126,14 @@ namespace MapRenderer.Tests.PlayMode.DataSources
                     "mesh must exist, proving the raise is real.");
                 Assert.AreEqual(1, meshes.Length);
                 Assert.IsNotNull(meshes[0]);
-                // 4 interior + 8 band: a real fill layer carries the outward boundary band, two vertices
-                // per ring vertex appended after the interior quad.
-                Assert.AreEqual(12, meshes[0].vertexCount,
+                // A real fill layer carries the outward boundary band: two band vertices per ring vertex,
+                // appended after the flat (Mercator, no subdivision) interior quad's own 4.
+                const int interiorVertices = 4;
+                int expectedVertices = interiorVertices + 2 * interiorVertices;
+                Assert.AreEqual(expectedVertices, meshes[0].vertexCount,
                     "the byteless source's feature must flow through StyledFillTileBuilder unchanged and " +
-                    "produce the flat 4-vertex quad (Mercator, no subdivision) plus its 8-vertex boundary " +
-                    "band — the same oracle NonMvtDecoderFanOutTests asserts one level down.");
+                    "produce the flat 4-vertex quad plus its boundary band — the same oracle " +
+                    "NonMvtDecoderFanOutTests asserts one level down.");
             }
             finally { view.Teardown(); }
         }

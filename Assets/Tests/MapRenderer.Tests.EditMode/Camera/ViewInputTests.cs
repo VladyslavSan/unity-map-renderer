@@ -2,6 +2,7 @@
 // (Tools/core-tests). Do NOT add any UnityEngine reference. Tests the pure pan/zoom/tilt input math.
 
 
+using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
@@ -193,111 +194,89 @@ namespace MapRenderer.Tests.Cameras
         private static ViewContext MakeView(CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = Vp, Projection = Proj };
 
-        // ── TiltBy via Apply ──────────────────────────────────────────────────────────────────────
+        // ── TiltBy via Apply — clamps to pitch bounds (B-SPLIT); field-null coverage lives in
+        // Apply_EachGestureKind_TouchesOnlyOwnFields below ────────────────────────────────────────
+
+        private static IEnumerable<TestCaseData> TiltByClampCases()
+        {
+            // Migration of ApplyTilt_AccumulatesPitchAndBearing_WithClamps (clamp high/low).  B-SPLIT.
+            yield return new TestCaseData(0.0, 1000.0, 60.0).SetName("Apply_TiltBy_AddsDeltaWithinPitchBounds(ClampsHigh)");
+            yield return new TestCaseData(0.0, -1000.0, 0.0).SetName("Apply_TiltBy_AddsDeltaWithinPitchBounds(ClampsLow)");
+            // In-range: proves the delta is ADDED, not doubled or otherwise mis-scaled — the two clamp rows
+            // above saturate at 60/0 regardless of a delta-scaling mutant, so they cannot catch one alone.
+            yield return new TestCaseData(30.0, 5.0, 35.0).SetName("Apply_TiltBy_AddsDeltaWithinPitchBounds(InRange)");
+        }
 
         [Test]
-        public void Apply_TiltBy_SetsTilt_HeadingNull()
+        [TestCaseSource(nameof(TiltByClampCases))]
+        public void Apply_TiltBy_AddsDeltaWithinPitchBounds(double startTilt, double tiltDelta, double expectedTilt)
+        {
+            var view = MakeView(Cam(0, 0, 5.0, heading: 0.0, tilt: startTilt));
+            var p    = ViewInput.Apply(GestureIntent.TiltBy(tiltDelta, 60.0), view);
+
+            Assert.AreEqual(expectedTilt, p.Tilt.Value, 1e-9,
+                $"TiltBy({tiltDelta:+0;-0}, maxPitch=60) from start={startTilt} → Tilt=={expectedTilt}");
+            Assert.IsNull(p.Heading, "TiltBy leaves Heading null  (B-SPLIT)");
+        }
+
+        // ── HeadingBy via Apply — wraps across the 0/360 boundary (B-SPLIT); field-null coverage
+        // lives in Apply_EachGestureKind_TouchesOnlyOwnFields below ─────────────────────────────────
+
+        private static IEnumerable<TestCaseData> HeadingByWrapCases()
+        {
+            // Migration of ApplyTilt_BearingWrapsTo0_360.  B-SPLIT.
+            yield return new TestCaseData(350.0, 20.0, 10.0).SetName("Apply_HeadingBy_WrapsAcrossBoundary(Forward)");
+            yield return new TestCaseData(5.0, -15.0, 350.0).SetName("Apply_HeadingBy_WrapsAcrossBoundary(Backward)");
+        }
+
+        [Test]
+        [TestCaseSource(nameof(HeadingByWrapCases))]
+        public void Apply_HeadingBy_WrapsAcrossBoundary(double startHeading, double headingDelta, double expectedHeading)
+        {
+            var view = MakeView(Cam(0, 0, 5.0, heading: startHeading, tilt: 0.0));
+            var p    = ViewInput.Apply(GestureIntent.HeadingBy(headingDelta), view);
+
+            Assert.AreEqual(expectedHeading, p.Heading.Value, 1e-9,
+                $"{startHeading} + {headingDelta} wraps to {expectedHeading}  (B-SPLIT)");
+            Assert.IsNull(p.Tilt, "HeadingBy leaves Tilt null  (B-SPLIT)");
+        }
+
+        // ── Every gesture kind touches only its own patch fields (B-SPLIT complement) ────────────
+
+        /// <summary>Sequential, one block per gesture kind: TiltBy/HeadingBy/PanToAnchor/ZoomAtAnchor each
+        /// set only the field(s) that name them and leave every other patch field null.</summary>
+        [Test]
+        public void Apply_EachGestureKind_TouchesOnlyOwnFields()
         {
             var v    = Cam(0, 0, 5.0);
             var view = MakeView(v);
-            var p    = ViewInput.Apply(GestureIntent.TiltBy(20.0, 60.0), view);
 
-            Assert.IsNotNull(p.Tilt,      "TiltBy sets Tilt");
-            Assert.IsNull   (p.Heading,   "TiltBy leaves Heading null  (B-SPLIT)");
-            Assert.IsNull   (p.Longitude, "TiltBy leaves Longitude null");
-            Assert.IsNull   (p.Zoom,      "TiltBy leaves Zoom null");
-            Assert.AreEqual (20.0, p.Tilt.Value, 1e-9, "vertical delta → pitch");
-        }
+            var tiltPatch = ViewInput.Apply(GestureIntent.TiltBy(20.0, 60.0), view);
+            Assert.IsNotNull(tiltPatch.Tilt,      "TiltBy sets Tilt");
+            Assert.IsNull   (tiltPatch.Heading,   "TiltBy leaves Heading null  (B-SPLIT)");
+            Assert.IsNull   (tiltPatch.Longitude, "TiltBy leaves Longitude null");
+            Assert.IsNull   (tiltPatch.Zoom,      "TiltBy leaves Zoom null");
 
-        [Test]
-        public void Apply_TiltBy_ClampsHigh()
-        {
-            // Migration of ApplyTilt_AccumulatesPitchAndBearing_WithClamps (clamp high).  B-SPLIT.
-            var view = MakeView(Cam(0, 0, 5.0));
-            var p    = ViewInput.Apply(GestureIntent.TiltBy(1000.0, 60.0), view);
+            var headingPatch = ViewInput.Apply(GestureIntent.HeadingBy(10.0), MakeView(Cam(0, 0, 5.0, heading: 0.0)));
+            Assert.IsNotNull(headingPatch.Heading,   "HeadingBy sets Heading");
+            Assert.IsNull   (headingPatch.Tilt,      "HeadingBy leaves Tilt null  (B-SPLIT)");
+            Assert.IsNull   (headingPatch.Longitude, "HeadingBy leaves Longitude null");
+            Assert.IsNull   (headingPatch.Zoom,      "HeadingBy leaves Zoom null");
 
-            Assert.AreEqual(60.0, p.Tilt.Value, 1e-9, "TiltBy(+1000, maxPitch=60) → Tilt==60.0");
-            Assert.IsNull  (p.Heading,            "TiltBy leaves Heading null  (B-SPLIT)");
-        }
+            var panCam     = Cam(0, 0, 4.0);
+            var panView    = MakeView(panCam);
+            var grabbed    = Proj.ScreenToGround(Centre, Vp, panCam);
+            var panPatch   = ViewInput.Apply(GestureIntent.Pan(grabbed, Centre + new double2(50.0, 0.0)), panView);
+            Assert.IsNotNull(panPatch.Longitude, "PanToAnchor sets Longitude");
+            Assert.IsNotNull(panPatch.Latitude,  "PanToAnchor sets Latitude");
+            Assert.IsNull   (panPatch.Zoom,      "PanToAnchor leaves Zoom null    (B-SPLIT)");
+            Assert.IsNull   (panPatch.Heading,   "PanToAnchor leaves Heading null (B-SPLIT)");
+            Assert.IsNull   (panPatch.Tilt,      "PanToAnchor leaves Tilt null    (B-SPLIT)");
 
-        [Test]
-        public void Apply_TiltBy_ClampsLow()
-        {
-            // Migration of ApplyTilt_AccumulatesPitchAndBearing_WithClamps (clamp low).  B-SPLIT.
-            var view = MakeView(Cam(0, 0, 5.0));
-            var p    = ViewInput.Apply(GestureIntent.TiltBy(-1000.0, 60.0), view);
-
-            Assert.AreEqual(0.0, p.Tilt.Value, 1e-9, "TiltBy(-1000, maxPitch=60) → Tilt==0.0");
-            Assert.IsNull  (p.Heading,            "TiltBy leaves Heading null  (B-SPLIT)");
-        }
-
-        // ── HeadingBy via Apply — B-SPLIT ────────────────────────────────────────────────────────
-
-        [Test]
-        public void Apply_HeadingBy_SetsHeading_TiltNull()
-        {
-            // Migration of ApplyTilt_AccumulatesPitchAndBearing_WithClamps (heading direction).
-            var view = MakeView(Cam(0, 0, 5.0, heading: 0.0));
-            var p    = ViewInput.Apply(GestureIntent.HeadingBy(10.0), view);
-
-            Assert.IsNotNull(p.Heading,   "HeadingBy sets Heading");
-            Assert.IsNull   (p.Tilt,      "HeadingBy leaves Tilt null  (B-SPLIT)");
-            Assert.IsNull   (p.Longitude, "HeadingBy leaves Longitude null");
-            Assert.IsNull   (p.Zoom,      "HeadingBy leaves Zoom null");
-            Assert.AreEqual (10.0, p.Heading.Value, 1e-9, "horizontal delta → bearing");
-        }
-
-        [Test]
-        public void Apply_HeadingBy_WrapsForward()
-        {
-            // Migration of ApplyTilt_BearingWrapsTo0_360.  B-SPLIT.
-            // From heading 350°, +20° → wraps to 10°.
-            var view = MakeView(Cam(0, 0, 5.0, heading: 350.0, tilt: 0.0));
-            var p    = ViewInput.Apply(GestureIntent.HeadingBy(20.0), view);
-
-            Assert.AreEqual(10.0, p.Heading.Value, 1e-9, "350 + 20 wraps to 10  (B-SPLIT)");
-            Assert.IsNull  (p.Tilt,                       "HeadingBy leaves Tilt null  (B-SPLIT)");
-        }
-
-        [Test]
-        public void Apply_HeadingBy_WrapsBackward()
-        {
-            // From heading 5°, -15° → wraps to 350°.  B-SPLIT.
-            var view = MakeView(Cam(0, 0, 5.0, heading: 5.0, tilt: 0.0));
-            var p    = ViewInput.Apply(GestureIntent.HeadingBy(-15.0), view);
-
-            Assert.AreEqual(350.0, p.Heading.Value, 1e-9, "5 - 15 wraps to 350  (B-SPLIT)");
-            Assert.IsNull  (p.Tilt,                        "HeadingBy leaves Tilt null  (B-SPLIT)");
-        }
-
-        // ── PanToAnchor / ZoomAtAnchor field-null checks (B-SPLIT complement) ──────────────────────
-
-        [Test]
-        public void Apply_PanToAnchor_LeavesZoomHeadingTiltNull()
-        {
-            var v       = Cam(0, 0, 4.0);
-            var view    = MakeView(v);
-            var grabbed = Proj.ScreenToGround(Centre, Vp, v);
-            double2 cursor = Centre + new double2(50.0, 0.0);
-
-            var p = ViewInput.Apply(GestureIntent.Pan(grabbed, cursor), view);
-
-            Assert.IsNotNull(p.Longitude, "PanToAnchor sets Longitude");
-            Assert.IsNotNull(p.Latitude,  "PanToAnchor sets Latitude");
-            Assert.IsNull   (p.Zoom,      "PanToAnchor leaves Zoom null    (B-SPLIT)");
-            Assert.IsNull   (p.Heading,   "PanToAnchor leaves Heading null (B-SPLIT)");
-            Assert.IsNull   (p.Tilt,      "PanToAnchor leaves Tilt null    (B-SPLIT)");
-        }
-
-        [Test]
-        public void Apply_ZoomAtAnchor_LeavesHeadingTiltNull()
-        {
-            var view = MakeView(Cam(0, 0, 5.0));
-            var p    = ViewInput.Apply(GestureIntent.ZoomAt(Centre, 1.0, 0.0, 22.0), view);
-
-            Assert.IsNotNull(p.Zoom,    "ZoomAtAnchor sets Zoom");
-            Assert.IsNull   (p.Heading, "ZoomAtAnchor leaves Heading null (B-SPLIT)");
-            Assert.IsNull   (p.Tilt,    "ZoomAtAnchor leaves Tilt null    (B-SPLIT)");
+            var zoomPatch = ViewInput.Apply(GestureIntent.ZoomAt(Centre, 1.0, 0.0, 22.0), view);
+            Assert.IsNotNull(zoomPatch.Zoom,    "ZoomAtAnchor sets Zoom");
+            Assert.IsNull   (zoomPatch.Heading, "ZoomAtAnchor leaves Heading null (B-SPLIT)");
+            Assert.IsNull   (zoomPatch.Tilt,    "ZoomAtAnchor leaves Tilt null    (B-SPLIT)");
         }
 
         // ── B-ZOOMPIN — anchored zoom through the seam ────────────────────────────────────────────
@@ -369,50 +348,6 @@ namespace MapRenderer.Tests.Cameras
                 "PanToAnchor via Apply: latitude must clamp to the Mercator limit (B-PAN)");
         }
 
-        // ── A fake source drives the seam (genericity proof) ─────────────────────────────
-
-        /// <summary>
-        /// Proof of genericity: a named fake intent source (no Unity/device dependency) drives
-        /// <see cref="ViewInput.Apply"/> and produces correct patches. The touch
-        /// backend and any headless test driver are interchangeable sources over the identical seam.
-        /// </summary>
-        private sealed class FakeGestureSource
-        {
-            private readonly ViewContext _view;
-            public FakeGestureSource(ViewContext view) => _view = view;
-            public CameraPropertiesUpdate Drive(GestureIntent i) => ViewInput.Apply(i, _view);
-        }
-
-        [Test]
-        public void FakeSource_DrivesSeam_NoDeviceDependency()
-        {
-            var cam    = Cam(10.0, 20.0, 8.0, heading: 90.0, tilt: 30.0);
-            var source = new FakeGestureSource(MakeView(cam));
-
-            // TiltBy: tilt changes, heading untouched.
-            var tp = source.Drive(GestureIntent.TiltBy(5.0, 60.0));
-            Assert.AreEqual(35.0, tp.Tilt.Value, 1e-9, "FakeSource TiltBy: 30+5=35");
-            Assert.IsNull  (tp.Heading,                  "FakeSource TiltBy: Heading null");
-
-            // HeadingBy: heading changes, tilt untouched.
-            var hp = source.Drive(GestureIntent.HeadingBy(-100.0));
-            Assert.AreEqual(350.0, hp.Heading.Value, 1e-9, "FakeSource HeadingBy: 90-100 wraps to 350");
-            Assert.IsNull  (hp.Tilt,                        "FakeSource HeadingBy: Tilt null");
-
-            // ZoomAtAnchor: zoom/lon/lat set, heading/tilt null.
-            var zp = source.Drive(GestureIntent.ZoomAt(Centre, 2.0, 0.0, 22.0));
-            Assert.IsNotNull(zp.Zoom,    "FakeSource ZoomAt: Zoom set");
-            Assert.IsNull   (zp.Heading, "FakeSource ZoomAt: Heading null");
-            Assert.IsNull   (zp.Tilt,    "FakeSource ZoomAt: Tilt null");
-
-            // PanToAnchor: lon/lat set, zoom/heading/tilt null.
-            var grabbed = Proj.ScreenToGround(Centre, Vp, cam);
-            var pp = source.Drive(GestureIntent.Pan(grabbed, Centre + new double2(10.0, 0.0)));
-            Assert.IsNotNull(pp.Longitude, "FakeSource Pan: Longitude set");
-            Assert.IsNull   (pp.Zoom,      "FakeSource Pan: Zoom null");
-            Assert.IsNull   (pp.Heading,   "FakeSource Pan: Heading null");
-            Assert.IsNull   (pp.Tilt,      "FakeSource Pan: Tilt null");
-        }
     }
 
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project

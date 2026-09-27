@@ -1327,37 +1327,6 @@ namespace MapRenderer.Tests.Visual
             return material;
         }
 
-        // ── P1 guard: the copied formula must still be the shipped one ─────────────────────────────────
-
-        /// <summary>
-        /// The probe's fragment body is a copy of the shipped outer-edge expression, so it can only answer
-        /// the real question while it stays a copy. Both lines are read from disk and compared; this fails
-        /// the moment <c>Line_VertexExtrude.hlsl</c>'s formula changes, which is the direction that matters
-        /// — a drifted probe would keep passing while measuring something the product no longer does.
-        /// </summary>
-        [Test]
-        public void ProbeFormula_IsVerbatimTheShippedLineCoverageExpression()
-        {
-            string root = Directory.GetParent(Application.dataPath)!.FullName;
-            string shipped = File.ReadAllText(Path.Combine(root,
-                "Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl"));
-            string probe = File.ReadAllText(Path.Combine(root,
-                "Assets/Tests/MapRenderer.Tests.Visual/FillBandCoverageProbe.shader"));
-
-            const string gradient = "max(length(float2(ddx(side), ddy(side))), 1e-6)";
-            const string coverage = "saturate((1.0 - absSide) / sideGrad)";
-
-            StringAssert.Contains(gradient, shipped,
-                "Line_VertexExtrude.hlsl no longer computes the Euclidean side gradient this way; the probe " +
-                "is measuring a formula the product has stopped using.");
-            StringAssert.Contains(coverage, shipped,
-                "Line_VertexExtrude.hlsl no longer computes the outer-edge coverage this way.");
-            StringAssert.Contains(gradient.Replace("side)", "input.side)"), probe,
-                "the probe shader must carry the shipped gradient expression verbatim.");
-            StringAssert.Contains(coverage, probe,
-                "the probe shader must carry the shipped coverage expression verbatim.");
-        }
-
         // ── P1: is a constant side = 0 interior stable? ─────────────────────────────────────────────────
 
         /// <summary>

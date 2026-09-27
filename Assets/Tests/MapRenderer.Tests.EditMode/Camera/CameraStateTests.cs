@@ -3,6 +3,7 @@
 
 
 using System;
+using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
@@ -93,7 +94,7 @@ namespace MapRenderer.Tests.Cameras
 
             double actual = CameraPoseMath.AltitudeForZoom(zoom, height, fov);
 
-            Assert.AreEqual(expected, actual, expected * 0.001,
+            Assert.AreEqual(expected, actual, expected * 1e-4,
                 $"AltitudeForZoom(10, 1080, 60) ≈ {expected:F1}. Got {actual:F1}.");
         }
 
@@ -248,25 +249,6 @@ namespace MapRenderer.Tests.Cameras
             Assert.Greater(pos.y, 0.0, "Camera stays above the ground at tilt=45.");
         }
 
-        // ── Heading interpolation: shortest-angle ─────────────────────────────────────────────────
-
-        [Test]
-        public void LerpHeading_ShortestPath_AcrossZero()
-        {
-            // 350 → 10: shortest is +20 (not −340)
-            double half = Angle.LerpShortest(Angle.FromDegrees(350.0), Angle.FromDegrees(10.0), 0.5).Degrees;
-            // At t=0.5, diff=+20, heading = 350+10 = 360 ≡ 0
-            bool nearZero = half < 5.0 || half > 355.0;
-            Assert.IsTrue(nearZero, $"350→10 at t=0.5 should be near 0°. Got {half:F2}°.");
-        }
-
-        [Test]
-        public void LerpHeading_ShortestPath_Full()
-        {
-            double full = Angle.LerpShortest(Angle.FromDegrees(350.0), Angle.FromDegrees(10.0), 1.0).Degrees;
-            Assert.AreEqual(10.0, full, 1e-6, "350→10 at t=1.0 must land at 10°.");
-        }
-
         // ── Heading normalization ─────────────────────────────────────────────────────────────────
 
         [Test]
@@ -281,16 +263,25 @@ namespace MapRenderer.Tests.Cameras
 
         // ── Pan Y-sign regression ────────────────────────────────────────────────────────────────
 
+        private static IEnumerable<TestCaseData> PanYSignCases()
+        {
+            yield return new TestCaseData(30.0, -1)
+                .SetName("PanYSign_DragDirection_MovesCenterOppositely(DragUp_MovesCenterSouth)");
+            yield return new TestCaseData(-30.0, 1)
+                .SetName("PanYSign_DragDirection_MovesCenterOppositely(DragDown_MovesCenterNorth)");
+        }
+
         /// <summary>
-        /// Pins the "content follows cursor" pan direction through the anchored-pan API.
+        /// Pins the "content follows cursor" pan direction through the anchored-pan API, both ways.
         /// Screen convention: +x right, +y up, origin bottom-left (Unity mouse position).
         /// MapController does not negate delta.y — the anchored pan handles direction.
         ///
-        /// This test pins: cursor moves UP (+y in +y-up convention) → grabbed ground appears ABOVE centre
-        /// → camera centre moves SOUTH (lat decreases) so the grabbed point follows the cursor.
+        /// Cursor UP (+y) → grabbed ground appears ABOVE centre → centre moves SOUTH (lat decreases).
+        /// Cursor DOWN (−y) → grabbed ground appears BELOW centre → centre moves NORTH (lat increases).
         /// </summary>
         [Test]
-        public void PanYSign_DragUp_NewIS_MovesCenterSouth()
+        [TestCaseSource(nameof(PanYSignCases))]
+        public void PanYSign_DragDirection_MovesCenterOppositely(double cursorDeltaY, int expectedLatitudeSign)
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
             IProjection proj   = new WebMercatorProjection();
@@ -299,87 +290,50 @@ namespace MapRenderer.Tests.Cameras
 
             // Grab the earth point at the screen centre.
             GeoCoordinate3D grabbed = proj.ScreenToGround(centre, vp, v);
-            // Cursor moves UP (+y): grabbed point needs to appear above centre → centre moves SOUTH.
-            var cursorNow = centre + new double2(0.0, 30.0);
+            var cursorNow = centre + new double2(0.0, cursorDeltaY);
 
             var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
-            Assert.Less(patch.Latitude.Value, v.LookAt.Latitude,
-                "cursor UP in +y-up convention must move the LookAt centre SOUTH " +
-                "(grabbed point glues to cursor above centre; content follows cursor correctly).");
-        }
-
-        /// <summary>
-        /// Complementary: cursor moves DOWN (−y in +y-up convention) → centre moves NORTH.
-        /// </summary>
-        [Test]
-        public void PanYSign_DragDown_NewIS_MovesCenterNorth()
-        {
-            var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
-            IProjection proj   = new WebMercatorProjection();
-            var         vp     = new double2(1920.0, 1080.0);
-            var         centre = new double2(960.0, 540.0);
-
-            GeoCoordinate3D grabbed = proj.ScreenToGround(centre, vp, v);
-            // Cursor moves DOWN (−y): grabbed point appears below centre → centre moves NORTH.
-            var cursorNow = centre - new double2(0.0, 30.0);
-
-            var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
-
-            Assert.Greater(patch.Latitude.Value, v.LookAt.Latitude,
-                "cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
+            Assert.That(math.sign(patch.Latitude.Value - v.LookAt.Latitude), Is.EqualTo(expectedLatitudeSign),
+                $"cursor Y-delta {cursorDeltaY} in +y-up convention must move the LookAt centre latitude by " +
+                $"sign {expectedLatitudeSign} (grabbed point glues to the cursor; content follows cursor).");
         }
 
         // ── Tilt-Y sign convention ──────────────────────────────────────────────────────────────────
         // The caller applies the sensitivity multiply before the delta reaches the seam, as MapController does.
 
-        /// <summary>
-        /// Pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead (pitch DECREASES).
-        /// The Input System reports <c>delta.y &gt; 0</c> for an upward move; <c>MapController</c> negates it
-        /// before it builds the <see cref="MapRenderer.App.View.GestureIntent.TiltBy"/> intent, and
-        /// <c>MapController</c>'s call site must agree with this test. It starts from a non-zero tilt so the
-        /// "pitch decreased" assertion does not pass by a clamp at 0.
-        /// </summary>
-        [Test]
-        public void TiltYSign_DragUp_NewIS_TiltsTowardOverhead()
+        private static IEnumerable<TestCaseData> TiltYSignCases()
         {
-            // Start tilted (30°) so a decrease is observable (not clamped at 0).
-            var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
-
             // New IS: delta.y = +20 (drag up). MapController negates → dy_for_seam = -20.
             // Sensitivity 0.3 is applied by the caller before the intent is built (as in MapController).
-            double newIsDeltaY = 20.0;
-            double viewInputDy = -newIsDeltaY;
-
-            var patch = MapRenderer.App.View.ViewInput.ApplyTiltDelta(
-                v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
-
-            Assert.Less(patch.Tilt.Value, v.Tilt.Degrees,
-                "a +Y drag (upward mouse move in the new Input System), after sign flip at the " +
-                "MapController translator, must tilt the camera TOWARD overhead (pitch decreases). " +
-                "Failure means MapController.Update passes the wrong sign to ViewInput.ApplyTiltDelta " +
-                "(drag direction does not match the documented overhead-on-drag-up convention).");
+            yield return new TestCaseData(20.0, -1, "TOWARD overhead")
+                .SetName("TiltYSign_DragDirection_TiltsOppositely(DragUp_TiltsTowardOverhead)");
+            yield return new TestCaseData(-20.0, 1, "TOWARD the horizon")
+                .SetName("TiltYSign_DragDirection_TiltsOppositely(DragDown_TiltsTowardHorizon)");
         }
 
         /// <summary>
-        /// Complementary: drag DOWN (delta.y = -20) → tilt toward horizon (pitch increases).
-        /// Symmetric check for the same sign-flip convention.
+        /// Pins the tilt-Y sign convention, both ways: drag-UP tilts toward overhead (pitch DECREASES),
+        /// drag-DOWN tilts toward horizon (pitch INCREASES). The Input System reports <c>delta.y &gt; 0</c>
+        /// for an upward move; <c>MapController</c> negates it before it builds the
+        /// <see cref="MapRenderer.App.View.GestureIntent.TiltBy"/> intent, and <c>MapController</c>'s call
+        /// site must agree with this test. Starts from a non-zero tilt so neither direction's assertion
+        /// passes by a clamp at 0.
         /// </summary>
         [Test]
-        public void TiltYSign_DragDown_NewIS_TiltsTowardHorizon()
+        [TestCaseSource(nameof(TiltYSignCases))]
+        public void TiltYSign_DragDirection_TiltsOppositely(double newIsDeltaY, int expectedTiltSign, string expectedDirectionLabel)
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
-
-            // New IS: delta.y = -20 (drag down). Negate → +20 for the seam.
-            double newIsDeltaY = -20.0;
             double viewInputDy = -newIsDeltaY;
 
             var patch = MapRenderer.App.View.ViewInput.ApplyTiltDelta(
                 v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
-            Assert.Greater(patch.Tilt.Value, v.Tilt.Degrees,
-                "a -Y drag (downward mouse move in the new Input System), after sign flip, must tilt " +
-                "the camera TOWARD the horizon (pitch increases).");
+            Assert.That(math.sign(patch.Tilt.Value - v.Tilt.Degrees), Is.EqualTo(expectedTiltSign),
+                $"a {newIsDeltaY} Y drag (new Input System), after sign flip at the MapController translator, " +
+                $"must tilt the camera {expectedDirectionLabel} (pitch sign {expectedTiltSign}). Failure means " +
+                "MapController.Update passes the wrong sign to ViewInput.ApplyTiltDelta.");
         }
 
         // ── Test-local oracle ────────────────────────────────────────────────────────────────────

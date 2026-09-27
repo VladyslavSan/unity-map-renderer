@@ -18,6 +18,7 @@
 //   RenderLayerSetTests                  — the unified render-layer model: one ordered set over every
 //                                           painted kind, declared-order slots, queue/sub-slot math.
 
+using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
@@ -104,44 +105,6 @@ namespace MapRenderer.Tests.Rendering
 
         // ── BRG ───────────────────────────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// A gated slot is absent from the emit order in BOTH views. The light view is asserted separately
-        /// because that is where a gated building would otherwise keep casting a shadow with nothing above
-        /// it — the one visible artefact a camera-only gate would leave behind.
-        /// </summary>
-        [Test]
-        public void BrgBackend_GatedSlot_EmitsNoDrawCommand_InEitherView()
-        {
-            using RenderLayerSet set = ThreeFillLayerSet();
-            var meshes = new List<Mesh>();
-            using BrgTileRenderer r = new BrgTileRenderer(MaterialsOf(set), AllCast);
-            for (int i = 0; i < 3; i++)
-            {
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-            }
-            r.Rebuild(SceneFrame.Mercator(double2.zero));
-
-            var emit = new List<int>();
-            Assert.AreEqual(3, r.ComputeEmitOrder(emit, BatchCullingViewType.Camera),
-                "anti-vacuity: before the gate every slot must emit, or its absence proves nothing.");
-
-            r.SetLayerVisible(GatedSlot, false);
-
-            CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
-                "a gated slot must emit NO draw command to the camera view. Emitting it and relying on " +
-                "a fragment discard is the mechanism this replaced — it still pays the vertex stage.");
-            CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Light),
-                "a gated slot must emit NO draw command to the LIGHT view either — every slot here " +
-                "declares CastShadows.On, so the shadow filter cannot be what removed it.");
-
-            r.SetLayerVisible(GatedSlot, true);
-            CollectionAssert.AreEqual(new[] { 0, 1, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
-                "lifting the gate must restore the slot. A one-way gate would strand a layer that " +
-                "zooms back into its range.");
-        }
-
         /// <summary>The layer SLOT behind each emitted draw command, in emission order.</summary>
         /// <param name="viewType">Camera or light view.</param>
         private static List<int> EmittedSlots(BrgTileRenderer r, BatchCullingViewType viewType)
@@ -155,136 +118,180 @@ namespace MapRenderer.Tests.Rendering
         }
 
         /// <summary>
-        /// BRG reads the gate while it computes the emit order, so an item registered into an already-gated
-        /// slot is covered by the same read — pinned here so the three backends are asserted on the same
-        /// property and not only on the two whose mechanism is per-item.
+        /// A gated slot is absent from the emit order in BOTH views, and the read applies REGARDLESS of
+        /// whether an item is registered before or after the slot is gated (BRG reads the gate while it
+        /// computes the emit order, so a late registration is covered by the same read). The light view is
+        /// asserted separately because that is where a gated building would otherwise keep casting a shadow
+        /// with nothing above it — the one visible artefact a camera-only gate would leave behind.
         /// </summary>
         [Test]
-        public void BrgBackend_ItemAddedIntoAGatedSlot_EmitsNoDrawCommand()
+        public void BrgBackend_DrawGate_SuppressesSlot_RegardlessOfRegistrationOrder()
         {
-            using RenderLayerSet set = ThreeFillLayerSet();
-            var meshes = new List<Mesh>();
-            using BrgTileRenderer r = new BrgTileRenderer(MaterialsOf(set), AllCast);
-            r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
-            for (int i = 0; i < 3; i++)
+            // ── Gate AFTER registration ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-            }
-            r.Rebuild(SceneFrame.Mercator(double2.zero));
+                var meshes = new List<Mesh>();
+                using BrgTileRenderer r = new BrgTileRenderer(MaterialsOf(set), AllCast);
+                for (int i = 0; i < 3; i++)
+                {
+                    var mesh = Track(new Mesh());
+                    meshes.Add(mesh);
+                    r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                }
+                r.Rebuild(SceneFrame.Mercator(double2.zero));
 
-            CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
-                "a tile that finishes building while its layer is gated out must not draw — that is " +
-                "the ordinary case, since tiles keep loading across a zoom bound.");
+                var emit = new List<int>();
+                Assert.AreEqual(3, r.ComputeEmitOrder(emit, BatchCullingViewType.Camera),
+                    "anti-vacuity: before the gate every slot must emit, or its absence proves nothing.");
+
+                r.SetLayerVisible(GatedSlot, false);
+
+                CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
+                    "a gated slot must emit NO draw command to the camera view. Emitting it and relying on " +
+                    "a fragment discard is the mechanism this replaced — it still pays the vertex stage.");
+                CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Light),
+                    "a gated slot must emit NO draw command to the LIGHT view either — every slot here " +
+                    "declares CastShadows.On, so the shadow filter cannot be what removed it.");
+
+                r.SetLayerVisible(GatedSlot, true);
+                CollectionAssert.AreEqual(new[] { 0, 1, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
+                    "lifting the gate must restore the slot. A one-way gate would strand a layer that " +
+                    "zooms back into its range.");
+            }
+
+            // ── Gate BEFORE registration ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                var meshes = new List<Mesh>();
+                using BrgTileRenderer r = new BrgTileRenderer(MaterialsOf(set), AllCast);
+                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
+                for (int i = 0; i < 3; i++)
+                {
+                    var mesh = Track(new Mesh());
+                    meshes.Add(mesh);
+                    r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                }
+                r.Rebuild(SceneFrame.Mercator(double2.zero));
+
+                CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
+                    "a tile that finishes building while its layer is gated out must not draw — that is " +
+                    "the ordinary case, since tiles keep loading across a zoom bound.");
+            }
         }
 
         // ── GameObjects ───────────────────────────────────────────────────────────────────────────
 
-        [Test]
-        public void GameObjectBackend_GatedSlot_DisablesOnlyThatSlotsRenderer()
-        {
-            using RenderLayerSet set = ThreeFillLayerSet();
-            var meshes = new List<Mesh>();
-            using GameObjectTileRenderer r = new GameObjectTileRenderer(MaterialsOf(set), LayerNames, AllCast);
-            var handles = new int[3];
-            for (int i = 0; i < 3; i++)
-            {
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-            }
-            for (int i = 0; i < 3; i++)
-                Assert.IsTrue(r.IsItemDrawn(handles[i]),
-                    $"anti-vacuity: slot {i} must draw before the gate is applied.");
-
-            r.SetLayerVisible(GatedSlot, false);
-            for (int i = 0; i < 3; i++)
-                Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
-                    $"slot {i}: only the gated slot may stop drawing. Disabling every renderer would " +
-                    "pass a one-slot check and blank the map.");
-
-            r.SetLayerVisible(GatedSlot, true);
-            Assert.IsTrue(r.IsItemDrawn(handles[GatedSlot]), "lifting the gate must restore the slot.");
-        }
-
         /// <summary>
-        /// The GameObject backend pools its layer children and enables the renderer per rent, so a fresh
-        /// item lands drawn unless <c>AddTileLayer</c> consults the gate. Registering into an already-gated
-        /// slot is the ordinary case: tiles keep finishing while a layer is out of its zoom range.
+        /// Only the gated slot's renderer disables, and that holds REGARDLESS of whether an item is
+        /// registered before or after the slot is gated — the ordinary case, since tiles keep finishing
+        /// while a layer is out of its zoom range. The backend pools its layer children and enables the
+        /// renderer per rent, so a fresh item lands drawn unless <c>AddTileLayer</c> consults the gate.
         /// </summary>
         [Test]
-        public void GameObjectBackend_ItemAddedIntoAGatedSlot_IsNotDrawn()
+        public void GameObjectBackend_DrawGate_SuppressesSlot_RegardlessOfRegistrationOrder()
         {
-            using RenderLayerSet set = ThreeFillLayerSet();
-            var meshes = new List<Mesh>();
-            using GameObjectTileRenderer r = new GameObjectTileRenderer(MaterialsOf(set), LayerNames, AllCast);
-            r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
-            var handles = new int[3];
-            for (int i = 0; i < 3; i++)
+            // ── Gate AFTER registration ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                var meshes = new List<Mesh>();
+                using GameObjectTileRenderer r = new GameObjectTileRenderer(MaterialsOf(set), LayerNames, AllCast);
+                var handles = new int[3];
+                for (int i = 0; i < 3; i++)
+                {
+                    var mesh = Track(new Mesh());
+                    meshes.Add(mesh);
+                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                }
+                for (int i = 0; i < 3; i++)
+                    Assert.IsTrue(r.IsItemDrawn(handles[i]),
+                        $"anti-vacuity: slot {i} must draw before the gate is applied.");
+
+                r.SetLayerVisible(GatedSlot, false);
+                for (int i = 0; i < 3; i++)
+                    Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
+                        $"slot {i}: only the gated slot may stop drawing. Disabling every renderer would " +
+                        "pass a one-slot check and blank the map.");
+
+                r.SetLayerVisible(GatedSlot, true);
+                Assert.IsTrue(r.IsItemDrawn(handles[GatedSlot]), "lifting the gate must restore the slot.");
             }
 
-            for (int i = 0; i < 3; i++)
-                Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
-                    $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+            // ── Gate BEFORE registration ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                var meshes = new List<Mesh>();
+                using GameObjectTileRenderer r = new GameObjectTileRenderer(MaterialsOf(set), LayerNames, AllCast);
+                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
+                var handles = new int[3];
+                for (int i = 0; i < 3; i++)
+                {
+                    var mesh = Track(new Mesh());
+                    meshes.Add(mesh);
+                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                }
+
+                for (int i = 0; i < 3; i++)
+                    Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
+                        $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+            }
         }
 
         // ── Entities ──────────────────────────────────────────────────────────────────────────────
 
-        [Test]
-        public void EntitiesBackend_GatedSlot_DisablesRenderingOnOnlyThatSlot()
-        {
-            using RenderLayerSet set = ThreeFillLayerSet();
-            var meshes = new List<Mesh>();
-            using EntitiesTileRenderer r = new EntitiesTileRenderer(MaterialsOf(set), LayerNames, AllCast);
-            var handles = new int[3];
-            for (int i = 0; i < 3; i++)
-            {
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-            }
-            for (int i = 0; i < 3; i++)
-                Assert.IsTrue(r.IsItemDrawn(handles[i]),
-                    $"anti-vacuity: slot {i} must draw before the gate is applied.");
-
-            r.SetLayerVisible(GatedSlot, false);
-            for (int i = 0; i < 3; i++)
-                Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
-                    $"slot {i}: only the gated slot may carry DisableRendering.");
-
-            r.SetLayerVisible(GatedSlot, true);
-            Assert.IsTrue(r.IsItemDrawn(handles[GatedSlot]),
-                "lifting the gate must REMOVE DisableRendering — an add-only gate strands a layer that " +
-                "zooms back into its range.");
-        }
-
         /// <summary>
-        /// Both layer prototypes are built without <see cref="DisableRendering"/>, so a fresh instance
-        /// arrives drawn unless <c>AddTileLayer</c> consults the gate.
+        /// Only the gated slot carries <c>DisableRendering</c>, and that holds REGARDLESS of whether an
+        /// item is registered before or after the slot is gated. Both layer prototypes are built without
+        /// <c>DisableRendering</c>, so a fresh instance arrives drawn unless <c>AddTileLayer</c> consults
+        /// the gate.
         /// </summary>
         [Test]
-        public void EntitiesBackend_ItemAddedIntoAGatedSlot_IsNotDrawn()
+        public void EntitiesBackend_DrawGate_SuppressesSlot_RegardlessOfRegistrationOrder()
         {
-            using RenderLayerSet set = ThreeFillLayerSet();
-            var meshes = new List<Mesh>();
-            using EntitiesTileRenderer r = new EntitiesTileRenderer(MaterialsOf(set), LayerNames, AllCast);
-            r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
-            var handles = new int[3];
-            for (int i = 0; i < 3; i++)
+            // ── Gate AFTER registration ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                var meshes = new List<Mesh>();
+                using EntitiesTileRenderer r = new EntitiesTileRenderer(MaterialsOf(set), LayerNames, AllCast);
+                var handles = new int[3];
+                for (int i = 0; i < 3; i++)
+                {
+                    var mesh = Track(new Mesh());
+                    meshes.Add(mesh);
+                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                }
+                for (int i = 0; i < 3; i++)
+                    Assert.IsTrue(r.IsItemDrawn(handles[i]),
+                        $"anti-vacuity: slot {i} must draw before the gate is applied.");
+
+                r.SetLayerVisible(GatedSlot, false);
+                for (int i = 0; i < 3; i++)
+                    Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
+                        $"slot {i}: only the gated slot may carry DisableRendering.");
+
+                r.SetLayerVisible(GatedSlot, true);
+                Assert.IsTrue(r.IsItemDrawn(handles[GatedSlot]),
+                    "lifting the gate must REMOVE DisableRendering — an add-only gate strands a layer that " +
+                    "zooms back into its range.");
             }
 
-            for (int i = 0; i < 3; i++)
-                Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
-                    $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+            // ── Gate BEFORE registration ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                var meshes = new List<Mesh>();
+                using EntitiesTileRenderer r = new EntitiesTileRenderer(MaterialsOf(set), LayerNames, AllCast);
+                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
+                var handles = new int[3];
+                for (int i = 0; i < 3; i++)
+                {
+                    var mesh = Track(new Mesh());
+                    meshes.Add(mesh);
+                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
+                }
+
+                for (int i = 0; i < 3; i++)
+                    Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
+                        $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+            }
         }
     }
 
@@ -295,7 +302,7 @@ namespace MapRenderer.Tests.Rendering
     // A backend's per-layer material list can hold a NULL entry (an unassigned base material). Each backend,
     // built with [null, realMaterial], must AddTileLayer at slot 1 and Rebuild/Dispose without an NRE.
     [TestFixture]
-    public class BackendNullSlotTests : BaseTestFixture
+    internal class BackendNullSlotTests : BaseTestFixture
     {
         private const string OneFillStyleJson = @"{
     ""version"": 8,
@@ -315,54 +322,25 @@ namespace MapRenderer.Tests.Rendering
             return new List<Material> { null, ownerSet[0].Material };
         }
 
-        [Test]
-        public void Brg_NullMaterialSlot_ConstructsAndAddsAtRealSlot()
+        private static IEnumerable<TestCaseData> BackendFactories()
         {
-            var mats = NullThenRealMaterial(out var set);
-            var meshes = new List<Mesh>();
-            try
-            {
-                using ITileRenderBackend backend = new BrgTileRenderer(mats);
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                int handle = backend.AddTileLayer(mesh, double3.zero, 1, new TileId { Z = 0, X = 0, Y = 0 });
-                Assert.GreaterOrEqual(handle, 0);
-                backend.Rebuild(SceneFrame.Mercator(double2.zero));
-            }
-            finally
-            {
-                set.Dispose();
-            }
+            yield return new TestCaseData((Func<List<Material>, ITileRenderBackend>)(m => new BrgTileRenderer(m)))
+                .SetName("NullMaterialSlot_ConstructsAndAddsAtRealSlot(Brg)");
+            yield return new TestCaseData((Func<List<Material>, ITileRenderBackend>)(m => new EntitiesTileRenderer(m)))
+                .SetName("NullMaterialSlot_ConstructsAndAddsAtRealSlot(Entities)");
+            yield return new TestCaseData((Func<List<Material>, ITileRenderBackend>)(m => new GameObjectTileRenderer(m)))
+                .SetName("NullMaterialSlot_ConstructsAndAddsAtRealSlot(GameObject)");
         }
 
         [Test]
-        public void Entities_NullMaterialSlot_ConstructsAndAddsAtRealSlot()
+        [TestCaseSource(nameof(BackendFactories))]
+        public void NullMaterialSlot_ConstructsAndAddsAtRealSlot(Func<List<Material>, ITileRenderBackend> makeBackend)
         {
             var mats = NullThenRealMaterial(out var set);
             var meshes = new List<Mesh>();
             try
             {
-                using ITileRenderBackend backend = new EntitiesTileRenderer(mats);
-                var mesh = Track(new Mesh());
-                meshes.Add(mesh);
-                int handle = backend.AddTileLayer(mesh, double3.zero, 1, new TileId { Z = 0, X = 0, Y = 0 });
-                Assert.GreaterOrEqual(handle, 0);
-                backend.Rebuild(SceneFrame.Mercator(double2.zero));
-            }
-            finally
-            {
-                set.Dispose();
-            }
-        }
-
-        [Test]
-        public void GameObject_NullMaterialSlot_ConstructsAndAddsAtRealSlot()
-        {
-            var mats = NullThenRealMaterial(out var set);
-            var meshes = new List<Mesh>();
-            try
-            {
-                using ITileRenderBackend backend = new GameObjectTileRenderer(mats);
+                using ITileRenderBackend backend = makeBackend(mats);
                 var mesh = Track(new Mesh());
                 meshes.Add(mesh);
                 int handle = backend.AddTileLayer(mesh, double3.zero, 1, new TileId { Z = 0, X = 0, Y = 0 });
@@ -831,129 +809,82 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(LayerSkipReason.GenuinelyUnpainted, set.SkippedLayers[0].Reason);
         }
 
-        /// <summary>The unsupported circle layer is named
-        /// explicitly in the summary — id, raw type, reason — while the fill and line layers either side of
-        /// it still render. RED recipe: revert <see cref="RenderLayerFactory"/>'s reason-reporting overload
-        /// to the original bare-null <c>_ =&gt; null</c> arm (or otherwise stop threading
-        /// <see cref="LayerSkipReason.UnsupportedKind"/> through) — this test's reason assertion fails.</summary>
-        [Test]
-        public void Build_CircleLayer_ReportedAsUnsupportedKind_SupportedLayersStillRender()
+        private static SkippedLayer AssertSkippedLayerReportsExpectedReason(
+            string styleJson, string[] expectedSurvivorIds, string skippedId, string expectedRawType,
+            LayerSkipReason expectedReason)
         {
-            using RenderLayerSet set = Build(CircleInterleavedStyleJson);
+            using RenderLayerSet set = Build(styleJson);
 
-            Assert.AreEqual(2, set.Count, "fill-a and line-c must both still take a slot.");
-            Assert.AreEqual(1, set.SkippedLayers.Count, "exactly circle-b is skipped.");
+            Assert.AreEqual(expectedSurvivorIds.Length, set.Count,
+                "exactly the expected survivors must take a slot.");
+            for (int i = 0; i < expectedSurvivorIds.Length; i++)
+                Assert.AreEqual(expectedSurvivorIds[i], set[i].StyleLayer.Id,
+                    $"slot {i} must hold '{expectedSurvivorIds[i]}' — surviving layers stay contiguous " +
+                    "across the skip, exactly as if the skipped layer were absent from the style entirely.");
 
+            Assert.AreEqual(1, set.SkippedLayers.Count, "exactly one layer is skipped.");
             SkippedLayer skip = set.SkippedLayers[0];
-            Assert.AreEqual("circle-b", skip.Id, "the summary must name the skipped layer's OWN id.");
-            Assert.AreEqual("circle", skip.RawType, "the summary must carry the raw type string, not just the enum.");
-            Assert.AreEqual(LayerSkipReason.UnsupportedKind, skip.Reason,
-                "an unsupported kind must report UnsupportedKind — not silence, and not lumped in with a " +
-                "material-misconfiguration or by-design skip.");
+            Assert.AreEqual(skippedId, skip.Id, "the summary must name the skipped layer's OWN id.");
+            Assert.AreEqual(expectedRawType, skip.RawType, "the summary must carry the raw type string, not just the enum.");
+            Assert.AreEqual(expectedReason, skip.Reason,
+                "the reason must match the layer's actual incompatibility — not silence, and not lumped in " +
+                "with a different skip reason.");
+            return skip;
         }
 
-        /// <summary>Distinguishes the third reason from the other two (team-lead constraint): a source-less
-        /// symbol layer has nothing to place BY DESIGN — not an unsupported kind, not a misconfiguration.
-        /// RED recipe: delete the bare <c>Symbol.StyleLayer =&gt;</c> arm in <see cref="RenderLayerFactory.Create"/>
-        /// — the layer falls through to the default arm and reports <see cref="LayerSkipReason.UnsupportedKind"/>
-        /// instead, which this assertion catches.</summary>
+        /// <summary>An unsupported kind (circle) reports its reason with NO detail —
+        /// <see cref="RenderLayerFactory.Create"/> only sets <c>detail</c> for an unsupported filter
+        /// (RenderLayerFactory.cs:30). RED recipe: revert the bare default arm in
+        /// <see cref="RenderLayerFactory.Create"/> — the reason assertion fails.</summary>
         [Test]
-        public void Build_SourcelessSymbolLayer_ReportedAsGenuinelyUnpainted()
+        public void Build_SkippedLayer_UnsupportedKind_ReportsNoDetail()
         {
-            using RenderLayerSet set = Build(SourcelessSymbolStyleJson);
-
-            Assert.AreEqual(1, set.Count, "only fill-a renders.");
-            Assert.AreEqual(1, set.SkippedLayers.Count);
-
-            SkippedLayer skip = set.SkippedLayers[0];
-            Assert.AreEqual("symbol-nosrc", skip.Id);
-            Assert.AreEqual(LayerSkipReason.GenuinelyUnpainted, skip.Reason,
-                "a source-less symbol layer is a by-design skip, not a compatibility gap.");
+            SkippedLayer skip = AssertSkippedLayerReportsExpectedReason(
+                CircleInterleavedStyleJson, new[] { "fill-a", "line-c" }, "circle-b", "circle",
+                LayerSkipReason.UnsupportedKind);
+            Assert.IsNull(skip.Detail, "an unsupported-kind skip must carry no detail string.");
         }
 
-        /// <summary>UMR-223: a filter naming an unsupported operator (here <c>within</c>) is reported ONCE at
-        /// style load, and only its own layer is skipped — fill-a and line-c either side of it still take a
-        /// slot. RED recipe: remove the <see cref="RenderLayerFactory"/> filter-compile check in
-        /// <see cref="RenderLayerFactory.Create"/> — fill-b then takes slot 1 (set.Count becomes 3) and the
-        /// skip-reason assertion below fails.</summary>
+        /// <summary>A by-design skip (source-less symbol) reports its reason with NO detail. RED recipe:
+        /// delete the bare <c>Symbol.StyleLayer =&gt;</c> arm in <see cref="RenderLayerFactory.Create"/> —
+        /// the layer falls through to the unsupported-kind arm and the reason assertion fails.</summary>
         [Test]
-        public void Build_UnsupportedFilterLayer_ReportedAsUnsupportedFilter_SupportedLayersStillRender()
+        public void Build_SkippedLayer_GenuinelyUnpainted_ReportsNoDetail()
         {
-            using RenderLayerSet set = Build(UnsupportedFilterInterleavedStyleJson);
-
-            Assert.AreEqual(2, set.Count, "fill-a and line-c must both still take a slot.");
-            Assert.AreEqual(1, set.SkippedLayers.Count, "exactly fill-b is skipped.");
-
-            SkippedLayer skip = set.SkippedLayers[0];
-            Assert.AreEqual("fill-b", skip.Id, "the summary must name the skipped layer's OWN id.");
-            Assert.AreEqual("fill", skip.RawType, "an unsupported filter does not change the reported kind.");
-            Assert.AreEqual(LayerSkipReason.UnsupportedFilter, skip.Reason,
-                "an unsupported filter operator must report UnsupportedFilter — not UnsupportedKind, and not " +
-                "a throw that reaches the caller.");
-            StringAssert.Contains("within", skip.Detail,
-                "the summary must name WHICH operator failed, not just that one did — the same detail the " +
-                "old per-tile log carried.");
-
-            Assert.AreEqual("fill-a", set[0].StyleLayer.Id);
-            Assert.AreEqual("line-c", set[1].StyleLayer.Id);
+            SkippedLayer skip = AssertSkippedLayerReportsExpectedReason(
+                SourcelessSymbolStyleJson, new[] { "fill-a" }, "symbol-nosrc", "symbol",
+                LayerSkipReason.GenuinelyUnpainted);
+            Assert.IsNull(skip.Detail, "a by-design skip must carry no detail string.");
         }
 
-        /// <summary>The same unsupported filter on a SYMBOL layer: only symbol-b is skipped, so
-        /// <c>MapView.SetStyle</c>'s <c>_symbolStyleLayers</c> (built from <see cref="RenderLayerSet.Layers"/>,
-        /// see that call site) never carries it — symbol-a and symbol-c still label. RED recipe: same as
-        /// above.</summary>
+        /// <summary>An unsupported filter operator, on both a fill and a symbol layer, names WHICH operator
+        /// failed in its detail — the same detail the old per-tile log carried. RED recipe: revert the
+        /// filter-compile check in <see cref="RenderLayerFactory.Create"/> — that row's detail assertion
+        /// fails.</summary>
         [Test]
-        public void Build_UnsupportedFilterSymbolLayer_ReportedAsUnsupportedFilter_OtherSymbolLayersStillRender()
+        public void Build_SkippedLayer_UnsupportedFilter_Fill_ReportsDetail()
         {
-            using RenderLayerSet set = Build(UnsupportedFilterInterleavedSymbolStyleJson);
-
-            Assert.AreEqual(2, set.Count, "symbol-a and symbol-c must both still take a slot.");
-            Assert.AreEqual(1, set.SkippedLayers.Count, "exactly symbol-b is skipped.");
-
-            SkippedLayer skip = set.SkippedLayers[0];
-            Assert.AreEqual("symbol-b", skip.Id);
-            Assert.AreEqual(LayerSkipReason.UnsupportedFilter, skip.Reason);
-
-            Assert.AreEqual("symbol-a", set[0].StyleLayer.Id);
-            Assert.AreEqual("symbol-c", set[1].StyleLayer.Id);
+            SkippedLayer skip = AssertSkippedLayerReportsExpectedReason(
+                UnsupportedFilterInterleavedStyleJson, new[] { "fill-a", "line-c" }, "fill-b", "fill",
+                LayerSkipReason.UnsupportedFilter);
+            StringAssert.Contains("within", skip.Detail, "an unsupported-filter skip must name WHICH operator failed.");
         }
 
-        /// <summary>An unsupported filter is a real compatibility gap, so <see cref="MapView.LogSkippedLayers"/>
-        /// must warn about it exactly like <see cref="LayerSkipReason.UnsupportedKind"/> does.</summary>
         [Test]
-        public void LogSkippedLayers_WarnsForUnsupportedFilter()
+        public void Build_SkippedLayer_UnsupportedFilter_Symbol_ReportsDetail()
         {
-            using RenderLayerSet set = Build(UnsupportedFilterInterleavedStyleJson);
-
-            // Names which operator failed, not just that one did — the detail the old per-tile log carried.
-            LogAssert.Expect(LogType.Warning, new Regex("fill-b.*UnsupportedFilter.*within"));
-            MapView.LogSkippedLayers(set.SkippedLayers);
-            LogAssert.NoUnexpectedReceived();
-        }
-
-        /// <summary>Mirrors <see cref="TryGetFetchSource_RefusesALayerThatCanNeverDraw"/> for a filter, not a
-        /// draw gate: a layer whose filter cannot compile must not register its source either, or a source no
-        /// drawing layer reads still gets fetched and MVT-decoded for nothing (the invariant
-        /// <see cref="RenderLayerFactory.TryGetFetchSource"/>'s own doc states).</summary>
-        [Test]
-        public void TryGetFetchSource_RefusesAnUnsupportedFilterLayer()
-        {
-            StyleDocument doc = StyleParser.Parse(UnsupportedFilterInterleavedStyleJson);
-            var fetched = new List<string>();
-            foreach (StyleLayer sl in doc.Layers)
-                if (RenderLayerFactory.TryGetFetchSource(sl, out string sid))
-                    fetched.Add(sl.Id);
-
-            CollectionAssert.AreEquivalent(new[] { "fill-a", "line-c" }, fetched,
-                "fill-b's filter cannot compile, so it must not register 's' as a fetch source either — " +
-                "the other two layers on 's' already do, so the source is still fetched for them.");
+            SkippedLayer skip = AssertSkippedLayerReportsExpectedReason(
+                UnsupportedFilterInterleavedSymbolStyleJson, new[] { "symbol-a", "symbol-c" }, "symbol-b", "symbol",
+                LayerSkipReason.UnsupportedFilter);
+            StringAssert.Contains("within", skip.Detail, "an unsupported-filter skip must name WHICH operator failed.");
         }
 
         /// <summary>UMR-223, through the real <see cref="MapView.SetStyle(StyleDocument,string,System.Threading.CancellationToken)"/>
         /// path: a filter change is never an in-place restyle (<see cref="SurvivingLayerGate"/> refuses it —
         /// <c>filter</c> sits inside the compared signature), so this always takes the full-rebuild arm. When
         /// fill-b's filter turns unsupported, the rebuild must skip ONLY fill-b; fill-a and line-c keep their
-        /// slots. RED recipe: same as <see cref="Build_UnsupportedFilterLayer_ReportedAsUnsupportedFilter_SupportedLayersStillRender"/>.</summary>
+        /// slots. RED recipe: same as
+        /// <see cref="Build_SkippedLayer_UnsupportedFilter_Fill_ReportsDetail"/>.</summary>
         [Test]
         public void SetStyle_FullRebuild_FilterTurnsUnsupported_OnlyThatLayerIsSkipped()
         {
@@ -981,25 +912,56 @@ namespace MapRenderer.Tests.Rendering
             }
         }
 
-        /// <summary>MapView.LogSkippedLayers must warn for an actual compatibility gap but stay silent for a
-        /// by-design skip — the distinction the reason enum (not the log site) carries.
-        /// RED recipe: remove the <c>GenuinelyUnpainted</c> filter in <see cref="MapView.LogSkippedLayers"/>
-        /// — the second call below then also warns, and <see cref="LogAssert.NoUnexpectedReceived"/> fails it.</summary>
+        /// <summary>An unsupported filter is a real compatibility gap, end-to-end through the real factory —
+        /// so the DETAIL a caller sees in the log is the one <c>FilterCompiles</c> actually produced, not a
+        /// hand-built stand-in.</summary>
         [Test]
-        public void LogSkippedLayers_WarnsForCompatibilityGap_SilentForByDesignSkip()
+        public void LogSkippedLayers_WarnsForUnsupportedFilter()
         {
-            var unsupported = new List<SkippedLayer>
-            {
-                new SkippedLayer { Id = "circle-b", RawType = "circle", Reason = LayerSkipReason.UnsupportedKind },
-            };
-            LogAssert.Expect(LogType.Warning, new Regex("circle-b.*UnsupportedKind"));
-            MapView.LogSkippedLayers(unsupported);
+            using RenderLayerSet set = Build(UnsupportedFilterInterleavedStyleJson);
 
-            var byDesignOnly = new List<SkippedLayer>
-            {
-                new SkippedLayer { Id = "symbol-nosrc", RawType = "symbol", Reason = LayerSkipReason.GenuinelyUnpainted },
-            };
-            MapView.LogSkippedLayers(byDesignOnly);
+            // Names which operator failed, not just that one did — the detail the old per-tile log carried.
+            LogAssert.Expect(LogType.Warning, new Regex("fill-b.*UnsupportedFilter.*within"));
+            MapView.LogSkippedLayers(set.SkippedLayers);
+            LogAssert.NoUnexpectedReceived();
+        }
+
+        /// <summary>
+        /// <see cref="MapView.LogSkippedLayers"/> warns for a real compatibility gap (an unsupported kind)
+        /// but stays silent for a by-design skip (a source-less symbol, <c>visibility: none</c>, or a
+        /// constant fully-transparent layer) — the distinction the reason ENUM carries, not the log site.
+        /// RED recipe: remove a reason from the warn set in <see cref="MapView.LogSkippedLayers"/> — that
+        /// row's expected warning never appears, or a silent row's <see cref="LogAssert.NoUnexpectedReceived"/>
+        /// then fails it.
+        /// </summary>
+        private static IEnumerable<TestCaseData> LogSkippedLayersCases()
+        {
+            yield return new TestCaseData(
+                    (object)new List<SkippedLayer> { new SkippedLayer { Id = "circle-b", RawType = "circle", Reason = LayerSkipReason.UnsupportedKind } },
+                    new[] { "circle-b.*UnsupportedKind" })
+                .SetName("LogSkippedLayers_WarnsOnlyForCompatibilityGaps(UnsupportedKind_Warns)");
+            yield return new TestCaseData(
+                    (object)new List<SkippedLayer> { new SkippedLayer { Id = "symbol-nosrc", RawType = "symbol", Reason = LayerSkipReason.GenuinelyUnpainted } },
+                    Array.Empty<string>())
+                .SetName("LogSkippedLayers_WarnsOnlyForCompatibilityGaps(GenuinelyUnpainted_Silent)");
+            yield return new TestCaseData(
+                    (object)new List<SkippedLayer>
+                    {
+                        new SkippedLayer { Id = "hidden-b", RawType = "fill", Reason = LayerSkipReason.Hidden },
+                        new SkippedLayer { Id = "clear-c", RawType = "fill", Reason = LayerSkipReason.FullyTransparent },
+                    },
+                    Array.Empty<string>())
+                .SetName("LogSkippedLayers_WarnsOnlyForCompatibilityGaps(HiddenAndFullyTransparent_Silent)");
+        }
+
+        // skipped is boxed as `object` (not the internal List<SkippedLayer>) because a public
+        // [TestCaseSource] test method cannot name an internal type in its own signature.
+        [Test]
+        [TestCaseSource(nameof(LogSkippedLayersCases))]
+        public void LogSkippedLayers_WarnsOnlyForCompatibilityGaps(object skipped, string[] expectedWarningRegexes)
+        {
+            foreach (string regex in expectedWarningRegexes) LogAssert.Expect(LogType.Warning, new Regex(regex));
+            MapView.LogSkippedLayers((List<SkippedLayer>)skipped);
             LogAssert.NoUnexpectedReceived(); // a by-design skip must not produce ANY warning
         }
 
@@ -1077,27 +1039,6 @@ namespace MapRenderer.Tests.Rendering
             return set;
         }
 
-        /// <summary>Pins that <see cref="MapView.LayerNumbering"/> folds the actual (dense index, id) PAIRS,
-        /// not merely the survivor COUNT. The two styles reach the SAME count (1) by different skip patterns,
-        /// so a <c>layers.Count</c> fold would let the second style serve the first's stale bake.</summary>
-        [Test]
-        public void LayerNumbering_EqualSurvivorCount_DifferentSkipPattern_ProducesDifferentNumbering()
-        {
-            using RenderLayerSet extrusionPresent = Build(ExtrusionPresentOtherSkippedStyleJson);
-            Assert.AreEqual(1, extrusionPresent.Count, "drive precondition: only the extrusion layer survives.");
-
-            // Disposed (LIFO) AFTER extrusionSkipped below: layers clone these base materials, and the
-            // consumer goes before its source.
-            var extrusionLessMaterials = Track(WithoutExtrusionMaterial());
-            using RenderLayerSet extrusionSkipped = new RenderLayerSet();
-            extrusionSkipped.Build(StyleParser.Parse(ExtrusionSkippedOtherPresentStyleJson), 0.0, extrusionLessMaterials);
-            Assert.AreEqual(1, extrusionSkipped.Count, "drive precondition: only the line layer survives.");
-
-            Assert.AreNotEqual(
-                MapView.LayerNumbering(extrusionPresent), MapView.LayerNumbering(extrusionSkipped),
-                "equal survivor counts from different skip patterns must still fold to different tokens.");
-        }
-
         // Same id SET and count, different declared ORDER: cached geometry is baked against a dense INDEX,
         // so a fold over an unordered (or sorted) id set would miss this.
         private const string FillThenLineStyleJson = @"{
@@ -1118,20 +1059,45 @@ namespace MapRenderer.Tests.Rendering
     ]
 }";
 
-        /// <summary>Pins that the fold is sensitive to dense POSITION, not just the id SET. RED recipe: fold
-        /// <c>layers[li].StyleLayer?.Id</c> into a set/sorted list instead of an ordered <c>(li, id)</c> walk
-        /// — both sides carry the same two ids and this assertion fails.</summary>
+        /// <summary>
+        /// Two ways for two style builds to LOOK alike while <see cref="MapView.LayerNumbering"/> must still
+        /// tell them apart: the same survivor COUNT reached by different skip patterns, and the same id SET
+        /// in a different declared ORDER (cached geometry is baked against a dense index, so a fold over an
+        /// unordered/sorted id set would miss this). RED recipe: fold <c>layers[li].StyleLayer?.Id</c> into a
+        /// set/sorted list, or fold survivor count instead of the (dense index, id) pairs — either block's
+        /// assertion then fails.
+        /// </summary>
         [Test]
-        public void LayerNumbering_SameIdSet_DifferentOrder_ProducesDifferentNumbering()
+        public void LayerNumbering_SuperficiallySimilarSets_ProduceDifferentTokens()
         {
-            using RenderLayerSet fillThenLine = Build(FillThenLineStyleJson);
-            using RenderLayerSet lineThenFill = Build(LineThenFillStyleJson);
-            Assert.AreEqual(2, fillThenLine.Count);
-            Assert.AreEqual(2, lineThenFill.Count);
+            // ── Equal survivor count, different skip pattern ──
+            using (RenderLayerSet extrusionPresent = Build(ExtrusionPresentOtherSkippedStyleJson))
+            {
+                Assert.AreEqual(1, extrusionPresent.Count, "drive precondition: only the extrusion layer survives.");
 
-            Assert.AreNotEqual(
-                MapView.LayerNumbering(fillThenLine), MapView.LayerNumbering(lineThenFill),
-                "the same two ids in a different declared order must fold to different tokens.");
+                // Disposed (LIFO) AFTER extrusionSkipped below: layers clone these base materials, and the
+                // consumer goes before its source.
+                var extrusionLessMaterials = Track(WithoutExtrusionMaterial());
+                using RenderLayerSet extrusionSkipped = new RenderLayerSet();
+                extrusionSkipped.Build(StyleParser.Parse(ExtrusionSkippedOtherPresentStyleJson), 0.0, extrusionLessMaterials);
+                Assert.AreEqual(1, extrusionSkipped.Count, "drive precondition: only the line layer survives.");
+
+                Assert.AreNotEqual(
+                    MapView.LayerNumbering(extrusionPresent), MapView.LayerNumbering(extrusionSkipped),
+                    "equal survivor counts from different skip patterns must still fold to different tokens.");
+            }
+
+            // ── Same id set, different declared order ──
+            using (RenderLayerSet fillThenLine = Build(FillThenLineStyleJson))
+            using (RenderLayerSet lineThenFill = Build(LineThenFillStyleJson))
+            {
+                Assert.AreEqual(2, fillThenLine.Count);
+                Assert.AreEqual(2, lineThenFill.Count);
+
+                Assert.AreNotEqual(
+                    MapView.LayerNumbering(fillThenLine), MapView.LayerNumbering(lineThenFill),
+                    "the same two ids in a different declared order must fold to different tokens.");
+            }
         }
 
         // ── Layers that can never draw are never constructed ──────────────────────────────────────
@@ -1180,39 +1146,37 @@ namespace MapRenderer.Tests.Rendering
         }
 
         /// <summary>
-        /// Neither never-drawn layer is a compatibility gap, so <see cref="MapView.LogSkippedLayers"/> stays
-        /// silent about both. Warning here would put a line in every log for a style doing what its author
-        /// asked.
+        /// A source read only by layers that can never draw — because their filter cannot compile, or
+        /// because they can never draw at all (<c>visibility: none</c>/constant fully-transparent) — is never
+        /// fetched, so its tiles are never decoded either. <c>TryGetFetchSource</c> is the one registry
+        /// <c>MapView.BuildSourceSpecs</c> derives from, so excluding a layer here is what stops the whole
+        /// per-tile pipeline for it.
         /// </summary>
-        [Test]
-        public void LogSkippedLayers_SilentForALayerThatCanNeverDraw()
+        private static IEnumerable<TestCaseData> RefusesFetchSourceCases()
         {
-            MapView.LogSkippedLayers(new List<SkippedLayer>
-            {
-                new SkippedLayer { Id = "hidden-b", RawType = "fill", Reason = LayerSkipReason.Hidden },
-                new SkippedLayer { Id = "clear-c", RawType = "fill", Reason = LayerSkipReason.FullyTransparent },
-            });
-            LogAssert.NoUnexpectedReceived();
+            yield return new TestCaseData(UnsupportedFilterInterleavedStyleJson, new[] { "fill-a=>s", "line-c=>s" },
+                    "fill-b's filter cannot compile, so it must not register 's' as a fetch source either — " +
+                    "the other two layers on 's' already do, so the source is still fetched for them.")
+                .SetName("TryGetFetchSource_RefusesALayerThatCanNeverDraw_ForAnyReason(UnsupportedFilter)");
+            yield return new TestCaseData(NeverDrawnInterleavedStyleJson, new[] { "fill-a=>s", "line-d=>s" },
+                    "only the two layers that can draw may register a fetch source. Including hidden-b or " +
+                    "clear-c downloads and MVT-decodes tiles for a layer whose pixels can never reach the " +
+                    "screen — the cost the draw gate cannot reach, because it acts after the mesh exists.")
+                .SetName("TryGetFetchSource_RefusesALayerThatCanNeverDraw_ForAnyReason(HiddenAndFullyTransparent)");
         }
 
-        /// <summary>
-        /// A source read only by layers that can never draw is never fetched, so its tiles are never
-        /// decoded either. <c>TryGetFetchSource</c> is the one registry <c>MapView.BuildSourceSpecs</c>
-        /// derives from, so excluding a layer here is what stops the whole per-tile pipeline for it.
-        /// </summary>
         [Test]
-        public void TryGetFetchSource_RefusesALayerThatCanNeverDraw()
+        [TestCaseSource(nameof(RefusesFetchSourceCases))]
+        public void TryGetFetchSource_RefusesALayerThatCanNeverDraw_ForAnyReason(
+            string styleJson, string[] expectedFetched, string message)
         {
-            StyleDocument doc = StyleParser.Parse(NeverDrawnInterleavedStyleJson);
+            StyleDocument doc = StyleParser.Parse(styleJson);
             var fetched = new List<string>();
             foreach (StyleLayer sl in doc.Layers)
                 if (RenderLayerFactory.TryGetFetchSource(sl, out string sid))
                     fetched.Add(sl.Id + "=>" + sid);
 
-            CollectionAssert.AreEquivalent(new[] { "fill-a=>s", "line-d=>s" }, fetched,
-                "only the two layers that can draw may register a fetch source. Including hidden-b or " +
-                "clear-c downloads and MVT-decodes tiles for a layer whose pixels can never reach the " +
-                "screen — the cost the draw gate cannot reach, because it acts after the mesh exists.");
+            CollectionAssert.AreEquivalent(expectedFetched, fetched, message);
         }
     }
 

@@ -445,6 +445,10 @@
          calibration alloc read 16 KB), so this byte-delta tooth is core-tests-ONLY (it lives here, NOT in the
          Assets EditMode tree, so Unity never compiles/runs it). See allocgcmemory-constraint-false-positives. -->
     <Compile Include="SymbolTileBufferAllocTests.cs" />
+    <!-- StyleProperty<T>'s zoom-interpolate GC-allocation sweep is core-tests-ONLY for the same reason as
+         SymbolTileBufferAllocTests.cs above: the byte-delta meter reads a constant 0 in the Unity EditMode
+         Mono runner. -->
+    <Compile Include="StyleZoomInterpolateAllocTests.cs" />
     <!-- Epic A / A1: WorldBillboardVertex is BillboardMath.BuildWorldQuad's output type — must compile
          alongside BillboardMath.cs (below) even though A0 didn't need it here (no real emit yet). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/WorldBillboardVertex.cs" />

@@ -508,29 +508,22 @@ namespace MapRenderer.Tests.DataSources
     public class TileUrlTemplateTests
     {
         [Test]
-        public void Resolve_Tms_FlipsY_ForANonZeroZoom()
+        public void Resolve_MatchesTmsFlip()
         {
-            var address = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = true };
-            Assert.AreEqual("3/5/6", address.Resolve(new TileId { Z = 3, X = 5, Y = 1 }),
-                "z3 has 8 rows (0..7); TMS row 1 is XYZ row 6 — y' = (1<<z) - 1 - y. X and Z pass through unchanged.");
-        }
+            // z3 has 8 rows (0..7); TMS row 1 is XYZ row 6 — y' = (1<<z) - 1 - y. X and Z pass through unchanged.
+            var tms = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = true };
+            Assert.AreEqual("3/5/6", tms.Resolve(new TileId { Z = 3, X = 5, Y = 1 }),
+                "Tms flips y for a non-zero zoom.");
 
-        /// <summary>Control: at z0 there is one row, so the correct flip is the identity. Without this arm, an
-        /// implementation that flips unconditionally by some OTHER formula could still satisfy the z3 case by
-        /// coincidence; z0 pins that the formula, not just "some flip", is <c>(1&lt;&lt;z) - 1 - y</c>.</summary>
-        [Test]
-        public void Resolve_Tms_ZoomZero_IsUnaffected()
-        {
-            var address = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = true };
-            Assert.AreEqual("0/0/0", address.Resolve(new TileId { Z = 0, X = 0, Y = 0 }));
-        }
+            // Control: at z0 there is one row, so the correct flip is the identity — rules out "some flip"
+            // by a different formula.
+            Assert.AreEqual("0/0/0", tms.Resolve(new TileId { Z = 0, X = 0, Y = 0 }),
+                "Tms at zoom zero is unaffected.");
 
-        /// <summary>Control: with no <c>scheme: "tms"</c>, <c>Resolve</c> never flips.</summary>
-        [Test]
-        public void Resolve_Xyz_DoesNotFlip()
-        {
-            var address = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = false };
-            Assert.AreEqual("3/5/1", address.Resolve(new TileId { Z = 3, X = 5, Y = 1 }));
+            // Control: with no Tms, Resolve never flips.
+            var xyz = new TileUrlTemplate { Template = "{z}/{x}/{y}", Tms = false };
+            Assert.AreEqual("3/5/1", xyz.Resolve(new TileId { Z = 3, X = 5, Y = 1 }),
+                "Xyz (no Tms) does not flip.");
         }
 
         /// <summary>Composition tooth: <see cref="TemplatedTileSource"/> must actually route the id through
@@ -1327,81 +1320,28 @@ namespace MapRenderer.Tests.DataSources
         // Negative-caching policy — fake clock, no wall-clock sleeps
         // -----------------------------------------------------------------------------------------
 
-        /// <summary>
-        /// An absent tile (HasData=false) is NOT re-fetched within the negative-cache TTL.
-        /// </summary>
-        [Test]
-        public async Task NegativeCache_AbsentTile_NotRefetchedWithinTtl()
+        /// <summary>An absent tile's negative-cache re-fetch decision, given the configured TTL and the
+        /// elapsed time before the second request: within the TTL it is served from cache (not re-fetched);
+        /// past the TTL, or with the TTL disabled (zero), it is re-fetched. An absent tile is never written
+        /// to the LRU <see cref="TileCache"/> in any case (no indefinite caching).</summary>
+        private static IEnumerable<TestCaseData> NegativeCacheCases()
         {
-            int fetchCount = 0;
-            var fakeSource = TestDataSource.FromFetch(id =>
-            {
-                Interlocked.Increment(ref fetchCount);
-                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
-            });
-
-            var now    = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            var clock  = new FakeClock(now);
-            var cache  = new TileCache(capacity: 10);
-            var scheduler = new TileScheduler(fakeSource, cache,
-                negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
-            var tileId = new TileId { Z = 9, X = 1, Y = 1 };
-
-            // First request — issues a fetch that reports absent.
-            var r1 = await scheduler.Request(tileId);
-            Assert.IsFalse(r1.HasData, "First response must be absent");
-            Assert.AreEqual(1, fetchCount, "First request issues exactly one fetch");
-
-            // Advance the clock but stay inside the TTL.
-            clock.Advance(TimeSpan.FromSeconds(2));
-
-            // Second request — must be served from the negative cache, NOT re-fetched.
-            var r2 = await scheduler.Request(tileId);
-            Assert.IsFalse(r2.HasData, "Second response must still be absent");
-            Assert.AreEqual(1, fetchCount,
-                "Absent tile must NOT be re-fetched within the negative-cache TTL (item b).");
-
-            // The absent tile must NOT have been written to the LRU cache.
-            Assert.IsFalse(cache.ContainsKey(tileId),
-                "Absent tile must not be stored in the LRU TileCache (no indefinite caching).");
+            yield return new TestCaseData(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), 1,
+                    "Absent tile must NOT be re-fetched within the negative-cache TTL (item b).")
+                .SetName("NegativeCache_RefetchDecision_GivenTtlAndElapsed(WithinTtl_NotRefetched)");
+            yield return new TestCaseData(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6), 2,
+                    "Absent tile must be re-fetched once the negative-cache TTL has expired (item b).")
+                .SetName("NegativeCache_RefetchDecision_GivenTtlAndElapsed(PastTtl_Refetched)");
+            yield return new TestCaseData(TimeSpan.Zero, TimeSpan.Zero, 2,
+                    "With negativeTtl == TimeSpan.Zero, an absent tile is re-fetched every request.")
+                .SetName("NegativeCache_RefetchDecision_GivenTtlAndElapsed(ZeroTtl_AlwaysRefetched)");
         }
 
-        /// <summary>
-        /// After the negative-cache TTL expires, an absent tile IS re-fetched.
-        /// </summary>
         [Test]
-        public async Task NegativeCache_RefetchesAfterTtlExpiry()
-        {
-            int fetchCount = 0;
-            var fakeSource = TestDataSource.FromFetch(id =>
-            {
-                Interlocked.Increment(ref fetchCount);
-                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
-            });
-
-            var now    = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            var clock  = new FakeClock(now);
-            var cache  = new TileCache(capacity: 10);
-            var scheduler = new TileScheduler(fakeSource, cache,
-                negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
-            var tileId = new TileId { Z = 9, X = 2, Y = 2 };
-
-            await scheduler.Request(tileId);
-            Assert.AreEqual(1, fetchCount, "First request issues one fetch");
-
-            // Advance past the TTL.
-            clock.Advance(TimeSpan.FromSeconds(6));
-
-            await scheduler.Request(tileId);
-            Assert.AreEqual(2, fetchCount,
-                "Absent tile must be re-fetched once the negative-cache TTL has expired (item b).");
-        }
-
-        /// <summary>
-        /// A negative TTL of zero disables negative caching entirely.
-        /// </summary>
-        [Test]
-        public async Task NegativeCache_ZeroTtl_AlwaysRefetches()
+        [TestCaseSource(nameof(NegativeCacheCases))]
+        public async Task NegativeCache_RefetchDecision_GivenTtlAndElapsed(
+            TimeSpan negativeTtl, TimeSpan advanceBeforeSecondRequest, int expectedFetchCountAfterSecond,
+            string message)
         {
             int fetchCount = 0;
             var fakeSource = TestDataSource.FromFetch(id =>
@@ -1412,14 +1352,21 @@ namespace MapRenderer.Tests.DataSources
 
             var clock  = new FakeClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
             var cache  = new TileCache(capacity: 10);
-            var scheduler = new TileScheduler(fakeSource, cache,
-                negativeTtl: TimeSpan.Zero, clock: clock.Now);
-            var tileId = new TileId { Z = 9, X = 3, Y = 3 };
+            var scheduler = new TileScheduler(fakeSource, cache, negativeTtl: negativeTtl, clock: clock.Now);
+            var tileId = new TileId { Z = 9, X = 1, Y = 1 };
 
-            await scheduler.Request(tileId);
-            await scheduler.Request(tileId);
-            Assert.AreEqual(2, fetchCount,
-                "With negativeTtl == TimeSpan.Zero, an absent tile is re-fetched every request.");
+            var r1 = await scheduler.Request(tileId);
+            Assert.IsFalse(r1.HasData, "First response must be absent");
+            Assert.AreEqual(1, fetchCount, "First request issues exactly one fetch");
+
+            clock.Advance(advanceBeforeSecondRequest);
+
+            var r2 = await scheduler.Request(tileId);
+            Assert.IsFalse(r2.HasData, "Second response must still be absent");
+            Assert.AreEqual(expectedFetchCountAfterSecond, fetchCount, message);
+
+            Assert.IsFalse(cache.ContainsKey(tileId),
+                "Absent tile must not be stored in the LRU TileCache (no indefinite caching).");
         }
 
         // -----------------------------------------------------------------------------------------

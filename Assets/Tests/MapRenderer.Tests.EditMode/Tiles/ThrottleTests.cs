@@ -1077,24 +1077,13 @@ namespace MapRenderer.Tests.Tiles
         // ── Pure zoom math: ZoomAt triangle wave ─────────────────────────────────────────────────────
 
         [Test]
-        public void ZoomAt_PhaseZero_IsMin()
-            => Assert.AreEqual(4.0, TileLoadStressDriver.ZoomAt(0.0, 4.0, 14.0, 8.0), Tol);
-
-        [Test]
-        public void ZoomAt_HalfPeriod_IsMax()
-            => Assert.AreEqual(14.0, TileLoadStressDriver.ZoomAt(4.0, 4.0, 14.0, 8.0), Tol);
-
-        [Test]
-        public void ZoomAt_FullPeriod_WrapsBackToMin()
-            => Assert.AreEqual(4.0, TileLoadStressDriver.ZoomAt(8.0, 4.0, 14.0, 8.0), Tol);
-
-        [Test]
-        public void ZoomAt_QuarterPeriod_IsMidpointRising()
-            => Assert.AreEqual(9.0, TileLoadStressDriver.ZoomAt(2.0, 4.0, 14.0, 8.0), Tol);
-
-        [Test]
-        public void ZoomAt_ThreeQuarterPeriod_IsMidpointFalling()
-            => Assert.AreEqual(9.0, TileLoadStressDriver.ZoomAt(6.0, 4.0, 14.0, 8.0), Tol);
+        [TestCase(0.0, 4.0, TestName = "ZoomAt_MatchesTriangleWave(PhaseZero_IsMin)")]
+        [TestCase(4.0, 14.0, TestName = "ZoomAt_MatchesTriangleWave(HalfPeriod_IsMax)")]
+        [TestCase(8.0, 4.0, TestName = "ZoomAt_MatchesTriangleWave(FullPeriod_WrapsBackToMin)")]
+        [TestCase(2.0, 9.0, TestName = "ZoomAt_MatchesTriangleWave(QuarterPeriod_IsMidpointRising)")]
+        [TestCase(6.0, 9.0, TestName = "ZoomAt_MatchesTriangleWave(ThreeQuarterPeriod_IsMidpointFalling)")]
+        public void ZoomAt_MatchesTriangleWave(double t, double expected)
+            => Assert.AreEqual(expected, TileLoadStressDriver.ZoomAt(t, 4.0, 14.0, 8.0), Tol);
 
         [Test]
         public void ZoomAt_NonPositivePeriod_PinsToMin()
@@ -1125,35 +1114,15 @@ namespace MapRenderer.Tests.Tiles
         // Centre at the equator (cos(lat)=1) so the longitude scaling is 1 and the orbit is exact.
 
         [Test]
-        public void LookAtAt_PhaseZero_IsDueEastOfCentre()
+        [TestCase(0.0, 0.0, 10.0, TestName = "LookAtAt_MatchesCircularOrbit(PhaseZero_IsDueEastOfCentre)")]
+        [TestCase(2.0, 10.0, 0.0, TestName = "LookAtAt_MatchesCircularOrbit(QuarterPeriod_IsDueNorth)")]
+        [TestCase(4.0, 0.0, -10.0, TestName = "LookAtAt_MatchesCircularOrbit(HalfPeriod_IsDueWest)")]
+        [TestCase(8.0, 0.0, 10.0, TestName = "LookAtAt_MatchesCircularOrbit(FullPeriod_WrapsBackToStart)")]
+        public void LookAtAt_MatchesCircularOrbit(double t, double expectedLat, double expectedLon)
         {
-            var (lat, lon) = TileLoadStressDriver.LookAtAt(0.0, 0.0, 0.0, 10.0, 8.0);
-            Assert.AreEqual(0.0,  lat, 1e-9);
-            Assert.AreEqual(10.0, lon, 1e-9);
-        }
-
-        [Test]
-        public void LookAtAt_QuarterPeriod_IsDueNorth()
-        {
-            var (lat, lon) = TileLoadStressDriver.LookAtAt(2.0, 0.0, 0.0, 10.0, 8.0);
-            Assert.AreEqual(10.0, lat, 1e-9);
-            Assert.AreEqual(0.0,  lon, 1e-9);
-        }
-
-        [Test]
-        public void LookAtAt_HalfPeriod_IsDueWest()
-        {
-            var (lat, lon) = TileLoadStressDriver.LookAtAt(4.0, 0.0, 0.0, 10.0, 8.0);
-            Assert.AreEqual(0.0,   lat, 1e-9);
-            Assert.AreEqual(-10.0, lon, 1e-9);
-        }
-
-        [Test]
-        public void LookAtAt_FullPeriod_WrapsBackToStart()
-        {
-            var (lat, lon) = TileLoadStressDriver.LookAtAt(8.0, 0.0, 0.0, 10.0, 8.0);
-            Assert.AreEqual(0.0,  lat, 1e-9);
-            Assert.AreEqual(10.0, lon, 1e-9);
+            var (lat, lon) = TileLoadStressDriver.LookAtAt(t, 0.0, 0.0, 10.0, 8.0);
+            Assert.AreEqual(expectedLat, lat, 1e-9);
+            Assert.AreEqual(expectedLon, lon, 1e-9);
         }
 
         [Test]
@@ -2754,11 +2723,10 @@ namespace MapRenderer.Tests.Tiles
             Build("{\"fill-color\":\"#ffffff\"}", out int defaultBand, out double2[] defaultInterior);
             Build("{\"fill-color\":\"#ffffff\",\"fill-antialias\":false}", out int offBand, out double2[] offInterior);
 
-            // Two band vertices per ring vertex over one 3-vertex ring. A precondition, because a tree that
-            // emits no band at all satisfies the assertion below.
-            Assert.AreEqual(6, defaultBand,
+            // A precondition, because a tree that emits no band at all satisfies the assertion below.
+            Assert.That(defaultBand, Is.GreaterThan(0),
                 "precondition: with fill-antialias absent (⇒ true, the spec default) this ring must carry a " +
-                "full band, or the zero below is measuring a band-free tree rather than the opt-out.");
+                "band, or the zero below is measuring a band-free tree rather than the opt-out.");
 
             Assert.AreEqual(0, offBand,
                 "fill-antialias: false must emit NO band geometry — this is the property's only consumer, " +

@@ -7,8 +7,8 @@
 // default (non-hairline, AA-on) path. It is a copy rather than an #include because pulling the real
 // LineCoverage in drags the whole line CBUFFER, its keywords and its dash machinery into a probe that
 // needs none of them — and the copy is pinned against drift by
-// FillOutwardBandProbeTests.ProbeFormula_IsVerbatimTheShippedLineCoverageExpression, which reads both
-// files and fails if they ever diverge.
+// FillBandAttributeTests.FillBandCoverage_IsVerbatimTheShippedLineCoverageExpression, which reads this
+// file and Line_VertexExtrude.hlsl and fails if they ever diverge.
 Shader "Hidden/MapRenderer/Tests/FillBandCoverageProbe"
 {
     Properties

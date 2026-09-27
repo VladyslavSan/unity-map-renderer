@@ -687,65 +687,39 @@ namespace MapRenderer.Tests.Visual
         /// near the 3% blank threshold, so the multi-line scene is used.
         /// </summary>
         [Test]
-        public void RoundCapScene_RendersLine_WritesPng_PassesCoverage()
+        [TestCase(JoinType.Round, CapType.Round, TestName = "CapScene_RendersLine_WritesPng_PassesCoverage(Round)")]
+        [TestCase(JoinType.Miter, CapType.Square, TestName = "CapScene_RendersLine_WritesPng_PassesCoverage(Square)")]
+        public void CapScene_RendersLine_WritesPng_PassesCoverage(JoinType join, CapType cap)
         {
+            string label = $"{cap}-cap";
+            string pngName = $"line-{cap.ToString().ToLowerInvariant()}-cap.png";
+            string sceneName = $"LineTest{cap}Cap";
+
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
 
-            // Build all golden shapes with Round cap + Round join.
-            var go = Track(BuildLineScene(LineWidthMeters, out _, JoinType.Round, CapType.Round));
-            go.name = "LineTestRoundCap";
+            // Build all golden shapes with the row's cap + join.
+            var go = Track(BuildLineScene(LineWidthMeters, out _, join, cap));
+            go.name = sceneName;
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             {
                 snap.Render(camera);
 
-                string pngPath = snap.WritePng("line-round-cap.png");
+                string pngPath = snap.WritePng(pngName);
                 FileAssert.Exists(pngPath);
                 Assert.That(new FileInfo(pngPath).Length, Is.GreaterThan(500L),
-                    "Round-cap PNG must be non-trivial (>500 bytes).");
+                    $"{label} PNG must be non-trivial (>500 bytes).");
 
                 Frame pixels = snap.Pixels;
                 SnapshotVerdict v = SnapshotCoverage.Analyse(pixels, Bg32);
 
                 Assert.IsFalse(v.IsBlank,
-                    "Round-cap line render must not be blank (multi-line scene should give >3% fill).");
+                    $"{label} line render must not be blank (multi-line scene should give >3% fill).");
                 Assert.That(v.FilledFraction, Is.InRange(0.01f, 0.50f),
-                    $"Round-cap fill fraction {v.FilledFraction:P1} must be in [1%,50%].");
+                    $"{label} fill fraction {v.FilledFraction:P1} must be in [1%,50%].");
                 Assert.IsTrue(v.Passes(minFill: 0.01f, maxFill: 0.50f, minBuckets: 2),
-                    $"Round-cap render must pass coverage gate. " +
-                    $"fill={v.FilledFraction:P1}, buckets={v.DistinctRegionBucketsHit}.");
-            }
-        }
-
-        [Test]
-        public void SquareCapScene_RendersLine_WritesPng_PassesCoverage()
-        {
-            var (cameraGo, camera) = BuildCamera();
-            Track(cameraGo);
-
-            // Build all golden shapes with Square cap + Miter join.
-            var go = Track(BuildLineScene(LineWidthMeters, out _, JoinType.Miter, CapType.Square));
-            go.name = "LineTestSquareCap";
-
-            using var snap = new SnapshotRenderer(SnapW, SnapH);
-            {
-                snap.Render(camera);
-
-                string pngPath = snap.WritePng("line-square-cap.png");
-                FileAssert.Exists(pngPath);
-                Assert.That(new FileInfo(pngPath).Length, Is.GreaterThan(500L),
-                    "Square-cap PNG must be non-trivial (>500 bytes).");
-
-                Frame pixels = snap.Pixels;
-                SnapshotVerdict v = SnapshotCoverage.Analyse(pixels, Bg32);
-
-                Assert.IsFalse(v.IsBlank,
-                    "Square-cap line render must not be blank (multi-line scene should give >3% fill).");
-                Assert.That(v.FilledFraction, Is.InRange(0.01f, 0.50f),
-                    $"Square-cap fill fraction {v.FilledFraction:P1} must be in [1%,50%].");
-                Assert.IsTrue(v.Passes(minFill: 0.01f, maxFill: 0.50f, minBuckets: 2),
-                    $"Square-cap render must pass coverage gate. " +
+                    $"{label} render must pass coverage gate. " +
                     $"fill={v.FilledFraction:P1}, buckets={v.DistinctRegionBucketsHit}.");
             }
         }

@@ -1,7 +1,9 @@
 // Unity EditMode only — structural guard over MapController's source text: no legacy UnityEngine.Input,
 // scroll normalized by WheelNotchUnits, Keyboard.current present, null-guarded.
 
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using MapController = MapRenderer.App.Controller;
@@ -24,158 +26,86 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── Tooth 4a — no legacy UnityEngine.Input ────────────────────────────────────────────────
+        // ── Tooth 4a-4e, T-ADAPTER — required source idioms, one row per idiom ───────────────────
 
         /// <summary>
-        /// MapController.cs must NOT use legacy UnityEngine.Input (the project uses the
-        /// new Input System exclusively; activeInputHandler = 1 / new only).
+        /// Each row names a token (or a set of acceptable alternative tokens) that MapController.cs must
+        /// contain — the new Input System device reads (tooth 4), their null guards (tooth 4d/4e), the
+        /// scroll normalization constant, and the device-agnostic seam dispatch (T-ADAPTER).
         /// </summary>
+        private static IEnumerable<TestCaseData> RequiredIdiomCases()
+        {
+            // A bare string[] argument would be unpacked by NUnit as the argument LIST (its single-array-
+            // parameter gotcha); the (object) cast forces it to stay one argument.
+            yield return new TestCaseData((object)new[] { "WheelNotchUnits" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(ScrollNormalizationConstant)");
+            yield return new TestCaseData((object)new[] { "Keyboard.current" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(KeyboardCurrent)");
+            yield return new TestCaseData((object)new[] { "ViewInput.Apply(" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(RoutesThroughViewInputApply)");
+            yield return new TestCaseData((object)new[] { "Mouse.current" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(MouseCurrent)");
+            yield return new TestCaseData((object)new[] { "mouse != null", "mouse == null" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(MouseCurrentNullGuard)");
+            yield return new TestCaseData((object)new[] { "kb != null", "kb == null" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(KeyboardCurrentNullGuard)");
+            // Shift→tilt (MapLibre parity) cannot silently regress to fused right-drag.
+            yield return new TestCaseData((object)new[] { "leftShiftKey" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(ShiftKeyBinding)");
+            yield return new TestCaseData((object)new[] { "TiltBy" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(TiltIntent)");
+            // Ctrl→heading (MapLibre parity) cannot silently regress.
+            yield return new TestCaseData((object)new[] { "leftCtrlKey" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(CtrlKeyBinding)");
+            yield return new TestCaseData((object)new[] { "HeadingBy" })
+                .SetName("MapControllerSource_ContainsRequiredIdiom(HeadingIntent)");
+        }
+
         [Test]
-        public void MapController_DoesNotUse_LegacyUnityEngineInput()
+        [TestCaseSource(nameof(RequiredIdiomCases))]
+        public void MapControllerSource_ContainsRequiredIdiom(string[] acceptableTokens)
         {
             string src = MapControllerSource;
-            bool hasLegacy = src.Contains("UnityEngine.Input.")
-                          || src.Contains("Input.GetAxis")
-                          || src.Contains("Input.GetButton")
-                          || src.Contains("Input.GetKey")
-                          || src.Contains("Input.mouseScrollDelta");
-
-            Assert.IsFalse(hasLegacy,
-                "MapController.cs must not use legacy UnityEngine.Input. " +
-                "Use Mouse.current / Keyboard.current (new Input System) instead.");
+            Assert.IsTrue(acceptableTokens.Any(src.Contains),
+                $"MapController.cs must contain at least one of: {string.Join(" | ", acceptableTokens)}.");
         }
 
-        // ── Tooth 4b — scroll normalized by WheelNotchUnits ──────────────────────────────────────
+        // ── Tooth 4a, T-ADAPTER — forbidden source idioms, one row per idiom ─────────────────────
 
         /// <summary>
-        /// Scroll must be divided by the named normalization constant WheelNotchUnits
-        /// so that a wheel notch and a trackpad swipe are comparable. The constant must be greppable.
+        /// Each row names a token MapController.cs must NOT contain: legacy UnityEngine.Input (the project
+        /// uses the new Input System exclusively), the retired fused ApplyTilt helper, and re-implemented
+        /// camera math that belongs in Core/ConstrainedAngle instead of the binding (T-ADAPTER).
         /// </summary>
-        [Test]
-        public void MapController_HasNamedScrollNormalizationConstant()
+        private static IEnumerable<TestCaseData> ForbiddenIdiomCases()
         {
-            string src = MapControllerSource;
-            Assert.IsTrue(src.Contains("WheelNotchUnits"),
-                "MapController.cs must define and use 'WheelNotchUnits' as the device-independent " +
-                "scroll normalization constant (tooth 4).");
+            yield return new TestCaseData("UnityEngine.Input.")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(LegacyInput_Prefix)");
+            yield return new TestCaseData("Input.GetAxis")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(LegacyInput_GetAxis)");
+            yield return new TestCaseData("Input.GetButton")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(LegacyInput_GetButton)");
+            yield return new TestCaseData("Input.GetKey")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(LegacyInput_GetKey)");
+            yield return new TestCaseData("Input.mouseScrollDelta")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(LegacyInput_MouseScrollDelta)");
+            yield return new TestCaseData("ApplyTilt")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(FusedApplyTilt)");
+            yield return new TestCaseData("% 360")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(ManualAngleWrap)");
+            yield return new TestCaseData("Mathf.Clamp")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(MathfClampOnAngles)");
+            yield return new TestCaseData("WebMercator.")
+                .SetName("MapControllerSource_DoesNotContainForbiddenIdiom(DirectWebMercatorCall)");
         }
 
-        // ── Tooth 4c — Keyboard.current present and greppable ────────────────────────────────────
-
-        /// <summary>
-        /// Keyboard zoom (via Keyboard.current) must be present and greppable in
-        /// MapController.cs so the feature cannot silently disappear.
-        /// </summary>
         [Test]
-        public void MapController_HasKeyboardCurrent()
+        [TestCaseSource(nameof(ForbiddenIdiomCases))]
+        public void MapControllerSource_DoesNotContainForbiddenIdiom(string forbiddenToken)
         {
-            string src = MapControllerSource;
-            Assert.IsTrue(src.Contains("Keyboard.current"),
-                "MapController.cs must contain 'Keyboard.current' (keyboard zoom, tooth 4).");
-        }
-
-        // ── Tooth 4d — Mouse.current null-guarded ────────────────────────────────────────────────
-
-        /// <summary>
-        /// Mouse.current must be null-guarded so headless/test builds don't NRE.
-        /// The canonical guard pattern is assigning to a local and checking it.
-        /// </summary>
-        [Test]
-        public void MapController_NullGuards_MouseCurrent()
-        {
-            string src = MapControllerSource;
-            // The guard appears as: var mouse = Mouse.current; ... if (mouse != null)
-            Assert.IsTrue(src.Contains("Mouse.current"),
-                "MapController.cs must read Mouse.current (needed to null-guard it).");
-            // A null check on the mouse variable must be present.
-            Assert.IsTrue(src.Contains("mouse != null") || src.Contains("mouse == null"),
-                "Mouse.current result must be null-checked before use (tooth 4 null-guard requirement).");
-        }
-
-        // ── Tooth 4e — Keyboard.current null-guarded separately ──────────────────────────────────
-
-        /// <summary>
-        /// Keyboard.current must be null-guarded separately from Mouse.current
-        /// (each device can be absent independently in headless / test environments).
-        /// </summary>
-        [Test]
-        public void MapController_NullGuards_KeyboardCurrent()
-        {
-            string src = MapControllerSource;
-            Assert.IsTrue(src.Contains("kb != null") || src.Contains("kb == null"),
-                "Keyboard.current result must be null-checked (tooth 4 null-guard requirement). " +
-                "Pattern: var kb = Keyboard.current; if (kb != null) { ... }");
-        }
-
-        // ── T-ADAPTER teeth — desktop backend is a thin adapter over the seam ────────────────────
-
-        /// <summary>
-        /// T-ADAPTER: Controller.cs must route gestures through <c>ViewInput.Apply(</c> —
-        /// the device-agnostic seam dispatch — rather than calling camera math directly.
-        /// </summary>
-        [Test]
-        public void MapController_RoutesThrough_ViewInputApply()
-        {
-            Assert.IsTrue(MapControllerSource.Contains("ViewInput.Apply("),
-                "Controller.cs must contain 'ViewInput.Apply(' — all gestures route through the " +
-                "device-agnostic seam dispatch (T-ADAPTER).");
-        }
-
-        /// <summary>
-        /// T-ADAPTER: the fused <c>ApplyTilt</c> call (that set both Heading and Tilt) must be
-        /// gone from Controller.cs. The split HeadingBy / TiltBy intents replace it.
-        /// </summary>
-        [Test]
-        public void MapController_NoFusedApplyTilt()
-        {
-            Assert.IsFalse(MapControllerSource.Contains("ApplyTilt"),
-                "Controller.cs must NOT contain 'ApplyTilt' — tilt and heading are separate intents, not one fused helper. " +
-                "Use GestureIntent.TiltBy + GestureIntent.HeadingBy via ViewInput.Apply instead.");
-        }
-
-        /// <summary>
-        /// T-ADAPTER: shift key binding must be present and greppable — proves shift→tilt
-        /// (MapLibre parity) cannot silently regress to fused right-drag.
-        /// </summary>
-        [Test]
-        public void MapController_ShiftDrivesTilt()
-        {
-            string src = MapControllerSource;
-            Assert.IsTrue(src.Contains("leftShiftKey"),
-                "Controller.cs must reference 'leftShiftKey' (shift → TiltBy, T-ADAPTER).");
-            Assert.IsTrue(src.Contains("TiltBy"),
-                "Controller.cs must contain 'TiltBy' (the tilt intent, T-ADAPTER).");
-        }
-
-        /// <summary>
-        /// T-ADAPTER: ctrl key binding must be present and greppable — proves ctrl→heading
-        /// (MapLibre parity) cannot silently regress.
-        /// </summary>
-        [Test]
-        public void MapController_CtrlDrivesHeading()
-        {
-            string src = MapControllerSource;
-            Assert.IsTrue(src.Contains("leftCtrlKey"),
-                "Controller.cs must reference 'leftCtrlKey' (ctrl → HeadingBy, T-ADAPTER).");
-            Assert.IsTrue(src.Contains("HeadingBy"),
-                "Controller.cs must contain 'HeadingBy' (the heading intent, T-ADAPTER).");
-        }
-
-        /// <summary>
-        /// T-ADAPTER: Controller.cs must not re-implement camera math — no Mercator arithmetic,
-        /// no manual degree wrapping, no Mathf.Clamp on angles. These live in Core / ConstrainedAngle,
-        /// invoked via ViewInput.Apply, not duplicated in the binding.
-        /// </summary>
-        [Test]
-        public void MapController_NoCameraMathInBinding()
-        {
-            string src = MapControllerSource;
-            Assert.IsFalse(src.Contains("% 360"),
-                "Controller.cs must not contain '% 360' — angle wrap lives in ConstrainedAngle (T-ADAPTER).");
-            Assert.IsFalse(src.Contains("Mathf.Clamp"),
-                "Controller.cs must not contain 'Mathf.Clamp' on tilt/heading — clamping lives in ConstrainedAngle (T-ADAPTER).");
-            Assert.IsFalse(src.Contains("WebMercator."),
-                "Controller.cs must not call WebMercator.* directly — projection math lives in Core (T-ADAPTER).");
+            Assert.IsFalse(MapControllerSource.Contains(forbiddenToken),
+                $"MapController.cs must not contain '{forbiddenToken}' — camera math and legacy device " +
+                "reads live elsewhere (T-ADAPTER); use the new Input System and ConstrainedAngle/Core instead.");
         }
 
         // ── T3-5 — the mouse seam runs in LOGICAL px ─────────────────────────────────────────────

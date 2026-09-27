@@ -165,9 +165,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── per-struct field hashers/comparers, one line per field. SymbolTileBlockGoldenTests' reflection
-        // field-count guard fails the gate when a struct gains a field with no line here. ──
+        // coverage guard fails the gate when a struct gains a field this file never references by name. ──
 
-        // 26 Combine calls == PointStageInput's 26 public fields (pinned by that reflection guard).
         private static int HashPointStageInput(PointStageInput p)
         {
             int h = 17;
@@ -236,8 +235,6 @@ namespace MapRenderer.Tests.Text.Placement
             AssertFloatEqual(a.IconRotateRadians, b.IconRotateRadians, msg + ".IconRotateRadians");
         }
 
-        // 18 Combine calls == CurvedStageInput's 18 public fields (same reflection-guard reasoning as
-        // HashPointStageInput above).
         private static int HashCurvedStageInput(CurvedStageInput c)
         {
             int h = 17;
@@ -290,7 +287,6 @@ namespace MapRenderer.Tests.Text.Placement
             AssertFloatEqual(a.MetresPerLogicalPixel, b.MetresPerLogicalPixel, msg + ".MetresPerLogicalPixel");
         }
 
-        // 6 Combine calls == SymbolQuad's 6 public properties.
         private static int HashSymbolQuad(SymbolQuad q)
         {
             int h = 17;
@@ -313,7 +309,6 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(a.Page, b.Page, msg + ".Page");
         }
 
-        // 3 Combine calls == CurvedGlyph's 3 public properties.
         private static int HashCurvedGlyph(CurvedGlyph g)
         {
             int h = 17;
@@ -330,7 +325,6 @@ namespace MapRenderer.Tests.Text.Placement
             AssertFloatEqual(a.CellSkirt, b.CellSkirt, msg + ".CellSkirt");
         }
 
-        // 2 Combine calls == LineAnchor's 2 public fields.
         private static int HashLineAnchor(LineAnchor l) => Combine(Combine(17, l.Segment), HashFloat(l.T));
 
         private static void AssertLineAnchorEqual(LineAnchor a, LineAnchor b, string msg)

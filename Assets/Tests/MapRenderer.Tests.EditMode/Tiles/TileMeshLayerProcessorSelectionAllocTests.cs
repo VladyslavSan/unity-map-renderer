@@ -94,7 +94,7 @@ namespace MapRenderer.Tests.Tiles
             SelectedTileFeature[] buffer = buffers.SelectionBuffer(roads.Features.Count);
             int selectedCount = FeatureSelector.SelectFeatures(styleLayer, roads, Zoom, buffer);
 
-            Assert.AreEqual(30, selectedCount, "a null filter must select every feature.");
+            Assert.AreEqual(roads.Features.Count, selectedCount, "a null filter must select every feature.");
             for (int i = 0; i < selectedCount; i++)
                 Assert.AreEqual(i, buffer[i].Ordinal, $"declared order must be preserved at slot {i}.");
         }

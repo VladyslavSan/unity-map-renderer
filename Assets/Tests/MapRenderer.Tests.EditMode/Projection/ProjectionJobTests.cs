@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Collections;
@@ -62,80 +63,50 @@ namespace MapRenderer.Tests.Projection
         // (1) Parity — job vs TileId.ToMercator (z0)
         // -----------------------------------------------------------------------------------------
 
-        [Test]
-        public void Parity_JobMatchesCore_Z0()
+        /// <summary>ProjectPointsJob must match the CPU reference (<c>TileId.ToMercator</c>) at both a z0
+        /// tile (exercises the identity/1x path) and a realistic non-z0 tile (exercises the 2^z path). The
+        /// job's world-Y is always 0 — <c>OriginWorld</c>'s Y is hardcoded 0.0 and ground points carry no
+        /// altitude — so it is asserted at every point in both rows.</summary>
+        private static IEnumerable<TestCaseData> ParityCases()
         {
-            var tile = new TileId { Z = 0, X = 0, Y = 0 };
-            var (bMin, _) = tile.MercatorBounds();
-            double originX = bMin.x, originY = bMin.y;
-            double extent = 4096.0;
-
-            // Test a handful of tile-space coords.
-            double[][] testPoints = {
-                new[] { 0.0, 0.0 },
-                new[] { 2048.0, 2048.0 },
-                new[] { 4096.0, 0.0 },
-                new[] { 0.0, 4096.0 },
-                new[] { 1000.0, 3000.0 },
-            };
-
-            // Generous tolerance: at z0 tile, float ULP at world scale (~20M m) is ~2–5 m.
-            // A formula bug errors by thousands of km, so 50 m absolute tol is safe and not too tight.
-            const double tol = 50.0;
-
-            foreach (var pt in testPoints)
-            {
-                double px = pt[0], py = pt[1];
-                double2 mercRef = tile.ToMercator(px, py, extent);
-                double refDx = mercRef.x - originX;
-                double refDz = mercRef.y - originY;
-
-                double3 jobOut = Project(0, 0, 0, extent, px, py, originX, originY);
-
-                Assert.That(jobOut.x, Is.EqualTo(refDx).Within(tol),
-                    $"X mismatch at px={px}, py={py}: job={jobOut.x:F2}, ref={refDx:F2}");
-                Assert.That(jobOut.z, Is.EqualTo(refDz).Within(tol),
-                    $"Z mismatch at px={px}, py={py}: job={jobOut.z:F2}, ref={refDz:F2}");
-                Assert.AreEqual(0.0, jobOut.y, "Y should be 0.");
-            }
+            yield return new TestCaseData(
+                    new TileId { Z = 0, X = 0, Y = 0 },
+                    new[] { new double2(0.0, 0.0), new double2(2048.0, 2048.0), new double2(4096.0, 0.0),
+                            new double2(0.0, 4096.0), new double2(1000.0, 3000.0) },
+                    // Generous tolerance: at z0 tile, float ULP at world scale (~20M m) is ~2-5 m. A formula
+                    // bug errors by thousands of km, so 50 m absolute tol is safe and not too tight.
+                    50.0)
+                .SetName("Parity_JobMatchesCore(Z0)");
+            yield return new TestCaseData(
+                    new TileId { Z = 5, X = 10, Y = 12 }, // a realistic non-trivial tile
+                    new[] { new double2(0.0, 0.0), new double2(2048.0, 2048.0), new double2(4096.0, 4096.0),
+                            new double2(1000.0, 500.0) },
+                    5.0) // non-z0: tile is smaller, ULPs much tighter, 5 m is safe.
+                .SetName("Parity_JobMatchesCore(NonZ0)");
         }
 
-        // -----------------------------------------------------------------------------------------
-        // (1b) Parity — non-z0 tile (exercises 2^z path)
-        // -----------------------------------------------------------------------------------------
-
         [Test]
-        public void Parity_JobMatchesCore_NonZ0()
+        [TestCaseSource(nameof(ParityCases))]
+        public void Parity_JobMatchesCore(TileId tile, double2[] testPoints, double tol)
         {
-            // z=5, x=10, y=12 — a realistic non-trivial tile
-            int z = 5, tx = 10, ty = 12;
-            var tile = new TileId { Z = z, X = tx, Y = ty };
             var (bMin, _) = tile.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
             double extent = 4096.0;
 
-            double[][] testPoints = {
-                new[] { 0.0, 0.0 },
-                new[] { 2048.0, 2048.0 },
-                new[] { 4096.0, 4096.0 },
-                new[] { 1000.0, 500.0 },
-            };
-
-            const double tol = 5.0; // Non-z0: tile is smaller, ULPs much tighter, 5 m is safe.
-
-            foreach (var pt in testPoints)
+            foreach (double2 pt in testPoints)
             {
-                double px = pt[0], py = pt[1];
+                double px = pt.x, py = pt.y;
                 double2 mercRef = tile.ToMercator(px, py, extent);
                 double refDx = mercRef.x - originX;
                 double refDz = mercRef.y - originY;
 
-                double3 jobOut = Project(z, tx, ty, extent, px, py, originX, originY);
+                double3 jobOut = Project(tile.Z, tile.X, tile.Y, extent, px, py, originX, originY);
 
                 Assert.That(jobOut.x, Is.EqualTo(refDx).Within(tol),
-                    $"X mismatch z={z} tx={tx} ty={ty} px={px}: job={jobOut.x:F4}, ref={refDx:F4}");
+                    $"X mismatch z={tile.Z} tx={tile.X} ty={tile.Y} px={px}: job={jobOut.x:F4}, ref={refDx:F4}");
                 Assert.That(jobOut.z, Is.EqualTo(refDz).Within(tol),
-                    $"Z mismatch z={z} tx={tx} ty={ty} py={py}: job={jobOut.z:F4}, ref={refDz:F4}");
+                    $"Z mismatch z={tile.Z} tx={tile.X} ty={tile.Y} py={py}: job={jobOut.z:F4}, ref={refDz:F4}");
+                Assert.AreEqual(0.0, jobOut.y, "Y should be 0.");
             }
         }
 

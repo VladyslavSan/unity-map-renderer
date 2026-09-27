@@ -378,108 +378,68 @@ namespace MapRenderer.Tests.Mvt
             return layer;
         }
 
-        [Test]
-        public void Variant_String_DecodesAsValueString()
+        /// <summary>Every MVT Value protobuf variant decodes to the expected typed <see cref="Value"/>, and
+        /// the per-feature property resolution agrees with the raw decoded value — the same
+        /// <see cref="BuildSyntheticLayer"/> wiring (feature tags [0,0] → key "k") for every row, so the
+        /// comparison is uniform across variants.</summary>
+        private static IEnumerable<TestCaseData> VariantCases()
         {
             // Value string_value (field 1, wire type 2)
-            byte[] valMsg = StringField(1, "hello");
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values.Length, Is.EqualTo(1));
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.String));
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsString(), Is.EqualTo("hello"));
-            Assert.That(layer.Features[0].Properties["k"].AsString(), Is.EqualTo("hello"));
-        }
+            yield return new TestCaseData(StringField(1, "hello"), Value.String("hello"))
+                .SetName("Variant_DecodesToExpectedValueType(String)");
 
-        [Test]
-        public void Variant_Float_DecodesAsValueNumber()
-        {
             // Value float_value (field 2, wire type 5 = fixed32 little-endian)
             float f = 3.14f;
             byte[] floatBytes = BitConverter.GetBytes(f);
             if (!BitConverter.IsLittleEndian) Array.Reverse(floatBytes);
-            byte[] valMsg = Cat(Tag(2, 5), floatBytes);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo((double)f).Within(1e-5));
-            Assert.That(layer.Features[0].Properties["k"].AsNumber(), Is.EqualTo((double)f).Within(1e-5));
-        }
+            yield return new TestCaseData(Cat(Tag(2, 5), floatBytes), Value.Number((double)f))
+                .SetName("Variant_DecodesToExpectedValueType(Float)");
 
-        [Test]
-        public void Variant_Double_DecodesAsValueNumber()
-        {
             // Value double_value (field 3, wire type 1 = fixed64 little-endian)
             double d = 2.718281828;
             long bits = BitConverter.DoubleToInt64Bits(d);
             byte[] doubleBytes = new byte[8];
             for (int i = 0; i < 8; i++) doubleBytes[i] = (byte)((bits >> (8 * i)) & 0xFF); // LE
-            byte[] valMsg = Cat(Tag(3, 1), doubleBytes);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(d).Within(1e-12));
-        }
+            yield return new TestCaseData(Cat(Tag(3, 1), doubleBytes), Value.Number(d))
+                .SetName("Variant_DecodesToExpectedValueType(Double)");
 
-        [Test]
-        public void Variant_Int_Positive_DecodesAsValueNumber()
-        {
             // Value int_value (field 4, wire type 0) — int64 positive
-            byte[] valMsg = VarintField(4, 42);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(42.0));
-        }
+            yield return new TestCaseData(VarintField(4, 42), Value.Number(42.0))
+                .SetName("Variant_DecodesToExpectedValueType(Int_Positive)");
 
-        [Test]
-        public void Variant_Int_Negative_DecodesAsValueNumber()
-        {
             // Value int_value (field 4, wire type 0) — int64 negative (-7 as two's complement ulong varint)
             long neg = -7L;
-            ulong raw = (ulong)neg; // two's complement (all bits set for sign extension)
-            byte[] valMsg = VarintField(4, raw);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(-7.0));
-        }
+            yield return new TestCaseData(VarintField(4, (ulong)neg), Value.Number(-7.0))
+                .SetName("Variant_DecodesToExpectedValueType(Int_Negative)");
 
-        [Test]
-        public void Variant_Uint_DecodesAsValueNumber()
-        {
             // Value uint_value (field 5, wire type 0)
-            byte[] valMsg = VarintField(5, 999);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(999.0));
-        }
+            yield return new TestCaseData(VarintField(5, 999), Value.Number(999.0))
+                .SetName("Variant_DecodesToExpectedValueType(Uint)");
 
-        [Test]
-        public void Variant_Sint_Negative_DecodesAsValueNumber()
-        {
             // Value sint_value (field 6, wire type 0) — zigzag(-5): n=5 → (5<<1)^0 = 10; n=-5 → 9
             // zigzag encode: (n << 1) ^ (n >> 63)  →  for -5: (-5<<1)^(-5>>63) = (-10)^(-1) = 9
             long n = -5L;
             ulong zigzag = (ulong)((n << 1) ^ (n >> 63));
-            byte[] valMsg = VarintField(6, zigzag);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(-5.0));
+            yield return new TestCaseData(VarintField(6, zigzag), Value.Number(-5.0))
+                .SetName("Variant_DecodesToExpectedValueType(Sint_Negative)");
+
+            // Value bool_value (field 7, wire type 0): 1 = true, 0 = false
+            yield return new TestCaseData(VarintField(7, 1), Value.Bool(true))
+                .SetName("Variant_DecodesToExpectedValueType(Bool_True)");
+            yield return new TestCaseData(VarintField(7, 0), Value.Bool(false))
+                .SetName("Variant_DecodesToExpectedValueType(Bool_False)");
         }
 
         [Test]
-        public void Variant_Bool_True_DecodesAsValueBool()
+        [TestCaseSource(nameof(VariantCases))]
+        public void Variant_DecodesToExpectedValueType(byte[] valMsg, Value expected)
         {
-            // Value bool_value (field 7, wire type 0): 1 = true
-            byte[] valMsg = VarintField(7, 1);
             var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Boolean));
-            Assert.IsTrue(layer.Values[0].ToValue(layer.ValueStrings).AsBool());
-            Assert.IsTrue(layer.Features[0].Properties["k"].AsBool());
-        }
-
-        [Test]
-        public void Variant_Bool_False_DecodesAsValueBool()
-        {
-            // Value bool_value (field 7, wire type 0): 0 = false
-            byte[] valMsg = VarintField(7, 0);
-            var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Boolean));
-            Assert.IsFalse(layer.Values[0].ToValue(layer.ValueStrings).AsBool());
+            Assert.That(layer.Values.Length, Is.EqualTo(1));
+            Value actual = layer.Values[0].ToValue(layer.ValueStrings);
+            Assert.AreEqual(expected.Type, actual.Type);
+            Assert.AreEqual(expected, actual);
+            Assert.AreEqual(expected, layer.Features[0].Properties["k"]);
         }
 
         // ── Malformed tag input — skip-tolerant ─────────────────────────────────────────────────

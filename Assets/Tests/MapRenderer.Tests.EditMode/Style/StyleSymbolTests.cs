@@ -683,54 +683,53 @@ namespace MapRenderer.Tests.Style
 
         private const string PaintOnly = @"""fill-color"": [""rgba"",102,153,204,1]";
 
-        [Test]
-        public void MeshAffectingRestyle_Filter_TakesTheRebuildPath()
+        private static IEnumerable<TestCaseData> NonTransitionableChangeCases()
         {
-            var oldStyle = FillStyle(PaintOnly, @"""filter"": [""=="", ""class"", ""a""],");
-            var newStyle = FillStyle(PaintOnly, @"""filter"": [""=="", ""class"", ""b""],");
-            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
-                "a changed filter must move the layer signature and refuse the gate.");
-        }
+            yield return new TestCaseData(
+                    (Func<StyleDocument>)(() => FillStyle(PaintOnly, @"""filter"": [""=="", ""class"", ""a""],")),
+                    (Func<StyleDocument>)(() => FillStyle(PaintOnly, @"""filter"": [""=="", ""class"", ""b""],")),
+                    "a changed filter must move the layer signature and refuse the gate.")
+                .SetName("NonTransitionableChange_RefusesTheGate(Filter)");
 
-        [Test]
-        public void MeshAffectingRestyle_SourceLayer_TakesTheRebuildPath()
-        {
-            var oldStyle = StyleParser.Parse(@"{
+            yield return new TestCaseData(
+                    (Func<StyleDocument>)(() => StyleParser.Parse(@"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [ { ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill0"",
         ""paint"": { ""fill-color"": [""rgba"",102,153,204,1] } } ]
-}");
-            var newStyle = StyleParser.Parse(@"{
+}")),
+                    (Func<StyleDocument>)(() => StyleParser.Parse(@"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [ { ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill1"",
         ""paint"": { ""fill-color"": [""rgba"",102,153,204,1] } } ]
-}");
-            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
-                "a changed source-layer must move the layer signature and refuse the gate.");
+}")),
+                    "a changed source-layer must move the layer signature and refuse the gate.")
+                .SetName("NonTransitionableChange_RefusesTheGate(SourceLayer)");
+
+            yield return new TestCaseData(
+                    (Func<StyleDocument>)(() => FillStyle(@"""fill-color"": [""rgba"",102,153,204,1], ""fill-antialias"": true")),
+                    (Func<StyleDocument>)(() => FillStyle(@"""fill-color"": [""rgba"",102,153,204,1], ""fill-antialias"": false")),
+                    "fill-antialias selects a meshing path (fill-parity-design.md § \"`fill-antialias`\") — it must stay inside the signature.")
+                .SetName("NonTransitionableChange_RefusesTheGate(FillAntialias)");
+
+            yield return new TestCaseData(
+                    (Func<StyleDocument>)(() => FillStyle(@"""fill-color"": [""get"",""c1""]")),
+                    (Func<StyleDocument>)(() => FillStyle(@"""fill-color"": [""get"",""c2""]")),
+                    "two DIFFERENT data-driven fill-colors both skip the bind — without clause (c) the gate " +
+                    "would accept and every tile would keep the previous style's baked colour forever.")
+                .SetName("NonTransitionableChange_RefusesTheGate(DataDrivenPaintChange)");
         }
 
+        /// <summary>Every non-transitionable restyle refuses the gate: a changed filter or source-layer, a
+        /// changed fill-antialias (selects a meshing path, fill-parity-design.md § "`fill-antialias`"), and
+        /// a data-driven <c>["get",...]</c> paint change.</summary>
         [Test]
-        public void MeshAffectingRestyle_FillAntialias_TakesTheRebuildPath()
+        [TestCaseSource(nameof(NonTransitionableChangeCases))]
+        public void NonTransitionableChange_RefusesTheGate(
+            Func<StyleDocument> makeOld, Func<StyleDocument> makeNew, string message)
         {
-            var oldStyle = FillStyle(@"""fill-color"": [""rgba"",102,153,204,1], ""fill-antialias"": true");
-            var newStyle = FillStyle(@"""fill-color"": [""rgba"",102,153,204,1], ""fill-antialias"": false");
-            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
-                "fill-antialias selects a meshing path (fill-parity-design.md § \"`fill-antialias`\") — it must stay inside the signature.");
-        }
-
-        // ── 17. A data-driven paint change takes the rebuild path ────────────────────────────
-
-        [Test]
-        public void DataDrivenPaintChange_TakesTheRebuildPath()
-        {
-            var oldStyle = FillStyle(@"""fill-color"": [""get"",""c1""]");
-            var newStyle = FillStyle(@"""fill-color"": [""get"",""c2""]");
-
-            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
-                "two DIFFERENT data-driven fill-colors both skip the bind — without clause (c) the gate " +
-                "would accept and every tile would keep the previous style's baked colour forever.");
+            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(makeOld(), makeNew()), message);
         }
 
         // ── Symbol layers survive and ease across a restyle ──────────────────────────────────

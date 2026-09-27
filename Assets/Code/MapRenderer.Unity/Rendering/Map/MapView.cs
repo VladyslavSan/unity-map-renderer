@@ -54,7 +54,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// with its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/> and owns its
     /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so it has no "wired yet"
     /// guards. Before <see cref="SetStyle(string,CancellationToken)"/> it is an empty map with no sources, so
-    /// <see cref="LateUpdate"/> renders nothing. Steady-state frames do not allocate.
+    /// <see cref="LateUpdate"/> renders nothing. Steady-state frames do not allocate on the BRG backend (docs/gc-and-allocation-design.md § 2).
     /// </summary>
     public sealed class MapView
     {

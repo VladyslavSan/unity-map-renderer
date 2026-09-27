@@ -1152,119 +1152,103 @@ namespace MapRenderer.Tests.Text.Placement
 
         // --- SymbolFeature overload ---
 
-        [Test]
-        public void SymbolFeature_IntactPair_Paired()
+        /// <summary>The owner→rider decision over <see cref="SymbolFeature"/>: intact adjacent pair resolves;
+        /// a truncated list, a null next slot, a mismatched pair id, or a non-owner at the query index all
+        /// refuse. <c>riderIndex</c> is <c>-1</c> on every refusal (the production default), so it is asserted
+        /// unconditionally alongside the bool.</summary>
+        private static IEnumerable<TestCaseData> TryGetRiderSymbolFeatureCases()
         {
-            var symbols = new[] { Symbol(SymbolPairRole.Owner, 7), Symbol(SymbolPairRole.Rider, 7) };
-            Assert.IsTrue(SymbolPairing.TryGetRider(symbols, 0, out int riderIndex));
-            Assert.AreEqual(1, riderIndex);
-        }
-
-        [Test]
-        public void SymbolFeature_RiderMissing_ListTruncated_NotPaired()
-        {
-            var symbols = new[] { Symbol(SymbolPairRole.Owner, 7) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
-        }
-
-        [Test]
-        public void SymbolFeature_NextSlotNull_NotPaired()
-        {
-            var symbols = new[] { Symbol(SymbolPairRole.Owner, 7), null };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
-        }
-
-        [Test]
-        public void SymbolFeature_MismatchedPairId_NotPaired()
-        {
+            yield return new TestCaseData(new[] { Symbol(SymbolPairRole.Owner, 7), Symbol(SymbolPairRole.Rider, 7) }, true, 1)
+                .SetName("TryGetRider_SymbolFeature_DecisionTable(IntactPair_Paired)");
+            yield return new TestCaseData(new[] { Symbol(SymbolPairRole.Owner, 7) }, false, -1)
+                .SetName("TryGetRider_SymbolFeature_DecisionTable(RiderMissing_ListTruncated_NotPaired)");
+            yield return new TestCaseData(new[] { Symbol(SymbolPairRole.Owner, 7), null }, false, -1)
+                .SetName("TryGetRider_SymbolFeature_DecisionTable(NextSlotNull_NotPaired)");
             // [Owner(A), Rider(B)] — the tooth a naive adjacency-only resolver fails.
-            var symbols = new[] { Symbol(SymbolPairRole.Owner, 1), Symbol(SymbolPairRole.Rider, 2) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
+            yield return new TestCaseData(new[] { Symbol(SymbolPairRole.Owner, 1), Symbol(SymbolPairRole.Rider, 2) }, false, -1)
+                .SetName("TryGetRider_SymbolFeature_DecisionTable(MismatchedPairId_NotPaired)");
+            yield return new TestCaseData(new[] { Symbol(SymbolPairRole.None, 0), Symbol(SymbolPairRole.Rider, 0) }, false, -1)
+                .SetName("TryGetRider_SymbolFeature_DecisionTable(NotAnOwner_NotPaired)");
         }
 
         [Test]
-        public void SymbolFeature_NotAnOwner_NotPaired()
+        [TestCaseSource(nameof(TryGetRiderSymbolFeatureCases))]
+        public void TryGetRider_SymbolFeature_DecisionTable(SymbolFeature[] symbols, bool expectedPaired, int expectedRiderIndex)
         {
-            var symbols = new[] { Symbol(SymbolPairRole.None, 0), Symbol(SymbolPairRole.Rider, 0) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
+            bool found = SymbolPairing.TryGetRider(symbols, 0, out int riderIndex);
+            Assert.AreEqual(expectedPaired, found);
+            Assert.AreEqual(expectedRiderIndex, riderIndex);
         }
 
         // --- ShapedSymbol overload: the live production carrier that Bake resolves ---
 
-        [Test]
-        public void ShapedSymbol_IntactPair_Paired()
+        /// <summary>Same decision as <see cref="TryGetRider_SymbolFeature_DecisionTable"/>, over the live
+        /// <see cref="ShapedSymbol"/> carrier, which adds two more required matches: tile key and material
+        /// index (a rider from a different tile or draw batch can never pair with this owner).</summary>
+        private static IEnumerable<TestCaseData> TryGetRiderShapedSymbolCases()
         {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 3, tileKey: 9, materialIndex: 2),
-                                  ShapedSymbol(SymbolPairRole.Rider, 3, tileKey: 9, materialIndex: 2) };
-            Assert.IsTrue(SymbolPairing.TryGetRider(symbols, 0, out int riderIndex));
-            Assert.AreEqual(1, riderIndex);
+            yield return new TestCaseData(
+                    new[]
+                    {
+                        ShapedSymbol(SymbolPairRole.Owner, 3, tileKey: 9, materialIndex: 2),
+                        ShapedSymbol(SymbolPairRole.Rider, 3, tileKey: 9, materialIndex: 2),
+                    }, true, 1)
+                .SetName("TryGetRider_ShapedSymbol_DecisionTable(IntactPair_Paired)");
+            yield return new TestCaseData(new[] { ShapedSymbol(SymbolPairRole.Owner, 3) }, false, -1)
+                .SetName("TryGetRider_ShapedSymbol_DecisionTable(RiderMissing_ListTruncated_NotPaired)");
+            yield return new TestCaseData(
+                    new[] { ShapedSymbol(SymbolPairRole.Owner, 3), ShapedSymbol(SymbolPairRole.None, 3) }, false, -1)
+                .SetName("TryGetRider_ShapedSymbol_DecisionTable(NextSlotNotRider_NotPaired)");
+            yield return new TestCaseData(
+                    new[] { ShapedSymbol(SymbolPairRole.Owner, 1), ShapedSymbol(SymbolPairRole.Rider, 2) }, false, -1)
+                .SetName("TryGetRider_ShapedSymbol_DecisionTable(MismatchedPairId_NotPaired)");
+            yield return new TestCaseData(
+                    new[]
+                    {
+                        ShapedSymbol(SymbolPairRole.Owner, 3, tileKey: 1),
+                        ShapedSymbol(SymbolPairRole.Rider, 3, tileKey: 2),
+                    }, false, -1)
+                .SetName("TryGetRider_ShapedSymbol_DecisionTable(MismatchedTileKey_NotPaired)");
+            yield return new TestCaseData(
+                    new[]
+                    {
+                        ShapedSymbol(SymbolPairRole.Owner, 3, materialIndex: 1),
+                        ShapedSymbol(SymbolPairRole.Rider, 3, materialIndex: 2),
+                    }, false, -1)
+                .SetName("TryGetRider_ShapedSymbol_DecisionTable(MismatchedMaterialIndex_NotPaired)");
         }
 
         [Test]
-        public void ShapedSymbol_RiderMissing_ListTruncated_NotPaired()
+        [TestCaseSource(nameof(TryGetRiderShapedSymbolCases))]
+        public void TryGetRider_ShapedSymbol_DecisionTable(ShapedSymbol[] symbols, bool expectedPaired, int expectedRiderIndex)
         {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 3) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
-        }
-
-        [Test]
-        public void ShapedSymbol_NextSlotNotRider_NotPaired()
-        {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 3), ShapedSymbol(SymbolPairRole.None, 3) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
-        }
-
-        [Test]
-        public void ShapedSymbol_MismatchedPairId_NotPaired()
-        {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 1), ShapedSymbol(SymbolPairRole.Rider, 2) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
-        }
-
-        [Test]
-        public void ShapedSymbol_MismatchedTileKey_NotPaired()
-        {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 3, tileKey: 1),
-                                  ShapedSymbol(SymbolPairRole.Rider, 3, tileKey: 2) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
-        }
-
-        [Test]
-        public void ShapedSymbol_MismatchedMaterialIndex_NotPaired()
-        {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 3, materialIndex: 1),
-                                  ShapedSymbol(SymbolPairRole.Rider, 3, materialIndex: 2) };
-            Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
+            bool found = SymbolPairing.TryGetRider(symbols, 0, out int riderIndex);
+            Assert.AreEqual(expectedPaired, found);
+            Assert.AreEqual(expectedRiderIndex, riderIndex);
         }
 
         // --- IsRider (the mirror at i-1) ---
 
-        [Test]
-        public void IsRider_MatchingOwnerBefore_True()
+        /// <summary>IsRider mirrors TryGetRider from the RIDER's own index: true only when the preceding
+        /// symbol is an owner with a matching pair id, false for a non-owner predecessor, and false at index
+        /// zero (no predecessor to check).</summary>
+        private static IEnumerable<TestCaseData> IsRiderCases()
         {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Owner, 3), ShapedSymbol(SymbolPairRole.Rider, 3) };
-            Assert.IsTrue(SymbolPairing.IsRider(symbols, 1));
+            yield return new TestCaseData(
+                    new[] { ShapedSymbol(SymbolPairRole.Owner, 3), ShapedSymbol(SymbolPairRole.Rider, 3) }, 1, true)
+                .SetName("IsRider_DecisionTable(MatchingOwnerBefore_True)");
+            yield return new TestCaseData(
+                    new[] { ShapedSymbol(SymbolPairRole.None, 0), ShapedSymbol(SymbolPairRole.Rider, 3) }, 1, false)
+                .SetName("IsRider_DecisionTable(PrecedingSymbolIsNotAnOwner_False)");
+            yield return new TestCaseData(new[] { ShapedSymbol(SymbolPairRole.Rider, 3) }, 0, false)
+                .SetName("IsRider_DecisionTable(IndexZero_False)");
         }
 
         [Test]
-        public void IsRider_OrphanRider_NoOwnerBefore_False()
+        [TestCaseSource(nameof(IsRiderCases))]
+        public void IsRider_DecisionTable(ShapedSymbol[] symbols, int index, bool expected)
         {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Rider, 3) };
-            Assert.IsFalse(SymbolPairing.IsRider(symbols, 0));
-        }
-
-        [Test]
-        public void IsRider_PrecedingSymbolIsNotAnOwner_False()
-        {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.None, 0), ShapedSymbol(SymbolPairRole.Rider, 3) };
-            Assert.IsFalse(SymbolPairing.IsRider(symbols, 1));
-        }
-
-        [Test]
-        public void IsRider_IndexZero_False()
-        {
-            var symbols = new[] { ShapedSymbol(SymbolPairRole.Rider, 3) };
-            Assert.IsFalse(SymbolPairing.IsRider(symbols, 0));
+            Assert.AreEqual(expected, SymbolPairing.IsRider(symbols, index));
         }
     }
 

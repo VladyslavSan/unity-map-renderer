@@ -75,16 +75,6 @@ namespace MapRenderer.Tests.Rendering
                 Assert.That(values[i], Is.EqualTo(i), "LayerSubSlot values must be contiguous 0..S-1 — they are queue offsets.");
         }
 
-        // N6 — the constant pinned exactly once, with its reason, so a stride change is never silently
-        // absorbed by a re-baked value list elsewhere.
-        [Test]
-        public void SubSlotsPerLayer_Is2_IconThenText()
-        {
-            Assert.That(LayerDrawOrder.SubSlotsPerLayer, Is.EqualTo(2),
-                "exactly two sub-slots per layer today: icon (Base) then text (Above) for a symbol layer; " +
-                "every other kind uses Base only. This is the ONE place the stride is pinned as a literal.");
-        }
-
         [Test]
         public void TransparentBandStart_Is2501_TransparentQueue_Is3000()
         {

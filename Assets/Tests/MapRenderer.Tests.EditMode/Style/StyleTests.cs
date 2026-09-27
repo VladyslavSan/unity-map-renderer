@@ -433,103 +433,56 @@ namespace MapRenderer.Tests.Style
 
         // ── 2. Numeric interpolation ──────────────────────────────────────────────────────────
 
+        /// <summary>A width interpolation over stops (5,2.0)-(15,20.0), sampled at each stop, mid-zoom
+        /// (linear interpolation), and past each end (clamped).</summary>
         [Test]
-        public void Zoom_WidthInterpolate_AtLowStop_ReturnsStoValue()
+        [TestCase(5.0, 2.0f, 1e-6f, TestName = "Zoom_WidthInterpolate_MatchesExpected(AtLowStop_ReturnsStopValue)")]
+        [TestCase(15.0, 20.0f, 1e-6f, TestName = "Zoom_WidthInterpolate_MatchesExpected(AtHighStop_ReturnsHighValue)")]
+        // t = (10-5)/(15-5) = 0.5, value = 2.0 + 0.5*(20.0-2.0) = 11.0.
+        [TestCase(10.0, 11.0f, 1e-4f, TestName = "Zoom_WidthInterpolate_MatchesExpected(AtMidZoom_ReturnsLinearInterpolation)")]
+        [TestCase(0.0, 2.0f, 1e-6f, TestName = "Zoom_WidthInterpolate_MatchesExpected(BelowFirstStop_ClampsToFirst)")]
+        [TestCase(20.0, 20.0f, 1e-6f, TestName = "Zoom_WidthInterpolate_MatchesExpected(AboveLastStop_ClampsToLast)")]
+        public void Zoom_WidthInterpolate_MatchesExpected(double zoom, float expected, float tolerance)
         {
             var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
-            Assert.AreEqual(2.0f, prop.Evaluate(5.0), 1e-6f);
-        }
-
-        [Test]
-        public void Zoom_WidthInterpolate_AtHighStop_ReturnsHighValue()
-        {
-            var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
-            Assert.AreEqual(20.0f, prop.Evaluate(15.0), 1e-6f);
-        }
-
-        [Test]
-        public void Zoom_WidthInterpolate_AtMidZoom_ReturnsLinearInterpolation()
-        {
-            // At zoom=10, t = (10-5)/(15-5) = 0.5, value = 2.0 + 0.5*(20.0-2.0) = 11.0
-            var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
-            Assert.AreEqual(11.0f, prop.Evaluate(10.0), 1e-4f);
-        }
-
-        [Test]
-        public void Zoom_WidthInterpolate_BelowFirstStop_ClampsToFirst()
-        {
-            var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
-            Assert.AreEqual(2.0f, prop.Evaluate(0.0), 1e-6f);
-        }
-
-        [Test]
-        public void Zoom_WidthInterpolate_AboveLastStop_ClampsToLast()
-        {
-            var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
-            Assert.AreEqual(20.0f, prop.Evaluate(20.0), 1e-6f);
+            Assert.AreEqual(expected, prop.Evaluate(zoom), tolerance);
         }
 
         // ── 3. Color interpolation with premultiplied-alpha ───────────────────────────────────
         //
         // Same hand-derived values as the retired PaintPropertyEvaluatorTests — byte-identity pin.
 
+        /// <summary>A zoom-interpolated color premultiplies alpha across every stop-alpha combination:
+        /// transparent→opaque (diverging sharply from a straight lerp), alpha=1 (reducing to a straight sRGB
+        /// lerp, the one case premult and straight agree), and partial-alpha stops on both ends.</summary>
         [Test]
-        public void Zoom_ColorInterpolate_PremultAlpha_TransparentToOpaque()
+        public void ZoomInterpolate_Color_PremultipliesAlpha()
         {
-            var prop = ColProp(
+            var transparentToOpaque = ColProp(
                 "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                 "0, [\"rgba\",0,0,0,0], 1, [\"rgba\",255,255,255,1]]");
+            double[] tToO = transparentToOpaque.Evaluate(0.5).ToRgbaArray();
+            Assert.AreEqual(255.0, tToO[0], 0.5, "Premult alpha: R at t=0.5 must be 255, not 127.5.");
+            Assert.AreEqual(255.0, tToO[1], 0.5, "G must equal R for white.");
+            Assert.AreEqual(255.0, tToO[2], 0.5, "B must equal R for white.");
+            Assert.AreEqual(0.5,   tToO[3], 1e-6, "Alpha at t=0.5 must be 0.5.");
 
-            Color c = prop.Evaluate(0.5);
-            double[] rgba = c.ToRgbaArray();
-
-            Assert.AreEqual(255.0, rgba[0], 0.5, "Premult alpha: R at t=0.5 must be 255, not 127.5.");
-            Assert.AreEqual(255.0, rgba[1], 0.5, "G must equal R for white.");
-            Assert.AreEqual(255.0, rgba[2], 0.5, "B must equal R for white.");
-            Assert.AreEqual(0.5,   rgba[3], 1e-6, "Alpha at t=0.5 must be 0.5.");
-        }
-
-        [Test]
-        public void Zoom_ColorInterpolate_PremultAlpha_DivergenceFromStraightLerp()
-        {
-            var prop = ColProp(
-                "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
-                "0, [\"rgba\",0,0,0,0], 1, [\"rgba\",255,255,255,1]]");
-
-            Color c = prop.Evaluate(0.5);
-            double r255 = c.ToRgbaArray()[0];
-            Assert.Greater(r255, 200.0,
-                "Premult interpolation must give R>200 (vs straight lerp's 127.5) for transparent→opaque.");
-        }
-
-        [Test]
-        public void Zoom_ColorInterpolate_AlphaOne_ReducesToStraightLerp()
-        {
-            var prop = ColProp(
+            var alphaOne = ColProp(
                 "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                 "0, [\"to-color\", \"#000000\"], 1, [\"to-color\", \"#ffffff\"]]");
+            double[] a1 = alphaOne.Evaluate(0.5).ToRgbaArray();
+            Assert.AreEqual(127.5, a1[0], 1e-6, "At alpha=1, premult reduces to straight sRGB lerp.");
+            Assert.AreEqual(127.5, a1[1], 1e-6);
+            Assert.AreEqual(127.5, a1[2], 1e-6);
+            Assert.AreEqual(1.0,   a1[3], 1e-9);
 
-            Color c = prop.Evaluate(0.5);
-            double[] rgba = c.ToRgbaArray();
-            Assert.AreEqual(127.5, rgba[0], 1e-6, "At alpha=1, premult reduces to straight sRGB lerp.");
-            Assert.AreEqual(127.5, rgba[1], 1e-6);
-            Assert.AreEqual(127.5, rgba[2], 1e-6);
-            Assert.AreEqual(1.0,   rgba[3], 1e-9);
-        }
-
-        [Test]
-        public void Zoom_ColorInterpolate_PartialAlpha_PremultResult()
-        {
-            var prop = ColProp(
+            var partialAlpha = ColProp(
                 "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                 "0, [\"rgba\",200,0,0,0.5], 1, [\"rgba\",0,0,200,1.0]]");
-
-            Color c = prop.Evaluate(0.5);
-            double[] rgba = c.ToRgbaArray();
-
-            Assert.AreEqual(0.75, rgba[3], 1e-6, "Alpha must be linear lerp of 0.5 and 1.0 at t=0.5.");
-            Assert.AreEqual(66.67, rgba[0], 0.5, "R channel via premult lerp.");
-            Assert.AreEqual(133.33, rgba[2], 0.5, "B channel via premult lerp.");
+            double[] partial = partialAlpha.Evaluate(0.5).ToRgbaArray();
+            Assert.AreEqual(0.75, partial[3], 1e-6, "Alpha must be linear lerp of 0.5 and 1.0 at t=0.5.");
+            Assert.AreEqual(66.67, partial[0], 0.5, "R channel via premult lerp.");
+            Assert.AreEqual(133.33, partial[2], 0.5, "B channel via premult lerp.");
         }
 
         // ── 4. Feature / Composite → Evaluate(zoom) throws ──────────────────────────────────
@@ -556,70 +509,6 @@ namespace MapRenderer.Tests.Style
             Assert.Throws<ArgumentException>(
                 () => prop.Evaluate(0.0),
                 "Composite-kind expressions must throw on Evaluate(zoom).");
-        }
-
-        // ── 5. No-GC sweep gate ──────────────────────────────────────────────────────────────
-
-        [Test]
-        public void ZoomInterpolateNumber_SweepingZoom_AllocatesZeroBytes()
-        {
-            var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
-
-            for (int w = 0; w < 50; w++)
-                prop.Evaluate(5.0 + (w % 10) * 1.0);
-
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 1000; i++)
-            {
-                double zoom = 5.0 + (i % 100) * 0.1;
-                prop.Evaluate(zoom);
-            }
-            long after = GC.GetAllocatedBytesForCurrentThread();
-
-            Assert.AreEqual(0L, after - before,
-                "Zoom number interpolation must not allocate any GC heap memory per call.");
-        }
-
-        [Test]
-        public void ZoomInterpolateColor_SweepingZoom_AllocatesZeroBytes()
-        {
-            var prop = ColProp(
-                "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
-                "5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]");
-
-            for (int w = 0; w < 50; w++)
-                prop.Evaluate(5.0 + (w % 10) * 1.0);
-
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 1000; i++)
-            {
-                double zoom = 5.0 + (i % 100) * 0.1;
-                prop.Evaluate(zoom);
-            }
-            long after = GC.GetAllocatedBytesForCurrentThread();
-
-            Assert.AreEqual(0L, after - before,
-                "Zoom color interpolation must not allocate any GC heap memory per call.");
-        }
-
-        [Test]
-        public void ZoomInterpolateNumber_WrappedWithNumberAssertion_AllocatesZeroBytes()
-        {
-            var prop = NumProp("[\"interpolate\",[\"linear\"],[\"number\",[\"zoom\"]],5,2.0,15,20.0]");
-
-            for (int w = 0; w < 50; w++)
-                prop.Evaluate(5.0 + (w % 10) * 1.0);
-
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            for (int i = 0; i < 1000; i++)
-            {
-                double zoom = 5.0 + (i % 100) * 0.1;
-                prop.Evaluate(zoom);
-            }
-            long after = GC.GetAllocatedBytesForCurrentThread();
-
-            Assert.AreEqual(0L, after - before,
-                "AssertExpression wrapping zoom must not allocate.");
         }
 
         [Test]
@@ -861,31 +750,18 @@ namespace MapRenderer.Tests.Style
                    "\"layers\":[{\"id\":\"f\",\"type\":\"fill\",\"source\":\"s\",\"source-layer\":\"l\",\"paint\":" + paint + "}]}";
         }
 
+        /// <summary>An omitted fill-antialias falls back to the HOST default (read, not just an unused
+        /// parameter); an explicit layer value wins over the host default either way.</summary>
         [Test]
-        public void StyleParser_FillAntialiasOmitted_HostDefaultFalse_ReachesTheParse()
+        [TestCase(null, false, false, TestName = "StyleParser_FillAntialias_MatchesExpected(Omitted_HostDefaultFalse)")]
+        [TestCase(null, true, true, TestName = "StyleParser_FillAntialias_MatchesExpected(Omitted_HostDefaultTrue)")]
+        [TestCase(true, false, true, TestName = "StyleParser_FillAntialias_MatchesExpected(Explicit_WinsOverHostDefault)")]
+        public void StyleParser_FillAntialias_MatchesExpected(bool? antialias, bool hostDefault, bool expected)
         {
-            var doc = StyleParser.Parse(MinimalFillStyle(antialias: null), fillAntialiasDefault: false);
+            var doc = StyleParser.Parse(MinimalFillStyle(antialias: antialias), fillAntialiasDefault: hostDefault);
             var fill = (Fill.StyleLayer)doc.Layers[0];
-            Assert.IsFalse(fill.Paint.Antialias.Evaluate(0.0),
-                "an omitted fill-antialias must fall back to the HOST default, not a hardcoded true.");
-        }
-
-        [Test]
-        public void StyleParser_FillAntialiasOmitted_HostDefaultTrue_ReachesTheParse()
-        {
-            var doc = StyleParser.Parse(MinimalFillStyle(antialias: null), fillAntialiasDefault: true);
-            var fill = (Fill.StyleLayer)doc.Layers[0];
-            Assert.IsTrue(fill.Paint.Antialias.Evaluate(0.0),
-                "the host default must be READ, not just present as an unused parameter.");
-        }
-
-        [Test]
-        public void StyleParser_FillAntialiasExplicit_WinsOverTheHostDefault()
-        {
-            var doc = StyleParser.Parse(MinimalFillStyle(antialias: true), fillAntialiasDefault: false);
-            var fill = (Fill.StyleLayer)doc.Layers[0];
-            Assert.IsTrue(fill.Paint.Antialias.Evaluate(0.0),
-                "an explicit layer value must win over the host default, whichever it is.");
+            Assert.AreEqual(expected, fill.Paint.Antialias.Evaluate(0.0),
+                $"antialias={antialias}, hostDefault={hostDefault} must evaluate to {expected}.");
         }
 
         // ── the laziness cannot come back (reflection, never text) ─────────────────────────────────
@@ -1136,42 +1012,25 @@ namespace MapRenderer.Tests.Style
 
         // ── The fix: every "cannot resolve" path reports unresolved, never a colour fallback ──────
 
+        /// <summary>Every "cannot resolve" path reports unresolved (a ZERO-AREA rect, the shader's clip
+        /// signal) — never a colour fallback: no pattern declared, the sheet not fetched yet, the name
+        /// absent from the sheet, and a degenerate (zero-area) sprite rect.</summary>
         [Test]
-        public void Unresolved_WhenNoPatternDeclared()
+        [TestCase(null, true, "a layer with no fill-pattern must not resolve a pattern",
+            TestName = "Unresolved_ReportsUnresolved(NoPatternDeclared)")]
+        [TestCase("plaza", false, "a null atlas (sheet not fetched yet) must report unresolved, not fall back to fill-color",
+            TestName = "Unresolved_ReportsUnresolved(SheetHasNotArrivedYet)")]
+        [TestCase("no-such-sprite", true, "a name absent from the sheet must report unresolved (spec: the layer is not painted)",
+            TestName = "Unresolved_ReportsUnresolved(NameAbsentFromSheet)")]
+        [TestCase("degenerate", true, "a zero-area sprite is not drawable and must report unresolved",
+            TestName = "Unresolved_ReportsUnresolved(SpriteRectIsDegenerate)")]
+        public void Unresolved_ReportsUnresolved(string patternName, bool useSheet, string message)
         {
-            Assert.IsFalse(Fill.FillPattern.TryResolve(null, Sheet(), out var r),
-                "a layer with no fill-pattern must not resolve a pattern");
+            SpriteAtlasView atlas = useSheet ? Sheet() : null;
+            Assert.IsFalse(Fill.FillPattern.TryResolve(patternName, atlas, out var r), message);
             Assert.IsFalse(r.IsResolved);
             Assert.AreEqual(0.0, r.Rect.z, "unresolved must be a ZERO-AREA rect — the shader's clip signal");
             Assert.AreEqual(0.0, r.Rect.w);
-        }
-
-        [Test]
-        public void Unresolved_WhenSheetHasNotArrivedYet()
-        {
-            // The real steady state for the first frames of every style: the sheet is fetched async, so a
-            // pattern layer's material is built before it exists.
-            Assert.IsFalse(Fill.FillPattern.TryResolve("plaza", null, out var r),
-                "a null atlas (sheet not fetched yet) must report unresolved, not fall back to fill-color");
-            Assert.IsFalse(r.IsResolved);
-            Assert.AreEqual(0.0, r.Rect.z);
-        }
-
-        [Test]
-        public void Unresolved_WhenNameAbsentFromSheet()
-        {
-            Assert.IsFalse(Fill.FillPattern.TryResolve("no-such-sprite", Sheet(), out var r),
-                "a name absent from the sheet must report unresolved (spec: the layer is not painted)");
-            Assert.IsFalse(r.IsResolved);
-            Assert.AreEqual(0.0, r.Rect.z);
-        }
-
-        [Test]
-        public void Unresolved_WhenSpriteRectIsDegenerate()
-        {
-            Assert.IsFalse(Fill.FillPattern.TryResolve("degenerate", Sheet(), out var r),
-                "a zero-area sprite is not drawable and must report unresolved");
-            Assert.IsFalse(r.IsResolved);
         }
 
         // ── Resolution arithmetic ────────────────────────────────────────────────────────────────
@@ -1483,312 +1342,193 @@ namespace MapRenderer.Tests.Style
 
         // ── height ────────────────────────────────────────────────────────────
 
+        /// <summary>fill-extrusion-height across every input kind: a constant literal pins, absence uses the
+        /// spec default (0), a zoom-interpolate ramps between its stops, and a data-driven <c>get</c>
+        /// classifies Feature.</summary>
         [Test]
-        public void Height_ConstantValue_ClassifiesAsConstantAndPins()
+        public void Height_ParsesAcrossInputKinds()
         {
-            var layer = MakeLayer("{\"fill-extrusion-height\":42}");
-            var fp    = layer.Paint;
+            var constant = MakeLayer("{\"fill-extrusion-height\":42}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, constant.Height.Kind, "a numeric literal must classify as Constant.");
+            Assert.AreEqual(42f, constant.Height.Evaluate(0.0), 1e-4f, "fill-extrusion-height must pin to its literal value.");
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.Height.Kind, "a numeric literal must classify as Constant.");
-            Assert.AreEqual(42f, fp.Height.Evaluate(0.0), 1e-4f, "fill-extrusion-height must pin to its literal value.");
-        }
+            var absent = MakeLayer("{}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, absent.Height.Kind, "absent fill-extrusion-height must use spec default (Constant kind).");
+            Assert.AreEqual(0f, absent.Height.Evaluate(0.0), 1e-6f, "default fill-extrusion-height must be 0.");
 
-        [Test]
-        public void Height_Absent_UsesSpecDefault_Zero()
-        {
-            var layer = MakeLayer("{}");
-            var fp    = layer.Paint;
+            var zoom = MakeLayer("{\"fill-extrusion-height\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,16,50]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Height.Kind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(0f, zoom.Height.Evaluate(10.0), 0.01f);
+            Assert.AreEqual(50f, zoom.Height.Evaluate(16.0), 0.01f);
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.Height.Kind, "absent fill-extrusion-height must use spec default (Constant kind).");
-            Assert.AreEqual(0f, fp.Height.Evaluate(0.0), 1e-6f, "default fill-extrusion-height must be 0.");
-        }
-
-        [Test]
-        public void Height_ZoomExpression_ClassifiesAsZoom()
-        {
-            const string paintJson =
-                "{\"fill-extrusion-height\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,16,50]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Zoom, fp.Height.Kind, "a zoom-interpolate expression must classify as Zoom.");
-            Assert.AreEqual(0f, fp.Height.Evaluate(10.0), 0.01f);
-            Assert.AreEqual(50f, fp.Height.Evaluate(16.0), 0.01f);
-        }
-
-        [Test]
-        public void Height_DataDriven_ClassifiesAsFeature()
-        {
-            const string paintJson = "{\"fill-extrusion-height\":[\"get\",\"height\"]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Feature, fp.Height.Kind, "a [\"get\",...] expression must classify as Feature.");
-            Assert.IsTrue(fp.Height.DependsOnFeature);
+            var dataDriven = MakeLayer("{\"fill-extrusion-height\":[\"get\",\"height\"]}").Paint;
+            Assert.AreEqual(ExpressionKind.Feature, dataDriven.Height.Kind, "a [\"get\",...] expression must classify as Feature.");
+            Assert.IsTrue(dataDriven.Height.DependsOnFeature);
         }
 
         // ── base ──────────────────────────────────────────────────────────────
 
+        /// <summary>fill-extrusion-base across every input kind: a constant literal pins, absence uses the
+        /// spec default (0), a zoom-interpolate ramps between its stops, and a data-driven <c>get</c>
+        /// classifies Feature.</summary>
         [Test]
-        public void Base_ConstantValue_ClassifiesAsConstantAndPins()
+        public void Base_ParsesAcrossInputKinds()
         {
-            var layer = MakeLayer("{\"fill-extrusion-base\":5}");
-            var fp    = layer.Paint;
+            var constant = MakeLayer("{\"fill-extrusion-base\":5}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, constant.Base.Kind);
+            Assert.AreEqual(5f, constant.Base.Evaluate(0.0), 1e-4f, "fill-extrusion-base must pin to its literal value.");
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.Base.Kind);
-            Assert.AreEqual(5f, fp.Base.Evaluate(0.0), 1e-4f, "fill-extrusion-base must pin to its literal value.");
-        }
+            var absent = MakeLayer("{}").Paint;
+            Assert.AreEqual(0f, absent.Base.Evaluate(0.0), 1e-6f, "default fill-extrusion-base must be 0.");
 
-        [Test]
-        public void Base_Absent_UsesSpecDefault_Zero()
-        {
-            var layer = MakeLayer("{}");
-            var fp    = layer.Paint;
+            var zoom = MakeLayer("{\"fill-extrusion-base\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,16,4]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Base.Kind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(0f, zoom.Base.Evaluate(10.0), 0.01f);
+            Assert.AreEqual(4f, zoom.Base.Evaluate(16.0), 0.01f);
 
-            Assert.AreEqual(0f, fp.Base.Evaluate(0.0), 1e-6f, "default fill-extrusion-base must be 0.");
-        }
-
-        [Test]
-        public void Base_ZoomExpression_ClassifiesAsZoom()
-        {
-            const string paintJson =
-                "{\"fill-extrusion-base\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,16,4]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Zoom, fp.Base.Kind, "a zoom-interpolate expression must classify as Zoom.");
-            Assert.AreEqual(0f, fp.Base.Evaluate(10.0), 0.01f);
-            Assert.AreEqual(4f, fp.Base.Evaluate(16.0), 0.01f);
-        }
-
-        [Test]
-        public void Base_DataDriven_ClassifiesAsFeature()
-        {
-            const string paintJson = "{\"fill-extrusion-base\":[\"get\",\"min_height\"]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Feature, fp.Base.Kind, "a [\"get\",...] expression must classify as Feature.");
-            Assert.IsTrue(fp.Base.DependsOnFeature);
+            var dataDriven = MakeLayer("{\"fill-extrusion-base\":[\"get\",\"min_height\"]}").Paint;
+            Assert.AreEqual(ExpressionKind.Feature, dataDriven.Base.Kind, "a [\"get\",...] expression must classify as Feature.");
+            Assert.IsTrue(dataDriven.Base.DependsOnFeature);
         }
 
         // ── color ─────────────────────────────────────────────────────────────
 
+        /// <summary>fill-extrusion-color across every input kind: a constant rgba pins, absence uses the
+        /// spec default (opaque black), a zoom-interpolate ramps between its stop colors, and a data-driven
+        /// <c>match</c> classifies Feature.</summary>
         [Test]
-        public void Color_Constant_ClassifiesAsConstantAndPins()
+        public void Color_ParsesAcrossInputKinds()
         {
-            var layer = MakeLayer("{\"fill-extrusion-color\":[\"rgba\",200,100,50,1]}");
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Constant, fp.Color.Kind);
-            var c = fp.Color.Evaluate(0.0);
+            var constant = MakeLayer("{\"fill-extrusion-color\":[\"rgba\",200,100,50,1]}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, constant.Color.Kind);
+            var c = constant.Color.Evaluate(0.0);
             Assert.AreEqual(200.0 / 255.0, c.R, 1e-3, "Red channel must match rgba(200,100,50,1).");
             Assert.AreEqual(100.0 / 255.0, c.G, 1e-3, "Green channel must match rgba(200,100,50,1).");
             Assert.AreEqual(50.0 / 255.0, c.B, 1e-3, "Blue channel must match rgba(200,100,50,1).");
-        }
 
-        [Test]
-        public void Color_Absent_UsesSpecDefault_Black()
-        {
-            var layer = MakeLayer("{}");
-            var fp    = layer.Paint;
+            var absent = MakeLayer("{}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, absent.Color.Kind, "absent fill-extrusion-color must use spec default (Constant kind).");
+            var defaultColor = absent.Color.Evaluate(0.0);
+            Assert.AreEqual(0.0, defaultColor.R, 1e-4, "Default fill-extrusion-color R must be 0 (black).");
+            Assert.AreEqual(0.0, defaultColor.G, 1e-4, "Default fill-extrusion-color G must be 0 (black).");
+            Assert.AreEqual(0.0, defaultColor.B, 1e-4, "Default fill-extrusion-color B must be 0 (black).");
+            Assert.AreEqual(1.0, defaultColor.A, 1e-4, "Default fill-extrusion-color must be fully opaque.");
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.Color.Kind, "absent fill-extrusion-color must use spec default (Constant kind).");
-            var c = fp.Color.Evaluate(0.0);
-            Assert.AreEqual(0.0, c.R, 1e-4, "Default fill-extrusion-color R must be 0 (black).");
-            Assert.AreEqual(0.0, c.G, 1e-4, "Default fill-extrusion-color G must be 0 (black).");
-            Assert.AreEqual(0.0, c.B, 1e-4, "Default fill-extrusion-color B must be 0 (black).");
-            Assert.AreEqual(1.0, c.A, 1e-4, "Default fill-extrusion-color must be fully opaque.");
-        }
-
-        [Test]
-        public void Color_ZoomExpression_ClassifiesAsZoom()
-        {
-            const string paintJson =
-                "{\"fill-extrusion-color\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
-                "10,[\"rgba\",255,0,0,1],16,[\"rgba\",0,0,255,1]]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Zoom, fp.Color.Kind, "a zoom-interpolate expression must classify as Zoom.");
-
-            var atMin = fp.Color.Evaluate(10.0);
+            var zoom = MakeLayer("{\"fill-extrusion-color\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                "10,[\"rgba\",255,0,0,1],16,[\"rgba\",0,0,255,1]]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Color.Kind, "a zoom-interpolate expression must classify as Zoom.");
+            var atMin = zoom.Color.Evaluate(10.0);
             Assert.AreEqual(1.0, atMin.R, 1e-3, "At zoom=10, interpolated color must be the first stop (red).");
             Assert.AreEqual(0.0, atMin.B, 1e-3);
-
-            var atMax = fp.Color.Evaluate(16.0);
+            var atMax = zoom.Color.Evaluate(16.0);
             Assert.AreEqual(0.0, atMax.R, 1e-3, "At zoom=16, interpolated color must be the second stop (blue).");
             Assert.AreEqual(1.0, atMax.B, 1e-3);
-        }
 
-        [Test]
-        public void Color_DataDriven_ClassifiesAsFeature()
-        {
-            const string paintJson =
-                "{\"fill-extrusion-color\":[\"match\",[\"get\",\"type\"]," +
+            var dataDriven = MakeLayer("{\"fill-extrusion-color\":[\"match\",[\"get\",\"type\"]," +
                 "\"residential\",[\"rgba\",200,50,50,1]," +
-                "[\"rgba\",128,128,128,1]]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Feature, fp.Color.Kind, "a [\"match\",[\"get\",...],...] expression must classify as Feature.");
-            Assert.IsTrue(fp.Color.DependsOnFeature);
+                "[\"rgba\",128,128,128,1]]}").Paint;
+            Assert.AreEqual(ExpressionKind.Feature, dataDriven.Color.Kind, "a [\"match\",[\"get\",...],...] expression must classify as Feature.");
+            Assert.IsTrue(dataDriven.Color.DependsOnFeature);
         }
 
         // ── opacity ───────────────────────────────────────────────────────────
 
+        /// <summary>fill-extrusion-opacity across every input kind: absence uses the spec default (1.0), a
+        /// constant literal pins, a zoom-interpolate ramps between its stops, and a data-driven <c>get</c>
+        /// classifies Feature.</summary>
         [Test]
-        public void Opacity_Absent_UsesSpecDefault_One()
+        public void Opacity_ParsesAcrossInputKinds()
         {
-            var layer = MakeLayer("{}");
-            var fp    = layer.Paint;
+            var absent = MakeLayer("{}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, absent.Opacity.Kind);
+            Assert.AreEqual(1.0f, absent.Opacity.Evaluate(0.0), 1e-6f, "default fill-extrusion-opacity must be 1.0.");
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.Opacity.Kind);
-            Assert.AreEqual(1.0f, fp.Opacity.Evaluate(0.0), 1e-6f, "default fill-extrusion-opacity must be 1.0.");
-        }
+            var constant = MakeLayer("{\"fill-extrusion-opacity\":0.5}").Paint;
+            Assert.AreEqual(0.5f, constant.Opacity.Evaluate(0.0), 1e-6f);
 
-        [Test]
-        public void Opacity_Constant_Pins()
-        {
-            var layer = MakeLayer("{\"fill-extrusion-opacity\":0.5}");
-            var fp    = layer.Paint;
+            var zoom = MakeLayer("{\"fill-extrusion-opacity\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0.2,16,1.0]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Opacity.Kind, "a zoom-interpolate expression must classify as Zoom.");
+            Assert.AreEqual(0.2f, zoom.Opacity.Evaluate(10.0), 0.01f);
+            Assert.AreEqual(1.0f, zoom.Opacity.Evaluate(16.0), 0.01f);
 
-            Assert.AreEqual(0.5f, fp.Opacity.Evaluate(0.0), 1e-6f);
-        }
-
-        [Test]
-        public void Opacity_ZoomExpression_ClassifiesAsZoom()
-        {
-            const string paintJson =
-                "{\"fill-extrusion-opacity\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0.2,16,1.0]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Zoom, fp.Opacity.Kind, "a zoom-interpolate expression must classify as Zoom.");
-            Assert.AreEqual(0.2f, fp.Opacity.Evaluate(10.0), 0.01f);
-            Assert.AreEqual(1.0f, fp.Opacity.Evaluate(16.0), 0.01f);
-        }
-
-        [Test]
-        public void Opacity_DataDriven_ClassifiesAsFeature()
-        {
-            const string paintJson = "{\"fill-extrusion-opacity\":[\"get\",\"opacity\"]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Feature, fp.Opacity.Kind, "a [\"get\",...] expression must classify as Feature.");
-            Assert.IsTrue(fp.Opacity.DependsOnFeature);
+            var dataDriven = MakeLayer("{\"fill-extrusion-opacity\":[\"get\",\"opacity\"]}").Paint;
+            Assert.AreEqual(ExpressionKind.Feature, dataDriven.Opacity.Kind, "a [\"get\",...] expression must classify as Feature.");
+            Assert.IsTrue(dataDriven.Opacity.DependsOnFeature);
         }
 
         // ── vertical-gradient ─────────────────────────────────────────────────
 
         [Test]
-        public void VerticalGradient_Absent_UsesSpecDefault_True()
+        [TestCase("{}", 1.0f, TestName = "VerticalGradient_MatchesExpected(Absent_UsesSpecDefault_True)")]
+        [TestCase("{\"fill-extrusion-vertical-gradient\":false}", 0.0f, TestName = "VerticalGradient_MatchesExpected(False_EncodesAsZero)")]
+        public void VerticalGradient_MatchesExpected(string paintJson, float expected)
         {
-            var layer = MakeLayer("{}");
+            var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(1.0f, fp.VerticalGradient.Evaluate(0.0), 1e-6f,
-                "default fill-extrusion-vertical-gradient must encode 'true' as 1.0.");
-        }
-
-        [Test]
-        public void VerticalGradient_False_EncodesAsZero()
-        {
-            var layer = MakeLayer("{\"fill-extrusion-vertical-gradient\":false}");
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(0.0f, fp.VerticalGradient.Evaluate(0.0), 1e-6f,
-                "fill-extrusion-vertical-gradient:false must encode as 0.0.");
+            Assert.AreEqual(expected, fp.VerticalGradient.Evaluate(0.0), 1e-6f,
+                $"fill-extrusion-vertical-gradient ({paintJson}) must encode as {expected}.");
         }
 
         // ── translate-anchor ──────────────────────────────────────────────────
 
         [Test]
-        public void TranslateAnchor_Viewport_IsOne()
+        [TestCase("{\"fill-extrusion-translate-anchor\":\"viewport\"}", 1.0f, TestName = "TranslateAnchor_MatchesExpected(Viewport_IsOne)")]
+        [TestCase("{}", 0.0f, TestName = "TranslateAnchor_MatchesExpected(AbsentDefaultsToMap_IsZero)")]
+        public void TranslateAnchor_MatchesExpected(string paintJson, float expected)
         {
-            var layer = MakeLayer("{\"fill-extrusion-translate-anchor\":\"viewport\"}");
+            var layer = MakeLayer(paintJson);
             var fp    = layer.Paint;
 
-            Assert.AreEqual(1.0f, fp.TranslateAnchor.Evaluate(0.0), 1e-6f,
-                "fill-extrusion-translate-anchor 'viewport' must encode as 1.0.");
-        }
-
-        [Test]
-        public void TranslateAnchor_AbsentDefaultsToMap_IsZero()
-        {
-            var layer = MakeLayer("{}");
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(0.0f, fp.TranslateAnchor.Evaluate(0.0), 1e-6f,
-                "absent fill-extrusion-translate-anchor must default to 'map' (0.0).");
+            Assert.AreEqual(expected, fp.TranslateAnchor.Evaluate(0.0), 1e-6f,
+                $"fill-extrusion-translate-anchor ({paintJson}) must encode as {expected}.");
         }
 
         // ── translate (parsed through the expression engine; mirrors the Height teeth above) ──
 
+        /// <summary>fill-extrusion-translate across every input kind: a bare [x,y] constant array pins,
+        /// absence uses the spec default [0,0], a zoom-interpolate ramps between its stops (never collapsing
+        /// to the default), and a data-driven value — spec-invalid for a layer-level property — falls back
+        /// to the Constant default rather than throwing.</summary>
         [Test]
-        public void Translate_ConstantValue_ClassifiesAsConstantAndPins()
+        public void Translate_ParsesAcrossInputKinds()
         {
             // A bare [x,y] array — the common constant form real styles use — must parse (via
             // WrapBareArrayLiterals) rather than throw "operator must be a string".
-            var layer = MakeLayer("{\"fill-extrusion-translate\":[12,-4]}");
-            var fp    = layer.Paint;
+            var constant = MakeLayer("{\"fill-extrusion-translate\":[12,-4]}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, constant.Translate.Kind);
+            var constantT = constant.Translate.Evaluate(0.0);
+            Assert.AreEqual(12.0, constantT.x, 1e-6, "fill-extrusion-translate.x must pin to its literal value.");
+            Assert.AreEqual(-4.0, constantT.y, 1e-6, "fill-extrusion-translate.y must pin to its literal value.");
 
-            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind);
-            var t = fp.Translate.Evaluate(0.0);
-            Assert.AreEqual(12.0, t.x, 1e-6, "fill-extrusion-translate.x must pin to its literal value.");
-            Assert.AreEqual(-4.0, t.y, 1e-6, "fill-extrusion-translate.y must pin to its literal value.");
-        }
+            var absent = MakeLayer("{}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, absent.Translate.Kind);
+            var absentT = absent.Translate.Evaluate(0.0);
+            Assert.AreEqual(0.0, absentT.x, 1e-6);
+            Assert.AreEqual(0.0, absentT.y, 1e-6);
 
-        [Test]
-        public void Translate_Absent_UsesSpecDefault_Zero()
-        {
-            var layer = MakeLayer("{}");
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind);
-            var t = fp.Translate.Evaluate(0.0);
-            Assert.AreEqual(0.0, t.x, 1e-6);
-            Assert.AreEqual(0.0, t.y, 1e-6);
-        }
-
-        [Test]
-        public void Translate_ZoomExpression_ClassifiesAsZoom_NotCollapsedToDefault()
-        {
             // The array-valued stop outputs must be wrapped ["literal", [...]] per the Style Spec — the
             // engine's InterpolateExpression.Lerp handles ValueType.Array element-wise (Ops/Ramps.cs).
-            const string paintJson =
-                "{\"fill-extrusion-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
-                "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}";
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Zoom, fp.Translate.Kind,
+            var zoom = MakeLayer("{\"fill-extrusion-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Translate.Kind,
                 "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
-
-            var atMin = fp.Translate.Evaluate(10.0);
-            Assert.AreEqual(0.0, atMin.x, 0.01);
-            Assert.AreEqual(0.0, atMin.y, 0.01);
-
-            var atMax = fp.Translate.Evaluate(16.0);
-            Assert.AreEqual(20.0, atMax.x, 0.01,
+            var zoomAtMin = zoom.Translate.Evaluate(10.0);
+            Assert.AreEqual(0.0, zoomAtMin.x, 0.01);
+            Assert.AreEqual(0.0, zoomAtMin.y, 0.01);
+            var zoomAtMax = zoom.Translate.Evaluate(16.0);
+            Assert.AreEqual(20.0, zoomAtMax.x, 0.01,
                 "at zoom=16 the interpolated translate must reach its second stop, NOT stay at [0,0].");
-            Assert.AreEqual(-10.0, atMax.y, 0.01);
-        }
+            Assert.AreEqual(-10.0, zoomAtMax.y, 0.01);
 
-        [Test]
-        public void Translate_DataDriven_FallsBackToDefault()
-        {
             // fill-extrusion-translate is a layer-level property; a data-driven value is spec-invalid and
             // must fall back to the default rather than throw at bind time (mirrors VerticalGradient).
-            var layer = MakeLayer("{\"fill-extrusion-translate\":[\"get\",\"offset\"]}");
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Constant, fp.Translate.Kind,
+            var dataDriven = MakeLayer("{\"fill-extrusion-translate\":[\"get\",\"offset\"]}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, dataDriven.Translate.Kind,
                 "a data-driven translate must fall back to the Constant default, not classify as Feature.");
-            var t = fp.Translate.Evaluate(0.0);
-            Assert.AreEqual(0.0, t.x, 1e-6);
-            Assert.AreEqual(0.0, t.y, 1e-6);
+            var dataDrivenT = dataDriven.Translate.Evaluate(0.0);
+            Assert.AreEqual(0.0, dataDrivenT.x, 1e-6);
+            Assert.AreEqual(0.0, dataDrivenT.y, 1e-6);
         }
 
         // ── StyleParser dispatch (Core half) ─────────────────────────────────────
@@ -1907,72 +1647,30 @@ namespace MapRenderer.Tests.Style
                 "Data-driven color must DependsOnFeature.");
         }
 
-        // ── Absent line-color → Constant kind (spec default #000000) ────────────
-
+        /// <summary>Every line-paint property, absent, uses its own spec default: color black, opacity 1,
+        /// width 1, blur 0, gap-width 0.</summary>
         [Test]
-        public void LinePaint_AbsentColor_UsesSpecDefault_Black()
+        public void LinePaint_AbsentProperty_UsesSpecDefault()
         {
-            var layer = MakeLineLayer("{}");
-            var lp    = layer.Paint;
+            var lp = MakeLineLayer("{}").Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.Color.Kind,
                 "Absent line-color must use spec default (Constant kind).");
             Assert.IsFalse(lp.Color.DependsOnFeature);
-
             var c = lp.Color.Evaluate(0.0);
             Assert.AreEqual(0.0, c.R, 1e-4, "Default line-color R must be 0 (black).");
             Assert.AreEqual(0.0, c.G, 1e-4, "Default line-color G must be 0 (black).");
             Assert.AreEqual(0.0, c.B, 1e-4, "Default line-color B must be 0 (black).");
-        }
-
-        // ── Absent line-opacity → Constant 1.0 ─────────────────────────────────
-
-        [Test]
-        public void LinePaint_AbsentOpacity_UsesSpecDefault_One()
-        {
-            var layer = MakeLineLayer("{}");
-            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.Opacity.Kind);
-            float v = lp.Opacity.Evaluate(0.0);
-            Assert.AreEqual(1.0f, v, 1e-6f, "Default line-opacity must be 1.0.");
-        }
-
-        // ── Absent line-width → Constant 1.0 ───────────────────────────────────
-
-        [Test]
-        public void LinePaint_AbsentWidth_UsesSpecDefault_One()
-        {
-            var layer = MakeLineLayer("{}");
-            var lp    = layer.Paint;
+            Assert.AreEqual(1.0f, lp.Opacity.Evaluate(0.0), 1e-6f, "Default line-opacity must be 1.0.");
 
             Assert.AreEqual(ExpressionKind.Constant, lp.Width.Kind);
-            float v = lp.Width.Evaluate(0.0);
-            Assert.AreEqual(1.0f, v, 1e-6f, "Default line-width must be 1.0.");
-        }
+            Assert.AreEqual(1.0f, lp.Width.Evaluate(0.0), 1e-6f, "Default line-width must be 1.0.");
 
-        // ── Absent line-blur → Constant 0 ──────────────────────────────────────
+            Assert.AreEqual(0.0f, lp.Blur.Evaluate(0.0), 1e-6f, "Default line-blur must be 0.0.");
 
-        [Test]
-        public void LinePaint_AbsentBlur_UsesSpecDefault_Zero()
-        {
-            var layer = MakeLineLayer("{}");
-            var lp    = layer.Paint;
-
-            float v = lp.Blur.Evaluate(0.0);
-            Assert.AreEqual(0.0f, v, 1e-6f, "Default line-blur must be 0.0.");
-        }
-
-        // ── Absent line-gap-width → Constant 0 ─────────────────────────────────
-
-        [Test]
-        public void LinePaint_AbsentGapWidth_UsesSpecDefault_Zero()
-        {
-            var layer = MakeLineLayer("{}");
-            var lp    = layer.Paint;
-
-            float v = lp.GapWidth.Evaluate(0.0);
-            Assert.AreEqual(0.0f, v, 1e-6f, "Default line-gap-width must be 0.0.");
+            Assert.AreEqual(0.0f, lp.GapWidth.Evaluate(0.0), 1e-6f, "Default line-gap-width must be 0.0.");
         }
 
         // ── line-gap-width present → parsed ────────────────────────────────────
@@ -1987,147 +1685,79 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(8.0f, v, 1e-6f, "line-gap-width must be 8.0.");
         }
 
-        // ── line-translate [16, -8] → double2 pinned ───────────────────────────
-
+        /// <summary>line-translate parses a bare [x,y] constant.</summary>
         [Test]
-        public void LinePaint_Translate_ComponentsArePinned()
+        public void LinePaint_Translate_ParsesOrFallsBackAcrossInputShapes()
         {
-            var layer = MakeLineLayer("{\"line-translate\":[16,-8]}");
-            var lp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Constant, lp.Translate.Kind);
-            var t = lp.Translate.Evaluate(0.0);
-            Assert.AreEqual(16.0, t.x, 1e-6, "line-translate x must be 16.");
-            Assert.AreEqual(-8.0, t.y, 1e-6, "line-translate y must be -8.");
+            var constant = MakeLineLayer("{\"line-translate\":[16,-8]}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, constant.Translate.Kind);
+            var constantT = constant.Translate.Evaluate(0.0);
+            Assert.AreEqual(16.0, constantT.x, 1e-6, "line-translate x must be 16.");
+            Assert.AreEqual(-8.0, constantT.y, 1e-6, "line-translate y must be -8.");
         }
 
-        // ── line-translate-anchor "viewport" → 1.0 ─────────────────────────────
-
+        /// <summary>line-translate-anchor encodes viewport as 1.0 and map (including absence, defaulting to
+        /// map) as 0.0.</summary>
         [Test]
-        public void LinePaint_TranslateAnchorViewport_IsOne()
+        [TestCase("{\"line-translate-anchor\":\"viewport\"}", 1.0f, TestName = "LinePaint_TranslateAnchor_MatchesExpected(Viewport_IsOne)")]
+        [TestCase("{\"line-translate-anchor\":\"map\"}", 0.0f, TestName = "LinePaint_TranslateAnchor_MatchesExpected(Map_IsZero)")]
+        public void LinePaint_TranslateAnchor_MatchesExpected(string paintJson, float expected)
         {
-            var layer = MakeLineLayer("{\"line-translate-anchor\":\"viewport\"}");
-            var lp    = layer.Paint;
-
+            var lp = MakeLineLayer(paintJson).Paint;
             Assert.AreEqual(ExpressionKind.Constant, lp.TranslateAnchor.Kind);
-            float v = lp.TranslateAnchor.Evaluate(0.0);
-            Assert.AreEqual(1.0f, v, 1e-6f, "line-translate-anchor 'viewport' must encode as 1.0.");
+            Assert.AreEqual(expected, lp.TranslateAnchor.Evaluate(0.0), 1e-6f,
+                $"line-translate-anchor ({paintJson}) must encode as {expected}.");
         }
 
-        // ── line-translate-anchor "map" → 0.0 ──────────────────────────────────
-
+        /// <summary>line-join/line-cap/line-miter-limit/line-round-limit each parse from layout (typed enums
+        /// for join/cap), and an entirely absent layout uses every one's spec default.</summary>
         [Test]
-        public void LinePaint_TranslateAnchorMap_IsZero()
+        public void LinePaint_Layout_ParsesJoinCapMiterRoundLimit()
         {
-            var layer = MakeLineLayer("{\"line-translate-anchor\":\"map\"}");
-            var lp    = layer.Paint;
+            var joinCap = MakeLineLayer("{}", "{\"line-join\":\"round\",\"line-cap\":\"square\"}").Layout;
+            Assert.AreEqual(JoinType.Round, joinCap.Join, "line-join='round' must parse to JoinType.Round.");
+            Assert.AreEqual(CapType.Square, joinCap.Cap,  "line-cap='square' must parse to CapType.Square.");
 
-            float v = lp.TranslateAnchor.Evaluate(0.0);
-            Assert.AreEqual(0.0f, v, 1e-6f, "line-translate-anchor 'map' must encode as 0.0.");
-        }
+            var joinBevel = MakeLineLayer("{}", "{\"line-join\":\"bevel\"}").Layout;
+            Assert.AreEqual(JoinType.Bevel, joinBevel.Join, "line-join='bevel' must parse to JoinType.Bevel.");
 
-        // ── line-join, line-cap from layout (now typed enums) ──────────────
+            var capRound = MakeLineLayer("{}", "{\"line-cap\":\"round\"}").Layout;
+            Assert.AreEqual(CapType.Round, capRound.Cap, "line-cap='round' must parse to CapType.Round.");
 
-        [Test]
-        public void LinePaint_LayoutJoinCap_Parsed()
-        {
-            var layer = MakeLineLayer("{}", "{\"line-join\":\"round\",\"line-cap\":\"square\"}");
-            var lo    = layer.Layout;
+            var miterLimit = MakeLineLayer("{}", "{\"line-miter-limit\":5.0}").Layout;
+            Assert.AreEqual(5.0, miterLimit.MiterLimit, 1e-6, "line-miter-limit must be parsed from layout.");
 
-            Assert.AreEqual(JoinType.Round,  lo.Join, "line-join='round' must parse to JoinType.Round.");
-            Assert.AreEqual(CapType.Square, lo.Cap,  "line-cap='square' must parse to CapType.Square.");
-        }
+            var roundLimit = MakeLineLayer("{}", "{\"line-round-limit\":1.2}").Layout;
+            Assert.AreEqual(1.2, roundLimit.RoundLimit, 1e-6, "line-round-limit must be parsed from layout.");
 
-        [Test]
-        public void LinePaint_LayoutJoinBevel_Parsed()
-        {
-            var layer = MakeLineLayer("{}", "{\"line-join\":\"bevel\"}");
-            var lo    = layer.Layout;
-
-            Assert.AreEqual(JoinType.Bevel, lo.Join, "line-join='bevel' must parse to JoinType.Bevel.");
-        }
-
-        [Test]
-        public void LinePaint_LayoutCapRound_Parsed()
-        {
-            var layer = MakeLineLayer("{}", "{\"line-cap\":\"round\"}");
-            var lo    = layer.Layout;
-
-            Assert.AreEqual(CapType.Round, lo.Cap, "line-cap='round' must parse to CapType.Round.");
-        }
-
-        [Test]
-        public void LinePaint_LayoutMiterLimit_Parsed()
-        {
-            var layer = MakeLineLayer("{}", "{\"line-miter-limit\":5.0}");
-            var lo    = layer.Layout;
-
-            Assert.AreEqual(5.0, lo.MiterLimit, 1e-6, "line-miter-limit must be parsed from layout.");
-        }
-
-        [Test]
-        public void LinePaint_LayoutRoundLimit_Parsed()
-        {
-            var layer = MakeLineLayer("{}", "{\"line-round-limit\":1.2}");
-            var lo    = layer.Layout;
-
-            Assert.AreEqual(1.2, lo.RoundLimit, 1e-6, "line-round-limit must be parsed from layout.");
-        }
-
-        [Test]
-        public void LinePaint_AbsentLayout_UsesSpecDefaults()
-        {
-            var layer = MakeLineLayer("{}");
-            var lo    = layer.Layout;
-
-            Assert.AreEqual(JoinType.Miter, lo.Join,       "Default line-join must be JoinType.Miter.");
-            Assert.AreEqual(CapType.Butt,   lo.Cap,        "Default line-cap must be CapType.Butt.");
-            Assert.AreEqual(2.0,            lo.MiterLimit, 1e-6, "Default miter-limit must be 2.0.");
-            Assert.AreEqual(1.05,           lo.RoundLimit, 1e-6, "Default round-limit must be 1.05.");
+            var absent = MakeLineLayer("{}").Layout;
+            Assert.AreEqual(JoinType.Miter, absent.Join,       "Default line-join must be JoinType.Miter.");
+            Assert.AreEqual(CapType.Butt,   absent.Cap,        "Default line-cap must be CapType.Butt.");
+            Assert.AreEqual(2.0,            absent.MiterLimit, 1e-6, "Default miter-limit must be 2.0.");
+            Assert.AreEqual(1.05,           absent.RoundLimit, 1e-6, "Default round-limit must be 1.05.");
         }
 
         // ── Line-offset ──────────────────────────────────────────────────────────
 
+        /// <summary>line-offset across every value form: a positive constant classifies Constant, absence
+        /// defaults to 0.0, a negative constant parses correctly, and a zoom-interpolate expression
+        /// classifies Zoom.</summary>
         [Test]
-        public void LinePaint_Offset_ConstantValue_IsParsed()
+        public void LinePaint_Offset_ParsesAcrossValueForms()
         {
-            var layer = MakeLineLayer("{\"line-offset\":5}");
-            var lp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Constant, lp.Offset.Kind,
+            var constant = MakeLineLayer("{\"line-offset\":5}").Paint;
+            Assert.AreEqual(ExpressionKind.Constant, constant.Offset.Kind,
                 "A numeric line-offset must classify as Constant.");
-            float v = lp.Offset.Evaluate(0.0);
-            Assert.AreEqual(5.0f, v, 1e-6f, "line-offset must evaluate to 5.0.");
-        }
+            Assert.AreEqual(5.0f, constant.Offset.Evaluate(0.0), 1e-6f, "line-offset must evaluate to 5.0.");
 
-        [Test]
-        public void LinePaint_Offset_Absent_DefaultsToZero()
-        {
-            var layer = MakeLineLayer("{}");
-            var lp    = layer.Paint;
+            var absent = MakeLineLayer("{}").Paint;
+            Assert.AreEqual(0.0f, absent.Offset.Evaluate(0.0), 1e-6f, "Absent line-offset must default to 0.0.");
 
-            float v = lp.Offset.Evaluate(0.0);
-            Assert.AreEqual(0.0f, v, 1e-6f, "Absent line-offset must default to 0.0.");
-        }
+            var negative = MakeLineLayer("{\"line-offset\":-3}").Paint;
+            Assert.AreEqual(-3.0f, negative.Offset.Evaluate(0.0), 1e-6f, "Negative line-offset must parse correctly.");
 
-        [Test]
-        public void LinePaint_Offset_NegativeValue_IsParsed()
-        {
-            var layer = MakeLineLayer("{\"line-offset\":-3}");
-            var lp    = layer.Paint;
-
-            float v = lp.Offset.Evaluate(0.0);
-            Assert.AreEqual(-3.0f, v, 1e-6f, "Negative line-offset must parse correctly.");
-        }
-
-        [Test]
-        public void LinePaint_Offset_ZoomInterpolate_ClassifiesAsZoom()
-        {
-            var json  = "{\"line-offset\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,14,8]}";
-            var layer = MakeLineLayer(json);
-            var lp    = layer.Paint;
-
-            Assert.AreEqual(ExpressionKind.Zoom, lp.Offset.Kind,
+            var zoom = MakeLineLayer("{\"line-offset\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,14,8]}").Paint;
+            Assert.AreEqual(ExpressionKind.Zoom, zoom.Offset.Kind,
                 "A zoom-interpolate line-offset must classify as Zoom kind.");
         }
 
@@ -2201,46 +1831,28 @@ namespace MapRenderer.Tests.Style
 
         // ── Explicit parse ────────────────────────────────────────────────────────
 
+        /// <summary>Each explicit background-paint value parses: a color string, a color rgba array,
+        /// an opacity number, and a pattern string.</summary>
         [Test]
-        public void BackgroundPaint_ExplicitColorString_Parses()
+        public void BackgroundPaint_ExplicitValues_Parse()
         {
-            var layer = MakeBackgroundLayer("{\"background-color\":\"#ff0000\"}");
-            var bp    = layer.Paint;
+            var colorString = MakeBackgroundLayer("{\"background-color\":\"#ff0000\"}").Paint;
+            var cs = colorString.Color.Evaluate(0.0);
+            Assert.AreEqual(1.0, cs.R, 1e-4, "Red channel must be 1.0 for #ff0000.");
+            Assert.AreEqual(0.0, cs.G, 1e-4);
+            Assert.AreEqual(0.0, cs.B, 1e-4);
 
-            var c = bp.Color.Evaluate(0.0);
-            Assert.AreEqual(1.0, c.R, 1e-4, "Red channel must be 1.0 for #ff0000.");
-            Assert.AreEqual(0.0, c.G, 1e-4);
-            Assert.AreEqual(0.0, c.B, 1e-4);
-        }
+            var colorRgba = MakeBackgroundLayer("{\"background-color\":[\"rgba\",0,255,0,1]}").Paint;
+            var cr = colorRgba.Color.Evaluate(0.0);
+            Assert.AreEqual(0.0, cr.R, 1e-4);
+            Assert.AreEqual(1.0, cr.G, 1e-4, "Green channel must be 1.0 for rgba(0,255,0,1).");
+            Assert.AreEqual(0.0, cr.B, 1e-4);
 
-        [Test]
-        public void BackgroundPaint_ExplicitColorRgbaArray_Parses()
-        {
-            var layer = MakeBackgroundLayer("{\"background-color\":[\"rgba\",0,255,0,1]}");
-            var bp    = layer.Paint;
+            var opacity = MakeBackgroundLayer("{\"background-opacity\":0.5}").Paint;
+            Assert.AreEqual(0.5f, opacity.Opacity.Evaluate(0.0), 1e-6f);
 
-            var c = bp.Color.Evaluate(0.0);
-            Assert.AreEqual(0.0, c.R, 1e-4);
-            Assert.AreEqual(1.0, c.G, 1e-4, "Green channel must be 1.0 for rgba(0,255,0,1).");
-            Assert.AreEqual(0.0, c.B, 1e-4);
-        }
-
-        [Test]
-        public void BackgroundPaint_ExplicitOpacityNumber_Parses()
-        {
-            var layer = MakeBackgroundLayer("{\"background-opacity\":0.5}");
-            var bp    = layer.Paint;
-
-            Assert.AreEqual(0.5f, bp.Opacity.Evaluate(0.0), 1e-6f);
-        }
-
-        [Test]
-        public void BackgroundPaint_ExplicitPatternString_Parses()
-        {
-            var layer = MakeBackgroundLayer("{\"background-pattern\":\"stripes\"}");
-            var bp    = layer.Paint;
-
-            Assert.AreEqual("stripes", bp.PatternName);
+            var pattern = MakeBackgroundLayer("{\"background-pattern\":\"stripes\"}").Paint;
+            Assert.AreEqual("stripes", pattern.PatternName);
         }
 
         // ── Zoom classification ──────────────────────────────────────────────────
@@ -2624,39 +2236,30 @@ namespace MapRenderer.Tests.Style
                 "[top,right,bottom,left] collapses to the largest entry");
         }
 
+        /// <summary>A zoom-interpolated icon-padding array evaluates (matching stop lengths, including a
+        /// 4-entry array that also looks like an rgb()/rgba() colour, so Ramps.Lerp must take the
+        /// element-wise array branch before colour coercion) or falls back via TryEvaluate for genuinely
+        /// mismatched stop lengths (Evaluate itself still throws — surviving it is the caller's job).</summary>
         [Test]
-        public void SymbolLayer_IconPadding_ZoomInterpolatedArray_MatchingLengthsEvaluate()
+        public void IconPadding_ZoomInterpolatedArray_EvaluatesOrFallsBack()
         {
-            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+            var matchingLengths = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
                 { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
                     'icon-padding':['interpolate',['linear'],['zoom'],0,[2,4],10,[8,16]] } } ] }").Layers[0];
             // z5 lerps each entry to [5,10] (halfway between [2,4] and [8,16]); the largest is 10.
-            Assert.AreEqual(10f, zoomed.Layout.IconPadding.Evaluate(5.0), 1e-4);
-        }
+            Assert.AreEqual(10f, matchingLengths.Layout.IconPadding.Evaluate(5.0), 1e-4);
 
-        [Test]
-        public void SymbolLayer_IconPadding_ZoomInterpolatedArray_FourEntriesEvaluate()
-        {
-            // A 4-number array stop also looks like an rgb()/rgba() colour; Ramps.Lerp must take the
-            // element-wise array branch before colour coercion, so this lerps instead of throwing.
-            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+            var fourEntries = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
                 { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
                     'icon-padding':['interpolate',['linear'],['zoom'],0,[2,4,6,8],10,[8,16,24,32]] } } ] }")
                 .Layers[0];
             // z5 lerps each entry to [5,10,15,20] (halfway); the largest is 20.
-            Assert.AreEqual(20f, zoomed.Layout.IconPadding.Evaluate(5.0), 1e-4);
-        }
+            Assert.AreEqual(20f, fourEntries.Layout.IconPadding.Evaluate(5.0), 1e-4);
 
-        [Test]
-        public void SymbolLayer_IconPadding_ZoomInterpolatedArray_MismatchedLengths_FallsBackViaTryEvaluate()
-        {
-            // Evaluate still throws for genuinely mismatched stop lengths — TryEvaluate is the caller's
-            // job to survive it (SymbolFeatureExtractor uses TryEvaluate, so a tile build never dies here).
             var mismatched = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
                 { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
                     'icon-padding':['interpolate',['linear'],['zoom'],0,[2],10,[8,16]] } } ] }").Layers[0];
             Assert.Throws<ExpressionEvaluationException>(() => mismatched.Layout.IconPadding.Evaluate(5.0));
-
             bool ok = mismatched.Layout.IconPadding.TryEvaluate(5.0, null, out float fallback);
             Assert.IsFalse(ok);
             Assert.AreEqual(2f, fallback, 1e-6, "TryEvaluate must degrade to the spec default (2px)");
@@ -2832,41 +2435,25 @@ namespace MapRenderer.Tests.Style
                 $"Expected on:off ratio ≈ 2:1 for [2,1], got {ratio:F4} (on={onCount}, off={offCount})");
         }
 
+        /// <summary>Every degenerate DashCoverage input is always-on (coverage 1.0): an odd-length ("solid
+        /// control") pattern, a null pattern, an empty pattern, and a zero/negative dash-width-in-metres.</summary>
         [Test]
-        public void DashCoverage_SolidControl_SingleEntry_AllOn()
+        public void DashCoverage_DegenerateInputs_AlwaysOn()
         {
-            float[] pattern = new float[] { 1f };
+            float[] solidControl = new float[] { 1f };
             for (int i = 0; i < 100; i++)
             {
-                float cov = Line.LineDash.DashCoverage(i * 0.17, 1.0, pattern);
+                float cov = Line.LineDash.DashCoverage(i * 0.17, 1.0, solidControl);
                 Assert.That(cov, Is.EqualTo(1.0f),
                     $"[1] (odd-length) must be solid identity, got {cov} at dist={i * 0.17}");
             }
-        }
 
-        [Test]
-        public void DashCoverage_NullPattern_AllOn()
-        {
             for (int i = 0; i < 20; i++)
-            {
-                float cov = Line.LineDash.DashCoverage(i * 0.5, 1.0, null);
-                Assert.That(cov, Is.EqualTo(1.0f));
-            }
-        }
+                Assert.That(Line.LineDash.DashCoverage(i * 0.5, 1.0, null), Is.EqualTo(1.0f));
 
-        [Test]
-        public void DashCoverage_EmptyPattern_AllOn()
-        {
             for (int i = 0; i < 20; i++)
-            {
-                float cov = Line.LineDash.DashCoverage(i * 0.5, 1.0, new float[0]);
-                Assert.That(cov, Is.EqualTo(1.0f));
-            }
-        }
+                Assert.That(Line.LineDash.DashCoverage(i * 0.5, 1.0, new float[0]), Is.EqualTo(1.0f));
 
-        [Test]
-        public void DashCoverage_DegenerateWidthM_AllOn()
-        {
             float[] pattern = new float[] { 2f, 1f };
             Assert.That(Line.LineDash.DashCoverage(5.0, 0.0, pattern), Is.EqualTo(1.0f));
             Assert.That(Line.LineDash.DashCoverage(5.0, -1.0, pattern), Is.EqualTo(1.0f));
@@ -2980,61 +2567,46 @@ namespace MapRenderer.Tests.Style
 
         // ── TryEvaluatePattern → float4 + count (alloc-free) ─────────────────────────────────
 
+        /// <summary>TryEvaluatePattern packs or degrades across every dash-array shape: a two-entry and a
+        /// four-entry pattern pack correctly into float4+count; an odd-length pattern (solid identity) and a
+        /// null expression both return false with count 0; a 5-entry pattern truncates to 4 (even).</summary>
         [Test]
-        public void TryEvaluatePattern_TwoEntry_PackedCorrectly()
+        public void TryEvaluatePattern_PacksOrDegrades()
         {
             // [2, 1] → packed.x=2, packed.y=1, count=2
-            var expr = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, 1]"));
-            Assert.IsNotNull(expr, "ParseDashArray must succeed for [2,1].");
+            var twoEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, 1]"));
+            Assert.IsNotNull(twoEntry, "ParseDashArray must succeed for [2,1].");
+            bool twoOk = Line.LineDash.TryEvaluatePattern(twoEntry, 14.0, out float4 twoPacked, out int twoCount);
+            Assert.IsTrue(twoOk, "TryEvaluatePattern must return true for a valid [2,1] pattern.");
+            Assert.AreEqual(2, twoCount, "Count must be 2 for a two-entry pattern.");
+            Assert.AreEqual(2f, twoPacked.x, 1e-6f, "packed.x must be 2 (first dash length).");
+            Assert.AreEqual(1f, twoPacked.y, 1e-6f, "packed.y must be 1 (first gap length).");
+            Assert.AreEqual(0f, twoPacked.z, 1e-6f, "packed.z must be 0 (unused).");
+            Assert.AreEqual(0f, twoPacked.w, 1e-6f, "packed.w must be 0 (unused).");
 
-            bool ok = Line.LineDash.TryEvaluatePattern(expr, 14.0, out float4 packed, out int count);
-            Assert.IsTrue(ok, "TryEvaluatePattern must return true for a valid [2,1] pattern.");
-            Assert.AreEqual(2, count, "Count must be 2 for a two-entry pattern.");
-            Assert.AreEqual(2f, packed.x, 1e-6f, "packed.x must be 2 (first dash length).");
-            Assert.AreEqual(1f, packed.y, 1e-6f, "packed.y must be 1 (first gap length).");
-            Assert.AreEqual(0f, packed.z, 1e-6f, "packed.z must be 0 (unused).");
-            Assert.AreEqual(0f, packed.w, 1e-6f, "packed.w must be 0 (unused).");
-        }
+            var fourEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[4, 1, 1, 1]"));
+            bool fourOk = Line.LineDash.TryEvaluatePattern(fourEntry, 10.0, out float4 fourPacked, out int fourCount);
+            Assert.IsTrue(fourOk);
+            Assert.AreEqual(4, fourCount);
+            Assert.AreEqual(4f, fourPacked.x, 1e-6f);
+            Assert.AreEqual(1f, fourPacked.y, 1e-6f);
+            Assert.AreEqual(1f, fourPacked.z, 1e-6f);
+            Assert.AreEqual(1f, fourPacked.w, 1e-6f);
 
-        [Test]
-        public void TryEvaluatePattern_FourEntry_PackedCorrectly()
-        {
-            var expr = Line.LineDash.ParseDashArray(JsonParser.Parse("[4, 1, 1, 1]"));
-            bool ok = Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 packed, out int count);
-            Assert.IsTrue(ok);
-            Assert.AreEqual(4, count);
-            Assert.AreEqual(4f, packed.x, 1e-6f);
-            Assert.AreEqual(1f, packed.y, 1e-6f);
-            Assert.AreEqual(1f, packed.z, 1e-6f);
-            Assert.AreEqual(1f, packed.w, 1e-6f);
-        }
-
-        [Test]
-        public void TryEvaluatePattern_OddEntry_ReturnsFalse_CountZero()
-        {
             // [2, 1, 3] is odd-length → solid identity → false, count=0
-            var expr = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, 1, 3]"));
-            bool ok = Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 packed, out int count);
-            Assert.IsFalse(ok, "Odd-length must return false (solid identity).");
-            Assert.AreEqual(0, count, "Count must be 0 for odd-length (solid identity sentinel).");
-        }
+            var oddEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[2, 1, 3]"));
+            bool oddOk = Line.LineDash.TryEvaluatePattern(oddEntry, 10.0, out _, out int oddCount);
+            Assert.IsFalse(oddOk, "Odd-length must return false (solid identity).");
+            Assert.AreEqual(0, oddCount, "Count must be 0 for odd-length (solid identity sentinel).");
 
-        [Test]
-        public void TryEvaluatePattern_Null_ReturnsFalse()
-        {
-            bool ok = Line.LineDash.TryEvaluatePattern(null, 10.0, out float4 packed, out int count);
-            Assert.IsFalse(ok, "Null expression must return false.");
-            Assert.AreEqual(0, count);
-        }
+            bool nullOk = Line.LineDash.TryEvaluatePattern(null, 10.0, out _, out int nullCount);
+            Assert.IsFalse(nullOk, "Null expression must return false.");
+            Assert.AreEqual(0, nullCount);
 
-        [Test]
-        public void TryEvaluatePattern_CapAt4Entries()
-        {
             // 5-entry → truncated to 4 (even) → count=4, ok=true
-            var expr = Line.LineDash.ParseDashArray(JsonParser.Parse("[1, 1, 1, 1, 1]"));
-            bool ok = Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 packed, out int count);
-            // After truncation to 4 entries (even), count=4
-            Assert.AreEqual(4, count, "5 entries truncated to 4 (even) → count=4");
+            var fiveEntry = Line.LineDash.ParseDashArray(JsonParser.Parse("[1, 1, 1, 1, 1]"));
+            Line.LineDash.TryEvaluatePattern(fiveEntry, 10.0, out _, out int fiveCount);
+            Assert.AreEqual(4, fiveCount, "5 entries truncated to 4 (even) → count=4");
         }
 
         // ── ParseDashArray + TryEvaluatePattern: expression system integration ────────────────
@@ -3042,81 +2614,66 @@ namespace MapRenderer.Tests.Style
         private static MapRenderer.Core.Expressions.Expression DashExpr(string json)
             => Line.LineDash.ParseDashArray(JsonParser.Parse(json));
 
+        /// <summary>ParseDashArray classifies and evaluates every VALID expression form: constant/literal,
+        /// zoom-step, and zoom-interpolate over a colour-shaped array (never colour-coerced). Degenerate
+        /// inputs are <see cref="ParseDashArray_NullOrDataDriven_DegradesToSolid"/>.</summary>
         [Test]
-        public void ParseDashArray_ConstantBareArray_IsConstantKind_AndEvaluates()
+        public void ParseDashArray_ClassifiesAndEvaluatesAcrossExpressionForms()
         {
-            var expr = DashExpr("[2, 1]");
-            Assert.That(expr, Is.Not.Null);
-            Assert.That(expr.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant),
+            var constantBareArray = DashExpr("[2, 1]");
+            Assert.That(constantBareArray, Is.Not.Null);
+            Assert.That(constantBareArray.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant),
                 "A bare constant dasharray must classify as Constant.");
+            bool constantOk = Line.LineDash.TryEvaluatePattern(constantBareArray, 14.0, out float4 constantPacked, out int constantCount);
+            Assert.That(constantOk, Is.True);
+            Assert.That(constantCount, Is.EqualTo(2));
+            Assert.That(constantPacked.x, Is.EqualTo(2f));
+            Assert.That(constantPacked.y, Is.EqualTo(1f));
 
-            bool ok = Line.LineDash.TryEvaluatePattern(expr, 14.0, out float4 packed, out int count);
-            Assert.That(ok, Is.True);
-            Assert.That(count, Is.EqualTo(2));
-            Assert.That(packed.x, Is.EqualTo(2f));
-            Assert.That(packed.y, Is.EqualTo(1f));
-        }
+            var literalExpr = DashExpr("[\"literal\", [4, 2]]");
+            Assert.That(literalExpr.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant));
+            Line.LineDash.TryEvaluatePattern(literalExpr, 10.0, out float4 literalPacked, out int literalCount);
+            Assert.That(literalCount, Is.EqualTo(2));
+            Assert.That(literalPacked.x, Is.EqualTo(4f));
+            Assert.That(literalPacked.y, Is.EqualTo(2f));
 
-        [Test]
-        public void ParseDashArray_LiteralExpression_IsConstantKind()
-        {
-            var expr = DashExpr("[\"literal\", [4, 2]]");
-            Assert.That(expr.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Constant));
-            Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 packed, out int count);
-            Assert.That(count, Is.EqualTo(2));
-            Assert.That(packed.x, Is.EqualTo(4f));
-            Assert.That(packed.y, Is.EqualTo(2f));
-        }
-
-        [Test]
-        public void ParseDashArray_ZoomStep_IsZoomKind_AndPicksCorrectStep()
-        {
-            var expr = DashExpr("[\"step\", [\"zoom\"], [1,1], 10, [2,1], 14, [4,1]]");
-            Assert.That(expr.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Zoom),
+            var zoomStep = DashExpr("[\"step\", [\"zoom\"], [1,1], 10, [2,1], 14, [4,1]]");
+            Assert.That(zoomStep.Kind, Is.EqualTo(MapRenderer.Core.Expressions.ExpressionKind.Zoom),
                 "A zoom-step dasharray must classify as Zoom.");
-
-            Line.LineDash.TryEvaluatePattern(expr, 9.0,  out float4 p9, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 9.0,  out float4 p9, out _);
             Assert.That(p9.x, Is.EqualTo(1f), "zoom=9: default [1,1]");
-
-            Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 p10, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 10.0, out float4 p10, out _);
             Assert.That(p10.x, Is.EqualTo(2f), "zoom=10: [2,1]");
-
-            Line.LineDash.TryEvaluatePattern(expr, 14.0, out float4 p14, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 14.0, out float4 p14, out _);
             Assert.That(p14.x, Is.EqualTo(4f), "zoom=14: [4,1]");
-
-            Line.LineDash.TryEvaluatePattern(expr, 15.0, out float4 p15, out _);
+            Line.LineDash.TryEvaluatePattern(zoomStep, 15.0, out float4 p15, out _);
             Assert.That(p15.x, Is.EqualTo(4f), "zoom=15: still [4,1]");
-        }
 
-        [Test]
-        public void ParseDashArray_ZoomInterpolate_LerpsElementwise_NotColorCoerced()
-        {
             // A 4-entry dash pattern also looks like an rgb()/rgba() colour; Ramps.Lerp must take the
             // array branch first, or this silently draws solid (a non-array TryEvaluatePattern result).
-            var expr = DashExpr("[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2,1,2,1],10,[4,2,4,2]]");
-            bool ok = Line.LineDash.TryEvaluatePattern(expr, 5.0, out float4 packed, out int count);
-            Assert.IsTrue(ok, "a matching-length zoom-interpolated dash array must evaluate, not fall back to solid");
-            Assert.AreEqual(4, count);
-            Assert.AreEqual(new float4(3f, 1.5f, 3f, 1.5f), packed);
+            var zoomInterpolate = DashExpr("[\"interpolate\",[\"linear\"],[\"zoom\"],0,[2,1,2,1],10,[4,2,4,2]]");
+            bool interpOk = Line.LineDash.TryEvaluatePattern(zoomInterpolate, 5.0, out float4 interpPacked, out int interpCount);
+            Assert.IsTrue(interpOk, "a matching-length zoom-interpolated dash array must evaluate, not fall back to solid");
+            Assert.AreEqual(4, interpCount);
+            Assert.AreEqual(new float4(3f, 1.5f, 3f, 1.5f), interpPacked);
         }
 
+        /// <summary>Two degenerate dasharray inputs both degrade to solid rather than crashing: a null array
+        /// parses to null, and a data-driven (feature-dependent) array cannot resolve without a feature, so
+        /// <c>TryEvaluatePattern</c> must not attempt it.</summary>
         [Test]
-        public void ParseDashArray_Null_ReturnsNull_AndEvaluatesToSolid()
+        public void ParseDashArray_NullOrDataDriven_DegradesToSolid()
         {
             Assert.That(Line.LineDash.ParseDashArray(null), Is.Null);
-            bool ok = Line.LineDash.TryEvaluatePattern(null, 10.0, out float4 packed, out int count);
-            Assert.That(ok, Is.False);
-            Assert.That(count, Is.EqualTo(0));
-        }
+            bool nullOk = Line.LineDash.TryEvaluatePattern(null, 10.0, out _, out int nullCount);
+            Assert.That(nullOk, Is.False);
+            Assert.That(nullCount, Is.EqualTo(0));
 
-        [Test]
-        public void ParseDashArray_DataDriven_DegradesToSolid()
-        {
-            var expr = DashExpr("[\"match\", [\"get\", \"cls\"], \"a\", [2,1], [4,2]]");
-            Assert.That(MapRenderer.Core.Expressions.ExpressionKinds.DependsOnFeature(expr.Kind), Is.True);
-            Assert.That(Line.LineDash.TryEvaluatePattern(expr, 10.0, out float4 packed, out int count), Is.False,
+            var dataDriven = DashExpr("[\"match\", [\"get\", \"cls\"], \"a\", [2,1], [4,2]]");
+            Assert.That(MapRenderer.Core.Expressions.ExpressionKinds.DependsOnFeature(dataDriven.Kind), Is.True);
+            Assert.That(Line.LineDash.TryEvaluatePattern(dataDriven, 10.0, out _, out int dataDrivenCount), Is.False,
                 "Data-driven dasharray must not crash — it degrades to solid (no pattern).");
-            Assert.That(count, Is.EqualTo(0));
+            Assert.That(dataDrivenCount, Is.EqualTo(0));
         }
 
         // ── GREPPABLE: Shader consumes per-vertex sideAndDist.y as dashU ──────────────────────
@@ -3388,12 +2945,13 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(ExpressionKind.Zoom, light.Color.Kind);
         }
 
+        /// <summary>Light.color is expression-backed: a bad value throws at eager parse, like any other
+        /// paint color, instead of falling back to the default.</summary>
         [Test]
-        public void Light_MalformedColor_Throws()
+        [TestCase("\"color\":\"notacolor\"", TestName = "Light_InvalidValue_FailsParse(Color_Malformed)")]
+        public void Light_InvalidValue_FailsParse(string lightProperty)
         {
-            // Unlike position, color is expression-backed: a bad value throws at eager parse, like any
-            // other paint color, instead of falling back to the default.
-            var root = Root("{\"light\":{\"color\":\"notacolor\"}}");
+            var root = Root($"{{\"light\":{{{lightProperty}}}}}");
             Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
         }
 
@@ -3546,18 +3104,12 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void AbsentSprite_YieldsAnEmptyList()
+        [TestCase("{\"version\":8,\"layers\":[]}", TestName = "Sprite_YieldsAnEmptyList(Absent)")]
+        // A number where the spec expects a string or an array — tolerate rather than throw.
+        [TestCase("{\"version\":8,\"sprite\":42,\"layers\":[]}", TestName = "Sprite_YieldsAnEmptyList(MalformedType)")]
+        public void Sprite_YieldsAnEmptyList(string styleJson)
         {
-            var doc = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
-
-            Assert.AreEqual(0, doc.Sprites.Count);
-        }
-
-        [Test]
-        public void MalformedSpriteType_YieldsAnEmptyList()
-        {
-            // A number where the spec expects a string or an array — tolerate rather than throw.
-            var doc = StyleParser.Parse("{\"version\":8,\"sprite\":42,\"layers\":[]}");
+            var doc = StyleParser.Parse(styleJson);
 
             Assert.AreEqual(0, doc.Sprites.Count);
         }

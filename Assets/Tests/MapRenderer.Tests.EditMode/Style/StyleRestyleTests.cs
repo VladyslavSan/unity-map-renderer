@@ -849,19 +849,49 @@ namespace MapRenderer.Tests.Style
             AssertQuadEqual(expected, symbol.IconQuad);
         }
 
+        /// <summary>An icon is unresolvable for either of two reasons — an unknown sprite name, or no
+        /// icon-image key at all — and both yield the text symbol only, never an icon, never a throw. The
+        /// third reason (a null atlas) is
+        /// <see cref="Extract_TextOnly_NullAtlas_YieldsZeroIcons_MatchesFiveArgOverload"/>.</summary>
         [Test]
-        public void Extract_UnknownSpriteName_YieldsZeroIcons_NoThrow()
+        public void Extract_IconUnresolvable_YieldsTextOnly()
         {
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
-            var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"does-not-exist\"}");
 
-            var symbols = new List<SymbolFeature>();
+            var unknownSpriteLayer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"does-not-exist\"}");
+            var unknownSpriteSymbols = new List<SymbolFeature>();
             Assert.DoesNotThrow(() =>
-                SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas));
+                SymbolFeatureExtractor.Extract(unknownSpriteLayer, tile, TileId0, 0.0, new WebMercatorProjection(), unknownSpriteSymbols, atlas));
+            Assert.AreEqual(1, unknownSpriteSymbols.Count, "the text symbol still resolves");
+            Assert.AreEqual(SymbolKind.Text, unknownSpriteSymbols[0].Kind, "an unresolvable sprite name must not emit an icon symbol");
 
-            Assert.AreEqual(1, symbols.Count, "the text symbol still resolves");
-            Assert.AreEqual(SymbolKind.Text, symbols[0].Kind, "an unresolvable sprite name must not emit an icon symbol");
+            var noIconImageLayer = PointLayer("{\"text-field\":\"L\"}"); // no icon-image at all
+            var noIconImageSymbols = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(noIconImageLayer, tile, TileId0, 0.0, new WebMercatorProjection(), noIconImageSymbols, atlas);
+            Assert.AreEqual(1, noIconImageSymbols.Count, "an atlas being present doesn't manufacture icons the layer never asked for");
+            Assert.AreEqual(SymbolKind.Text, noIconImageSymbols[0].Kind);
+        }
+
+        [Test]
+        public void Extract_TextOnly_NullAtlas_YieldsZeroIcons_MatchesFiveArgOverload()
+        {
+            var tile = OnePointTile(new double2(100, 200));
+            var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
+
+            // 5-arg call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
+            var preI3Style = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
+
+            var explicitNull = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), explicitNull, null);
+
+            Assert.AreEqual(1, preI3Style.Count, "a null atlas never emits an icon symbol, even with icon-image set");
+            Assert.AreEqual(1, explicitNull.Count);
+            Assert.AreEqual(SymbolKind.Text, preI3Style[0].Kind);
+            Assert.AreEqual(preI3Style[0].Text, explicitNull[0].Text);
+            Assert.AreEqual(preI3Style[0].FeatureIndex, explicitNull[0].FeatureIndex);
+            Assert.AreEqual(preI3Style[0].PaddingPx, explicitNull[0].PaddingPx, 1e-9);
         }
 
         [Test]
@@ -914,40 +944,6 @@ namespace MapRenderer.Tests.Style
             AssertQuadEqual(expected, symbols[0].IconQuad);
         }
 
-        [Test]
-        public void Extract_TextOnly_NullAtlas_YieldsZeroIcons_ByteIdenticalToPreI3()
-        {
-            var tile = OnePointTile(new double2(100, 200));
-            var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
-
-            // 5-arg call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
-            var preI3Style = new List<SymbolFeature>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
-
-            var explicitNull = new List<SymbolFeature>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), explicitNull, null);
-
-            Assert.AreEqual(1, preI3Style.Count, "a null atlas never emits an icon symbol, even with icon-image set");
-            Assert.AreEqual(1, explicitNull.Count);
-            Assert.AreEqual(SymbolKind.Text, preI3Style[0].Kind);
-            Assert.AreEqual(preI3Style[0].Text, explicitNull[0].Text);
-            Assert.AreEqual(preI3Style[0].FeatureIndex, explicitNull[0].FeatureIndex);
-            Assert.AreEqual(preI3Style[0].PaddingPx, explicitNull[0].PaddingPx, 1e-9);
-        }
-
-        [Test]
-        public void Extract_AtlasPresent_TextOnlyLayer_NoIconImage_YieldsZeroIcons()
-        {
-            var tile = OnePointTile(new double2(100, 200));
-            var atlas = LoadAtlas();
-            var layer = PointLayer("{\"text-field\":\"L\"}"); // no icon-image at all
-
-            var symbols = new List<SymbolFeature>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
-
-            Assert.AreEqual(1, symbols.Count, "an atlas being present doesn't manufacture icons the layer never asked for");
-            Assert.AreEqual(SymbolKind.Text, symbols[0].Kind);
-        }
 
         // ── icon-image must read the CALLER's zoom (not always 0); icon-padding must fall back
         // instead of dropping the tile's whole extraction on a malformed zoom expression ────────
@@ -1482,7 +1478,7 @@ namespace MapRenderer.Tests.Style
             };
         }
 
-        // ── #1a: Constant fill-color → Constant kind, pinned RGB ────────────────
+        // ── Constant fill-color → Constant kind, pinned RGB ────────────────
 
         [Test]
         public void FillPaint_ConstantColor_ClassifiesAsConstant()
@@ -1501,7 +1497,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0.0, c.B, 1e-4, "Blue channel must be 0.0 for rgba(255,0,0,1).");
         }
 
-        // ── #1b: Zoom-dependent fill-opacity → Zoom kind ────────────────────────
+        // ── Zoom-dependent fill-opacity → Zoom kind ────────────────────────
 
         [Test]
         public void FillPaint_ZoomOpacity_ClassifiesAsZoom()
@@ -1521,7 +1517,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1.0f, v10, 0.01f, "At zoom=10, interpolated opacity must be 1.0.");
         }
 
-        // ── #1c: Feature-dependent fill-color → Feature kind ────────────────────
+        // ── Feature-dependent fill-color → Feature kind ────────────────────
 
         [Test]
         public void FillPaint_DataDrivenColor_ClassifiesAsFeature()
@@ -1539,7 +1535,7 @@ namespace MapRenderer.Tests.Style
                 "Data-driven color must DependsOnFeature.");
         }
 
-        // ── #1d: Absent fill-color → Constant kind (spec default #000000) ───────
+        // ── Absent fill-color → Constant kind (spec default #000000) ───────
 
         [Test]
         public void FillPaint_AbsentColor_UsesSpecDefault_Black()
@@ -1557,7 +1553,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0.0, c.B, 1e-4, "Default fill-color B must be 0 (black).");
         }
 
-        // ── #1e: Absent fill-opacity → Constant 1.0 ─────────────────────────────
+        // ── Absent fill-opacity → Constant 1.0 ─────────────────────────────
 
         [Test]
         public void FillPaint_AbsentOpacity_UsesSpecDefault_One()
@@ -1570,32 +1566,22 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1.0f, v, 1e-6f, "Default fill-opacity must be 1.0.");
         }
 
-        // ── #1f: fill-translate-anchor "viewport" → 1.0 ─────────────────────────
-
+        /// <summary>fill-translate-anchor is a plain literal, so both "viewport" and the spec-default "map"
+        /// classify as Constant kind and encode as 1.0/0.0.</summary>
         [Test]
-        public void FillPaint_TranslateAnchorViewport_IsOne()
+        [TestCase("viewport", 1.0f, TestName = "FillPaint_TranslateAnchor_MatchesExpected(Viewport_IsOne)")]
+        [TestCase("map", 0.0f, TestName = "FillPaint_TranslateAnchor_MatchesExpected(Map_IsZero)")]
+        public void FillPaint_TranslateAnchor_MatchesExpected(string anchor, float expected)
         {
-            var layer = MakeFillLayer("{\"fill-translate-anchor\":\"viewport\"}");
+            var layer = MakeFillLayer($"{{\"fill-translate-anchor\":\"{anchor}\"}}");
             var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.TranslateAnchor.Kind);
             float v = fp.TranslateAnchor.Evaluate(0.0);
-            Assert.AreEqual(1.0f, v, 1e-6f, "fill-translate-anchor 'viewport' must encode as 1.0.");
+            Assert.AreEqual(expected, v, 1e-6f, $"fill-translate-anchor '{anchor}' must encode as {expected}.");
         }
 
-        // ── #1g: fill-translate-anchor "map" (spec default) → 0.0 ───────────────
-
-        [Test]
-        public void FillPaint_TranslateAnchorMap_IsZero()
-        {
-            var layer = MakeFillLayer("{\"fill-translate-anchor\":\"map\"}");
-            var fp    = layer.Paint;
-
-            float v = fp.TranslateAnchor.Evaluate(0.0);
-            Assert.AreEqual(0.0f, v, 1e-6f, "fill-translate-anchor 'map' must encode as 0.0.");
-        }
-
-        // ── #1h: fill-translate [16, -8] → double2 pinned ───────────────────────
+        // ── fill-translate [16, -8] → double2 pinned ───────────────────────
 
         [Test]
         public void FillPaint_Translate_ComponentsArePinned()
@@ -1637,7 +1623,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0.0, c.B, 1e-4, "Outline B must be 0 for rgba(0,255,0,1).");
         }
 
-        // ── #1k: fill-pattern present → PatternName is set ──────────────────────
+        // ── fill-pattern present → PatternName is set ──────────────────────
 
         [Test]
         public void FillPaint_PatternName_IsParsed()
@@ -1648,7 +1634,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual("grass", fp.PatternName, "fill-pattern must be read as PatternName.");
         }
 
-        // ── #2: CPU gamma formula — sRGB→linear approximation ────────────────────
+        // ── CPU gamma formula — sRGB→linear approximation ────────────────────
 
         [Test]
         public void SrgbToLinear_Formula_KnownValues()
@@ -1671,7 +1657,7 @@ namespace MapRenderer.Tests.Style
             return Math.Pow((srgb + 0.055) / 1.055, 2.4);
         }
 
-        // ── #4: BakeNumbers ≥2 distinct alphas from a data-driven fill-opacity ───
+        // ── BakeNumbers ≥2 distinct alphas from a data-driven fill-opacity ───
 
         /// <summary>
         /// One evaluation per feature, mirroring the tile builders' inner loop. A failed evaluation
@@ -1717,29 +1703,16 @@ namespace MapRenderer.Tests.Style
                 $"across {features.Count} features (got {distinct.Count}).");
         }
 
-        // ── #5: SourceLayerResolver seam ────────────────────────────────────────
+        // ── SourceLayerResolver seam ────────────────────────────────────────
 
+        /// <summary>SourceLayerResolver.ResolveTileLayer returns the named MVT layer when it's present in
+        /// the tile, or null when the name is missing from the tile or the style layer names none at all
+        /// (background layers).</summary>
         [Test]
-        public void SourceLayerResolver_RoutesLayerNameToMvtLayer()
-        {
-            byte[] bytes  = LoadFixture();
-            using var tile = MvtDecoder.Decode(FixtureTileId, bytes);
-
-            var styleLayer = new StyleLayer
-            {
-                Id          = "test",
-                SourceLayer = "countries",
-            };
-
-            var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, tile);
-            Assert.IsNotNull(mvtLayer,
-                "SourceLayerResolver.ResolveTileLayer must return the MVT layer for SourceLayer='countries'.");
-            Assert.AreEqual("countries", mvtLayer.Name,
-                "Resolved MVT layer name must match SourceLayer.");
-        }
-
-        [Test]
-        public void SourceLayerResolver_MissingLayer_ReturnsNull()
+        [TestCase("countries", "countries", TestName = "SourceLayerResolver_ResolveTileLayer_ReturnsLayerOrNull(RoutesLayerNameToMvtLayer)")]
+        [TestCase("__nonexistent_layer__", null, TestName = "SourceLayerResolver_ResolveTileLayer_ReturnsLayerOrNull(MissingLayer_ReturnsNull)")]
+        [TestCase(null, null, TestName = "SourceLayerResolver_ResolveTileLayer_ReturnsLayerOrNull(NullSourceLayer_ReturnsNull)")]
+        public void SourceLayerResolver_ResolveTileLayer_ReturnsLayerOrNull(string sourceLayer, string expectedName)
         {
             byte[] bytes = LoadFixture();
             using var tile = MvtDecoder.Decode(FixtureTileId, bytes);
@@ -1747,29 +1720,13 @@ namespace MapRenderer.Tests.Style
             var styleLayer = new StyleLayer
             {
                 Id          = "test",
-                SourceLayer = "__nonexistent_layer__",
+                SourceLayer = sourceLayer,
             };
 
             var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, tile);
-            Assert.IsNull(mvtLayer,
-                "SourceLayerResolver must return null for a layer name not present in the tile.");
-        }
-
-        [Test]
-        public void SourceLayerResolver_NullSourceLayer_ReturnsNull()
-        {
-            byte[] bytes = LoadFixture();
-            using var tile = MvtDecoder.Decode(FixtureTileId, bytes);
-
-            var styleLayer = new StyleLayer
-            {
-                Id          = "background",
-                SourceLayer = null,
-            };
-
-            var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, tile);
-            Assert.IsNull(mvtLayer,
-                "SourceLayerResolver must return null when SourceLayer is null (background layers).");
+            Assert.AreEqual(expectedName, mvtLayer?.Name,
+                $"SourceLayerResolver.ResolveTileLayer for SourceLayer={sourceLayer ?? "null"} must return " +
+                "the MVT layer of that name, or null.");
         }
 
         // ── fill-antialias: the boolean the Style Spec declares ─────────────────

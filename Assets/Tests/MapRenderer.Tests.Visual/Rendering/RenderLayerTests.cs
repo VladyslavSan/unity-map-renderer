@@ -391,15 +391,13 @@ namespace MapRenderer.Tests.Visual
             .Layer(VisualLayer.Fill("land").Source("land").Color("#203040"))
             .Camera(new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 }, zoom: 6.0, tilt: TiltDeg);
 
+        // The Unlit row pins that twin's per-fragment fog contract (view-space z carried to the fragment
+        // stage, not a per-vertex factor) with the same acceptance as the Lit row.
         [Test]
-        public void Tilt60_FarCutIsFogColor_ScreenBottomIsClear()
-            => AssertFarCutIsFogColorAndScreenBottomIsClear(RenderMode.Lit, "haze-tilt60");
-
-        // Pins the Unlit twin's per-fragment fog contract (view-space z carried to the fragment stage, not a
-        // per-vertex factor) with the same acceptance as the Lit twin.
-        [Test]
-        public void Tilt60_FarCutIsFogColor_ScreenBottomIsClear_Unlit()
-            => AssertFarCutIsFogColorAndScreenBottomIsClear(RenderMode.Unlit, "haze-tilt60-unlit");
+        [TestCase(RenderMode.Lit, "haze-tilt60", TestName = "Tilt60_FarCutIsFogColor_ScreenBottomIsClear(Lit)")]
+        [TestCase(RenderMode.Unlit, "haze-tilt60-unlit", TestName = "Tilt60_FarCutIsFogColor_ScreenBottomIsClear(Unlit)")]
+        public void Tilt60_FarCutIsFogColor_ScreenBottomIsClear(RenderMode mode, string snapshotPrefix)
+            => AssertFarCutIsFogColorAndScreenBottomIsClear(mode, snapshotPrefix);
 
         private static void AssertFarCutIsFogColorAndScreenBottomIsClear(RenderMode mode, string snapshotPrefix)
         {
@@ -600,12 +598,10 @@ namespace MapRenderer.Tests.Visual
         }");
 
         [Test]
-        public void FillLayer_FromLitMaterialSet_UsesLitShader()
-            => AssertFillLayerShader(RenderMode.Lit, "Map/Fill");
-
-        [Test]
-        public void FillLayer_FromUnlitMaterialSet_UsesUnlitShader()
-            => AssertFillLayerShader(RenderMode.Unlit, "Map/FillUnlit");
+        [TestCase(RenderMode.Lit, "Map/Fill", TestName = "FillLayer_UsesShaderFromMaterialSet(Lit)")]
+        [TestCase(RenderMode.Unlit, "Map/FillUnlit", TestName = "FillLayer_UsesShaderFromMaterialSet(Unlit)")]
+        public void FillLayer_UsesShaderFromMaterialSet(RenderMode mode, string expectedShaderName)
+            => AssertFillLayerShader(mode, expectedShaderName);
 
         private static void AssertFillLayerShader(RenderMode mode, string expectedShaderName)
         {

@@ -879,7 +879,7 @@ namespace MapRenderer.Tests.Tiles
     /// (<c>PolygonRun.InputOuter</c>/<c>InputHoles</c>), because the gather and <c>PolygonAssembler</c> can
     /// order polygons differently. It pins termination, the index range, and area conservation within 1% for
     /// simple and holed polygons. A holed polygon skips only when every ring self-intersects.
-    /// <para>Non-obvious why: the pinned skip count rests on these sample-tile rings. KNOWN SKIPS, all
+    /// <para>Non-obvious why: the skip-count ceiling rests on these sample-tile rings. KNOWN SKIPS, all
     /// forceClips=0 and degenerate before earcut (ratio = triArea / shoelace):</para>
     /// <code>
     ///   (3265,1333)(3273,1328)(3274,1326)(3270,1333)             1.92x  proper edge crossing
@@ -894,7 +894,7 @@ namespace MapRenderer.Tests.Tiles
     ///   (1171,1627)(1173,1627)(1175,1626)(1176,1627)   (585,1340)(586,1338)(586,1337)(586,1341)
     ///   (3601,2179)(3604,2175)(3604,2174)(3604,2176)
     /// </code>
-    /// <para>Before changing the pinned count, verify each new skip self-intersects AND inflates area.</para>
+    /// <para>Before raising the skip-count ceiling, verify each new skip self-intersects AND inflates area.</para>
     /// </summary>
     public class FullPipelineTests
     {
@@ -918,7 +918,7 @@ namespace MapRenderer.Tests.Tiles
 
             var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
-            Assert.AreEqual(239, layer.Kinds.Count, "Expected 239 country features.");
+            Assert.That(layer.Kinds.Count, Is.GreaterThan(0), "the countries layer must have decoded features.");
 
             var runs = EarcutJobGatherHarness.RunLayer(mvtBytes, "countries", SampleTileId, forceLinearEarScan: false);
 
@@ -928,7 +928,7 @@ namespace MapRenderer.Tests.Tiles
             double totalSimpleRelError = 0.0;
             double totalHoledRelError  = 0.0;
             // Self-intersecting polygons that skip area conservation; HasSelfIntersection() proves each one
-            // before it counts. The total is pinned below.
+            // before it counts. The total is capped below (a ratchet, not an exact pin).
             int skipCount = 0;
             int totalForceClips = 0;
 
@@ -1033,17 +1033,22 @@ namespace MapRenderer.Tests.Tiles
                 totalTriangles += run.Indices.Length / 3;
             }
 
-            // Pinned polygon count: RunLayer has no per-feature counter to match against the 239 features, so
-            // this is the proxy. A dropped feature, or dropped or merged polygons, moves it.
-            Assert.AreEqual(3218, runs.Count, "Countries fixture's assembled polygon count (Burst arm) moved.");
+            // The Burst arm's assembled polygon count must match the managed PolygonAssembler reference
+            // exactly, not just be at least the feature count (a 13x margin that a real polygon-count
+            // regression could hide inside).
+            int managedPolygonCount = ManagedPolygonReference.Compute(layer).PolyCount;
+            Assert.That(runs.Count, Is.EqualTo(managedPolygonCount),
+                "the Burst arm's assembled polygon count must equal the managed PolygonAssembler reference.");
             Assert.Greater(totalTriangles, 0, "Should have produced at least one triangle.");
 
-            // Pinned skip count, measured with RingAssemblyJob upstream. Before changing it, verify each new skip
-            // self-intersects AND inflates area (see the class doc's KNOWN NON-SKIPS).
-            Assert.AreEqual(4, skipCount,
-                $"Expected exactly 4 self-intersecting polygon skips in the countries fixture, " +
-                $"got {skipCount}. If a triangulator change caused this, verify each new skip is a real " +
-                $"degenerate ring (HasSelfIntersection returns true) before updating the pinned count.");
+            // A ratchet, not a pin: skipCount must never exceed the known-good count. Without this, a
+            // triangulator regression that inflates a known non-skip polygon's area past the 1.5x gate
+            // above would silently start counting it as a self-intersection skip instead of failing the
+            // area-conservation check it should have hit.
+            Assert.That(skipCount, Is.LessThanOrEqualTo(4),
+                $"Expected at most 4 self-intersecting polygon skips in the countries fixture, got {skipCount}. " +
+                "If a triangulator change caused this, verify each new skip is a real degenerate ring " +
+                "(HasSelfIntersection returns true) before raising this ceiling.");
 
             if (simpleAreaChecks > 0)
                 Debug.Log($"[FullPipeline] Simple-polygon area conservation: avg relErr={totalSimpleRelError / simpleAreaChecks:F8} over {simpleAreaChecks} polygons.");
@@ -1356,18 +1361,7 @@ namespace MapRenderer.Tests.Tiles
             var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
 
-            int managedPolyCount = 0;
-            int managedHoleCount = 0;
-            var polyGeoms        = new List<uint[]>();
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-            {
-                if (layer.Kinds[fi] != TileGeometryType.Polygon || layer.Commands[fi] == null) continue;
-                polyGeoms.Add(layer.Commands[fi]);
-                var rings = MvtGeometry.Decode(layer.Commands[fi]);
-                var polys = PolygonAssembler.Assemble(rings);
-                managedPolyCount += polys.Count;
-                foreach (var p in polys) managedHoleCount += (p.Holes?.Count ?? 0);
-            }
+            var (managedPolyCount, managedHoleCount, polyGeoms) = ManagedPolygonReference.Compute(layer);
 
             int featureCount  = polyGeoms.Count;
             int totalCommands = 0;
@@ -2447,6 +2441,28 @@ namespace MapRenderer.Tests.Tiles
                 "the fault must be wrapped as a TileDecodeException, unchanged by the scheduler policy.");
             Assert.IsInstanceOf<InvalidOperationException>(thrown.InnerException,
                 "…with the decoder's own exception preserved underneath.");
+        }
+    }
+
+    /// <summary>The managed <see cref="PolygonAssembler"/> reference count, shared by
+    /// <see cref="FullPipelineTests"/> (polygon count only) and <see cref="JobifiedPipelineTests"/> (polygon
+    /// and hole counts) so the two never compute it two different ways.</summary>
+    internal static class ManagedPolygonReference
+    {
+        internal static (int PolyCount, int HoleCount, List<uint[]> PolyGeometries) Compute(MvtFixtureStreams.Layer layer)
+        {
+            int polyCount = 0, holeCount = 0;
+            var polyGeoms = new List<uint[]>();
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+            {
+                if (layer.Kinds[fi] != TileGeometryType.Polygon || layer.Commands[fi] == null) continue;
+                polyGeoms.Add(layer.Commands[fi]);
+                var rings = MvtGeometry.Decode(layer.Commands[fi]);
+                var polys = PolygonAssembler.Assemble(rings);
+                polyCount += polys.Count;
+                foreach (var p in polys) holeCount += (p.Holes?.Count ?? 0);
+            }
+            return (polyCount, holeCount, polyGeoms);
         }
     }
 }

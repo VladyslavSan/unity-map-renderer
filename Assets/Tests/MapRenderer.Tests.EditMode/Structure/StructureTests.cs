@@ -8,10 +8,9 @@
 //   StyledLineBuilderStructureTests         — the line builder never frees geometry it only borrows.
 //   TileProcessingStructureTests            — TileManager.KickMeshBuild does not decode/dispatch directly.
 //   FillMeshGraphStructureTests             — FillMeshGraph's source shape: no Complete/stale .AsArray()/.Run/IWorkScheduler.
-//   FillMeshPipelineRetirementFenceTests    — retired fill-pipeline symbols never regrow a caller.
+//   FillMeshPipelineRetirementFenceTests    — WriteMeshData cannot regrow a declaration in the builders.
 //   WallChainCallerFenceTests               — the wall-job chain cannot re-inline into the extrusion prologue.
-//   ProjectPointsJobConstructionFenceTests  — only its declaration + scheduler may construct ProjectPointsJob.
-//   RingCopyConstructionFenceTests          — only their declaration + VisitedRingCopy may construct RingClipJob/RingSelectJob.
+//   JobConstructionSiteFenceTests           — construction-site fences: RingClipJob/RingSelectJob/WallQuadJob/ProjectPointsJob each appear in only their declaration + one scheduler.
 //   JobsNamespaceVisibilityTests            — every type under MapRenderer.Unity.Jobs is internal.
 //   TileBuildGraphKindNeutralityTests       — TileBuildGraph retains no per-kind (fill/line/extrusion) knowledge.
 //   RenderModeMeshingFenceTests             — mesh preparation never branches on render mode (Lit vs Unlit).
@@ -616,6 +615,40 @@ namespace MapRenderer.Tests.Structure
             => Regex.Replace(text, @"\s+", " ");
     }
 
+    /// <summary>Shared by every source-file consumer fence in this file that must reference zero
+    /// fill-assembly symbols — only Fill has a polygon/hole/area concept, so Symbol's and Line's consumer
+    /// code must never name <see cref="ForbiddenTokens"/>.</summary>
+    internal static class FillAssemblyStageFence
+    {
+        internal static readonly string[] ForbiddenTokens =
+        {
+            "RingAssemblyJob", "EarcutJob", "RingClipJob", "FillMeshPipeline",
+            "GlobeFillSubdivide", "PolygonAssembler", "AdoptClippedLists",
+            "DegenerateThreshold", "SignedArea",
+        };
+
+        /// <summary>Asserts <paramref name="strippedSource"/> (comments already stripped by the caller)
+        /// still references every one of <paramref name="requiredTokens"/> (a non-vacuity precondition — a
+        /// gutted file would satisfy the zero-counts below trivially) and references none of
+        /// <see cref="ForbiddenTokens"/>. <paramref name="forbiddenReasonWhy"/> names the consumer-specific
+        /// reason it has no fill-assembly concept.</summary>
+        internal static void AssertNoFillAssemblyStageReferenced(
+            string consumerName, string strippedSource, string[] requiredTokens, string forbiddenReasonWhy)
+        {
+            Assert.Greater(strippedSource.Trim().Length, 0, $"precondition: the {consumerName} source is non-empty");
+            foreach (string token in requiredTokens)
+                Assert.Greater(CountOccurrences(strippedSource, token), 0,
+                    $"precondition: {consumerName} must still reference '{token}' — without it this test's " +
+                    "zero-counts would be satisfied by a gutted file");
+
+            foreach (string token in ForbiddenTokens)
+                Assert.AreEqual(0, CountOccurrences(strippedSource, token),
+                    $"{consumerName} must reference ZERO fill-assembly symbols — '{token}' found. {forbiddenReasonWhy}");
+        }
+
+        private static int CountOccurrences(string text, string token) => Regex.Matches(text, Regex.Escape(token)).Count;
+    }
+
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolExtractorStructureTests — SymbolFeatureExtractor mints and disposes exactly the buffers it owns
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -630,14 +663,6 @@ namespace MapRenderer.Tests.Structure
     public class SymbolExtractorStructureTests
     {
         private const string ExtractAnchor = "public static void Extract(";
-
-        /// <summary>Types that belong to the FILL assembly path. Symbol must reference none of them.</summary>
-        private static readonly string[] ForbiddenFillStageTokens =
-        {
-            "RingAssemblyJob", "EarcutJob", "RingClipJob", "FillMeshPipeline",
-            "GlobeFillSubdivide", "PolygonAssembler", "AdoptClippedLists",
-            "DegenerateThreshold", "SignedArea",
-        };
 
         /// <summary>Tokens that must be PRESENT. Without them a renamed, gutted or deleted file would satisfy
         /// every "count is zero" claim below trivially — the easiest kind of tooth to make vacuous.</summary>
@@ -694,26 +719,18 @@ namespace MapRenderer.Tests.Structure
         // ── the fused-job fence, plus the claim that no production code decodes MVT geometry ──────────
 
         [Test]
-        public void SymbolExtractorTouchesNoFillAssemblyStage_AndNoProductionCodeDecodesMvtGeometry()
+        public void SymbolExtractorTouchesNoFillAssemblyStage()
         {
             string code = StripComments(ExtractorSource());
+            FillAssemblyStageFence.AssertNoFillAssemblyStageReferenced(
+                "SymbolFeatureExtractor", code, RequiredTokens,
+                "Symbol has no polygon, hole or area concept: it rejects Polygon outright, a Point feature's " +
+                "1-point path has no area at all, and a straight road has exactly zero.");
+        }
 
-            Assert.Greater(code.Trim().Length, 0, "precondition: the symbol extractor source is non-empty");
-            foreach (string token in RequiredTokens)
-            {
-                Assert.Greater(CountOccurrences(code, token), 0,
-                    $"precondition: SymbolFeatureExtractor must still reference '{token}' — without it this " +
-                    "test's zero-counts would be satisfied by a gutted file");
-            }
-
-            foreach (string token in ForbiddenFillStageTokens)
-            {
-                Assert.AreEqual(0, CountOccurrences(code, token),
-                    $"SymbolFeatureExtractor must reference ZERO fill-assembly symbols — '{token}' found. " +
-                    "Symbol has no polygon, hole or area concept: it rejects Polygon outright, a Point " +
-                    "feature's 1-point path has no area at all, and a straight road has exactly zero.");
-            }
-
+        [Test]
+        public void NoProductionCodeDecodesMvtGeometry()
+        {
             // Clause 2: MvtGeometry.Decode has no production call site left anywhere. Two roots, not three:
             // MapRenderer.Unity's recursive walk already covers its nested Jobs/ folder.
             const string decodeCallForm = "MvtGeometry.Decode(";
@@ -866,14 +883,6 @@ namespace MapRenderer.Tests.Structure
     [TestFixture]
     public class StyledLineBuilderStructureTests
     {
-        /// <summary>Types that belong to the FILL assembly path. Line must reference none of them.</summary>
-        private static readonly string[] ForbiddenFillStageTokens =
-        {
-            "RingAssemblyJob", "EarcutJob", "RingClipJob", "FillMeshPipeline",
-            "GlobeFillSubdivide", "PolygonAssembler", "AdoptClippedLists",
-            "DegenerateThreshold", "SignedArea",
-        };
-
         /// <summary>Tokens that must be PRESENT. Without them a renamed, gutted or deleted file would satisfy
         /// every "count is zero" claim above trivially — the easiest kind of tooth to make vacuous.</summary>
         // The required tokens name the mechanism the file uses: the borrowed buffer type, the ordinal join,
@@ -887,25 +896,12 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void LineBuilderDoesNotTouchTheFillAssemblyStages()
         {
-            string source = LineBuilderSource();
-            string code   = StripLineComments(source);
-
-            Assert.Greater(code.Trim().Length, 0, "precondition: the line builder source is non-empty");
-            foreach (string token in RequiredTokens)
-            {
-                Assert.Greater(CountOccurrences(code, token), 0,
-                    $"precondition: StyledLineTileBuilder must still reference '{token}' — without it this " +
-                    "test's zero-counts would be satisfied by a gutted file");
-            }
-
-            foreach (string token in ForbiddenFillStageTokens)
-            {
-                Assert.AreEqual(0, CountOccurrences(code, token),
-                    $"StyledLineTileBuilder must reference ZERO fill-assembly symbols — '{token}' found. " +
-                    "Line iterates the shared buffer itself: it has no polygon or hole concept, and its " +
-                    "filter is a COUNT threshold (>= 2), never an area threshold. A straight polyline has " +
-                    "exactly zero signed area and RingAssemblyJob would drop it.");
-            }
+            string code = StripLineComments(LineBuilderSource());
+            FillAssemblyStageFence.AssertNoFillAssemblyStageReferenced(
+                "StyledLineTileBuilder", code, RequiredTokens,
+                "Line iterates the shared buffer itself: it has no polygon or hole concept, and its filter " +
+                "is a COUNT threshold (>= 2), never an area threshold. A straight polyline has exactly zero " +
+                "signed area and RingAssemblyJob would drop it.");
         }
 
         /// <summary>
@@ -1049,11 +1045,19 @@ namespace MapRenderer.Tests.Structure
                 "decode-once fan-out point for this worker pass.");
         }
 
-        /// <summary>The source's <c>GetTile</c> decodes, so <c>RunWorkerPass</c> decodes nothing and reads the
-        /// caller's reference exactly once, via <c>decode.Value</c>: the mesh cadence's decode-once boundary.
-        /// A background tile has no runner entry, so there is no sourceless half.</summary>
+        /// <summary>Neither <c>TileLayerProcessorRunner</c> worker pass decodes: the source's <c>GetTile</c>
+        /// decodes, and each pass reads the caller's reference exactly once, via <c>decode.Value</c> — the
+        /// decode-once boundary for its own cadence. A background tile has no runner entry, so there is no
+        /// sourceless half.</summary>
         [Test]
-        public void TileLayerProcessorRunner_MeshWorkerPass_ReadsTheSharedDecode_AndNeverDecodesItself()
+        [TestCase("TilePrologueOutput RunWorkerPass(", "the mesh worker pass's own read of the caller's " +
+            "lease. More than one read is more than one place a released lease can be observed, and the " +
+            "fan-out is supposed to happen through the single tile it returns.",
+            TestName = "TileLayerProcessorRunner_WorkerPass_ReadsTheSharedDecode_AndNeverDecodesItself(Mesh)")]
+        [TestCase("void RunSymbolWorkerPass(", "the symbol cadence's own read of the caller's lease.",
+            TestName = "TileLayerProcessorRunner_WorkerPass_ReadsTheSharedDecode_AndNeverDecodesItself(Symbol)")]
+        public void TileLayerProcessorRunner_WorkerPass_ReadsTheSharedDecode_AndNeverDecodesItself(
+            string signatureAnchor, string readReason)
         {
             string path = Path.Combine(
                 Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing",
@@ -1061,17 +1065,13 @@ namespace MapRenderer.Tests.Structure
             FileAssert.Exists(path);
             string source = File.ReadAllText(path);
 
-            const string workerPassAnchor = "TilePrologueOutput RunWorkerPass(";
+            string body = ExtractMethodBody(source, signatureAnchor, path);
 
-            string workerPassBody = ExtractMethodBody(source, workerPassAnchor, path);
-
-            Assert.AreEqual(0, CountOccurrences(workerPassBody, DecodeCallForm),
-                $"RunWorkerPass must contain ZERO direct '{DecodeCallForm}' calls — the decode happens in " +
-                "TileDecodeDispatch, before the lease exists; the runner only reads it.");
-            Assert.AreEqual(1, CountOccurrences(workerPassBody, DecodeReadForm),
-                $"RunWorkerPass must read '{DecodeReadForm}' exactly once — the mesh worker pass's own " +
-                "read of the caller's lease. More than one read is more than one place a released lease " +
-                "can be observed, and the fan-out is supposed to happen through the single tile it returns.");
+            Assert.AreEqual(0, CountOccurrences(body, DecodeCallForm),
+                $"{signatureAnchor} must contain ZERO direct '{DecodeCallForm}' calls — the decode happens " +
+                "in TileDecodeDispatch, before the lease exists; the runner only reads it.");
+            Assert.AreEqual(1, CountOccurrences(body, DecodeReadForm),
+                $"{signatureAnchor} must read '{DecodeReadForm}' exactly once — {readReason}");
         }
 
         /// <summary>The subsystem does not decode, extract or shape symbols itself; that machinery lives in the
@@ -1303,28 +1303,6 @@ namespace MapRenderer.Tests.Structure
             }
         }
 
-        /// <summary>The symbol cadence does not decode for
-        /// itself — it reads the shared entry exactly once, same as the mesh cadence.</summary>
-        [Test]
-        public void RunSymbolWorkerPass_DoesNotDecodeItself_ReadsTheSharedEntry()
-        {
-            string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing",
-                "TileLayerProcessorRunner.cs");
-            FileAssert.Exists(path);
-            string source = File.ReadAllText(path);
-
-            const string signatureAnchor = "void RunSymbolWorkerPass(";
-            string body = ExtractMethodBody(source, signatureAnchor, path);
-
-            Assert.AreEqual(0, CountOccurrences(body, DecodeCallForm),
-                $"RunSymbolWorkerPass must contain ZERO direct '{DecodeCallForm}' calls — the decode happens " +
-                "in TileDecodeDispatch, before the lease exists.");
-            Assert.AreEqual(1, CountOccurrences(body, DecodeReadForm),
-                $"RunSymbolWorkerPass must read '{DecodeReadForm}' exactly once — the symbol cadence's " +
-                "own read of the caller's lease.");
-        }
-
         /// <summary><c>TileManager</c> and <see cref="SourceRegistry"/> are byte-agnostic: they name none of
         /// <c>TileResponse</c>/<c>IDataSource</c>/<c>TileScheduler</c>/a concrete lease type/standalone
         /// <c>TileCache</c>, and <c>SourceRegistry.cs</c> names <c>ITileFeatureSource</c>. <c>TileCache</c> is
@@ -1434,41 +1412,6 @@ namespace MapRenderer.Tests.Structure
                 "the HasData path, and by synchronous/inline completion otherwise — not by the fetch " +
                 "scheduler, which introduces no thread-pool hop of its own), preserving the off-PlayerLoop " +
                 "invariant DrainMeshBuilds' spin depends on.");
-        }
-
-        /// <summary>No file under <c>Assets/Code</c> or <c>Assets/Tests</c> names the old geometry-type enum
-        /// ("Mvt" + "GeometryType"); it is <c>Core.Tiles.TileGeometryType</c>. Non-obvious why: this file is
-        /// swept too, so the token is concatenated and no comment here may spell it. Positive half: the type's
-        /// file exists and it resolves in <c>Core.Tiles</c>.</summary>
-        [Test]
-        public void GeometryTypeEnum_RenameIsComplete_NoOldTokenSurvives()
-        {
-            string codeRoot = Path.Combine(Application.dataPath, "Code");
-            DirectoryAssert.Exists(codeRoot);
-            string testsRoot = Path.Combine(Application.dataPath, "Tests");
-            DirectoryAssert.Exists(testsRoot);
-
-            string oldTypeName = "Mvt" + "GeometryType";
-
-            string[] files = Directory.GetFiles(codeRoot, "*.cs", SearchOption.AllDirectories)
-                .Concat(Directory.GetFiles(testsRoot, "*.cs", SearchOption.AllDirectories))
-                .ToArray();
-            Assert.Greater(files.Length, 0, $"expected at least one .cs file under {codeRoot} or {testsRoot}");
-
-            var offenders = new System.Collections.Generic.List<string>();
-            foreach (string file in files)
-            {
-                if (CountOccurrences(File.ReadAllText(file), oldTypeName) > 0)
-                    offenders.Add(file);
-            }
-
-            Assert.IsEmpty(offenders,
-                $"no file under {codeRoot} or {testsRoot} may reference '{oldTypeName}' " +
-                $"— the enum is Core.Tiles.TileGeometryType; found '{oldTypeName}' in: " +
-                $"{string.Join(", ", offenders)}");
-
-            string newTypePath = Path.Combine(codeRoot, "MapRenderer.Core", "Tiles", "TileGeometryType.cs");
-            FileAssert.Exists(newTypePath);
         }
 
         // ── The decode-abandonment funnels ───────────────────────────────────────────────────
@@ -2352,77 +2295,21 @@ namespace MapRenderer.Tests.Structure
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FillMeshPipelineRetirementFenceTests — retired fill-pipeline symbols never regrow a caller
+    // FillMeshPipelineRetirementFenceTests — WriteMeshData cannot regrow a declaration in the builders
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// No production code references a symbol whose only caller was the synchronous fill pipeline. Stop
-    /// rule: <see cref="ForbiddenPatterns"/> derives from that predicate, not a hand-picked list. The scan is
-    /// identifier-anchored over <c>MapRenderer.Unity/Jobs/</c> and <c>MapRenderer.Unity/Rendering/</c>, comments
-    /// stripped. <c>ProjectPointsJob.Run</c> cannot be anchored, so
-    /// <see cref="ProjectPointsJobConstructionFenceTests"/> fences its construction site instead.
+    /// The retired synchronous <c>WriteMeshData</c> method does not regrow a declaration in the three
+    /// builder source files. <c>ProjectPointsJob.Run</c> cannot be anchored the same way, so
+    /// <see cref="JobConstructionSiteFenceTests"/> fences its construction site instead.
     /// </summary>
     [TestFixture]
     public class FillMeshPipelineRetirementFenceTests
     {
-        /// <summary>One pattern per retired symbol with no production caller: a call form where a bare name
-        /// would hit an unrelated member, a word-boundary match otherwise. <c>Run\s*\(</c> does NOT match
-        /// <c>RunTyped(</c>, hence the separate <c>RunTyped</c> entries.</summary>
-        private static readonly (string Label, Regex Pattern)[] ForbiddenPatterns =
-        {
-            ("FillMeshPipeline.Schedule(",        new Regex(@"\bFillMeshPipeline\.Schedule\s*\(")),
-            ("TileMeshBuffers",                    new Regex(@"\bTileMeshBuffers\b")),
-            ("WriteGlobeSubdivided",               new Regex(@"\bWriteGlobeSubdivided\b")),
-            ("WriteGlobeRoof",                     new Regex(@"\bWriteGlobeRoof\b")),
-            ("WriteFlatRoof",                      new Regex(@"\bWriteFlatRoof\b")),
-            ("GlobeFillSubdivideDispatch.Run(",     new Regex(@"\bGlobeFillSubdivideDispatch\.Run\s*\(")),
-            ("GlobeFillSubdivideDispatch.RunTyped", new Regex(@"\bGlobeFillSubdivideDispatch\.RunTyped\b")),
-            ("ProjectionDispatch.Run(",             new Regex(@"\bProjectionDispatch\.Run\s*\(")),
-            ("ProjectionDispatch.RunTyped",         new Regex(@"\bProjectionDispatch\.RunTyped\b")),
-            ("CountsFromArrayLength",               new Regex(@"\bCountsFromArrayLength\b")),
-            ("SrcVertCount",                        new Regex(@"\bSrcVertCount\b")),
-            ("SrcIndexCount",                       new Regex(@"\bSrcIndexCount\b")),
-        };
-
-        [Test]
-        public void ProductionSources_ContainNoRetiredSynchronousPipelineReferences()
-        {
-            string jobsDir   = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
-            string unityDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering");
-            DirectoryAssert.Exists(jobsDir);
-            DirectoryAssert.Exists(unityDir);
-
-            var files = new List<string>();
-            files.AddRange(Directory.GetFiles(jobsDir, "*.cs", SearchOption.AllDirectories));
-            files.AddRange(Directory.GetFiles(unityDir, "*.cs", SearchOption.AllDirectories));
-
-            // Non-vacuity: guards a path typo silently scanning zero files.
-            Assert.GreaterOrEqual(files.Count, 50,
-                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Unity/Jobs/ + " +
-                $"MapRenderer.Unity/Rendering/ (found {files.Count}) — a path typo would silently scan nothing.");
-
-            var violations = new List<string>();
-            foreach (string path in files)
-            {
-                string stripped = StripLineComments(File.ReadAllText(path));
-                foreach ((string label, Regex pattern) in ForbiddenPatterns)
-                {
-                    if (pattern.IsMatch(stripped))
-                        violations.Add($"{path}: '{label}'");
-                }
-            }
-
-            Assert.IsEmpty(violations,
-                "production source under MapRenderer.Unity/Jobs/ or MapRenderer.Unity/Rendering/ references " +
-                "a symbol mesher other than the graph — the graph is the only mesher:\n" +
-                string.Join("\n", violations));
-        }
-
-        /// <summary>The retired synchronous <c>WriteMeshData</c> methods cannot grow back into the three
-        /// builder source files. Identifier-anchored, declaration-form
-        /// (<c>\bWriteMeshData\s*[(&lt;]</c>) rather than the call-form patterns above — see the class doc's
-        /// last paragraph for why: the risk is the method growing back with a different modifier or arity,
-        /// which only the declaration form sees.</summary>
+        /// <summary>The retired synchronous <c>WriteMeshData</c> method cannot grow back into the three
+        /// builder source files. Identifier-anchored, declaration-form (<c>\bWriteMeshData\s*[(&lt;]</c>):
+        /// the risk is the method growing back with a different modifier or arity, which only the
+        /// declaration form sees.</summary>
         [Test]
         public void WriteMeshDataCannotGrowBackIntoTheBuilderSources()
         {
@@ -2455,9 +2342,8 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Strips everything from <c>//</c> to end of line — the same narrow grep-guard idiom
         /// <c>TileGeometryBuffersOwnershipTests</c> uses. Also removes every <c>///</c> XML-doc line (a
-        /// <c>///</c> line IS a <c>//</c> line syntactically, so this is the same pass): this repo's docs
-        /// keep past-tense prose naming these retired symbols as the reason they were retired,
-        /// and that history is not what this fence exists to police.</summary>
+        /// <c>///</c> line IS a <c>//</c> line syntactically), so this repo's docs can keep past-tense
+        /// prose naming WriteMeshData as the reason it was retired without tripping this fence.</summary>
         private static string StripLineComments(string text)
         {
             string[] lines = text.Split('\n');
@@ -2476,9 +2362,9 @@ namespace MapRenderer.Tests.Structure
 
     /// <summary>
     /// The wall chain cannot run inside the extrusion prologue. Limitation: no runtime test can see it, as
-    /// Unity has no manual <c>JobHandle</c>. So the prologue file names none of the wall-chain types, and
-    /// <c>WallQuadJob</c> appears in EXACTLY its declaring partial and <c>FillExtrusionMeshGraph.cs</c>, so a
-    /// third partial cannot re-inline it. Same scan as <see cref="FillMeshPipelineRetirementFenceTests"/>.
+    /// Unity has no manual <c>JobHandle</c>. So the prologue file names none of the wall-chain types. Same
+    /// scan as <see cref="FillMeshPipelineRetirementFenceTests"/>. <c>WallQuadJob</c>'s own construction-site
+    /// fence lives in <see cref="JobConstructionSiteFenceTests"/>.
     /// </summary>
     [TestFixture]
     public class WallChainCallerFenceTests
@@ -2488,11 +2374,6 @@ namespace MapRenderer.Tests.Structure
         private static readonly string[] PrologueForbiddenIdentifiers =
         {
             "WallQuadJob", "RingSelectJob", "TileToGeoJob", "ProjectionDispatch", "WriteWalls",
-        };
-
-        private static readonly string[] ExpectedWallQuadJobFiles =
-        {
-            "StyledFillExtrusionTileBuilder.WallJob.cs", "FillExtrusionMeshGraph.cs",
         };
 
         [Test]
@@ -2518,31 +2399,6 @@ namespace MapRenderer.Tests.Structure
                 $"{PrologueFileName} — the prologue's own file — still references the wall chain directly: " +
                 string.Join(", ", violations) + ". The wall chain must be reachable only through " +
                 "FillExtrusionMeshGraph.Schedule, never inline in the prologue body.");
-        }
-
-        [Test]
-        public void WallQuadJob_AppearsInExactlyTheTwoExpectedProductionFiles()
-        {
-            List<string> files = ScanFiles();
-
-            var actual = new List<string>();
-            foreach (string path in files)
-            {
-                string stripped = StripLineComments(File.ReadAllText(path));
-                if (Regex.IsMatch(stripped, @"\bWallQuadJob\b"))
-                    actual.Add(Path.GetFileName(path));
-            }
-            actual.Sort();
-
-            var expected = new List<string>(ExpectedWallQuadJobFiles);
-            expected.Sort();
-
-            Assert.AreEqual(expected, actual,
-                "WallQuadJob must appear in exactly its declaring file and its sole scheduler — a THIRD file " +
-                "referencing it (e.g. a re-inlined construction back into the prologue's partial-class family) " +
-                "means the wall chain became reachable from somewhere this fence does not expect, and a " +
-                "MISSING expected file means the job was renamed or its scheduler changed without updating " +
-                "this fence.");
         }
 
         private static List<string> ScanFiles()
@@ -2581,90 +2437,39 @@ namespace MapRenderer.Tests.Structure
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // ProjectPointsJobConstructionFenceTests — only its declaration + scheduler may construct ProjectPointsJob
+    // JobConstructionSiteFenceTests — construction-site fences for the jobs each only their declaration
+    // and one scheduler may construct
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <c>ProjectPointsJob&lt;TProj&gt;.Run(n)</c> is public and no regex can anchor an instance call, so the
-    /// CONSTRUCTION SITE is fenced: only <c>ProjectPointsJob.cs</c> and <c>ProjectionDispatch.cs</c> may name
-    /// <c>ProjectPointsJob</c>. Same scan as
-    /// <c>WallChainCallerFenceTests.WallQuadJob_AppearsInExactlyTheTwoExpectedProductionFiles</c>.
+    /// Each row's job type is constructed in exactly two places: its own declaring file, and one scheduler
+    /// site. Bare-identifier scan (not a <c>new\s+</c> anchor, which would miss <c>RingClipJob j = new() {...}</c>
+    /// and <c>default(RingClipJob)</c>). <c>ProjectPointsJob&lt;TProj&gt;.Run(n)</c> is public, so its
+    /// construction site is what gets fenced, same reasoning as the ring-copy jobs; <c>WallQuadJob</c>'s
+    /// fence guards the same re-inlining risk <see cref="WallChainCallerFenceTests"/> checks from the
+    /// prologue's own side.
     /// </summary>
     [TestFixture]
-    public class ProjectPointsJobConstructionFenceTests
+    public class JobConstructionSiteFenceTests
     {
-        private static readonly string[] ExpectedFiles =
-        {
-            "ProjectPointsJob.cs", "ProjectionDispatch.cs",
-        };
-
-        [Test]
-        public void ProjectPointsJob_AppearsInExactlyTheTwoExpectedProductionFiles()
-        {
-            string jobsDir  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs");
-            string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering");
-            DirectoryAssert.Exists(jobsDir);
-            DirectoryAssert.Exists(unityDir);
-
-            var files = new List<string>();
-            files.AddRange(Directory.GetFiles(jobsDir, "*.cs", SearchOption.AllDirectories));
-            files.AddRange(Directory.GetFiles(unityDir, "*.cs", SearchOption.AllDirectories));
-
-            // Non-vacuity: guards a path typo silently scanning zero files — same floor as the sibling fences.
-            Assert.GreaterOrEqual(files.Count, 50,
-                $"precondition: expected to scan at least 50 .cs files under MapRenderer.Unity/Jobs/ + " +
-                $"MapRenderer.Unity/Rendering/ (found {files.Count}) — a path typo would silently scan nothing.");
-
-            var actual = new List<string>();
-            foreach (string path in files)
-            {
-                string stripped = StripLineComments(File.ReadAllText(path));
-                if (Regex.IsMatch(stripped, @"\bProjectPointsJob\b"))
-                    actual.Add(Path.GetFileName(path));
-            }
-            actual.Sort();
-
-            var expected = new List<string>(ExpectedFiles);
-            expected.Sort();
-
-            Assert.AreEqual(expected, actual,
-                "ProjectPointsJob must appear in exactly its declaring file and its sole scheduler — a THIRD " +
-                "file referencing it means something else can now construct the job directly and reach " +
-                "Run(n) synchronously, exactly the hole this fence exists to close. A MISSING expected file " +
-                "means the job or its scheduler was renamed without updating this fence.");
-        }
-
-        /// <summary>Strips everything from <c>//</c> to end of line, including <c>///</c> XML-doc lines —
-        /// the same idiom every sibling fence in this directory uses.</summary>
-        private static string StripLineComments(string text)
-        {
-            string[] lines = text.Split('\n');
-            for (int i = 0; i < lines.Length; i++)
-            {
-                int idx = lines[i].IndexOf("//", StringComparison.Ordinal);
-                if (idx >= 0) lines[i] = lines[i].Substring(0, idx);
-            }
-            return string.Join('\n', lines);
-        }
-    }
-
-    // ───────────────────────────────────────────────────────────────────────────────────
-    // RingCopyConstructionFenceTests — only their declaration + VisitedRingCopy may construct RingClipJob/RingSelectJob
-    // ───────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// <c>RingClipJob</c> and <c>RingSelectJob</c> are each constructed in exactly two places: their own
-    /// declaring file, and <c>VisitedRingCopy.Schedule</c> — the one site fill and fill-extrusion both route
-    /// through. Same bare-identifier scan as <see cref="ProjectPointsJobConstructionFenceTests"/>
-    /// / <see cref="WallChainCallerFenceTests"/>: a <c>new\s+</c> anchor would miss
-    /// <c>RingClipJob j = new() {...}</c> and <c>default(RingClipJob)</c>.
-    /// </summary>
-    [TestFixture]
-    public class RingCopyConstructionFenceTests
-    {
-        [TestCase("RingClipJob", "RingClipJob.cs")]
-        [TestCase("RingSelectJob", "RingSelectJob.cs")]
-        public void JobType_AppearsInExactlyItsDeclarationAndVisitedRingCopy(string identifier, string declaringFile)
+        [TestCase("RingClipJob", new[] { "RingClipJob.cs", "VisitedRingCopy.cs" },
+            "a THIRD file means something else can construct it directly, bypassing the shared " +
+            "select-or-clip branch",
+            TestName = "JobType_AppearsInExactlyItsExpectedProductionFiles(RingClipJob)")]
+        [TestCase("RingSelectJob", new[] { "RingSelectJob.cs", "VisitedRingCopy.cs" },
+            "a THIRD file means something else can construct it directly, bypassing the shared " +
+            "select-or-clip branch",
+            TestName = "JobType_AppearsInExactlyItsExpectedProductionFiles(RingSelectJob)")]
+        [TestCase("WallQuadJob", new[] { "StyledFillExtrusionTileBuilder.WallJob.cs", "FillExtrusionMeshGraph.cs" },
+            "a THIRD file (e.g. a re-inlined construction back into the prologue's partial-class family) " +
+            "means the wall chain became reachable from somewhere this fence does not expect",
+            TestName = "JobType_AppearsInExactlyItsExpectedProductionFiles(WallQuadJob)")]
+        [TestCase("ProjectPointsJob", new[] { "ProjectPointsJob.cs", "ProjectionDispatch.cs" },
+            "a THIRD file referencing it means something else can now construct the job directly and reach " +
+            "Run(n) synchronously, exactly the hole this fence exists to close",
+            TestName = "JobType_AppearsInExactlyItsExpectedProductionFiles(ProjectPointsJob)")]
+        public void JobType_AppearsInExactlyItsExpectedProductionFiles(
+            string identifier, string[] expectedFiles, string thirdFileReason)
         {
             string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
             DirectoryAssert.Exists(unityDir);
@@ -2685,13 +2490,13 @@ namespace MapRenderer.Tests.Structure
             }
             actual.Sort();
 
-            var expected = new List<string> { declaringFile, "VisitedRingCopy.cs" };
+            var expected = new List<string>(expectedFiles);
             expected.Sort();
 
             CollectionAssert.AreEqual(expected, actual,
-                $"{identifier} must appear in exactly its declaring file and VisitedRingCopy.Schedule, the " +
-                "one site that constructs it — a THIRD file means something else can construct it directly, " +
-                $"bypassing the shared select-or-clip branch. Actual: {string.Join(", ", actual)}");
+                $"{identifier} must appear in exactly [{string.Join(", ", expected)}] — {thirdFileReason}. " +
+                $"A MISSING expected file means the job or its scheduler was renamed without updating this " +
+                $"fence. Actual: {string.Join(", ", actual)}");
         }
 
         /// <summary>Strips everything from <c>//</c> to end of line, including <c>///</c> XML-doc lines —

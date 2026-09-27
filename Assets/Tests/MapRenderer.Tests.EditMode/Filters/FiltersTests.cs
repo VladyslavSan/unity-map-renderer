@@ -13,6 +13,7 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Collections;
@@ -48,41 +49,33 @@ namespace MapRenderer.Tests.Filters
     [TestFixture]
     public class MvtFeatureIFeatureContractTests
     {
-        [Test]
-        public void TryGetProperty_PresentKey_ReturnsTrueAndValue()
+        private static IEnumerable<TestCaseData> TryGetPropertyCases()
         {
-            IFeature feature = new DictionaryFeature(
-                new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") });
-
-            bool found = feature.TryGetProperty("NAME", out Value value);
-
-            Assert.IsTrue(found);
-            Assert.AreEqual(Value.String("Aruba"), value);
+            yield return new TestCaseData(
+                    (System.Func<IFeature>)(() => new DictionaryFeature(
+                        new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") })),
+                    "NAME", true, Value.String("Aruba"))
+                .SetName("TryGetProperty_AcrossPresenceCases_ReturnsFoundAndValue(PresentKey)");
+            yield return new TestCaseData(
+                    (System.Func<IFeature>)(() => new DictionaryFeature(
+                        new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") })),
+                    "ABBREV", false, Value.Null)
+                .SetName("TryGetProperty_AcrossPresenceCases_ReturnsFoundAndValue(MissingKey)");
+            // Store defaults to the EmptyPropertyStore Null Object — never throws.
+            yield return new TestCaseData((System.Func<IFeature>)(() => new MvtFeature()), "NAME", false, Value.Null)
+                .SetName("TryGetProperty_AcrossPresenceCases_ReturnsFoundAndValue(NoStore_NeverThrows)");
         }
 
         [Test]
-        public void TryGetProperty_MissingKey_ReturnsFalseAndNull()
+        [TestCaseSource(nameof(TryGetPropertyCases))]
+        public void TryGetProperty_AcrossPresenceCases_ReturnsFoundAndValue(
+            System.Func<IFeature> makeFeature, string key, bool expectedFound, Value expectedValue)
         {
-            IFeature feature = new DictionaryFeature(
-                new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") });
+            IFeature feature = makeFeature();
+            bool found = feature.TryGetProperty(key, out Value value);
 
-            bool found = feature.TryGetProperty("ABBREV", out Value value);
-
-            Assert.IsFalse(found, "a missing key must return false, not throw.");
-            Assert.AreEqual(Value.Null, value);
-        }
-
-        [Test]
-        public void TryGetProperty_NoStore_ReturnsFalseAndNull_NeverThrows()
-        {
-            var feature = new MvtFeature(); // Store defaults to the EmptyPropertyStore Null Object
-            IFeature asFeature = feature;
-
-            bool found = asFeature.TryGetProperty("NAME", out Value value);
-
-            Assert.IsFalse(found,
-                "with no real store the default EmptyPropertyStore answers 'absent' — never throws.");
-            Assert.AreEqual(Value.Null, value);
+            Assert.AreEqual(expectedFound, found, $"TryGetProperty(\"{key}\") found must be {expectedFound}.");
+            Assert.AreEqual(expectedValue, value);
         }
 
         [Test]
@@ -161,92 +154,73 @@ namespace MapRenderer.Tests.Filters
             };
         }
 
-        // ── Source-layer resolution (seam tests) ──────────────────────────────────────────────────
+        // ── Source-layer / tile / style-layer null-input guards ─────────────────────────────────────
 
         [Test]
-        public void WrongSourceLayer_ReturnsEmpty()
+        public void SelectFeatures_NullOrMissingInputs_ReturnEmpty()
         {
             var tile = BuildTile();
-            var layer = MakeLayer("nonexistent");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(0), "Wrong source-layer name should yield empty selection");
+
+            Assert.That(FeatureSelector.SelectFeatures(MakeLayer("roads"), null).Count, Is.EqualTo(0),
+                "Null tile should yield empty selection");
+            Assert.That(FeatureSelector.SelectFeatures(null, tile).Count, Is.EqualTo(0),
+                "Null StyleLayer should yield empty selection");
+            Assert.That(FeatureSelector.SelectFeatures(MakeLayer(null), tile).Count, Is.EqualTo(0),
+                "Null source-layer should yield empty selection");
+            Assert.That(FeatureSelector.SelectFeatures(MakeLayer("nonexistent"), tile).Count, Is.EqualTo(0),
+                "Wrong source-layer name should yield empty selection");
         }
 
         [Test]
-        public void NullSourceLayer_ReturnsEmpty()
+        public void SelectFeatures_MatchingSourceLayer_ReturnsItsFeatures()
         {
             var tile = BuildTile();
-            var layer = MakeLayer(null);
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(0), "Null source-layer should yield empty selection");
-        }
 
-        [Test]
-        public void NullTile_ReturnsEmpty()
-        {
-            var layer = MakeLayer("roads");
-            var result = FeatureSelector.SelectFeatures(layer, null);
-            Assert.That(result.Count, Is.EqualTo(0), "Null tile should yield empty selection");
-        }
-
-        [Test]
-        public void CorrectSourceLayer_NoFilter_ReturnsAllFeatures()
-        {
-            var tile = BuildTile();
-            var layer = MakeLayer("roads");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(3), "roads layer has 3 features");
-        }
-
-        [Test]
-        public void CorrectSourceLayer_Landuse_ReturnsAllLanduseFeatures()
-        {
-            var tile = BuildTile();
-            var layer = MakeLayer("landuse");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(3), "landuse layer has 3 features");
+            Assert.That(FeatureSelector.SelectFeatures(MakeLayer("roads"), tile).Count, Is.EqualTo(3),
+                "roads layer has 3 features");
+            Assert.That(FeatureSelector.SelectFeatures(MakeLayer("landuse"), tile).Count, Is.EqualTo(3),
+                "landuse layer has 3 features");
         }
 
         // ── $type filter over real MvtFeature geometry ────────────────────────────────────────────
 
+        /// <summary>A $type/none filter selects the right COUNT and every selected feature carries the
+        /// expected GeometryType — not just the first one.</summary>
         [Test]
-        public void TypeFilter_LineString_SelectsOnlyLineStrings()
+        [TestCase("[\"==\",\"$type\",\"LineString\"]", 2, TileGeometryType.LineString,
+            TestName = "TypeFilter_SelectsOnlyMatchingGeometry(LineString)")]
+        [TestCase("[\"==\",\"$type\",\"Point\"]", 1, TileGeometryType.Point,
+            TestName = "TypeFilter_SelectsOnlyMatchingGeometry(Point)")]
+        // none(type==LineString) -> excludes LineString -> only Point remains in roads.
+        [TestCase("[\"none\",[\"==\",\"$type\",\"LineString\"]]", 1, TileGeometryType.Point,
+            TestName = "TypeFilter_SelectsOnlyMatchingGeometry(NoneOfLineString)")]
+        public void TypeFilter_SelectsOnlyMatchingGeometry(
+            string filterJson, int expectedCount, TileGeometryType expectedType)
         {
             var tile = BuildTile();
-            var layer = MakeLayer("roads", "[\"==\",\"$type\",\"LineString\"]");
+            var layer = MakeLayer("roads", filterJson);
             var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(2), "roads layer has 2 LineString features");
+            Assert.That(result.Count, Is.EqualTo(expectedCount));
             foreach (var f in result)
-                Assert.That(f.GeometryType, Is.EqualTo(TileGeometryType.LineString));
+                Assert.That(f.GeometryType, Is.EqualTo(expectedType));
         }
 
+        /// <summary>A $type/all filter's exact feature count, with no per-feature geometry claim.</summary>
         [Test]
-        public void TypeFilter_Point_SelectsOnlyPoints()
+        [TestCase("landuse", "[\"==\",\"$type\",\"Polygon\"]", 3,
+            TestName = "TypeFilter_ReturnsCount(Polygon_SelectedFromLanduse)")]
+        // roads layer has LineString and Point, not Polygon.
+        [TestCase("roads", "[\"==\",\"$type\",\"Polygon\"]", 0,
+            TestName = "TypeFilter_ReturnsCount(WrongType_SelectsNothing)")]
+        // all(type==LineString, type==Point) -> impossible -> empty.
+        [TestCase("roads", "[\"all\",[\"==\",\"$type\",\"LineString\"],[\"==\",\"$type\",\"Point\"]]", 0,
+            TestName = "TypeFilter_ReturnsCount(AllFilter_MustSatisfyBothConditions)")]
+        public void TypeFilter_ReturnsCount(string layerName, string filterJson, int expectedCount)
         {
             var tile = BuildTile();
-            var layer = MakeLayer("roads", "[\"==\",\"$type\",\"Point\"]");
+            var layer = MakeLayer(layerName, filterJson);
             var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(1), "roads layer has 1 Point feature");
-            Assert.That(result[0].GeometryType, Is.EqualTo(TileGeometryType.Point));
-        }
-
-        [Test]
-        public void TypeFilter_Polygon_SelectedFromLanduse()
-        {
-            var tile = BuildTile();
-            var layer = MakeLayer("landuse", "[\"==\",\"$type\",\"Polygon\"]");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(3), "landuse layer has 3 Polygon features");
-        }
-
-        [Test]
-        public void TypeFilter_WrongType_SelectsNothing()
-        {
-            var tile = BuildTile();
-            // roads layer has LineString and Point, not Polygon
-            var layer = MakeLayer("roads", "[\"==\",\"$type\",\"Polygon\"]");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(0), "roads layer has no Polygon features");
+            Assert.That(result.Count, Is.EqualTo(expectedCount));
         }
 
         // ── Expression-form type filter over real features ────────────────────────────────────────
@@ -263,43 +237,6 @@ namespace MapRenderer.Tests.Filters
 
             Assert.That(legacyResult.Count, Is.EqualTo(exprResult.Count),
                 "Legacy and expression type filters should select same count");
-        }
-
-        // ── none filter ───────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void NoneTypeFilter_ExcludesMatchingFeatures()
-        {
-            var tile = BuildTile();
-            // none(type==LineString) -> excludes LineString -> only Point remains in roads
-            var layer = MakeLayer("roads", "[\"none\",[\"==\",\"$type\",\"LineString\"]]");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(1), "Only 1 non-LineString feature (Point) in roads");
-            Assert.That(result[0].GeometryType, Is.EqualTo(TileGeometryType.Point));
-        }
-
-        // ── all filter ────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void AllFilter_MustSatisfyBothConditions()
-        {
-            var tile = BuildTile();
-            // all(type==LineString, type==Point) -> impossible -> empty
-            var layer = MakeLayer("roads",
-                "[\"all\",[\"==\",\"$type\",\"LineString\"],[\"==\",\"$type\",\"Point\"]]");
-            var result = FeatureSelector.SelectFeatures(layer, tile);
-            Assert.That(result.Count, Is.EqualTo(0),
-                "all(type==LineString, type==Point) is always false");
-        }
-
-        // ── NullLayer guard ───────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void NullStyleLayer_ReturnsEmpty()
-        {
-            var tile = BuildTile();
-            var result = FeatureSelector.SelectFeatures(null, tile);
-            Assert.That(result.Count, Is.EqualTo(0), "Null StyleLayer should yield empty selection");
         }
 
         // ── The ordinal-returning overload ────────────────────────────────────────────────────────
@@ -894,17 +831,28 @@ namespace MapRenderer.Tests.Filters
 
         // ── coverage pin ────────────────────────────────────────────────────────────────────────
 
-        /// <summary>All 105 of liberty.json's filtered layers compile through the accepted op subset. The
+        /// <summary>Every one of liberty.json's filtered layers compiles through the accepted op subset. The
         /// 10+-label <c>road_link</c> matches fit the VM's op budget only because <c>InStringSet</c> compiles
         /// them in O(1) ops whatever the label count. The refused set must be empty, which a count alone
-        /// cannot show.</summary>
+        /// cannot show. The expected total comes from a raw-JSON scan, independent of the StyleLayer model
+        /// <see cref="CollectCoveredLibertyFilters"/> itself walks.</summary>
         [Test]
-        public void CoveredLibertyFilters_Count_Is105()
+        public void CoveredLibertyFilters_AllLayersAccepted_NoneRefused()
         {
-            Assert.That(_totalFilteredLibertyLayers, Is.EqualTo(105), "precondition: liberty.json's filtered layer count");
+            JsonValue root = JsonParser.Parse(SymbolTestFixtures.LoadLibertyJson());
+            Assert.That(root.TryGet("layers", out JsonValue layers) && layers.IsArray, Is.True,
+                "precondition: liberty.json must parse to an object with a 'layers' array.");
+            int rawFilteredLayerCount = layers.Items.Count(l => l.TryGet("filter", out _));
+            Assert.That(rawFilteredLayerCount, Is.GreaterThan(0),
+                "precondition: liberty.json must have at least one filtered layer, or the checks below pass vacuously.");
+
+            Assert.That(_totalFilteredLibertyLayers, Is.EqualTo(rawFilteredLayerCount),
+                "precondition: the StyleLayer model's filtered-layer count must match a raw scan of " +
+                "liberty.json's own 'filter' keys, or the checks below are not really counting this fixture.");
             Assert.That(_refusedLibertyLayerIds, Is.Empty,
                 "refused layer(s): " + string.Join(", ", _refusedLibertyLayerIds));
-            Assert.That(_coveredLibertyFilters.Count, Is.EqualTo(105));
+            Assert.That(_coveredLibertyFilters.Count, Is.EqualTo(rawFilteredLayerCount),
+                "the covered set must account for every filtered layer once the refused set is empty.");
         }
 
         // ── Parity oracle ─────────────────────────────────────────────────────────────

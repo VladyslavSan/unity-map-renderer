@@ -311,13 +311,21 @@ namespace MapRenderer.Tests.Cameras
 
         // ── B-CLAMP — recognizer intents survive ConstrainedAngle clamp/wrap ─────────────────────
 
-        [Test]
-        public void BClamp_TiltBy_HugeDownwardDrag_ClampedTo60()
+        private static IEnumerable<TestCaseData> BClampTiltCases()
         {
             // Huge downward centroid drag (dc.y < 0) from tilt=0 → TiltBy huge positive →
             // ViewInput.Apply clamps to MaxPitch=60.
+            yield return new TestCaseData(0.0, -500.0, 60.0).SetName("BClamp_TiltBy_ClampsToPitchBounds(HugeDownwardDrag_ClampedToMax)");
+            // Huge upward drag from a tilted camera → TiltBy huge negative → clamped to 0.
+            yield return new TestCaseData(30.0, 500.0, 0.0).SetName("BClamp_TiltBy_ClampsToPitchBounds(HugeUpwardDrag_FlooredAtZero)");
+        }
+
+        [Test]
+        [TestCaseSource(nameof(BClampTiltCases))]
+        public void BClamp_TiltBy_ClampsToPitchBounds(double startTilt, double centroidDeltaY, double expectedTilt)
+        {
             var rec  = new TouchGestureRecognizer(Cfg(maxPitch: 60));
-            var view = MakeView(Cam(tilt: 0));
+            var view = MakeView(Cam(tilt: startTilt));
 
             double2 f0 = new double2(800, 540);
             double2 f1 = new double2(1000, 540);
@@ -329,49 +337,18 @@ namespace MapRenderer.Tests.Cameras
                 Sample(1, f1.x, f1.y, TouchPhase.Began),
             });
 
-            // Huge downward drag (−500px centroid) → latch Tilt, huge +tilt delta.
+            // Huge centroid drag → latch Tilt, huge tilt delta.
             var bigTilt = Step(rec, view, new List<TouchSample>
             {
-                Sample(0, f0.x, f0.y - 500, TouchPhase.Moved),  // DOWN (centroid.y decreases)
-                Sample(1, f1.x, f1.y - 500, TouchPhase.Moved),
+                Sample(0, f0.x, f0.y + centroidDeltaY, TouchPhase.Moved),
+                Sample(1, f1.x, f1.y + centroidDeltaY, TouchPhase.Moved),
             });
 
             Assert.AreEqual(1, CountKind(bigTilt, GestureKind.TiltBy), "Should emit TiltBy");
             GestureIntent intent = bigTilt[0];
             var patch = ViewInput.Apply(intent, view);
-            Assert.AreEqual(60.0, patch.Tilt.Value, 1e-9,
-                "B-CLAMP: huge tilt delta clamps to MaxPitch=60.0");
-            Assert.IsNull(patch.Heading, "B-CLAMP: TiltBy leaves Heading null");
-        }
-
-        [Test]
-        public void BClamp_TiltBy_HugeUpwardDrag_FlooredAtZero()
-        {
-            // Huge upward drag from a tilted camera → TiltBy huge negative → clamped to 0.
-            var rec  = new TouchGestureRecognizer(Cfg(maxPitch: 60));
-            var view = MakeView(Cam(tilt: 30));
-
-            double2 f0 = new double2(800, 540);
-            double2 f1 = new double2(1000, 540);
-
-            Step(rec, view, new List<TouchSample>
-            {
-                Sample(0, f0.x, f0.y, TouchPhase.Began),
-                Sample(1, f1.x, f1.y, TouchPhase.Began),
-            });
-
-            // Huge upward drag (+500px centroid) → latch Tilt, huge −tilt delta.
-            var upTilt = Step(rec, view, new List<TouchSample>
-            {
-                Sample(0, f0.x, f0.y + 500, TouchPhase.Moved),  // UP
-                Sample(1, f1.x, f1.y + 500, TouchPhase.Moved),
-            });
-
-            Assert.AreEqual(1, CountKind(upTilt, GestureKind.TiltBy), "Should emit TiltBy");
-            GestureIntent intent = upTilt[0];
-            var patch = ViewInput.Apply(intent, view);
-            Assert.AreEqual(0.0, patch.Tilt.Value, 1e-9,
-                "B-CLAMP: upward drag from tilt=30 floors at 0.0");
+            Assert.AreEqual(expectedTilt, patch.Tilt.Value, 1e-9,
+                $"B-CLAMP: huge tilt delta from start={startTilt} clamps to {expectedTilt}");
             Assert.IsNull(patch.Heading, "B-CLAMP: TiltBy leaves Heading null");
         }
 

@@ -129,17 +129,19 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(1, polygons[1].Holes.Count, "Polygon 1 should have 1 hole.");
         }
 
-        [Test]
-        public void EmptyInput_ReturnsEmptyList()
+        private static IEnumerable<TestCaseData> NoRingsCases()
         {
-            var polygons = PolygonAssembler.Assemble(new List<List<double2>>());
-            Assert.AreEqual(0, polygons.Count);
+            yield return new TestCaseData(new List<List<double2>>())
+                .SetName("Assemble_WithNoRings_ReturnsEmptyList(EmptyInput)");
+            yield return new TestCaseData((object)null)
+                .SetName("Assemble_WithNoRings_ReturnsEmptyList(NullInput)");
         }
 
         [Test]
-        public void NullInput_ReturnsEmptyList()
+        [TestCaseSource(nameof(NoRingsCases))]
+        public void Assemble_WithNoRings_ReturnsEmptyList(List<List<double2>> rings)
         {
-            var polygons = PolygonAssembler.Assemble(null);
+            var polygons = PolygonAssembler.Assemble(rings);
             Assert.AreEqual(0, polygons.Count);
         }
 

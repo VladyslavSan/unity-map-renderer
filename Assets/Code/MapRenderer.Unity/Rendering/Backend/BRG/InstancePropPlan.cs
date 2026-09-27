@@ -100,20 +100,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         }
 
         /// <summary>
-        /// Returns the SoA float offset for the material entry with <paramref name="propId"/>, or -1 if
-        /// not found. Used by tests for the byte-identical-wire spot check.
-        /// </summary>
-        internal int GetSoaFloatOffset(int propId)
-        {
-            for (int i = 0; i < MaterialEntries.Length; i++)
-            {
-                if (MaterialEntries[i].PropId == propId)
-                    return MaterialEntries[i].SoaFloatOffset;
-            }
-            return -1;
-        }
-
-        /// <summary>
         /// Builds a plan by reflecting <typeparamref name="T"/> once, in <c>Marshal.OffsetOf</c> order.
         /// <typeparamref name="T"/> is <c>[StructLayout(Sequential)]</c> with only <c>float</c>, <c>float4</c> and
         /// <c>float3x4</c> fields. The two transforms <c>unity_ObjectToWorld</c>/<c>unity_WorldToObject</c> are

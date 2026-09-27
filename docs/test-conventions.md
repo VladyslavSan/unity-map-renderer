@@ -317,3 +317,16 @@ Ordered. First match wins. Read down until one fires.
 
 - **No production member that exists only for a test** — see [`conventions-short.md`](conventions-short.md)
   §"Test code must not bloat the production codebase".
+
+## 7. What a test asserts
+
+- **Assert the property that matters** — parity, ordering, a bound, a relation — when the generic property
+  IS the point. Never vague by default: a behaviour whose exact value is the contract (a golden, a spec
+  constant, a parity oracle, zero-alloc) stays exact. Ask: would a legitimate change move this number?
+- **One test per behaviour.** Join only when the cases are truly ONE behaviour — sequential asserts or
+  named rows, each with its own message. Unrelated cases stay separate; a joined test never becomes a
+  catch-all.
+- **A row must read without counting parameters.** Past about three values, use a named record or
+  sequential asserts, not positional literals.
+- **NOT yet enforced across the codebase** — read this as the rule new and touched tests are held to; no
+  sweep of the existing suite has been run against it.

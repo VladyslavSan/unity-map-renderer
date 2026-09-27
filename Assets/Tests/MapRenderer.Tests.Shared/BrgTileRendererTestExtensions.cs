@@ -25,13 +25,6 @@ namespace MapRenderer.Tests
         /// <summary>True if the instance GraphicsBuffer is allocated.</summary>
         internal static bool HasBuffer(this BrgTileRenderer renderer) => renderer._instanceBuffer != null;
 
-        /// <summary>Total floats per instance in the SoA buffer, as derived from <c>MapInstanceData</c>.</summary>
-        internal static int FloatsPerInstance(this BrgTileRenderer renderer) => renderer._plan.FloatsPerInstance;
-
-        /// <summary>Total BRG metadata entry count (2 transforms + the material props), as derived from
-        /// <c>MapInstanceData</c>.</summary>
-        internal static int MetadataEntryCount(this BrgTileRenderer renderer) => renderer._plan.MetaCount;
-
         /// <summary>
         /// The packed translation (X, Z) of the instance <paramref name="handle"/> from the last
         /// <c>Rebuild</c> call. GPU-independent — decodes the CPU buffer (SoA layout), not the GPU buffer.
@@ -89,13 +82,6 @@ namespace MapRenderer.Tests
             }
             return float.NaN;
         }
-
-        /// <summary>
-        /// The SoA float offset (the Pfx_ equivalent) for the material property <paramref name="propId"/>,
-        /// or -1 if not found in the plan. Used for the byte-identical-wire spot check.
-        /// </summary>
-        internal static int GetPropSoaOffset(this BrgTileRenderer renderer, int propId)
-            => renderer._plan.GetSoaFloatOffset(propId);
 
         /// <summary>
         /// The renderQueue of each draw command in emission order, as computed by the last <c>Rebuild</c>

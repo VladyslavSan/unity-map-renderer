@@ -34,143 +34,47 @@ namespace MapRenderer.Tests.Filters
         private static bool IsExpr(string json)
             => FilterDialect.IsExpressionFilter(JsonParser.Parse(json));
 
-        // ── Always-legacy operators ───────────────────────────────────────────────────────────────
-
-        [Test] public void NotHas_IsLegacy() => Assert.IsFalse(IsExpr("[\"!has\",\"k\"]"));
-        [Test] public void NotIn_IsLegacy() => Assert.IsFalse(IsExpr("[\"!in\",\"k\",1,2]"));
-        [Test] public void None_IsLegacy() => Assert.IsFalse(IsExpr("[\"none\",[\"==\",\"a\",1]]"));
-
-        // ── Always-expression operators ──────────────────────────────────────────────────────────
-
-        [Test] public void Get_IsExpression() => Assert.IsTrue(IsExpr("[\"get\",\"k\"]"));
-        [Test] public void Not_IsExpression() => Assert.IsTrue(IsExpr("[\"!\",[\"has\",\"k\"]]"));
-        [Test] public void Match_IsExpression() => Assert.IsTrue(IsExpr("[\"match\",[\"get\",\"k\"],1,true,false]"));
-        [Test] public void MathPlus_IsExpression() => Assert.IsTrue(IsExpr("[\"+\",1,2]"));
-        [Test] public void GeometryType_IsExpression() => Assert.IsTrue(IsExpr("[\"geometry-type\"]"));
-        [Test] public void IdExpr_IsExpression() => Assert.IsTrue(IsExpr("[\"id\"]"));
-        [Test] public void Zoom_IsExpression() => Assert.IsTrue(IsExpr("[\"zoom\"]"));
-        [Test] public void Concat_IsExpression() => Assert.IsTrue(IsExpr("[\"concat\",\"a\",\"b\"]"));
-        [Test] public void Literal_IsExpression() => Assert.IsTrue(IsExpr("[\"literal\",[1,2,3]]"));
-        [Test] public void ToNumber_IsExpression() => Assert.IsTrue(IsExpr("[\"to-number\",[\"get\",\"x\"]]"));
-
-        // ── == disambiguation ────────────────────────────────────────────────────────────────────
-
+        /// <summary>Every dialect-routing case, one row per filter shape: the always-legacy and
+        /// always-expression operators, and the ambiguous overlapping operators (==, !=, &lt;, &lt;=,
+        /// &gt;, &gt;=, in, has, all, any) where routing depends on operand form.</summary>
         [Test]
-        public void Eq_BareKeyValue_IsLegacy()
+        [TestCase("[\"!has\",\"k\"]", false, "always-legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(NotHas)")]
+        [TestCase("[\"!in\",\"k\",1,2]", false, "always-legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(NotIn)")]
+        [TestCase("[\"none\",[\"==\",\"a\",1]]", false, "always-legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(None)")]
+        [TestCase("[\"get\",\"k\"]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Get)")]
+        [TestCase("[\"!\",[\"has\",\"k\"]]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Not)")]
+        [TestCase("[\"match\",[\"get\",\"k\"],1,true,false]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Match)")]
+        [TestCase("[\"+\",1,2]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(MathPlus)")]
+        [TestCase("[\"geometry-type\"]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(GeometryType)")]
+        [TestCase("[\"id\"]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(IdExpr)")]
+        [TestCase("[\"zoom\"]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Zoom)")]
+        [TestCase("[\"concat\",\"a\",\"b\"]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Concat)")]
+        [TestCase("[\"literal\",[1,2,3]]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Literal)")]
+        [TestCase("[\"to-number\",[\"get\",\"x\"]]", true, "always-expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(ToNumber)")]
+        [TestCase("[\"==\",\"key\",\"value\"]", false, "== bare string key, scalar value -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Eq_BareKeyValue)")]
+        [TestCase("[\"==\",[\"get\",\"key\"],\"value\"]", true, "== first operand is an array -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Eq_ExpressionOperand)")]
+        [TestCase("[\"==\",\"key\",[\"literal\",\"v\"]]", true, "== second operand is an array -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Eq_ExpressionValueSide)")]
+        [TestCase("[\"==\",\"area\",100]", false, "== legacy numeric comparison", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Eq_NumericValue)")]
+        [TestCase("[\"!=\",\"k\",1]", false, "!= bare key/value -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Neq_BareKeyValue)")]
+        [TestCase("[\"!=\",[\"get\",\"k\"],1]", true, "!= expression operand -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Neq_ExprOperand)")]
+        [TestCase("[\"<\",\"area\",10]", false, "< bare key -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Lt_BareKey)")]
+        [TestCase("[\"<=\",\"area\",10]", false, "<= bare key -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Lte_BareKey)")]
+        [TestCase("[\">\" ,\"area\",10]", false, "> bare key -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Gt_BareKey)")]
+        [TestCase("[\">=\",\"area\",10]", false, ">= bare key -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Gte_BareKey)")]
+        [TestCase("[\"<\",[\"get\",\"area\"],10]", true, "< expression key -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Lt_ExpressionKey)")]
+        [TestCase("[\"in\",\"key\",\"v1\",\"v2\"]", false, "in bare key + scalars -> legacy membership", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(In_BareKeyScalars)")]
+        [TestCase("[\"in\",[\"get\",\"k\"],[\"literal\",[\"v1\",\"v2\"]]]", true, "in expression needle -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(In_ExprNeedle)")]
+        [TestCase("[\"in\",\"needle\",[\"literal\",[\"v1\"]]]", true, "in array haystack -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(In_ArrayHaystack)")]
+        [TestCase("[\"has\",\"key\"]", false, "has single bare string key -> legacy existence check", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Has_SingleBareStringKey)")]
+        [TestCase("[\"has\",\"key\",[\"properties\"]]", true, "has two args (object arg) -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Has_TwoArgs)")]
+        [TestCase("[\"all\",[\"==\",\"a\",1],[\"has\",\"b\"]]", false, "all with legacy child filters -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(All_WithLegacyChildFilters)")]
+        [TestCase("[\"all\",[\"==\",[\"get\",\"a\"],1]]", true, "all with an expression-only child op -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(All_WithExpressionChildFilters)")]
+        [TestCase("[\"any\",[\"==\",\"x\",\"y\"],[\"has\",\"z\"]]", false, "any with legacy child filters -> legacy", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Any_WithLegacyChildFilters)")]
+        [TestCase("[\"any\",[\"!\",[\"has\",\"x\"]]]", true, "any with an expression child -> expression", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(Any_WithExpressionChild)")]
+        [TestCase("[\"all\"]", true, "all with no children -> expression (AllExpression of 0 args = true)", TestName = "IsExpressionFilter_ClassifiesByOperatorAndOperandShape(All_EmptyArgs)")]
+        public void IsExpressionFilter_ClassifiesByOperatorAndOperandShape(string json, bool expectedIsExpression, string note)
         {
-            // ["==","key","value"] — legacy form (bare string key, scalar value)
-            Assert.IsFalse(IsExpr("[\"==\",\"key\",\"value\"]"));
-        }
-
-        [Test]
-        public void Eq_ExpressionOperand_IsExpression()
-        {
-            // ["==",["get","key"],"value"] — operand is an array -> expression
-            Assert.IsTrue(IsExpr("[\"==\",[\"get\",\"key\"],\"value\"]"));
-        }
-
-        [Test]
-        public void Eq_ExpressionValueSide_IsExpression()
-        {
-            // ["==","key",["literal","v"]] — second operand is an array -> expression
-            Assert.IsTrue(IsExpr("[\"==\",\"key\",[\"literal\",\"v\"]]"));
-        }
-
-        [Test]
-        public void Eq_NumericValue_IsLegacy()
-        {
-            // ["==","area",100] — legacy numeric comparison
-            Assert.IsFalse(IsExpr("[\"==\",\"area\",100]"));
-        }
-
-        // ── != disambiguation ────────────────────────────────────────────────────────────────────
-
-        [Test] public void Neq_BareKeyValue_IsLegacy() => Assert.IsFalse(IsExpr("[\"!=\",\"k\",1]"));
-        [Test] public void Neq_ExprOperand_IsExpression() => Assert.IsTrue(IsExpr("[\"!=\",[\"get\",\"k\"],1]"));
-
-        // ── < <= > >= disambiguation ─────────────────────────────────────────────────────────────
-
-        [Test] public void Lt_BareKey_IsLegacy() => Assert.IsFalse(IsExpr("[\"<\",\"area\",10]"));
-        [Test] public void Lte_BareKey_IsLegacy() => Assert.IsFalse(IsExpr("[\"<=\",\"area\",10]"));
-        [Test] public void Gt_BareKey_IsLegacy() => Assert.IsFalse(IsExpr("[\">\" ,\"area\",10]"));
-        [Test] public void Gte_BareKey_IsLegacy() => Assert.IsFalse(IsExpr("[\">=\",\"area\",10]"));
-
-        [Test]
-        public void Lt_ExpressionKey_IsExpression()
-            => Assert.IsTrue(IsExpr("[\"<\",[\"get\",\"area\"],10]"));
-
-        // ── in disambiguation ────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void In_BareKeyScalars_IsLegacy()
-        {
-            // ["in","key","v1","v2"] — legacy membership
-            Assert.IsFalse(IsExpr("[\"in\",\"key\",\"v1\",\"v2\"]"));
-        }
-
-        [Test]
-        public void In_ExprNeedle_IsExpression()
-        {
-            // ["in",["get","k"],["literal",["v1","v2"]]] — needle is expression
-            Assert.IsTrue(IsExpr("[\"in\",[\"get\",\"k\"],[\"literal\",[\"v1\",\"v2\"]]]"));
-        }
-
-        [Test]
-        public void In_ArrayHaystack_IsExpression()
-        {
-            // ["in","needle",["literal",["v1"]]] — haystack is array -> expression
-            Assert.IsTrue(IsExpr("[\"in\",\"needle\",[\"literal\",[\"v1\"]]]"));
-        }
-
-        // ── has disambiguation ───────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Has_SingleBareStringKey_IsLegacy()
-        {
-            // ["has","key"] — legacy existence check
-            Assert.IsFalse(IsExpr("[\"has\",\"key\"]"));
-        }
-
-        [Test]
-        public void Has_TwoArgs_IsExpression()
-        {
-            // ["has","key",["properties"]] — expression form (object arg)
-            Assert.IsTrue(IsExpr("[\"has\",\"key\",[\"properties\"]]"));
-        }
-
-        // ── all/any disambiguation ───────────────────────────────────────────────────────────────
-
-        [Test]
-        public void All_WithLegacyChildFilters_IsLegacy()
-        {
-            // Children are legacy filter arrays: ["==","a",1], ["has","b"]
-            Assert.IsFalse(IsExpr("[\"all\",[\"==\",\"a\",1],[\"has\",\"b\"]]"));
-        }
-
-        [Test]
-        public void All_WithExpressionChildFilters_IsExpression()
-        {
-            // Child contains expression-only op: ["==",["get","a"],1]
-            Assert.IsTrue(IsExpr("[\"all\",[\"==\",[\"get\",\"a\"],1]]"));
-        }
-
-        [Test]
-        public void Any_WithLegacyChildFilters_IsLegacy()
-        {
-            Assert.IsFalse(IsExpr("[\"any\",[\"==\",\"x\",\"y\"],[\"has\",\"z\"]]"));
-        }
-
-        [Test]
-        public void Any_WithExpressionChild_IsExpression()
-        {
-            Assert.IsTrue(IsExpr("[\"any\",[\"!\",[\"has\",\"x\"]]]"));
-        }
-
-        [Test]
-        public void All_EmptyArgs_IsExpression()
-        {
-            // ["all"] with no children -> treated as expression (AllExpression of 0 args = true)
-            Assert.IsTrue(IsExpr("[\"all\"]"));
+            Assert.AreEqual(expectedIsExpression, IsExpr(json), $"{json} ({note})");
         }
     }
 
@@ -238,156 +142,32 @@ namespace MapRenderer.Tests.Filters
                 $"Legacy and expression filters should select identical subsets.\nLegacy: {legacyJson}\nExpr:   {expressionJson}");
         }
 
-        // ── $type ───────────────────────────────────────────────────────────────────────────────
-
+        /// <summary>Every legacy filter and its hand-written expression equivalent select IDENTICAL subsets
+        /// over the fixed <see cref="Features"/> set — $type, $id, has/!has, ==/!=, comparisons, in/!in,
+        /// and the all/any/none combinators.</summary>
         [Test]
-        public void EqType_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"==\",\"$type\",\"Polygon\"]",
-                "[\"==\",[\"geometry-type\"],\"Polygon\"]");
-
-        [Test]
-        public void NeqType_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"!=\",\"$type\",\"Polygon\"]",
-                "[\"!=\",[\"geometry-type\"],\"Polygon\"]");
-
-        [Test]
-        public void InType_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"in\",\"$type\",\"Polygon\",\"LineString\"]",
-                "[\"in\",[\"geometry-type\"],[\"literal\",[\"Polygon\",\"LineString\"]]]");
-
-        [Test]
-        public void NotInType_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"!in\",\"$type\",\"Polygon\"]",
-                "[\"!\",[\"in\",[\"geometry-type\"],[\"literal\",[\"Polygon\"]]]]");
-
-        // ── $id ─────────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void EqId_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"==\",\"$id\",42]",
-                "[\"==\",[\"id\"],42]");
-
-        [Test]
-        public void InId_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"in\",\"$id\",42,99]",
-                "[\"in\",[\"id\"],[\"literal\",[42,99]]]");
-
-        // ── has / !has ───────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Has_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"has\",\"area\"]",
-                "[\"has\",\"area\"]"); // expression "has" with bare string is also valid
-
-        [Test]
-        public void NotHas_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"!has\",\"name\"]",
-                "[\"!\",[\"has\",\"name\"]]");
-
-        // ── == / != ──────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void EqProperty_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"==\",\"name\",\"road\"]",
-                "[\"==\",[\"get\",\"name\"],\"road\"]");
-
-        [Test]
-        public void NeqProperty_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"!=\",\"name\",\"road\"]",
-                "[\"!=\",[\"get\",\"name\"],\"road\"]");
-
-        // ── < <= > >= ────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Lt_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"<\",\"area\",100]",
-                "[\"<\",[\"get\",\"area\"],100]");
-
-        [Test]
-        public void Lte_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"<=\",\"area\",100]",
-                "[\"<=\",[\"get\",\"area\"],100]");
-
-        [Test]
-        public void Gt_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\">\" ,\"area\",100]",
-                "[\">\", [\"get\",\"area\"],100]");
-
-        [Test]
-        public void Gte_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\">=\",\"area\",100]",
-                "[\">=\",[\"get\",\"area\"],100]");
-
-        // ── in / !in ─────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void In_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"in\",\"name\",\"road\",\"water\"]",
-                "[\"in\",[\"get\",\"name\"],[\"literal\",[\"road\",\"water\"]]]");
-
-        [Test]
-        public void NotIn_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"!in\",\"name\",\"road\",\"water\"]",
-                "[\"!\",[\"in\",[\"get\",\"name\"],[\"literal\",[\"road\",\"water\"]]]]");
-
-        // ── all / any / none ─────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void All_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]]",
-                "[\"all\",[\"==\",[\"geometry-type\"],\"Polygon\"],[\">\", [\"get\",\"area\"],50]]");
-
-        [Test]
-        public void Any_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"any\",[\"==\",\"name\",\"road\"],[\"==\",\"name\",\"water\"]]",
-                "[\"any\",[\"==\",[\"get\",\"name\"],\"road\"],[\"==\",[\"get\",\"name\"],\"water\"]]");
-
-        [Test]
-        public void None_LegacyEqualsExpression()
-            => AssertEquivalent(
-                "[\"none\",[\"==\",\"$type\",\"Polygon\"]]",
-                "[\"!\",[\"any\",[\"==\",[\"geometry-type\"],\"Polygon\"]]]");
-
-        // ── Nested complex filter ─────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void ComplexNested_LegacyEqualsExpression()
-        {
-            // Legacy: all(type==Polygon, area>=100)
-            // Expr:   all(geometry-type==Polygon, get(area)>=100)
-            AssertEquivalent(
-                "[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]]",
-                "[\"all\",[\"==\",[\"geometry-type\"],\"Polygon\"],[\">\", [\"get\",\"area\"],50]]");
-        }
-
-        // ── literal array wrapping is required (in) ───────────────────────────────────────────────
-
-        [Test]
-        public void In_LiteralArrayWrappingRequired()
-        {
-            // ["in",["get","name"],["literal",["road","water"]]] must produce same as legacy
-            AssertEquivalent(
-                "[\"in\",\"name\",\"road\",\"water\"]",
-                "[\"in\",[\"get\",\"name\"],[\"literal\",[\"road\",\"water\"]]]");
-        }
+        [TestCase("[\"==\",\"$type\",\"Polygon\"]", "[\"==\",[\"geometry-type\"],\"Polygon\"]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(EqType)")]
+        [TestCase("[\"!=\",\"$type\",\"Polygon\"]", "[\"!=\",[\"geometry-type\"],\"Polygon\"]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(NeqType)")]
+        [TestCase("[\"in\",\"$type\",\"Polygon\",\"LineString\"]", "[\"in\",[\"geometry-type\"],[\"literal\",[\"Polygon\",\"LineString\"]]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(InType)")]
+        [TestCase("[\"!in\",\"$type\",\"Polygon\"]", "[\"!\",[\"in\",[\"geometry-type\"],[\"literal\",[\"Polygon\"]]]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(NotInType)")]
+        [TestCase("[\"==\",\"$id\",42]", "[\"==\",[\"id\"],42]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(EqId)")]
+        [TestCase("[\"in\",\"$id\",42,99]", "[\"in\",[\"id\"],[\"literal\",[42,99]]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(InId)")]
+        // Expression "has" with a bare string is also valid.
+        [TestCase("[\"has\",\"area\"]", "[\"has\",\"area\"]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(Has)")]
+        [TestCase("[\"!has\",\"name\"]", "[\"!\",[\"has\",\"name\"]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(NotHas)")]
+        [TestCase("[\"==\",\"name\",\"road\"]", "[\"==\",[\"get\",\"name\"],\"road\"]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(EqProperty)")]
+        [TestCase("[\"!=\",\"name\",\"road\"]", "[\"!=\",[\"get\",\"name\"],\"road\"]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(NeqProperty)")]
+        [TestCase("[\"<\",\"area\",100]", "[\"<\",[\"get\",\"area\"],100]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(Lt)")]
+        [TestCase("[\"<=\",\"area\",100]", "[\"<=\",[\"get\",\"area\"],100]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(Lte)")]
+        [TestCase("[\">\" ,\"area\",100]", "[\">\", [\"get\",\"area\"],100]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(Gt)")]
+        [TestCase("[\">=\",\"area\",100]", "[\">=\",[\"get\",\"area\"],100]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(Gte)")]
+        [TestCase("[\"in\",\"name\",\"road\",\"water\"]", "[\"in\",[\"get\",\"name\"],[\"literal\",[\"road\",\"water\"]]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(In)")]
+        [TestCase("[\"!in\",\"name\",\"road\",\"water\"]", "[\"!\",[\"in\",[\"get\",\"name\"],[\"literal\",[\"road\",\"water\"]]]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(NotIn)")]
+        [TestCase("[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]]", "[\"all\",[\"==\",[\"geometry-type\"],\"Polygon\"],[\">\", [\"get\",\"area\"],50]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(All)")]
+        [TestCase("[\"any\",[\"==\",\"name\",\"road\"],[\"==\",\"name\",\"water\"]]", "[\"any\",[\"==\",[\"get\",\"name\"],\"road\"],[\"==\",[\"get\",\"name\"],\"water\"]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(Any)")]
+        [TestCase("[\"none\",[\"==\",\"$type\",\"Polygon\"]]", "[\"!\",[\"any\",[\"==\",[\"geometry-type\"],\"Polygon\"]]]", TestName = "LegacyAndExpressionEquivalents_SelectIdenticalSubsets(None)")]
+        public void LegacyAndExpressionEquivalents_SelectIdenticalSubsets(string legacyJson, string expressionJson)
+            => AssertEquivalent(legacyJson, expressionJson);
 
         // ── $id==absent id → no match (not a throw) ───────────────────────────────────────────────
 
@@ -492,60 +272,79 @@ namespace MapRenderer.Tests.Filters
                 Assert.IsFalse(filter.Matches(Features[i]), $"feature {i} should not match false filter");
         }
 
-        // ── $type ────────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void EqType_Polygon_SelectsPolygons()
+        /// <summary>One row per selectivity case pinned across $type, $id, has/!has, comparisons, in/!in,
+        /// all/any/none, and nesting — each asserts the EXACT matching index set, not just a count.</summary>
+        private static IEnumerable<TestCaseData> ExactIndexCases()
         {
-            var result = Select("[\"==\",\"$type\",\"Polygon\"]");
-            Assert.That(result, Is.EqualTo(new[] { 0, 1, 2 }));
+            yield return new TestCaseData("[\"==\",\"$type\",\"Polygon\"]", new[] { 0, 1, 2 })
+                .SetName("Select_ReturnsExactIndices(EqType_Polygon)");
+            yield return new TestCaseData("[\"==\",\"$type\",\"LineString\"]", new[] { 3 })
+                .SetName("Select_ReturnsExactIndices(EqType_LineString)");
+            yield return new TestCaseData("[\"==\",\"$type\",\"Point\"]", new[] { 4 })
+                .SetName("Select_ReturnsExactIndices(EqType_Point)");
+            yield return new TestCaseData("[\"!=\",\"$type\",\"Polygon\"]", new[] { 3, 4, 5 })
+                .SetName("Select_ReturnsExactIndices(NotEqType_Polygon)");
+            yield return new TestCaseData("[\"in\",\"$type\",\"Polygon\",\"LineString\"]", new[] { 0, 1, 2, 3 })
+                .SetName("Select_ReturnsExactIndices(InType_PolygonLineString)");
+            // Excludes only feature 4 (Point); feature 5 is Unknown, which != Point/LineString/Polygon, so
+            // !in ["Point"] includes it too.
+            yield return new TestCaseData("[\"!in\",\"$type\",\"Point\"]", new[] { 0, 1, 2, 3, 5 })
+                .SetName("Select_ReturnsExactIndices(NotInType_Point)");
+            yield return new TestCaseData("[\"==\",\"$id\",1]", new[] { 1 })
+                .SetName("Select_ReturnsExactIndices(EqId_NumericId)");
+            yield return new TestCaseData("[\"in\",\"$id\",1,2]", new[] { 1, 2 })
+                .SetName("Select_ReturnsExactIndices(InId)");
+            yield return new TestCaseData("[\"has\",\"area\"]", new[] { 0, 1, 2 })
+                .SetName("Select_ReturnsExactIndices(Has_ExistingProperty)");
+            yield return new TestCaseData("[\"has\",\"nonexistent\"]", new int[0])
+                .SetName("Select_ReturnsExactIndices(Has_MissingProperty)");
+            yield return new TestCaseData("[\"!has\",\"area\"]", new[] { 3, 4, 5 })
+                .SetName("Select_ReturnsExactIndices(NotHas_ExistingProperty)");
+            yield return new TestCaseData("[\"==\",\"name\",\"beta\"]", new[] { 1 })
+                .SetName("Select_ReturnsExactIndices(EqProperty_StringMatch)");
+            yield return new TestCaseData("[\"<\",\"area\",100]", new[] { 0 }) // area=50 < 100
+                .SetName("Select_ReturnsExactIndices(LessThan_Area)");
+            yield return new TestCaseData("[\"<=\",\"area\",100]", new[] { 0, 1 }) // 50<=100 AND 100<=100
+                .SetName("Select_ReturnsExactIndices(LessThanOrEqual_Area_BoundaryIsInclusive)");
+            yield return new TestCaseData("[\">=\",\"area\",100]", new[] { 1, 2 }) // 100>=100 AND 200>=100
+                .SetName("Select_ReturnsExactIndices(GreaterThanOrEqual_Area)");
+            yield return new TestCaseData("[\">=\",\"area\",200]", new[] { 2 }) // 200>=200
+                .SetName("Select_ReturnsExactIndices(GreaterThanOrEqual_Boundary_IsInclusive)");
+            yield return new TestCaseData("[\">\",\"area\",200]", new int[0]) // nothing > 200
+                .SetName("Select_ReturnsExactIndices(StrictGreaterThan_Boundary_ExcludesEqual)");
+            yield return new TestCaseData("[\"in\",\"name\",\"alpha\",\"gamma\"]", new[] { 0, 2 })
+                .SetName("Select_ReturnsExactIndices(In_StringSet)");
+            // Polygon AND area > 50.
+            yield return new TestCaseData("[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]]", new[] { 1, 2 })
+                .SetName("Select_ReturnsExactIndices(All_TwoConditions)");
+            // name=alpha OR name=gamma.
+            yield return new TestCaseData("[\"any\",[\"==\",\"name\",\"alpha\"],[\"==\",\"name\",\"gamma\"]]", new[] { 0, 2 })
+                .SetName("Select_ReturnsExactIndices(Any_TwoConditions)");
+            yield return new TestCaseData("[\"any\"]", new int[0])
+                .SetName("Select_ReturnsExactIndices(Any_EmptyArgs)");
+            // none of Polygon -> same as !Polygon -> LineString, Point, Unknown.
+            yield return new TestCaseData("[\"none\",[\"==\",\"$type\",\"Polygon\"]]", new[] { 3, 4, 5 })
+                .SetName("Select_ReturnsExactIndices(None_ExcludesAllMatching)");
+            // any( all(Polygon, area>50), type==Point ).
+            yield return new TestCaseData(
+                    "[\"any\",[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]],[\"==\",\"$type\",\"Point\"]]",
+                    new[] { 1, 2, 4 })
+                .SetName("Select_ReturnsExactIndices(Nested_AllInsideAny)");
+            // all( none(type==Point), has(name) ) -> non-Point with name: 0,1,2 (Polygon), 3 (LineString).
+            yield return new TestCaseData(
+                    "[\"all\",[\"none\",[\"==\",\"$type\",\"Point\"]],[\"has\",\"name\"]]", new[] { 0, 1, 2, 3 })
+                .SetName("Select_ReturnsExactIndices(Nested_NoneInsideAll)");
         }
 
         [Test]
-        public void EqType_LineString_SelectsLineStrings()
+        [TestCaseSource(nameof(ExactIndexCases))]
+        public void Select_ReturnsExactIndices(string filterJson, int[] expected)
         {
-            var result = Select("[\"==\",\"$type\",\"LineString\"]");
-            Assert.That(result, Is.EqualTo(new[] { 3 }));
-        }
-
-        [Test]
-        public void EqType_Point_SelectsPoints()
-        {
-            var result = Select("[\"==\",\"$type\",\"Point\"]");
-            Assert.That(result, Is.EqualTo(new[] { 4 }));
-        }
-
-        [Test]
-        public void NotEqType_Polygon_ExcludesPolygons()
-        {
-            var result = Select("[\"!=\",\"$type\",\"Polygon\"]");
-            Assert.That(result, Is.EqualTo(new[] { 3, 4, 5 }));
-        }
-
-        [Test]
-        public void InType_PolygonLineString_SelectsBoth()
-        {
-            var result = Select("[\"in\",\"$type\",\"Polygon\",\"LineString\"]");
-            Assert.That(result, Is.EqualTo(new[] { 0, 1, 2, 3 }));
-        }
-
-        [Test]
-        public void NotInType_Point_ExcludesPoint()
-        {
-            var result = Select("[\"!in\",\"$type\",\"Point\"]");
-            // Excludes only feature 4 (Point); feature 5 is Unknown so also excluded
-            // Unknown != Point, LineString, or Polygon, so !in ["Point"] includes Unknown
-            Assert.That(result, Is.EqualTo(new[] { 0, 1, 2, 3, 5 }));
+            var result = Select(filterJson);
+            Assert.That(result, Is.EqualTo(expected));
         }
 
         // ── $id ──────────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void EqId_NumericId_SelectsMatchingFeature()
-        {
-            var result = Select("[\"==\",\"$id\",1]");
-            Assert.That(result, Is.EqualTo(new[] { 1 }));
-        }
 
         [Test]
         public void EqId_AbsentId_NoMatch()
@@ -556,44 +355,7 @@ namespace MapRenderer.Tests.Filters
             Assert.IsFalse(result.Contains(4), "feature 4 (no id) should not match $id==1");
         }
 
-        [Test]
-        public void InId_SelectsFeatureWithMatchingId()
-        {
-            var result = Select("[\"in\",\"$id\",1,2]");
-            Assert.That(result, Is.EqualTo(new[] { 1, 2 }));
-        }
-
-        // ── has / !has ───────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Has_ExistingProperty_MatchesFeaturesWithIt()
-        {
-            var result = Select("[\"has\",\"area\"]");
-            Assert.That(result, Is.EqualTo(new[] { 0, 1, 2 }));
-        }
-
-        [Test]
-        public void Has_MissingProperty_MatchesNone()
-        {
-            var result = Select("[\"has\",\"nonexistent\"]");
-            Assert.That(result, Is.Empty);
-        }
-
-        [Test]
-        public void NotHas_ExistingProperty_ExcludesFeaturesWithIt()
-        {
-            var result = Select("[\"!has\",\"area\"]");
-            Assert.That(result, Is.EqualTo(new[] { 3, 4, 5 }));
-        }
-
-        // ── == / != ──────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void EqProperty_StringMatch()
-        {
-            var result = Select("[\"==\",\"name\",\"beta\"]");
-            Assert.That(result, Is.EqualTo(new[] { 1 }));
-        }
+        // ── has / !has / == / != ─────────────────────────────────────────────────────────────────
 
         [Test]
         public void EqProperty_MissingProperty_NoMatch()
@@ -615,42 +377,6 @@ namespace MapRenderer.Tests.Filters
         // ── < / <= / > / >= ──────────────────────────────────────────────────────────────────────
 
         [Test]
-        public void LessThan_Area_SelectsCorrectFeatures()
-        {
-            var result = Select("[\"<\",\"area\",100]");
-            Assert.That(result, Is.EqualTo(new[] { 0 })); // area=50 < 100
-        }
-
-        [Test]
-        public void LessThanOrEqual_Area_BoundaryIsInclusive()
-        {
-            var result = Select("[\"<=\",\"area\",100]");
-            Assert.That(result, Is.EqualTo(new[] { 0, 1 })); // 50 <= 100 AND 100 <= 100
-        }
-
-        [Test]
-        public void GreaterThan_Area_SelectsCorrectFeatures()
-        {
-            var result = Select("[\">=\",\"area\",100]");
-            Assert.That(result, Is.EqualTo(new[] { 1, 2 })); // 100 >= 100 AND 200 >= 100
-        }
-
-        [Test]
-        public void GreaterThanOrEqual_Boundary_IsInclusive()
-        {
-            // exactly at boundary
-            var result = Select("[\">=\",\"area\",200]");
-            Assert.That(result, Is.EqualTo(new[] { 2 })); // 200 >= 200
-        }
-
-        [Test]
-        public void StrictGreaterThan_Boundary_ExcludesEqual()
-        {
-            var result = Select("[\">\" ,\"area\",200]");
-            Assert.That(result, Is.Empty); // nothing > 200
-        }
-
-        [Test]
         public void Comparison_MissingProperty_NoMatch()
         {
             // feature 3 has no area; get("area") -> null; Compare(null, 100) -> type mismatch error
@@ -661,13 +387,6 @@ namespace MapRenderer.Tests.Filters
         }
 
         // ── in / !in ─────────────────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void In_StringSet_SelectsMatchingFeatures()
-        {
-            var result = Select("[\"in\",\"name\",\"alpha\",\"gamma\"]");
-            Assert.That(result, Is.EqualTo(new[] { 0, 2 }));
-        }
 
         [Test]
         public void In_MissingProperty_NoMatch()
@@ -691,41 +410,10 @@ namespace MapRenderer.Tests.Filters
         // ── all / any / none ─────────────────────────────────────────────────────────────────────
 
         [Test]
-        public void All_TwoConditions_RequiresBothTrue()
-        {
-            // Polygon AND area > 50
-            var result = Select("[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]]");
-            Assert.That(result, Is.EqualTo(new[] { 1, 2 }));
-        }
-
-        [Test]
         public void All_EmptyArgs_MatchesAll()
         {
             var result = Select("[\"all\"]");
             Assert.That(result.Count, Is.EqualTo(Features.Length));
-        }
-
-        [Test]
-        public void Any_TwoConditions_EitherSuffices()
-        {
-            // name=alpha OR name=gamma
-            var result = Select("[\"any\",[\"==\",\"name\",\"alpha\"],[\"==\",\"name\",\"gamma\"]]");
-            Assert.That(result, Is.EqualTo(new[] { 0, 2 }));
-        }
-
-        [Test]
-        public void Any_EmptyArgs_MatchesNone()
-        {
-            var result = Select("[\"any\"]");
-            Assert.That(result, Is.Empty);
-        }
-
-        [Test]
-        public void None_ExcludesAllMatchingFeatures()
-        {
-            // none of Polygon -> same as !Polygon -> LineString, Point, Unknown
-            var result = Select("[\"none\",[\"==\",\"$type\",\"Polygon\"]]");
-            Assert.That(result, Is.EqualTo(new[] { 3, 4, 5 }));
         }
 
         [Test]
@@ -734,27 +422,6 @@ namespace MapRenderer.Tests.Filters
             // none[] -> !(any[]) -> !false -> true -> all
             var result = Select("[\"none\"]");
             Assert.That(result.Count, Is.EqualTo(Features.Length));
-        }
-
-        // ── Nested all/any/none ──────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void Nested_AllInsideAny()
-        {
-            // any( all(Polygon, area>=100), type==Point )
-            var json = "[\"any\",[\"all\",[\"==\",\"$type\",\"Polygon\"],[\">\",\"area\",50]],[\"==\",\"$type\",\"Point\"]]";
-            var result = Select(json);
-            Assert.That(result, Is.EqualTo(new[] { 1, 2, 4 }));
-        }
-
-        [Test]
-        public void Nested_NoneInsideAll()
-        {
-            // all( none(type==Point), has(name) )
-            var json = "[\"all\",[\"none\",[\"==\",\"$type\",\"Point\"]],[\"has\",\"name\"]]";
-            var result = Select(json);
-            // non-Point with name: 0(Polygon,alpha), 1(Polygon,beta), 2(Polygon,gamma), 3(LineString,delta)
-            Assert.That(result, Is.EqualTo(new[] { 0, 1, 2, 3 }));
         }
     }
 }

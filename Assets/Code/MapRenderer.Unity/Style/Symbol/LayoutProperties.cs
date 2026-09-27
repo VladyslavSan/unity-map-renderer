@@ -281,7 +281,7 @@ namespace MapRenderer.Unity.Style.Symbol
             try
             {
                 return new StyleProperty<string>(
-                    DesugarTokenTemplate(json), null, v => v.ToDisplayString(), interpolatable: false);
+                    DesugarTokenTemplate(json), null, v => v.ToDisplayString());
             }
             catch
             {

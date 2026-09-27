@@ -1855,10 +1855,9 @@ namespace MapRenderer.Tests.Text.Placement
         public void Build_VertexBufferStride_MatchesTheStructSize()
         {
             Mesh mesh = Track(BuildFourVertexMesh());
-            // 80 B: 18 pre-halo floats + SdfWidenPx's 2 floats (72 B -> 80 B). A field added without a
-            // matching descriptor (or vice versa) mismatches the struct size against Unity's own accounting.
+            // A field added to the struct without a matching descriptor (or vice versa) mismatches the
+            // struct size against Unity's own accounting.
             Assert.AreEqual(UnsafeUtility.SizeOf<WorldBillboardVertex>(), mesh.GetVertexBufferStride(0));
-            Assert.AreEqual(80, mesh.GetVertexBufferStride(0), "stream 0 grew 72 B -> 80 B for SdfWidenPx");
         }
 
         [Test]

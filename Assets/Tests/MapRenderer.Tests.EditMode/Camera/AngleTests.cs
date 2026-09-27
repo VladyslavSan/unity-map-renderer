@@ -2,6 +2,8 @@
 // Tests the Angle value type: deg↔rad round-trips, trig association, shortest-path lerp.
 
 
+using System;
+using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
@@ -45,55 +47,34 @@ namespace MapRenderer.Tests.Cameras
         // ── Trig association ──────────────────────────────────────────────────────────────────────
 
         [Test]
-        public void Trig_90Degrees_SinIsOne()
+        [TestCase(90.0, 1.0, TestName = "Trig_SinMatchesFormula(90Degrees_SinIsOne)")]
+        [TestCase(180.0, 0.0, TestName = "Trig_SinMatchesFormula(180Degrees_SinIsZero)")]
+        public void Trig_SinMatchesFormula(double degrees, double expected)
         {
-            double s = Angle.FromDegrees(90.0).Sin;
-            Assert.AreEqual(1.0, s, 1e-12, "sin(90°) must be 1.");
+            double s = Angle.FromDegrees(degrees).Sin;
+            Assert.AreEqual(expected, s, 1e-12, $"sin({degrees}°) must be {expected}.");
         }
 
         [Test]
-        public void Trig_0Degrees_CosIsOne()
+        [TestCase(0.0, 1.0, TestName = "Trig_CosMatchesFormula(0Degrees_CosIsOne)")]
+        // cos(60°) = 0.5 exactly by definition.
+        [TestCase(60.0, 0.5, TestName = "Trig_CosMatchesFormula(60Degrees_CosIsHalf)")]
+        public void Trig_CosMatchesFormula(double degrees, double expected)
         {
-            double c = Angle.FromDegrees(0.0).Cos;
-            Assert.AreEqual(1.0, c, 1e-12, "cos(0°) must be 1.");
-        }
-
-        [Test]
-        public void Trig_180Degrees_SinIsZero()
-        {
-            double s = Angle.FromDegrees(180.0).Sin;
-            Assert.AreEqual(0.0, s, 1e-12, "sin(180°) must be 0.");
-        }
-
-        [Test]
-        public void Trig_60Degrees_CosMatchesMathFormula()
-        {
-            // cos(60°) = 0.5 exactly by definition
-            double c = Angle.FromDegrees(60.0).Cos;
-            Assert.AreEqual(0.5, c, 1e-12, "cos(60°) must be 0.5.");
+            double c = Angle.FromDegrees(degrees).Cos;
+            Assert.AreEqual(expected, c, 1e-12, $"cos({degrees}°) must be {expected}.");
         }
 
         // ── NormalizedDegrees ─────────────────────────────────────────────────────────────────────
 
         [Test]
-        public void NormalizedDegrees_370_Returns10_Exactly()
+        [TestCase(370.0, 10.0, TestName = "NormalizedDegrees_ReturnsExactly(370_Returns10)")]
+        [TestCase(-10.0, 350.0, TestName = "NormalizedDegrees_ReturnsExactly(Negative10_Returns350)")]
+        [TestCase(360.0, 0.0, TestName = "NormalizedDegrees_ReturnsExactly(360_Returns0)")] // half-open [0,360)
+        public void NormalizedDegrees_ReturnsExactly(double degrees, double expected)
         {
-            double d = Angle.FromDegrees(370.0).NormalizedDegrees().Degrees;
-            Assert.AreEqual(10.0, d, 0.0, "370° normalized must be exactly 10° (degree storage, no rounding).");
-        }
-
-        [Test]
-        public void NormalizedDegrees_Negative10_Returns350_Exactly()
-        {
-            double d = Angle.FromDegrees(-10.0).NormalizedDegrees().Degrees;
-            Assert.AreEqual(350.0, d, 0.0, "-10° normalized must be exactly 350°.");
-        }
-
-        [Test]
-        public void NormalizedDegrees_360_Returns0_Exactly()
-        {
-            double d = Angle.FromDegrees(360.0).NormalizedDegrees().Degrees;
-            Assert.AreEqual(0.0, d, 0.0, "360° normalized must be exactly 0° (half-open [0,360)).");
+            double d = Angle.FromDegrees(degrees).NormalizedDegrees().Degrees;
+            Assert.AreEqual(expected, d, 0.0, $"{degrees}° normalized must be exactly {expected}° (degree storage, no rounding).");
         }
 
         // ── LerpShortest — shortest-path heading lerp ──────────────────────────────────────────────
@@ -164,108 +145,64 @@ namespace MapRenderer.Tests.Cameras
         // Degree storage guarantees bitwise-exact integer-degree wraps (370 % 360 == 10 exactly).
 
         [Test]
-        public void Heading_370_Returns10_Exactly()
+        [TestCase(370.0, 10.0, TestName = "Heading_MatchesExpected(370_Returns10)")]
+        [TestCase(-10.0, 350.0, TestName = "Heading_MatchesExpected(Negative10_Returns350)")]
+        [TestCase(0.0, 0.0, TestName = "Heading_MatchesExpected(0_Returns0)")]
+        // The range is half-open [0, 360); 360° wraps to 0°.
+        [TestCase(360.0, 0.0, TestName = "Heading_MatchesExpected(360_Returns0)")]
+        public void Heading_MatchesExpected(double degrees, double expected)
         {
-            double d = ConstrainedAngle.Heading(370.0).Degrees;
-            Assert.AreEqual(10.0, d, 0.0, "Heading(370) must be exactly 10° (bitwise, no tolerance).");
-        }
-
-        [Test]
-        public void Heading_Negative10_Returns350_Exactly()
-        {
-            double d = ConstrainedAngle.Heading(-10.0).Degrees;
-            Assert.AreEqual(350.0, d, 0.0, "Heading(-10) must be exactly 350°.");
-        }
-
-        [Test]
-        public void Heading_0_Returns0_Exactly()
-        {
-            double d = ConstrainedAngle.Heading(0.0).Degrees;
-            Assert.AreEqual(0.0, d, 0.0, "Heading(0) must be exactly 0°.");
-        }
-
-        [Test]
-        public void Heading_360_Returns0_Exactly()
-        {
-            // The range is half-open [0, 360); 360° wraps to 0°.
-            double d = ConstrainedAngle.Heading(360.0).Degrees;
-            Assert.AreEqual(0.0, d, 0.0, "Heading(360) must wrap to exactly 0° (half-open [0,360)).");
+            double d = ConstrainedAngle.Heading(degrees).Degrees;
+            Assert.AreEqual(expected, d, 0.0, $"Heading({degrees}) must be exactly {expected}° (bitwise, no tolerance).");
         }
 
         // ── Tilt — Clamp to [0, 90] ──────────────────────────────────────────────────────────────
         // The CameraProperties.Tilt invariant; other tests keep tilt ≤ 60 and never reach the clamp.
 
         [Test]
-        public void Tilt_Above90_ClampsTo90()
+        [TestCase(95.0, 90.0, 0.0, TestName = "Tilt_MatchesExpected(Above90_ClampsTo90)")]
+        [TestCase(-5.0, 0.0, 0.0, TestName = "Tilt_MatchesExpected(Negative_ClampsTo0)")]
+        [TestCase(45.0, 45.0, 1e-9, TestName = "Tilt_MatchesExpected(InRange_IsPreserved)")]
+        [TestCase(90.0, 90.0, 0.0, TestName = "Tilt_MatchesExpected(ExactlyAtUpperBound_Is90)")]
+        public void Tilt_MatchesExpected(double degrees, double expected, double tolerance)
         {
-            double d = ConstrainedAngle.Tilt(95.0).Degrees;
-            Assert.AreEqual(90.0, d, 0.0, "Tilt(95) must clamp to exactly 90°.");
-        }
-
-        [Test]
-        public void Tilt_Negative_ClampsTo0()
-        {
-            double d = ConstrainedAngle.Tilt(-5.0).Degrees;
-            Assert.AreEqual(0.0, d, 0.0, "Tilt(-5) must clamp to exactly 0°.");
-        }
-
-        [Test]
-        public void Tilt_InRange_IsPreserved()
-        {
-            double d = ConstrainedAngle.Tilt(45.0).Degrees;
-            Assert.AreEqual(45.0, d, 1e-9, "Tilt(45) must be preserved within [0,90].");
-        }
-
-        [Test]
-        public void Tilt_ExactlyAtUpperBound_Is90()
-        {
-            double d = ConstrainedAngle.Tilt(90.0).Degrees;
-            Assert.AreEqual(90.0, d, 0.0, "Tilt(90) must be exactly 90° (inclusive upper bound).");
+            double d = ConstrainedAngle.Tilt(degrees).Degrees;
+            Assert.AreEqual(expected, d, tolerance, $"Tilt({degrees}) must be {expected}°.");
         }
 
         // ── Clamped — runtime range ≠ the [0,90] Tilt preset ─────────────────────────────────────
-        // ViewInput.ApplyTiltDelta's runtime maxPitch is not the [0,90] Tilt preset: Clamped(75,0,60) is 60°.
 
         [Test]
-        public void Clamped_AboveHi_ClampsToHi()
+        // ViewInput.ApplyTiltDelta's runtime maxPitch is not the [0,90] Tilt preset: Clamped(75,0,60) is 60°,
+        // proving the runtime range, not the Tilt preset, is what clamped this value.
+        [TestCase(75.0, 60.0, 0.0, TestName = "Clamped_MatchesExpected(AboveHi_ClampsToHi)")]
+        [TestCase(-5.0, 0.0, 0.0, TestName = "Clamped_MatchesExpected(BelowLo_ClampsToLo)")]
+        [TestCase(30.0, 30.0, 1e-9, TestName = "Clamped_MatchesExpected(InRange_IsPreserved)")]
+        public void Clamped_MatchesExpected(double value, double expected, double tolerance)
         {
-            double d = ConstrainedAngle.Clamped(75.0, 0.0, 60.0).Degrees;
-            Assert.AreEqual(60.0, d, 0.0,
-                "Clamped(75, 0, 60) must clamp to exactly 60°, proving runtime maxPitch≠[0,90] preset.");
-        }
-
-        [Test]
-        public void Clamped_BelowLo_ClampsToLo()
-        {
-            double d = ConstrainedAngle.Clamped(-5.0, 0.0, 60.0).Degrees;
-            Assert.AreEqual(0.0, d, 0.0, "Clamped(-5, 0, 60) must clamp to exactly 0°.");
-        }
-
-        [Test]
-        public void Clamped_InRange_IsPreserved()
-        {
-            double d = ConstrainedAngle.Clamped(30.0, 0.0, 60.0).Degrees;
-            Assert.AreEqual(30.0, d, 1e-9, "Clamped(30, 0, 60) must be preserved within [0,60].");
+            double d = ConstrainedAngle.Clamped(value, 0.0, 60.0).Degrees;
+            Assert.AreEqual(expected, d, tolerance, $"Clamped({value}, 0, 60) must be {expected}°.");
         }
 
         // ── operator + (ConstrainedAngle + Angle) ────────────────────────────────────────────────
 
-        [Test]
-        public void Operator_Plus_Heading_ReappliesWrap()
+        private static IEnumerable<TestCaseData> OperatorPlusCases()
         {
             // Heading(350) + 20° = 370° → wraps to exactly 10°.
-            ConstrainedAngle result = ConstrainedAngle.Heading(350.0) + Angle.FromDegrees(20.0);
-            Assert.AreEqual(10.0, result.Degrees, 0.0,
-                "(Heading(350) + 20°) must re-apply Wrap → exactly 10°.");
+            yield return new TestCaseData((Func<ConstrainedAngle>)(() => ConstrainedAngle.Heading(350.0)), 20.0, 10.0)
+                .SetName("OperatorPlus_ReappliesSameConstraint(Heading_WrapsPast360)");
+            // Clamped(50, 0, 60) + 20° = 70° → clamped to exactly 60°.
+            yield return new TestCaseData((Func<ConstrainedAngle>)(() => ConstrainedAngle.Clamped(50.0, 0.0, 60.0)), 20.0, 60.0)
+                .SetName("OperatorPlus_ReappliesSameConstraint(Clamped_ClampsAtHi)");
         }
 
         [Test]
-        public void Operator_Plus_Clamped_ReappliesClamp()
+        [TestCaseSource(nameof(OperatorPlusCases))]
+        public void OperatorPlus_ReappliesSameConstraint(Func<ConstrainedAngle> makeStart, double addDegrees, double expected)
         {
-            // Clamped(50, 0, 60) + 20° = 70° → clamped to exactly 60°.
-            ConstrainedAngle result = ConstrainedAngle.Clamped(50.0, 0.0, 60.0) + Angle.FromDegrees(20.0);
-            Assert.AreEqual(60.0, result.Degrees, 0.0,
-                "(Clamped(50,0,60) + 20°) must re-apply Clamp → exactly 60°.");
+            ConstrainedAngle result = makeStart() + Angle.FromDegrees(addDegrees);
+            Assert.AreEqual(expected, result.Degrees, 0.0,
+                $"(start + {addDegrees}°) must re-apply the start's own constraint → exactly {expected}°.");
         }
 
         // ── default(ConstrainedAngle) ─────────────────────────────────────────────────────────────
@@ -281,22 +218,21 @@ namespace MapRenderer.Tests.Cameras
 
         // ── WithDegrees re-applies same constraint ────────────────────────────────────────────────
 
-        [Test]
-        public void WithDegrees_Heading_ReappliesWrap()
+        private static IEnumerable<TestCaseData> WithDegreesCases()
         {
-            ConstrainedAngle h   = ConstrainedAngle.Heading(45.0);
-            ConstrainedAngle h2  = h.WithDegrees(720.0);
-            Assert.AreEqual(0.0, h2.Degrees, 0.0,
-                "Heading.WithDegrees(720) must wrap to 0°.");
+            yield return new TestCaseData((Func<double, ConstrainedAngle>)(d => ConstrainedAngle.Heading(45.0).WithDegrees(d)), 720.0, 0.0)
+                .SetName("WithDegrees_ReappliesSameConstraint(Heading_WrapsPast360)");
+            yield return new TestCaseData((Func<double, ConstrainedAngle>)(d => ConstrainedAngle.Tilt(45.0).WithDegrees(d)), -10.0, 0.0)
+                .SetName("WithDegrees_ReappliesSameConstraint(Tilt_ClampsBelowZero)");
         }
 
         [Test]
-        public void WithDegrees_Tilt_ReappliesClamp()
+        [TestCaseSource(nameof(WithDegreesCases))]
+        public void WithDegrees_ReappliesSameConstraint(Func<double, ConstrainedAngle> withDegrees, double newDegrees, double expected)
         {
-            ConstrainedAngle t  = ConstrainedAngle.Tilt(45.0);
-            ConstrainedAngle t2 = t.WithDegrees(-10.0);
-            Assert.AreEqual(0.0, t2.Degrees, 0.0,
-                "Tilt.WithDegrees(-10) must clamp to 0°.");
+            ConstrainedAngle result = withDegrees(newDegrees);
+            Assert.AreEqual(expected, result.Degrees, 0.0,
+                $"WithDegrees({newDegrees}) must re-apply the start's own constraint → exactly {expected}°.");
         }
     }
 }

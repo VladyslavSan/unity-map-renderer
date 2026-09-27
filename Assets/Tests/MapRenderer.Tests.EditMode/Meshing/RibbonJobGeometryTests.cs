@@ -1040,19 +1040,16 @@ namespace MapRenderer.Tests.Meshing
 
         // ─── Straight 2-point segment (Butt caps, Miter join) ─────────────────────────────
 
+        /// <summary>A straight 2-point butt-cap segment: exact vert/index counts, unit-length Across normals
+        /// perpendicular to the tangent and opposite on the left/right sides, endpoints at the source
+        /// positions, and the expected Side sequence.</summary>
         [Test]
-        public void TwoPoints_ButtCap_Miter_ExactlyFourVertsAndTwoTriangles()
+        public void TwoPoints_ButtCap_Miter_ProducesCorrectGeometry()
         {
             var (v, i) = Build(new[] { Pt(0, 0), Pt(10, 0) }, JoinType.Miter, CapType.Butt);
 
             Assert.AreEqual(4, v.Length, $"2-pt butt segment → exactly 4 vertices. Got {v.Length}.");
             Assert.AreEqual(6, i.Length, $"2-pt butt segment → exactly 6 indices (2 triangles). Got {i.Length}.");
-        }
-
-        [Test]
-        public void TwoPoints_ButtCap_NormalsAreUnitLength()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0) }, JoinType.Miter, CapType.Butt);
 
             foreach (var vert in v)
             {
@@ -1060,12 +1057,6 @@ namespace MapRenderer.Tests.Meshing
                 AssertNearlyEqual(1.0, len, 1e-9,
                     $"Butt segment: every Across must be unit length. Got length={len:G10}.");
             }
-        }
-
-        [Test]
-        public void TwoPoints_ButtCap_NormalsPerpendicularToSegment()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0) }, JoinType.Miter, CapType.Butt);
 
             double2 tangent = new double2(1, 0);
             foreach (var vert in v)
@@ -1075,42 +1066,24 @@ namespace MapRenderer.Tests.Meshing
                 AssertNearlyEqual(0.0, dot, 1e-9,
                     $"Butt segment: Across must be perpendicular to tangent. dot={dot:G10}.");
             }
-        }
-
-        [Test]
-        public void TwoPoints_ButtCap_NormalsAreOppositeOnLeftAndRight()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0) }, JoinType.Miter, CapType.Butt);
 
             double2 n0 = Across2(v[0]);
             double2 n1 = Across2(v[1]);
             AssertNearlyEqual(0.0, n0.x + n1.x, 1e-9, "Left and right Across must be x-opposites.");
             AssertNearlyEqual(0.0, n0.y + n1.y, 1e-9, "Left and right Across must be y-opposites.");
-        }
 
-        [Test]
-        public void TwoPoints_ButtCap_PositionsMatchEndpoints()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0) }, JoinType.Miter, CapType.Butt);
-
-            for (int i = 0; i < 2; i++)
+            for (int idx = 0; idx < 2; idx++)
             {
-                double2 p = Pos2(v[i]);
+                double2 p = Pos2(v[idx]);
                 Assert.That(p.x == 0.0 && p.y == 0.0, Is.True,
-                    $"Vertex[{i}] should be at (0,0), got ({p.x},{p.y}).");
+                    $"Vertex[{idx}] should be at (0,0), got ({p.x},{p.y}).");
             }
-            for (int i = 2; i < 4; i++)
+            for (int idx = 2; idx < 4; idx++)
             {
-                double2 p = Pos2(v[i]);
+                double2 p = Pos2(v[idx]);
                 Assert.That(p.x == 10.0 && p.y == 0.0, Is.True,
-                    $"Vertex[{i}] should be at (10,0), got ({p.x},{p.y}).");
+                    $"Vertex[{idx}] should be at (10,0), got ({p.x},{p.y}).");
             }
-        }
-
-        [Test]
-        public void TwoPoints_ButtCap_SideValues_AreCorrect()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0) }, JoinType.Miter, CapType.Butt);
 
             Assert.AreEqual(+1f, v[0].Side, $"Vertex[0] side={v[0].Side}; expected +1.");
             Assert.AreEqual(-1f, v[1].Side, $"Vertex[1] side={v[1].Side}; expected -1.");
@@ -1176,42 +1149,30 @@ namespace MapRenderer.Tests.Meshing
 
         // ─── 90° Miter join ────────────────────────────────────────────────────────────────
 
+        /// <summary>A 90° miter join: exact vert/index counts, the miter vertices' Across length at √2, and
+        /// the plain-segment vertices' Across still at unit length.</summary>
         [Test]
-        public void RightAngle_MiterJoin_ExactVertexCount()
+        public void RightAngle_MiterJoin_ProducesCorrectGeometry()
         {
             var (v, i) = Build(new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) }, JoinType.Miter, CapType.Butt,
                 miterLimit: 10.0);
 
             Assert.AreEqual(6, v.Length, $"3-pt miter join → 6 vertices. Got {v.Length}.");
             Assert.AreEqual(12, i.Length, $"3-pt miter join → 12 indices. Got {i.Length}.");
-        }
-
-        [Test]
-        public void RightAngle_MiterJoin_NormalLengthIsSqrt2()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) }, JoinType.Miter, CapType.Butt,
-                miterLimit: 10.0);
 
             double miterExpected = math.sqrt(2.0);
-            for (int i = 2; i <= 3; i++)
+            for (int mi = 2; mi <= 3; mi++)
             {
-                double len = VecLen(Across2(v[i]));
+                double len = VecLen(Across2(v[mi]));
                 AssertNearlyEqual(miterExpected, len, 1e-9,
-                    $"90° miter join: vertex[{i}] |Across| should be √2. Got {len:G10}.");
+                    $"90° miter join: vertex[{mi}] |Across| should be √2. Got {len:G10}.");
             }
-        }
-
-        [Test]
-        public void RightAngle_MiterJoin_SegmentNormalsAreUnit()
-        {
-            var (v, _) = Build(new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) }, JoinType.Miter, CapType.Butt,
-                miterLimit: 10.0);
 
             int[] segVertIdx = { 0, 1, 4, 5 };
-            foreach (int i in segVertIdx)
+            foreach (int si in segVertIdx)
             {
-                double len = VecLen(Across2(v[i]));
-                AssertNearlyEqual(1.0, len, 1e-9, $"Vertex[{i}] (segment Across) must be unit length. Got {len:G10}.");
+                double len = VecLen(Across2(v[si]));
+                AssertNearlyEqual(1.0, len, 1e-9, $"Vertex[{si}] (segment Across) must be unit length. Got {len:G10}.");
             }
         }
 
@@ -1662,53 +1623,44 @@ namespace MapRenderer.Tests.Meshing
 
         // ─── NeedsMiter / NeedsBevel (RibbonJob's internal accessors) ─────────────────────────
 
-        [Test]
-        public void NeedsMiter_ParallelSegments_ReturnsTrue()
+        private static IEnumerable<TestCaseData> NeedsMiterCases()
         {
-            double3 n = new double3(0, 0, 1);
-            Assert.IsTrue(RibbonJob.NeedsMiter(n, n, 1.05),
-                "Parallel segments → miter factor = 1 ≤ any roundLimit ≥ 1 → shallow → collapses to miter.");
+            yield return new TestCaseData(new double3(0, 0, 1), new double3(0, 0, 1), 1.05, true,
+                    "Parallel segments → miter factor = 1 ≤ any roundLimit ≥ 1 → shallow → collapses to miter.")
+                .SetName("NeedsMiter_ByAngleAndLimit(ParallelSegments)");
+            yield return new TestCaseData(new double3(0, 0, 1), new double3(-1, 0, 0), 1.05, false,
+                    "90° turn: miter factor √2 > roundLimit 1.05 → not shallow → NeedsMiter should be false.")
+                .SetName("NeedsMiter_ByAngleAndLimit(RightAngle_AboveDefaultLimit)");
+            yield return new TestCaseData(new double3(0, 0, 1), new double3(1e-9, 0, -1.0000000001), 1.05, false,
+                    "Hairpin: miter factor magnitude ≫ roundLimit → NeedsMiter should be false.")
+                .SetName("NeedsMiter_ByAngleAndLimit(HairpinWithNegativeHalfAngleCosine)");
         }
 
         [Test]
-        public void NeedsMiter_RightAngle_AboveDefaultLimit_ReturnsFalse()
+        [TestCaseSource(nameof(NeedsMiterCases))]
+        public void NeedsMiter_ByAngleAndLimit(double3 n1, double3 n2, double roundLimit, bool expected, string message)
         {
-            double3 n1 = new double3(0, 0, 1);
-            double3 n2 = new double3(-1, 0, 0);
-            Assert.IsFalse(RibbonJob.NeedsMiter(n1, n2, 1.05),
-                "90° turn: miter factor √2 > roundLimit 1.05 → not shallow → NeedsMiter should be false.");
+            Assert.AreEqual(expected, RibbonJob.NeedsMiter(n1, n2, roundLimit), message);
+        }
+
+        private static IEnumerable<TestCaseData> NeedsBevelCases()
+        {
+            yield return new TestCaseData(new double3(0, 0, 1), new double3(0, 0, 1), 2.0, false,
+                    "Parallel segments → miter factor = 1 → no bevel needed.")
+                .SetName("NeedsBevel_ByAngleAndLimit(ParallelSegments)");
+            yield return new TestCaseData(new double3(0, 0, 1), new double3(-1, 0, 0), 2.0, false,
+                    "90° turn: miter factor √2 < limit 2 → NeedsBevel should be false.")
+                .SetName("NeedsBevel_ByAngleAndLimit(RightAngle_BelowDefaultLimit)");
+            yield return new TestCaseData(new double3(0, 0, 1), new double3(0.01, 0, -0.9999), 2.0, true, // ~179° turn
+                    "Near-180° turn: miter factor >> 2 → NeedsBevel should be true.")
+                .SetName("NeedsBevel_ByAngleAndLimit(VerySharpAngle_ExceedsLimit)");
         }
 
         [Test]
-        public void NeedsMiter_HairpinWithNegativeHalfAngleCosine_ReturnsFalse()
+        [TestCaseSource(nameof(NeedsBevelCases))]
+        public void NeedsBevel_ByAngleAndLimit(double3 n1, double3 n2, double limit, bool expected, string message)
         {
-            double3 n1 = new double3(0, 0, 1);
-            double3 n2 = new double3(1e-9, 0, -1.0000000001);
-            Assert.IsFalse(RibbonJob.NeedsMiter(n1, n2, 1.05),
-                "Hairpin: miter factor magnitude ≫ roundLimit → NeedsMiter should be false.");
-        }
-
-        [Test]
-        public void NeedsBevel_ParallelSegments_ReturnsFalse()
-        {
-            double3 n = new double3(0, 0, 1);
-            Assert.IsFalse(RibbonJob.NeedsBevel(n, n, 2.0), "Parallel segments → miter factor = 1 → no bevel needed.");
-        }
-
-        [Test]
-        public void NeedsBevel_RightAngle_BelowDefaultLimit_ReturnsFalse()
-        {
-            double3 n1 = new double3(0, 0, 1);
-            double3 n2 = new double3(-1, 0, 0);
-            Assert.IsFalse(RibbonJob.NeedsBevel(n1, n2, 2.0), "90° turn: miter factor √2 < limit 2 → NeedsBevel should be false.");
-        }
-
-        [Test]
-        public void NeedsBevel_VerySharpAngle_ExceedsLimit_ReturnsTrue()
-        {
-            double3 n1 = new double3(0, 0, 1);
-            double3 n2 = new double3(0.01, 0, -0.9999); // ~179° turn
-            Assert.IsTrue(RibbonJob.NeedsBevel(n1, n2, 2.0), "Near-180° turn: miter factor >> 2 → NeedsBevel should be true.");
+            Assert.AreEqual(expected, RibbonJob.NeedsBevel(n1, n2, limit), message);
         }
 
         /// <summary>Test-local restatement of the miter-factor math, independent of <see cref="RibbonJob"/> —
@@ -1815,31 +1767,25 @@ namespace MapRenderer.Tests.Meshing
         private static readonly double2 LineEnd = new double2(10, 0);
         private static readonly double2 LineTangent = new double2(1, 0);
 
-        [Test]
-        public void AllJoinCapCombinations_PositiveWindingNoDegenerate()
+        private static IEnumerable<TestCaseData> ShapeCases()
         {
-            var joins = new[] { JoinType.Miter, JoinType.Bevel, JoinType.Round };
-            var caps = new[] { CapType.Butt, CapType.Square, CapType.Round };
-            var hline = new[] { LineStart, LineEnd };
+            double2 east = new double2(1, 0), north = new double2(0, 1), south = new double2(0, -1);
 
-            foreach (var join in joins)
-            {
-                foreach (var cap in caps)
-                {
-                    string label = $"hline {join}/{cap}";
-                    var (v, i) = Build(hline, join, cap, roundSegments: 4);
-
-                    bool needsExtentCheck = cap == CapType.Round || cap == CapType.Square;
-                    AssertGeometryValid(v, i, label, needsExtentCheck,
-                        startPt: LineStart, startTangent: LineTangent, endPt: LineEnd, endTangent: LineTangent);
-                }
-            }
+            yield return new TestCaseData("hline", new[] { LineStart, LineEnd }, LineStart, LineTangent, LineEnd, LineTangent)
+                .SetName("AllJoinCapCombinations_PositiveWindingNoDegenerate(HLine)");
+            yield return new TestCaseData("Lshape", new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) },
+                    Pt(0, 0), east, Pt(10, 10), north)
+                .SetName("AllJoinCapCombinations_PositiveWindingNoDegenerate(LShape)");
+            yield return new TestCaseData("RightTurn", new[] { Pt(0, 0), Pt(10, 0), Pt(10, -10) },
+                    Pt(0, 0), east, Pt(10, -10), south)
+                .SetName("AllJoinCapCombinations_PositiveWindingNoDegenerate(RightTurn)");
         }
 
         [Test]
-        public void AllJoinCapCombinations_LShape_PositiveWindingNoDegenerate()
+        [TestCaseSource(nameof(ShapeCases))]
+        public void AllJoinCapCombinations_PositiveWindingNoDegenerate(
+            string shapeLabel, double2[] pts, double2 startPt, double2 startTangent, double2 endPt, double2 endTangent)
         {
-            var pts = new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) };
             var joins = new[] { JoinType.Miter, JoinType.Bevel, JoinType.Round };
             var caps = new[] { CapType.Butt, CapType.Square, CapType.Round };
 
@@ -1847,35 +1793,12 @@ namespace MapRenderer.Tests.Meshing
             {
                 foreach (var cap in caps)
                 {
-                    string label = $"Lshape {join}/{cap}";
+                    string label = $"{shapeLabel} {join}/{cap}";
                     var (v, i) = Build(pts, join, cap, roundSegments: 4);
 
                     bool needsExtentCheck = cap == CapType.Round || cap == CapType.Square;
                     AssertGeometryValid(v, i, label, needsExtentCheck,
-                        startPt: Pt(0, 0), startTangent: new double2(1, 0),
-                        endPt: Pt(10, 10), endTangent: new double2(0, 1));
-                }
-            }
-        }
-
-        [Test]
-        public void AllJoinCapCombinations_RightTurn_PositiveWindingNoDegenerate()
-        {
-            var pts = new[] { Pt(0, 0), Pt(10, 0), Pt(10, -10) };
-            var joins = new[] { JoinType.Miter, JoinType.Bevel, JoinType.Round };
-            var caps = new[] { CapType.Butt, CapType.Square, CapType.Round };
-
-            foreach (var join in joins)
-            {
-                foreach (var cap in caps)
-                {
-                    string label = $"RightTurn {join}/{cap}";
-                    var (v, i) = Build(pts, join, cap, roundSegments: 4);
-
-                    bool needsExtentCheck = cap == CapType.Round || cap == CapType.Square;
-                    AssertGeometryValid(v, i, label, needsExtentCheck,
-                        startPt: Pt(0, 0), startTangent: new double2(1, 0),
-                        endPt: Pt(10, -10), endTangent: new double2(0, -1));
+                        startPt: startPt, startTangent: startTangent, endPt: endPt, endTangent: endTangent);
                 }
             }
         }

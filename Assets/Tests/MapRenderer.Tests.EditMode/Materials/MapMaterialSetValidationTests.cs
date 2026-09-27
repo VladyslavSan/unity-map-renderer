@@ -33,12 +33,21 @@ namespace MapRenderer.Tests.Materials
         // ── SymbolTextWorld is REQUIRED; SymbolIconWorld stays optional-with-warn —
         //    pinning the required-vs-optional policy split. ──
 
+        /// <summary>Each REQUIRED base, left unassigned alone, throws an exception naming it.</summary>
         [Test]
-        public void Validate_UnassignedSymbolTextWorld_ThrowsNamingIt()
+        public void Validate_UnassignedRequiredBase_ThrowsNamingIt()
         {
-            var set = Track(NewSet(true, true, symbolWorld: false));
-            var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-            StringAssert.Contains("SymbolTextWorld", ex.Message);
+            var missingFill = Track(NewSet(fill: false, line: true, symbolWorld: true));
+            var fillEx = Assert.Throws<InvalidOperationException>(() => missingFill.Validate());
+            StringAssert.Contains("FillMaterial", fillEx.Message);
+
+            var missingLine = Track(NewSet(fill: true, line: false, symbolWorld: true));
+            var lineEx = Assert.Throws<InvalidOperationException>(() => missingLine.Validate());
+            StringAssert.Contains("LineMaterial", lineEx.Message);
+
+            var missingSymbolTextWorld = Track(NewSet(fill: true, line: true, symbolWorld: false));
+            var symbolEx = Assert.Throws<InvalidOperationException>(() => missingSymbolTextWorld.Validate());
+            StringAssert.Contains("SymbolTextWorld", symbolEx.Message);
         }
 
         [Test]
@@ -48,22 +57,6 @@ namespace MapRenderer.Tests.Materials
             // left null must NOT throw.
             var set = Track(NewSet(true, true, true));
             Assert.DoesNotThrow(() => set.Validate(), "SymbolIconWorld is optional-with-warn, not enforced.");
-        }
-
-        [Test]
-        public void Validate_UnassignedFillMaterial_ThrowsNamingIt()
-        {
-            var set = Track(NewSet(false, true, true));
-            var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-            StringAssert.Contains("FillMaterial", ex.Message);
-        }
-
-        [Test]
-        public void Validate_UnassignedLineMaterial_ThrowsNamingIt()
-        {
-            var set = Track(NewSet(true, false, true));
-            var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-            StringAssert.Contains("LineMaterial", ex.Message);
         }
 
         [Test]

@@ -1592,13 +1592,14 @@ namespace MapRenderer.Tests.Text.Placement
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// A <see cref="AlignmentMode.Map"/> symbol with a live ruler emits
-        /// <c>CandidateEmit.CornerMetresPerLogicalPixel</c> equal to EXACTLY that ruler, the one the arc walk
-        /// spaces anchors with. Limitation: rulers above ≈ 1.6 overflow the reference symbol's 100 m road and
-        /// <c>StageCurved</c> emits nothing, so the values straddle 1.
+        /// Ruler-T6, the CORNER UNIT's producer: a <see cref="AlignmentMode.Map"/> symbol with a live ruler
+        /// carries EXACTLY that ruler as its corner unit; a non-map-pitched symbol always carries 0 (logical
+        /// px); and a map-pitched symbol with NO ruler degrades to 0 too — the corner unit and the arc ruler
+        /// must degrade TOGETHER, never a silently mixed pair. Limitation: rulers above ≈ 1.6 overflow the
+        /// reference symbol's 100 m road, so the live-ruler values straddle 1.
         /// </summary>
         [Test]
-        public void CornerMetresPerLogicalPixel_IsTheRuler_WhenMapPitchedAndRulerIsLive()
+        public void CornerMetresPerLogicalPixel_ResolvesAcrossAllThreeRulerStates()
         {
             foreach (float ruler in new[] { 0.5f, 1f, 1.25f })
             {
@@ -1613,17 +1614,11 @@ namespace MapRenderer.Tests.Text.Placement
                     "value means the corner scale and the arc scale were derived separately — the state this " +
                     "stage exists to make inexpressible.");
             }
-        }
 
-        /// <summary>
-        /// <b>Ruler-T6, case 2.</b> Proves: a NON-map-pitched symbol emits <c>0f</c> as its corner unit whatever
-        /// the ruler reads — so its <c>Offset</c> stays LOGICAL PIXELS and every existing path is untouched.
-        /// The zero value is the struct's default, which is why no point emit and no hand-built fixture emit
-        /// had to be edited by this stage.
-        /// </summary>
-        [Test]
-        public void CornerMetresPerLogicalPixel_IsZero_WhenNotMapPitched()
-        {
+            // Ruler-T6, case 2. Proves: a NON-map-pitched symbol emits 0f as its corner unit whatever
+            // the ruler reads — so its Offset stays LOGICAL PIXELS and every existing path is untouched. The
+            // zero value is the struct's default, which is why no point emit and no hand-built fixture emit
+            // had to be edited by this stage.
             foreach (AlignmentMode mode in new[] { AlignmentMode.Viewport, AlignmentMode.Auto })
                 foreach (float ruler in new[] { 0f, 1f, 1e6f })
                 {
@@ -1637,25 +1632,21 @@ namespace MapRenderer.Tests.Text.Placement
                         $"{p.Emit[0].CornerMetresPerLogicalPixel}. A non-zero here would make every viewport " +
                         "label's corners metres and reinterpret the whole screen render.");
                 }
-        }
 
-        /// <summary>
-        /// The two halves degrade TOGETHER: a <see cref="AlignmentMode.Map"/> symbol with no ruler emits
-        /// <c>0f</c> as its corner unit too, the corner-side half of
-        /// <c>MapPitchedSymbol_WithNoRuler_DegradesToTheScreenWalk</c>. Otherwise spacing would be screen px
-        /// while the corners are metres, a silently mixed pair of rulers.
-        /// </summary>
-        [Test]
-        public void CornerMetresPerLogicalPixel_IsZero_WhenMapPitchedButTheRulerIsMissing()
-        {
-            var p = Pools.New();
-            int staged = StageReferenceSymbol(AlignmentMode.Map, 0f, ref p);
-            Assert.That(staged, Is.EqualTo(1), "Ruler-T6 precondition: the reference label must stage.");
-            Assert.That(p.Emit[0].CornerMetresPerLogicalPixel, Is.EqualTo(0f),
-                "Ruler-T6: a map-pitched label with no ruler must degrade its CORNER unit to logical px exactly " +
-                "as Arc-T9 shows it degrades its ARC ruler to the screen walk — got " +
-                $"{p.Emit[0].CornerMetresPerLogicalPixel}. The two must degrade together; a half-converted " +
-                "label is worse than either whole behaviour.");
+            // Ruler-T6, case 3. The two halves degrade TOGETHER: a Map-pitched symbol with no ruler
+            // emits 0f as its corner unit too, the corner-side half of
+            // MapPitchedSymbol_WithNoRuler_DegradesToTheScreenWalk. Otherwise spacing would be screen px
+            // while the corners are metres, a silently mixed pair of rulers.
+            {
+                var p = Pools.New();
+                int staged = StageReferenceSymbol(AlignmentMode.Map, 0f, ref p);
+                Assert.That(staged, Is.EqualTo(1), "Ruler-T6 precondition: the reference label must stage.");
+                Assert.That(p.Emit[0].CornerMetresPerLogicalPixel, Is.EqualTo(0f),
+                    "Ruler-T6: a map-pitched label with no ruler must degrade its CORNER unit to logical px exactly " +
+                    "as Arc-T9 shows it degrades its ARC ruler to the screen walk — got " +
+                    $"{p.Emit[0].CornerMetresPerLogicalPixel}. The two must degrade together; a half-converted " +
+                    "label is worse than either whole behaviour.");
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════

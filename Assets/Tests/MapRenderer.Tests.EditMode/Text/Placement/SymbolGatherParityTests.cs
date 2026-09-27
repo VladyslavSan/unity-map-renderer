@@ -2059,11 +2059,21 @@ namespace MapRenderer.Tests.Text.Placement
         // Each test flips ONE mask and asserts the OTHER is unchanged, so a cross-wire that copies one source mask
         // into both destinations fails. A test that flipped both masks together would pass it.
 
-        [Test]
-        public void Memo_DepartingFlip_TrackedWhilePoolsHeld_CoverageFadingUnchanged()
+        private enum GatherMask { Departing, CoverageFading }
+
+        private static bool ReadMask(SymbolBatch batch, GatherMask mask)
+            => mask == GatherMask.Departing ? batch.SymbolDeparting[0] : batch.SymbolCoverageFading[0];
+
+        /// <summary>Shared body: builds a tile, flips exactly the ONE mask named by <paramref name="flipped"/>,
+        /// and asserts the flip is tracked on a held mirror while the OTHER mask stays untouched (a mask
+        /// cross-wire that copies one source into both destinations would fail this).</summary>
+        private static void AssertMaskFlipTrackedWhilePoolsHeld(int tileX, GatherMask flipped)
         {
-            var tile = new TileId { Z = 6, X = 40, Y = 40 };
+            GatherMask unchanged = flipped == GatherMask.Departing ? GatherMask.CoverageFading : GatherMask.Departing;
+            var tile = new TileId { Z = 6, X = tileX, Y = 40 };
             long key = Tk(tile);
+            long fadeTileKey = flipped == GatherMask.CoverageFading ? key : -1;
+            long departingTileKey = flipped == GatherMask.Departing ? key : -1;
             var store = new SymbolTileStore(cacheCap: 8);
             SeedTile(store, tile, PointSymbol(new double3(100, 0, 200), "a", 1, key, 0.1f));
 
@@ -2077,61 +2087,33 @@ namespace MapRenderer.Tests.Text.Placement
                 harness.Lps.GatherIntoMirror(plan);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
 
-                // SAME version (no tile event) — ONLY Departing flips; CoverageFading stays Keep (untouched).
-                BuildPlan(store, plan, version: 0, departingTileKey: key);
+                // SAME version (no tile event) — ONLY the flipped mask changes; the other stays untouched.
+                BuildPlan(store, plan, version: 0, fadeTileKey: fadeTileKey, departingTileKey: departingTileKey);
                 harness.Lps.GatherIntoMirror(plan);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "a mask-only change at a fixed version must stay a memo HIT");
 
-                BuildPlan(store, refPlan, version: 0, departingTileKey: key);
+                BuildPlan(store, refPlan, version: 0, fadeTileKey: fadeTileKey, departingTileKey: departingTileKey);
                 refHarness.Lps.GatherIntoMirror(refPlan);
 
                 var got = new SymbolBatch(); harness.Lps.CopyMirrorInto(got);
                 var want = new SymbolBatch(); refHarness.Lps.CopyMirrorInto(want);
                 Assert.IsNull(SymbolBatchDiff.FirstDifference(want, got),
                     "the per-frame masks must be tracked on a HELD mirror, not frozen from the first rebuild");
-                Assert.IsTrue(got.SymbolDeparting[0], "Departing must reflect the flip even on a memo-hit frame");
-                Assert.IsFalse(got.SymbolCoverageFading[0],
-                    "CoverageFading must stay UNCHANGED — a mask cross-wire (e.g. Departing's source copied into both destinations) would wrongly flip this too");
+                Assert.IsTrue(ReadMask(got, flipped), $"{flipped} must reflect the flip even on a memo-hit frame");
+                Assert.IsFalse(ReadMask(got, unchanged),
+                    $"{unchanged} must stay UNCHANGED — a mask cross-wire (e.g. {flipped}'s source " +
+                    "copied into both destinations) would wrongly flip this too");
             }
             finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
         }
+
+        [Test]
+        public void Memo_DepartingFlip_TrackedWhilePoolsHeld_CoverageFadingUnchanged()
+            => AssertMaskFlipTrackedWhilePoolsHeld(40, GatherMask.Departing);
 
         [Test]
         public void Memo_CoverageFadingFlip_TrackedWhilePoolsHeld_DepartingUnchanged()
-        {
-            var tile = new TileId { Z = 6, X = 41, Y = 40 };
-            long key = Tk(tile);
-            var store = new SymbolTileStore(cacheCap: 8);
-            SeedTile(store, tile, PointSymbol(new double3(100, 0, 200), "a", 1, key, 0.1f));
-
-            using var harness = new LpsHarness();
-            using var refHarness = new LpsHarness();
-            var plan = new SymbolGatherPlan();
-            var refPlan = new SymbolGatherPlan();
-            try
-            {
-                BuildPlan(store, plan, version: 0);
-                harness.Lps.GatherIntoMirror(plan);
-                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
-
-                // SAME version (no tile event) — ONLY CoverageFading flips; Departing stays false (untouched).
-                BuildPlan(store, plan, version: 0, fadeTileKey: key);
-                harness.Lps.GatherIntoMirror(plan);
-                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "a mask-only change at a fixed version must stay a memo HIT");
-
-                BuildPlan(store, refPlan, version: 0, fadeTileKey: key);
-                refHarness.Lps.GatherIntoMirror(refPlan);
-
-                var got = new SymbolBatch(); harness.Lps.CopyMirrorInto(got);
-                var want = new SymbolBatch(); refHarness.Lps.CopyMirrorInto(want);
-                Assert.IsNull(SymbolBatchDiff.FirstDifference(want, got),
-                    "the per-frame masks must be tracked on a HELD mirror, not frozen from the first rebuild");
-                Assert.IsTrue(got.SymbolCoverageFading[0], "CoverageFading must reflect the flip even on a memo-hit frame");
-                Assert.IsFalse(got.SymbolDeparting[0],
-                    "Departing must stay UNCHANGED — a mask cross-wire (e.g. CoverageFading's source copied into both destinations) would wrongly flip this too");
-            }
-            finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
-        }
+            => AssertMaskFlipTrackedWhilePoolsHeld(41, GatherMask.CoverageFading);
 
         // ═══ Dropped is invisible through CopyMirrorInto (GatherSymbolPoints hard-skips it), so assert it through a
         //     real Tick on a memo-HIT frame, against a reference that never collected the dropped tile. ═══

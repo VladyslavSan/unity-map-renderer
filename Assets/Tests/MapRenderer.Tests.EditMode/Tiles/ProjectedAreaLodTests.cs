@@ -768,11 +768,14 @@ namespace MapRenderer.Tests.Tiles
             var    projection = new WebMercatorProjection();
             TileId own        = TileAt(LookAtLon, LookAtLat, 13);
 
-            double tilted  = ProjectedTilePx(projection, Cam(30.0), Viewport, own);
-            double coarser = ProjectedTilePx(projection, Cam(0.0), Viewport, TileAt(LookAtLon, LookAtLat, 12));
+            double untilted = ProjectedTilePx(projection, Cam(0.0),  Viewport, own);
+            double tilted   = ProjectedTilePx(projection, Cam(30.0), Viewport, own);
+            double coarser  = ProjectedTilePx(projection, Cam(0.0), Viewport, TileAt(LookAtLon, LookAtLat, 12));
 
-            Assert.AreEqual(463.710, tilted,  0.01, "tilt 30 foreshortens the look-at's own tile");
-            Assert.AreEqual(1024.0,  coarser, 1.0,  "one zoom coarser is twice the side");
+            // A real margin, not a zero-tolerance bound: a tilt-blind instrument reading 511.9995 (essentially
+            // untilted) would still pass Is.LessThan(untilted) with no margin at all.
+            Assert.That(tilted, Is.LessThan(untilted - 1.0), "tilt 30 foreshortens the look-at's own tile");
+            Assert.AreEqual(2.0 * OnScreenTilePx, coarser, 1.0, "one zoom coarser is twice the side");
         }
     }
 }

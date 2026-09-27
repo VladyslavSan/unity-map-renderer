@@ -1544,7 +1544,7 @@ namespace MapRenderer.Tests.Tiles
     public class ProjectedAreaLodWiringTests : BaseTestFixture
     {
         // Same fixture pose as TiltCoverGrowthTests/ProjectedAreaLodTests (globe z13 1600x900 tilt 60) —
-        // aggressiveness 2.0 there measures 22, aggressiveness 1.0 measures 39.
+        // aggressiveness 2.0 and 1.0 select different-sized covers there.
         private static readonly double2 Viewport = new double2(1600.0, 900.0);
 
         private static CameraProperties FixtureCam()
@@ -1553,8 +1553,9 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Config selects <see cref="TileLodMode.ProjectedArea"/> at aggressiveness 2.0; the selector
-        /// <see cref="MapView"/> built reads back the 2.0 cover (22), not the ctor default's 39. A second
-        /// selection at a changed value pins the knob's place in the <c>_selectorInputs</c> rebuild key.
+        /// <see cref="MapView"/> built must read back that value's own cover, not the ctor default's. A
+        /// second selection at a changed value pins the knob's place in the <c>_selectorInputs</c> rebuild
+        /// key.
         /// </summary>
         [Test]
         public void ProjectedAreaAggressiveness_ReachesTheSelector_ThroughMapView()
@@ -1578,20 +1579,43 @@ namespace MapRenderer.Tests.Tiles
                 };
                 var cover = new List<TileId>();
                 view.View.TileManager.Selector.SelectVisibleTiles(in probe, cover);
-
-                Assert.AreEqual(22, cover.Count,
-                    "aggressiveness 2.0 must reach the strategy through MapView's wiring (measured cover 22); "
-                  + "39 means the ctor default (1.0) silently applied instead.");
+                List<TileId> directCover2 = AssertCoverMatchesDirectSelector(view, probe, cover, 2.0);
 
                 // Changing the knob alone (nothing else) must rebuild the selector — the _selectorInputs key.
                 view.Config.TileSelection.ProjectedAreaAggressiveness = 1.0;
                 view.LateUpdate();
                 view.View.TileManager.Selector.SelectVisibleTiles(in probe, cover);
-                Assert.AreEqual(39, cover.Count,
-                    "changing ProjectedAreaAggressiveness alone must rebuild the selector; a stale cover here "
-                  + "means the knob is missing from the _selectorInputs rebuild key.");
+                List<TileId> directCover1 = AssertCoverMatchesDirectSelector(view, probe, cover, 1.0);
+
+                // Precondition: without this, a wiring bug that ignores the knob entirely (always applying
+                // one fixed aggressiveness) would still pass both checks above, as long as MapView's actual
+                // cover happened to match whichever value it defaulted to.
+                CollectionAssert.AreNotEquivalent(directCover2, directCover1,
+                    "precondition: aggressiveness 2.0 and 1.0 must select different covers at this fixture " +
+                    "pose, or the parity checks above prove nothing about whether the knob reached the strategy.");
             }
             finally { view.Teardown(); }
+        }
+
+        /// <summary>MapView's wired selector's cover must equal a directly-constructed
+        /// <see cref="ProjectedAreaLodStrategy"/> selector's cover at the same aggressiveness — proving the
+        /// knob reached the strategy, without pinning either cover's incidental size. Returns the direct
+        /// cover so the caller can also assert the two aggressiveness values are actually distinguishable.</summary>
+        private static List<TileId> AssertCoverMatchesDirectSelector(
+            MapView view, in ViewContext probe, List<TileId> wiredCover, double aggressiveness)
+        {
+            var directSelector = new FrustumTileSelector(
+                view.Config.TileSelection.MinZoom, view.Config.TileSelection.MaxZoom,
+                view.Config.TileSelection.OnScreenTilePx, new ProjectedAreaLodStrategy(aggressiveness),
+                view.Camera.FarPlanePolicy);
+            var directCover = new List<TileId>();
+            directSelector.SelectVisibleTiles(in probe, directCover);
+
+            CollectionAssert.AreEquivalent(directCover, wiredCover,
+                $"aggressiveness {aggressiveness} must reach the strategy through MapView's wiring — a " +
+                "directly-constructed ProjectedAreaLodStrategy selector at the same value must select the " +
+                "identical cover.");
+            return directCover;
         }
 
         /// <summary>
@@ -3470,12 +3494,27 @@ namespace MapRenderer.Tests.Tiles
             finally { view.Teardown(); }
         }
 
-        /// <summary>A malformed `bounds` (here: 3 numbers, not 4) warns EXACTLY ONCE and does NOT gate — a
-        /// non-NE tile (which a real `[0,0,180,85]`-style gate would reject) is still admitted, rather than
-        /// the whole source silently losing its bounds visibility. z1, not z0: the world tile overlaps any
-        /// bounds trivially, so a z0 arm could not tell "gated" from "not gated" apart.</summary>
+        /// <summary>Each malformed/out-of-range `bounds` shape warns EXACTLY ONCE per style load and does
+        /// NOT gate admission — the target tile (which a real bounds gate would reject) is still admitted,
+        /// rather than the whole source silently losing its bounds visibility.</summary>
         [Test]
-        public void MalformedBounds_WarnsOnce_AndDoesNotGate()
+        // z1, not z0: the world tile overlaps any bounds trivially, so a z0 arm could not tell "gated" from
+        // "not gated" apart. Short array (3 numbers, not 4) -> the NW tile.
+        [TestCase(1, @", ""bounds"": [0, 0, 180]", 0, 0,
+            TestName = "MalformedBounds_WarnsOnceAndDoesNotGate(ShortArray)")]
+        // Non-number item (here "x"), not a short array -> the NW tile, same as above.
+        [TestCase(1, @", ""bounds"": [0, 0, 180, ""x""]", 0, 0,
+            TestName = "MalformedBounds_WarnsOnceAndDoesNotGate(NonNumberItem)")]
+        // west=0, south=50, east=180, north=10 — inverted. If accepted as-is (not caught), the SE quadrant
+        // tile is REJECTED (its y-range never reaches the inverted "south"); if malformed (no gate), admitted.
+        [TestCase(1, @", ""bounds"": [0, 50, 180, 10]", 1, 1,
+            TestName = "MalformedBounds_WarnsOnceAndDoesNotGate(SouthGreaterThanNorth)")]
+        // west=-190 (out of range), east=-170 — a MIDDLE column tile sits outside the raw sliver either way,
+        // so it discriminates "malformed -> no gate" (admitted) from "accepted raw" (rejected).
+        [TestCase(2, @", ""bounds"": [-190, -10, -170, 10]", 1, 1,
+            TestName = "MalformedBounds_WarnsOnceAndDoesNotGate(OutOfRangeLongitude)")]
+        public void MalformedBounds_WarnsOnceAndDoesNotGate(
+            int zoom, string boundsJson, int x, int y)
         {
             var view = NewView(out var go);
             Track(go);
@@ -3487,19 +3526,19 @@ namespace MapRenderer.Tests.Tiles
             Application.logMessageReceived += CountWarnings;
             try
             {
-                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
-                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
+                view.Config.TileSelection.MinZoom = zoom; view.Config.TileSelection.MaxZoom = zoom;
+                view.View.Camera.SetProperties(Cam(0, 0, zoom));
                 view.View.Camera.SyncToCamera();
                 view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent(); // never a real network fetch
 
                 LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
-                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 0, 180]"), "malformed"));
+                SpinToCompleted(view.SetStyle(VectorStyle(boundsJson), "malformed"));
                 PumpUntilSettled(view);
 
                 var loaded = new List<TileId>();
                 view.CollectLoadedTileIds(loaded);
-                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 0, Y = 0 },
-                    "a malformed `bounds` must not gate at all — the NW tile (a real [0,0,180,85] gate " +
+                CollectionAssert.Contains(loaded, new TileId { Z = zoom, X = x, Y = y },
+                    "a malformed/out-of-range `bounds` must not gate at all — the target tile (a real gate " +
                     "would reject it) is still admitted.");
                 Assert.AreEqual(1, warningCount,
                     "the malformed-bounds warning must fire exactly once per style load, not once per " +
@@ -3510,32 +3549,6 @@ namespace MapRenderer.Tests.Tiles
                 Application.logMessageReceived -= CountWarnings;
                 view.Teardown();
             }
-        }
-
-        /// <summary>The same claim for the OTHER malformed shape: a non-number item (here `"x"`), not a
-        /// short array — end to end, so this also proves <c>ValidateBounds</c> maps it to no gate.</summary>
-        [Test]
-        public void MalformedBounds_NonNumberItem_WarnsOnce_AndDoesNotGate()
-        {
-            var view = NewView(out var go);
-            Track(go);
-            try
-            {
-                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
-                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
-                view.View.Camera.SyncToCamera();
-                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
-
-                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
-                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 0, 180, ""x""]"), "malformed-nonnumber"));
-                PumpUntilSettled(view);
-
-                var loaded = new List<TileId>();
-                view.CollectLoadedTileIds(loaded);
-                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 0, Y = 0 },
-                    "a non-number bounds item must not gate at all — the NW tile is still admitted.");
-            }
-            finally { view.Teardown(); }
         }
 
         /// <summary>A `bounds` key on a geojson source is not a spec-defined gate for it: a tile OUTSIDE the
@@ -3672,67 +3685,5 @@ namespace MapRenderer.Tests.Tiles
             finally { view.Teardown(); }
         }
 
-        // ── ValidateBounds: south > north, and an out-of-range longitude ──────────────────────────────
-
-        /// <summary>`south > north` is malformed (a warning, no gate) rather than an inverted region that
-        /// silently rejects tiles it should admit. z1: at z0 both an inverted gate and "no gate" admit the
-        /// world tile, so the arm could not tell them apart.</summary>
-        [Test]
-        public void SouthGreaterThanNorthBounds_WarnsOnce_AndDoesNotGate()
-        {
-            var view = NewView(out var go);
-            Track(go);
-            try
-            {
-                view.Config.TileSelection.MinZoom = 1; view.Config.TileSelection.MaxZoom = 1;
-                view.View.Camera.SetProperties(Cam(0, 0, 1.0));
-                view.View.Camera.SyncToCamera();
-                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
-
-                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
-                // west=0, south=50, east=180, north=10 — inverted. If accepted as-is (not caught), the SE
-                // quadrant tile below is REJECTED (its y-range never reaches the inverted, too-far-north
-                // "south" value); if correctly treated as malformed (no gate), it is admitted.
-                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [0, 50, 180, 10]"), "south-gt-north"));
-                PumpUntilSettled(view);
-
-                var loaded = new List<TileId>();
-                view.CollectLoadedTileIds(loaded);
-                CollectionAssert.Contains(loaded, new TileId { Z = 1, X = 1, Y = 1 },
-                    "south > north must be treated as malformed (no gate), not an inverted region that " +
-                    "rejects a tile a real gate would never touch.");
-            }
-            finally { view.Teardown(); }
-        }
-
-        /// <summary>A longitude outside [-180, 180] is malformed (a warning, no gate) rather than a raw,
-        /// unwrapped coordinate fed straight into the unit-square math.</summary>
-        [Test]
-        public void OutOfRangeLongitudeBounds_WarnsOnce_AndDoesNotGate()
-        {
-            var view = NewView(out var go);
-            Track(go);
-            try
-            {
-                view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
-                view.View.Camera.SetProperties(Cam(0, 0, 2.0));
-                view.View.Camera.SyncToCamera();
-                view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
-
-                LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
-                // west=-190 (out of range), east=-170. If accepted raw (not caught), the region still spans
-                // a narrow sliver near lon -180; a MIDDLE column tile (below) sits outside it either way, so
-                // it discriminates "malformed -> no gate" (admitted) from "accepted raw" (rejected).
-                SpinToCompleted(view.SetStyle(VectorStyle(@", ""bounds"": [-190, -10, -170, 10]"), "lon-oor"));
-                PumpUntilSettled(view);
-
-                var loaded = new List<TileId>();
-                view.CollectLoadedTileIds(loaded);
-                CollectionAssert.Contains(loaded, new TileId { Z = 2, X = 1, Y = 1 },
-                    "a west/east outside [-180,180] must be treated as malformed (no gate), not fed raw " +
-                    "into the unit-square math.");
-            }
-            finally { view.Teardown(); }
-        }
     }
 }

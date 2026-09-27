@@ -153,67 +153,12 @@ namespace MapRenderer.Tests.MapViews
                     "this measured a real load/release diff instead of the alloc-free early set-rebuild claim.");
 
                 // ── (d) AT SCALE: zero-alloc must hold over MANY frames, not just one. ──
-                // Same N as the Entities verdict below, so a clean BRG shows the churn is Entities-specific.
+                // The Entities backend allocates intermittently at this same scale (docs/gc-and-allocation-
+                // design.md § 2); BRG staying clean over N=50 shows the churn is Entities-specific.
                 const int N = 50;
                 AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
                     $"BRG.Tick must not allocate across {N} steady-state frames — proving the zero-alloc " +
                     "contract holds at the scale where the Entities backend trips the recorder.");
-            }
-            finally
-            {
-                view.Teardown();
-            }
-        }
-
-        // ── (3b) Entities backend allocation VERDICT (informational, not a hard assertion) ─────────
-        // The BRG test on the Entities backend. Its allocation is a trade-off, not a contract: it reports a count.
-        [Test]
-        public void MapView_SteadyStateTick_Entities_AllocationVerdict()
-        {
-            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go    = Track(new GameObject("MapView"));
-            var view  = go.AddComponent<MapView>().WithTestMaterials();
-            var style = MinimalStyle();
-            view.Config.Backend = RenderBackend.Entities; // the default backend under measurement
-            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
-            view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
-            view.Config.MaxMeshBuildsPerTick = 64;
-
-            try
-            {
-                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style);
-                PumpUntilSettled(view);
-                Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
-
-                // Prime reused buffers, identical to the BRG test.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.LateUpdate();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.LateUpdate();
-
-                // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                view.LateUpdate(); // consume the pan; now steady.
-                Assert.AreEqual(16, view.LoadedTileCount(),
-                    "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
-
-                // Measure over MANY frames: a single Entities Tick is alloc-free, but its system groups
-                // allocate INTERMITTENTLY, so a 1-frame sample under-reports.
-                const int N = 50;
-                string verdict;
-                try
-                {
-                    AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); });
-                    verdict = $"NO GC allocation across {N} steady-state Ticks";
-                }
-                catch (AssertionException)
-                {
-                    // Trips on ≥1 GC.Alloc sampler call over the run; the constraint's byte/count actual
-                    // prints blank here, so report the trip (intermittent: a single Tick does not trip).
-                    verdict = $"ALLOCATES across {N} Ticks (GC.Alloc recorder tripped; intermittent)";
-                }
-                TestContext.WriteLine($"[S53b alloc] MapView.LateUpdate (Backend=Entities) steady-state: {verdict}");
             }
             finally
             {

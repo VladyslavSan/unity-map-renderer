@@ -64,10 +64,13 @@ ladder:
 | **Expression eval** (`FunctionExpression.Evaluate`) | an argument buffer per call node, per feature | a per-thread free-list (`EvalArgBuffers`) hands out a scratch `Value[]` and reclaims it on return, clearing every slot so no evaluated `Value` — which may hold a `string` — is retained |
 | **Off-main build scratch** | `TempJob` reclaimed mid-build | `Allocator.Persistent`, disposed when the build completes — see "Allocator lifetime trap" |
 
-Steady-state camera motion over already-loaded cover therefore allocates next to nothing. The remaining GC
-pressure is the **new-tile-build tail**: worker-thread allocation during fetch → decode → build of freshly
-covered tiles, which a Main-Thread profiler view does not show ("An off-thread allocation freezes the
-main thread too").
+Steady-state camera motion over already-loaded cover therefore allocates next to nothing on the BRG backend.
+The remaining GC pressure is the **new-tile-build tail**: worker-thread allocation during fetch → decode →
+build of freshly covered tiles, which a Main-Thread profiler view does not show ("An off-thread allocation
+freezes the main thread too"). The Entities backend, which is the default (`MapViewConfig.cs:125`), does
+not hold this: its ECS system groups allocate intermittently even at steady state, so a single measured
+frame can read alloc-free while a run of many does not — an accepted trade-off of that backend, not a
+target for elimination.
 
 ---
 
