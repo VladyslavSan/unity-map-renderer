@@ -3,7 +3,7 @@
 This file is the one place that lists the MapLibre style spec surface and the status of each item in this
 renderer. Other docs point here. They do not keep their own copy.
 
-**Snapshot date: 2026-09-26.**
+**Snapshot date: 2026-09-27.**
 
 **How this was traced.** The spec surface comes from the public MapLibre style spec pages
 (maplibre.org/maplibre-style-spec: root, sources, layers, light, sky, projection, terrain, expressions).
@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 55 supported, 56 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 56 supported, 55 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -113,7 +113,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 | `vector` | `partial` | MVT only. Key status is below. |
 | `raster` | `not supported` | No raster layer renderer, so the source is never fetched. See [`meshing-design.md`](meshing-design.md) § "Fill-extrusion and the raster seat". |
 | `raster-dem` | `not supported` | No terrain or hillshade. |
-| `geojson` | `partial` | Inline `data` object only, sliced locally. Key status is below. |
+| `geojson` | `partial` | Sliced locally. Key status is below. |
 | `image` | `not supported` | Not built. |
 | `video` | `not supported` | Not built. |
 
@@ -135,7 +135,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 
 | Key | Status | Note |
 |---|---|---|
-| `data` | `partial` | An inline object only. A URL string skips the source with a warning. |
+| `data` | `supported` | An inline object, or a URL string fetched through the same loader TileJSON uses. |
 | `maxzoom` | `partial` | Defaults to 18 (the spec value) when absent. A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom — the same per-source-overzoom limit as the vector row. |
 | `buffer` | `partial` | An authored value is honoured (×8 to reference units, clamped to [0, 512]). An absent key keeps the slicer's own 64-reference-unit default, not the spec's 128. |
 | `tolerance` | `not supported` | Not read. The slicer runs at tolerance 0 (`GeoJsonSliceOptions.SimplifyTolerance` accepts no other value). |

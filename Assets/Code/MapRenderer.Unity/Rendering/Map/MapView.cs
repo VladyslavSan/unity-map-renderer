@@ -446,7 +446,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>
         /// Resolves each rendered source-id of <paramref name="style"/> into a
         /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
-        /// fetch); a <c>url</c>-only source fetches its TileJSON once. A failed TileJSON skips that source only.
+        /// fetch); a <c>url</c>-only source fetches its TileJSON once; a geojson source whose <c>data</c> is
+        /// a URL string fetches it the same way. A failed fetch skips that source only.
         /// It runs before <see cref="Rendering.Layers.RenderLayerSet.Build"/>, so it walks the raw style layers through
         /// <see cref="Rendering.Layers.RenderLayerFactory.TryGetFetchSource"/>, the one registry of fetching layers.
         /// </summary>
@@ -477,21 +478,31 @@ namespace MapRenderer.Unity.Rendering.Map
                     continue;
                 }
 
-                // A geojson source is sliced locally, with no TileJSON, tiles[] or byte fetcher, so it branches
-                // before the TileJSON fetch and the no-tiles skip. A bad source is skipped, never a thrown SetStyle.
+                // A geojson source is sliced locally, with no tiles[] or byte fetcher, so it branches before
+                // the TileJSON fetch and the no-tiles skip; a URL `data` is the one thing it still fetches,
+                // through the same loader. A bad source is skipped, never a thrown SetStyle.
                 if (def.Type == SourceType.GeoJson)
                 {
-                    if (def.Data == null || !def.Data.IsObject)
-                    {
-                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an INLINE object " +
-                                         "`data` (a URL-valued `data` is not supported yet) — skipped.");
-                        continue;
-                    }
-
                     GeoJson.GeoJsonDataset parsed;
                     try
                     {
-                        parsed = GeoJson.GeoJsonParser.Parse(def.Data);
+                        if (def.Data != null && def.Data.Kind == JsonKind.String)
+                        {
+                            // A URL `data`: one document fetch through the same loader TileJSON uses, before
+                            // anything is mutated — BuildSourceSpecs is already SetStyle's one pre-mutation await.
+                            string text = await loader(def.Data.AsString(), ct);
+                            parsed = GeoJson.GeoJsonParser.Parse(text);
+                        }
+                        else if (def.Data != null && def.Data.IsObject)
+                        {
+                            parsed = GeoJson.GeoJsonParser.Parse(def.Data);
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an inline object " +
+                                             "or URL string `data` — skipped.");
+                            continue;
+                        }
                     }
                     catch (System.OperationCanceledException)
                     {
@@ -499,9 +510,10 @@ namespace MapRenderer.Unity.Rendering.Map
                     }
                     catch (System.Exception ex)
                     {
-                        // System.Exception, not only GeoJsonFormatException: any other parser throw would fault
-                        // SetStyle for the whole style over one bad source. Cancellation is rethrown above.
-                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to parse: " +
+                        // System.Exception, not only GeoJsonFormatException: any other parser or loader throw
+                        // would fault SetStyle for the whole style over one bad source. Cancellation is
+                        // rethrown above.
+                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to load or parse: " +
                                          $"{ex.Message}. Source skipped.");
                         continue;
                     }
