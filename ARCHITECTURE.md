@@ -331,7 +331,9 @@ A small C# interface — `fetch(tileCoord) -> bytes` + declared encoding (MVT no
 later). HTTP, local files, PMTiles, a proprietary backend, or in-memory generated tiles all look
 identical to the pipeline. This is a first-class product surface. Fetching itself goes through
 `UnityWebRequest`, never `System.Net.Http.HttpClient` — `HttpClient` allocates heavily per request, and
-WebGL cannot use it at all.
+WebGL cannot use it at all. The production tile source composes three separable parts: addressing (turning
+a tile id into a URI, `scheme: "tms"` included), a transport (bytes or absent, over HTTP or the local
+filesystem) and the source's own encoding.
 
 ---
 

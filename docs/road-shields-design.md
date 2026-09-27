@@ -156,8 +156,8 @@ Properties that make this correct:
 **The deadline bound, and what it changes about the invariant.** "No tile ever commits icon-starved" holds
 **while the fetch is still in flight** — true for every normal terminal path, all of which settle in well
 under the bound. It does not hold once the fetch has been waited on past
-`SymbolSubsystem.SpriteFetchDeadlineSeconds` (an `internal const`, 8 s): `UnityWebRequestSpriteSource` sets
-no HTTP timeout, so a hung endpoint (connects, never responds) would otherwise park every affected build
+`SymbolSubsystem.SpriteFetchDeadlineSeconds` (an `internal const`, 8 s): `HttpTransport` sets
+no timeout, so a hung endpoint (connects, never responds) would otherwise park every affected build
 forever, holding an unbounded pending queue. Once the deadline trips — measured against a test-overridable
 clock, `SymbolSubsystem.NowSecondsOverride` — `SpritesSettled` goes true regardless of the fetch's own
 status, and the pending drain dispatches every parked build with whatever atlas state exists: a bounded

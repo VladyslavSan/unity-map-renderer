@@ -79,6 +79,10 @@ instead — `SourceIdOf`, `IsSourceless`, `AdmitsZoom`, `SourceAt`, `ReleaseTile
 `TileProcessingStructureTests.SourceRegistry_SurfaceIsExactlyTenMembers` pins the bound, so a later "just add a getter"
 fails loudly rather than reopening the indexer shape.
 
+A tiled source's fetch composes three things: addressing (`TileUrlTemplate`, which turns a `TileId` into a
+URI), a transport (`HttpTransport` or `FileTransport`, each returning bytes or absent) and the encoding the
+source declares (`TemplatedTileSource` pairs the bytes with it).
+
 **The three-consumer agreement invariant.** The kick, the prepared-cache probe and the release transfer must
 agree on what "this tile's complete prepared set" means; a disagreement serves a partial tile as a complete
 cache hit. Each of the three calls `TileManager.ComputeDenseLayerIds` over one shared scratch list,

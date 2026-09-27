@@ -19,7 +19,7 @@ namespace MapRenderer.Core.Text
         /// <summary>
         /// The MapLibre glyph-PBF <c>{fontstack}</c> request token: the ordered font names joined with <c>", "</c>,
         /// the same join as the committed fixtures' decoded multi-font <see cref="FontStackGlyphs.Name"/>. Not
-        /// URL-encoded; the fetch layer (<c>UnityWebRequestGlyphSource</c>) encodes. Computed on demand, not an
+        /// URL-encoded; the fetch layer (<c>TemplatedGlyphSource</c>) encodes. Computed on demand, not an
         /// <c>init</c> property, so a <c>Names</c>-only object initializer still yields it.
         /// </summary>
         public string RequestToken => BuildRequestToken(Names);

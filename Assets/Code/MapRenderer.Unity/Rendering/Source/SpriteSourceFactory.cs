@@ -33,7 +33,7 @@ namespace MapRenderer.Unity.Rendering.Source
                 return null;
             }
 
-            return new UnityWebRequestSpriteSource(spriteUrl);
+            return new SpriteSheetSource(spriteUrl);
         }
     }
 }

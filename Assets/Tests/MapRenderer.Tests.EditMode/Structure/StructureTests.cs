@@ -14,6 +14,7 @@
 //   TileBuildGraphKindNeutralityTests       — TileBuildGraph retains no per-kind (fill/line/extrusion) knowledge.
 //   RenderModeMeshingFenceTests             — mesh preparation never branches on render mode (Lit vs Unlit).
 //   GlobeFillVertexKeySizeTests             — GlobeFillVertexKey is hand-enumerated field by field; a new GlobeFillVertex column is not picked up automatically.
+//   TileTransportStructureTests             — HttpTransport/FileTransport name no tile encoding; TileEncoding.Mvt is named once, at the BuildSourceSpecs factory; HttpTransport introduces no thread hop; HttpTransport is the one site naming HttpStatusCode.NotFound and calling SendWebRequest(.
 
 using System;
 using System.Collections.Generic;
@@ -2861,6 +2862,136 @@ namespace MapRenderer.Tests.Structure
                 "GlobeFillVertexKey's ctor, Equals and GetHashCode with the new column and update CoveredBytes. " +
                 "Leaving it means two vertices differing ONLY in the new column merge into one — for the band " +
                 "attribute that collapses the antialiasing skirt, with nothing failing to compile.");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // TileTransportStructureTests — HttpTransport/FileTransport carry no tile encoding; TileEncoding.Mvt is
+    // named exactly once, at the BuildSourceSpecs factory line; HttpTransport introduces no thread hop.
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class TileTransportStructureTests
+    {
+        private static string ReadSource(params string[] relativeParts)
+        {
+            string path = Path.Combine(Application.dataPath, Path.Combine(relativeParts));
+            FileAssert.Exists(path);
+            return File.ReadAllText(path);
+        }
+
+        private static int CountOccurrences(string text, string token)
+        {
+            int count = 0, index = 0;
+            while ((index = text.IndexOf(token, index, StringComparison.Ordinal)) >= 0)
+            {
+                count++;
+                index += token.Length;
+            }
+            return count;
+        }
+
+        /// <summary>The transports carry raw bytes only; neither names <c>TileEncoding</c> nor
+        /// <c>TileResponse</c> — those belong to the byte-fetcher boundary (<c>TemplatedTileSource</c>), not
+        /// the transport underneath it. Positive control: <c>TemplatedTileSource.cs</c> DOES name
+        /// <c>TileEncoding</c>, so a blind matcher's silence over the transports would prove nothing.</summary>
+        [Test]
+        public void Transports_NameNoTileEncoding()
+        {
+            string http      = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Source", "HttpTransport.cs");
+            string file      = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Source", "FileTransport.cs");
+            string templated = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Source", "TemplatedTileSource.cs");
+
+            Assert.Greater(CountOccurrences(templated, "TileEncoding"), 0,
+                "positive control: TemplatedTileSource.cs must name TileEncoding, or the zero counts below prove nothing.");
+
+            Assert.AreEqual(0, CountOccurrences(http, "TileEncoding"), "HttpTransport.cs must name no TileEncoding.");
+            Assert.AreEqual(0, CountOccurrences(http, "TileResponse"), "HttpTransport.cs must name no TileResponse.");
+            Assert.AreEqual(0, CountOccurrences(file, "TileEncoding"), "FileTransport.cs must name no TileEncoding.");
+            Assert.AreEqual(0, CountOccurrences(file, "TileResponse"), "FileTransport.cs must name no TileResponse.");
+        }
+
+        /// <summary>The literal <c>TileEncoding.Mvt</c> may appear at exactly one production site — the
+        /// vector-tile branch of <c>MapView.BuildSourceSpecs</c> — never inside the reusable
+        /// <c>Rendering/Source</c> addressing/transport layer, which stays encoding-agnostic.</summary>
+        [Test]
+        public void TileEncodingMvt_IsNamedOnlyInBuildSourceSpecs()
+        {
+            string sourceDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Source");
+            string mapView   = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Map", "MapView.cs");
+
+            int total = CountOccurrences(mapView, "TileEncoding.Mvt");
+            foreach (string file in Directory.GetFiles(sourceDir, "*.cs", SearchOption.AllDirectories))
+            {
+                int hits = CountOccurrences(File.ReadAllText(file), "TileEncoding.Mvt");
+                if (Path.GetFileName(file) == "TemplatedTileSource.cs")
+                    Assert.AreEqual(0, hits,
+                        "TemplatedTileSource.cs must name zero 'TileEncoding.Mvt' literals — its Encoding is " +
+                        "a ctor parameter, not a hard-coded literal.");
+                total += hits;
+            }
+
+            Assert.AreEqual(1, total,
+                "'TileEncoding.Mvt' must appear exactly once across Rendering/Source/** plus MapView.cs — the " +
+                "BuildSourceSpecs factory line is the one production site that decides vector tiles are MVT.");
+
+            // The total-of-1 check alone would still pass if the literal moved out of MapView.cs into a
+            // Rendering/Source/** helper — pin it to the actual file, not just the count.
+            Assert.AreEqual(1, CountOccurrences(mapView, "TileEncoding.Mvt"),
+                "the single 'TileEncoding.Mvt' occurrence must be in MapView.cs itself (the BuildSourceSpecs " +
+                "factory line), not moved into a Rendering/Source/** helper.");
+        }
+
+        /// <summary><c>HttpTransport</c> resumes on the SAME thread <c>SendWebRequest().ToUniTask()</c>
+        /// completes on — it introduces no thread hop of its own, which <c>GlyphManager</c>'s own
+        /// resume-on-main requirement leans on.</summary>
+        [Test]
+        public void HttpTransport_IntroducesNoThreadHop()
+        {
+            string http = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Source", "HttpTransport.cs");
+
+            Assert.AreEqual(0, CountOccurrences(http, "SwitchToThreadPool"),
+                "HttpTransport.cs must contain ZERO 'SwitchToThreadPool' occurrences.");
+            Assert.AreEqual(0, CountOccurrences(http, "RunOnThreadPool"),
+                "HttpTransport.cs must contain ZERO 'RunOnThreadPool' occurrences.");
+        }
+
+        /// <summary><c>HttpStatusCode.NotFound</c> — the absent-mapping literal glyphs/sprites/tiles all
+        /// need — and <c>SendWebRequest(</c> — the one place a request is actually issued — may each appear
+        /// at exactly one production site: <c>HttpTransport</c>. Limitation: a text match — a copied filter
+        /// written as <c>ResponseCode == 404</c> or <c>(HttpStatusCode)404</c> would evade the first
+        /// clause.</summary>
+        [Test]
+        public void HttpTransport_IsTheOnlySendSite()
+        {
+            string codeRoot = Path.Combine(Application.dataPath, "Code");
+
+            AssertOnlyInHttpTransport(codeRoot, "HttpStatusCode.NotFound");
+            AssertOnlyInHttpTransport(codeRoot, "SendWebRequest(");
+        }
+
+        /// <summary>Scans every <c>.cs</c> file under <paramref name="codeRoot"/> (excluding ThirdParty) for
+        /// <paramref name="token"/> and asserts it appears exactly once, in <c>HttpTransport.cs</c>.</summary>
+        private static void AssertOnlyInHttpTransport(string codeRoot, string token)
+        {
+            int    total    = 0;
+            string offender = null;
+
+            foreach (string file in Directory.GetFiles(codeRoot, "*.cs", SearchOption.AllDirectories))
+            {
+                if (file.Contains(Path.DirectorySeparatorChar + "ThirdParty" + Path.DirectorySeparatorChar))
+                    continue;
+
+                int hits = CountOccurrences(File.ReadAllText(file), token);
+                if (hits > 0 && Path.GetFileName(file) != "HttpTransport.cs")
+                    offender = file;
+                total += hits;
+            }
+
+            Assert.AreEqual(1, total,
+                $"'{token}' must appear exactly once across Assets/Code (excluding ThirdParty) — " +
+                "HttpTransport is the one production site that issues and maps an HTTP request.");
+            Assert.IsNull(offender, $"the '{token}' occurrence must be in HttpTransport.cs, not '{offender}'.");
         }
     }
 }

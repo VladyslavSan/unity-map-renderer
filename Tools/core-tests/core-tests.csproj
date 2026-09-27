@@ -122,9 +122,9 @@
     <!-- S72: pure two-way slider↔camera reconcile (App, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.App/View/Camera/CameraSliderBinding.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/IDataSource.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Data/FileDataSource.cs" />
     <!-- HttpDataSource removed from Core (S51): HttpClient is inherently Task-based.
-         HTTP moves to MapRenderer.Unity as UnityWebRequestDataSource. -->
+         HTTP and file transports live in MapRenderer.Unity as HttpTransport/FileTransport (Unity-only,
+         not compiled here). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/TileCache.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/TileScheduler.cs" />
 

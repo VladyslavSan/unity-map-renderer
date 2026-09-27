@@ -9,7 +9,7 @@ namespace MapRenderer.Core.Text.Sprites
     /// <summary>
     /// BYO sprite-sheet fetch abstraction. Unlike <see cref="IGlyphSource"/> (fontstack+range-keyed), a
     /// sprite sheet is one keyless pair (index JSON + PNG) per style, from the root <c>sprite</c> URL.
-    /// <c>UnityWebRequestSpriteSource</c> implements it. Core implementations use only the
+    /// <c>SpriteSheetSource</c> implements it. Core implementations use only the
     /// PlayerLoop-independent UniTask subset, as <see cref="IGlyphSource"/> does.
     /// </summary>
     public interface ISpriteSource : IDisposable

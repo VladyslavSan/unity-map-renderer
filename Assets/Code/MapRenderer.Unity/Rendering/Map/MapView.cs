@@ -248,7 +248,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // Loader seams — production defaults; tests inject counting/offline fakes via InternalsVisibleTo.
         internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
-        internal System.Func<string, IDataSource>                        TileSourceFactoryOverride;
+        internal System.Func<TileUrlTemplate, IDataSource>                TileSourceFactoryOverride;
 
         /// <summary>The six mutation sites of <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s
         /// full-rebuild arm after which an exception would leave persistent state a later call or frame
@@ -453,7 +453,8 @@ namespace MapRenderer.Unity.Rendering.Map
             StyleDocument style, CancellationToken ct)
         {
             var loader    = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
-            var factory   = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
+            // Vector tiles decode as MVT; the encoding is the source's, never the transport's.
+            var factory   = TileSourceFactoryOverride ?? (address => new TemplatedTileSource(address, TileEncoding.Mvt));
             IWorkScheduler scheduler = WorkSchedulerFactory.ForCurrentPlatform();
 
             // Distinct rendered source-ids in declared order.
@@ -539,13 +540,13 @@ namespace MapRenderer.Unity.Rendering.Map
                     continue;
                 }
 
-                string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
+                var address = new TileUrlTemplate { Template = def.Tiles[0], Tms = def.Scheme == "tms" };
                 var    key      = Tile.TileManager.SourceKey.From(def);
                 // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource
                 // seam — TileManager never names the byte-level type.
                 specs.Add(new Tile.TileManager.SourceSpec(
                     sid, key, def.MinZoom, def.MaxZoom,
-                    () => new Tile.Processing.MvtTileFeatureSource(factory(template), scheduler)));
+                    () => new Tile.Processing.MvtTileFeatureSource(factory(address), scheduler)));
             }
 
             return specs;

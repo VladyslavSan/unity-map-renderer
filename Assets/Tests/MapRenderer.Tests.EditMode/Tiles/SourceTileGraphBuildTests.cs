@@ -23,6 +23,7 @@ using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.IO;

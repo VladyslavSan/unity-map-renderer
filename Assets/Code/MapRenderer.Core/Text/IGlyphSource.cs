@@ -9,7 +9,7 @@ namespace MapRenderer.Core.Text
     /// <summary>
     /// BYO glyph-PBF fetch abstraction, distinct from the tile-keyed <see cref="Data.IDataSource"/>: a glyph
     /// request is keyed by a fontstack string + 256-aligned range, not a <see cref="Geo.TileId"/>. The Unity
-    /// side implements it as <c>UnityWebRequestGlyphSource</c>. A Core implementation uses only the
+    /// side implements it as <c>TemplatedGlyphSource</c>. A Core implementation uses only the
     /// PlayerLoop-independent UniTask subset (<c>SwitchToThreadPool</c>, <c>UniTaskCompletionSource</c>,
     /// <c>UniTask.FromResult</c>), as <see cref="Data.IDataSource"/> does.
     /// </summary>

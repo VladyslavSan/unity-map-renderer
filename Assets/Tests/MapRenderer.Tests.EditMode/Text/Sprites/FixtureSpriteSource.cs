@@ -11,7 +11,7 @@ namespace MapRenderer.Tests
     /// <c>Assets/Fixtures/sprites/sample-sprite.{json,png}</c> (the same fixture <c>SpriteIndexTests</c>/
     /// <c>SpriteSheetTests</c> load), so a future icon eyeball demo can render REAL sprite icons with no
     /// network dependency. NOT a production data source — production wires the real
-    /// <c>UnityWebRequestSpriteSource</c> against a style's <c>sprite</c> URL, via <c>SpriteSourceFactory</c>.
+    /// <c>SpriteSheetSource</c> against a style's <c>sprite</c> URL, via <c>SpriteSourceFactory</c>.
     /// </summary>
     public sealed class FixtureSpriteSource : ISpriteSource
     {

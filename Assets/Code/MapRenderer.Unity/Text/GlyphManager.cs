@@ -1,5 +1,5 @@
 // Non-local invariant: Tools/core-tests/core-tests.csproj compiles this file, so it must not reference
-// UnityEngine or UnityWebRequestGlyphSource; the caller injects the concrete IGlyphSource.
+// UnityEngine or TemplatedGlyphSource; the caller injects the concrete IGlyphSource.
 
 using System;
 using System.Collections.Generic;
@@ -16,8 +16,8 @@ namespace MapRenderer.Unity.Text
     /// fetch/decode/cache/atlas pipeline a <c>text-font</c> stack needs. It fetches per font NAME, not per
     /// joined <see cref="FontStack.RequestToken"/>, so <see cref="FontStackResolver"/> can fall back in
     /// stack order. Non-local invariant: the decode/cache/atlas steps run on the context the fetch resumes
-    /// on, so the <see cref="IGlyphSource"/> must resume on the main thread (the
-    /// <c>UnityWebRequest</c> source does).
+    /// on, so the <see cref="IGlyphSource"/> must resume on the main thread — the HTTP transport
+    /// (<c>HttpTransport</c>) resumes on main.
     /// </summary>
     public sealed class GlyphManager : VerifiedDisposable
     {

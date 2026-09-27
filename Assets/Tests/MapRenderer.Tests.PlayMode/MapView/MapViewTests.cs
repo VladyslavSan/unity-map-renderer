@@ -1105,7 +1105,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         }
 
         // ── THE decisive tooth: a file:// style whose vector source resolves to file:// tiles renders with
-        //    ZERO network — no UnityWebRequestDataSource is ever constructed across SetStyle + settle. ──────
+        //    ZERO HTTP requests across SetStyle + settle. ──────────────────────────────────────────────────
         [UnityTest]
         public IEnumerator SetStyle_FileUriChain_RendersOffline_ZeroNetwork()
         {
@@ -1116,7 +1116,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             File.WriteAllText(stylePath, OneFillStyle("src", tilesTemplate.Replace("\\", "/")));
             string styleUri = "file://" + stylePath;
 
-            int netBefore = UnityWebRequestDataSource.DebugConstructedCount;
+            int netBefore = HttpTransport.DebugRequestCount;
             var view = NewView(out var go);
             Track(go);
             try
@@ -1126,9 +1126,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "the file:// tile must build from the local fixture");
-                Assert.AreEqual(netBefore, UnityWebRequestDataSource.DebugConstructedCount,
-                    "a file:// chain must construct ZERO UnityWebRequestDataSource — no network. " +
-                    "A >0 delta means the style/TileJSON/tiles hit the network (offline guarantee broken).");
+                Assert.AreEqual(netBefore, HttpTransport.DebugRequestCount,
+                    "a file:// chain must issue ZERO HTTP requests — no network. The style document, any " +
+                    "TileJSON and every tile all route through HttpTransport when http(s), so a >0 delta " +
+                    "means one of the three hit the network (offline guarantee broken).");
                 Assert.AreEqual(styleUri, view.StyleId, "SetStyle(uri) ⇒ styleId == uri");
             }
             finally { view.Teardown(); }
@@ -1200,10 +1201,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             var perTemplate = new Dictionary<string, TestDataSource>();
             var view = NewView(out var go);
             Track(go);
-            view.View.TileSourceFactoryOverride = template =>
+            view.View.TileSourceFactoryOverride = address =>
             {
                 var src = TestDataSource.FromBytes(bytes);
-                perTemplate[template] = src;
+                perTemplate[address.Template] = src;
                 return src;
             };
             try
@@ -1245,9 +1246,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             TestDataSource srcA = null;
             var view = NewView(out var go);
             Track(go);
-            view.View.TileSourceFactoryOverride = template =>
+            view.View.TileSourceFactoryOverride = address =>
             {
-                if (template == "https://a/{z}/{x}/{y}.pbf") { constructsForA++; srcA = TestDataSource.FromBytes(bytes); return srcA; }
+                if (address.Template == "https://a/{z}/{x}/{y}.pbf") { constructsForA++; srcA = TestDataSource.FromBytes(bytes); return srcA; }
                 return TestDataSource.FromBytes(bytes);
             };
             try
@@ -1348,10 +1349,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             int factoryCalls = 0;
             var seenTemplates = new List<string>();
             view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
-            view.View.TileSourceFactoryOverride = template =>
+            view.View.TileSourceFactoryOverride = address =>
             {
                 Interlocked.Increment(ref factoryCalls);
-                seenTemplates.Add(template);
+                seenTemplates.Add(address.Template);
                 return TestDataSource.Absent(); // never actually fetched by this test's assertions
             };
             try

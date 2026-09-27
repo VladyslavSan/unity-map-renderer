@@ -979,7 +979,7 @@ byte-for-byte on the fast `dotnet test` loop rather than behind a GPU readback. 
 `Style/Symbol/{StyleLayer,LayoutProperties,PaintProperties}`, `SymbolFeatureExtractor`
 (the `isLine`/point branches — icons ride point), `Text/GlyphManager`/
 `GlyphAtlasTexture` (prior art for the sprite `Texture2D`), `Rendering/Source/GlyphSourceFactory`+
-`UnityWebRequestGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolGatherPlan`,
+`TemplatedGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolGatherPlan`,
 `Text/Placement/SymbolPlacementSystem`, `Rendering/Layers/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
 (template for `Shaders/Map/Symbol/Icon/*`). Jobs: `SymbolProjectionJob`, `StageJob`, `CollisionJob`
 (texture-blind). Style: top-level `"sprite"` in `StyleDocument`/`StyleParser` and in `liberty.json`.
