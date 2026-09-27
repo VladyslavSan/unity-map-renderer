@@ -15,7 +15,7 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// decode-sizing pair <see cref="PrecountRingsAndVertices"/>/<see cref="EnsureCapacity"/>, which
     /// <c>MvtGeometryMaterializer</c> calls upstream of the mesher.
     /// </summary>
-    public static class FillMeshPipeline
+    internal static class FillMeshPipeline
     {
         // MVT command IDs (per MVT spec §4.3) — must match MvtDecodeJob's constants.
         private const uint MoveTo = 1;
@@ -90,9 +90,12 @@ namespace MapRenderer.Unity.Jobs.Fill
         }
 
         /// <summary>
-        /// Input descriptor for one layer's polygon features, already decoded from MVT bytes.
+        /// Input descriptor for one layer's polygon features, already decoded from MVT bytes. The per-feature
+        /// paint columns are not part of this struct: the layer build owns them, and the write step reads
+        /// them. The fill-extrusion wall chain also reads colour and bake at measure time, as parameters of
+        /// <see cref="Rendering.Meshing.FillExtrusionMeshGraph.Schedule"/>.
         /// </summary>
-        public struct LayerInput
+        internal struct LayerInput
         {
             /// <summary>The shared tile geometry — <b>BORROWED</b>. <see cref="FillMeshGraph.Schedule"/>
             /// never disposes it, never writes into it, and does not retain it past
@@ -121,7 +124,9 @@ namespace MapRenderer.Unity.Jobs.Fill
             public double3 OriginRender;
 
             /// <summary>The projection the geometry is built with (a stateless struct behind
-            /// <see cref="MapRenderer.Core.Geo.IProjection"/>). Left <c>null</c> ⇒ Web Mercator (planar).</summary>
+            /// <see cref="MapRenderer.Core.Geo.IProjection"/>). Never null by the time this reaches a graph:
+            /// every graph that consumes it throws on null, and the caller resolves the null-means-Mercator
+            /// default.</summary>
             public MapRenderer.Core.Geo.IProjection Projection;
 
             /// <summary>How much of the tile's buffer to keep before triangulating. <c>default</c> ⇒

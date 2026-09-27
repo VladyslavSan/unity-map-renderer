@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// <c>GeoJsonTileFeatureSource</c> has no bytes at all.
     /// <see cref="IDecodedTile"/> is polymorphic by kind, so a raster source needs only a new implementation.
     /// </summary>
-    public interface ITileFeatureSource : System.IDisposable
+    internal interface ITileFeatureSource : System.IDisposable
     {
         /// <summary>Resolves one tile's decode-provisioning handle, <b>already decoded</b>. Absent
         /// (404/204/missing, or a tile the dataset provably cannot reach) → <see langword="null"/>, matching

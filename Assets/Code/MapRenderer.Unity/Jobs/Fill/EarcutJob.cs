@@ -17,7 +17,7 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// reads <see cref="OutMergedVertexCount"/> rather than the capacity.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct EarcutJob : IJob
+    internal struct EarcutJob : IJob
     {
         /// <summary>Finite ceiling on split attempts per polygon — the failure-path-only bound below
         /// which the pre-sized headroom, a tighter bound, normally binds first. No loop here is

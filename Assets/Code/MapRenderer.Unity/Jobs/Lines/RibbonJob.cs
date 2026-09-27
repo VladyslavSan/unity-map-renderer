@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Lines
     /// winding is CCW (pinned by <c>GlobeLineWindingTests</c>). Round arcs sweep in the local tangent plane.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct RibbonJob : IJob
+    internal struct RibbonJob : IJob
     {
         // ── Input ─────────────────────────────────────────────────────────────────────────────
         /// <summary>Projected centerline: origin-relative render-space points.</summary>

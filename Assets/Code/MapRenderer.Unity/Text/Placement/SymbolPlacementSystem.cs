@@ -481,13 +481,18 @@ namespace MapRenderer.Unity.Text.Placement
                 // Gate on the EFFECTIVE non-Dropped count (see _mirrorNonDroppedCount's field doc).
                 if (_mirrorNonDroppedCount > 0 && atlas?.Texture != null && _worldTextMaterial != null)
                 {
-                    float4x4 viewProj = ViewProj(_camera.Camera);
-                    double3 sceneOriginRender = frame.SceneOriginRender;
-                    float3x3 rebase = frame.Rebase;
+                    // One per-frame view transform: SymbolProjectionJob projects anchors with it and StageJob
+                    // builds the projected collision boxes from it.
+                    var view = new SymbolViewTransform
+                    {
+                        SceneOriginRender = frame.SceneOriginRender,
+                        Rebase            = frame.Rebase,
+                        ViewProj          = ViewProj(_camera.Camera),
+                        ViewportLogicalPx = viewportLogicalPx,
+                    };
 
                     // Globe horizon-cull params, built once per Tick — on a planar projection occ is false, so HorizonCull is a no-op.
                     bool occ = _camera.Projection.TryGetHorizonOccluder(out double3 occCentre, out double occRadius);
-                    double3 cameraRelative = frame.CameraRelativePosition;
                     double  globeRadiusSq  = occ ? occRadius * occRadius : -1.0;
 
                     // Pre-projection distance-cull threshold, from CurrentFarMetres so it works before SyncToCamera runs this frame.
@@ -504,26 +509,18 @@ namespace MapRenderer.Unity.Text.Placement
                         using (PmGatherPoints.Auto())
                         {
                             // A Dropped tile's symbols stay resident and get hard-skipped below; a Fading tile's still gather.
-                            GatherSymbolPoints(sceneOriginRender, symbolCullDistance, rebase, cameraRelative, occCentre, globeRadiusSq,
+                            GatherSymbolPoints(in frame, symbolCullDistance, occCentre, globeRadiusSq,
                                                symbolLayers, _camera.CurrentProperties.Zoom);
                         }
 
                         // Projects only the symbols the scan kept, via the parallel Burst SymbolProjectionJob — free when fully culled.
                         using (PmProjectPositions.Auto())
-                            ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx, rebase);
+                            ProjectSymbols(in view);
 
                         using (PmStage.Auto())
                         {
                             // Stages the whole mirror in one Burst job (StageJob); its output feeds collision and emit directly.
                             PreSizeStageOutputs();
-                            // The collision box is the screen AABB of the glyph's four projected world corners.
-                            var view = new SymbolViewTransform
-                            {
-                                SceneOriginRender = sceneOriginRender,
-                                Rebase            = rebase,
-                                ViewProj          = viewProj,
-                                ViewportLogicalPx = viewportLogicalPx,
-                            };
                             RunStageJob(bearingRadians, viewportLogicalPx, metresPerLogicalPixel, in view);
                             candidateCount = _stageCounts[0]; boxCount = _stageCounts[1];
                             LastBoxCount = boxCount;
@@ -591,8 +588,8 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Flattens every un-culled symbol's world point into _symbolPoints; _stagePointOffset holds each start (-1 = culled).
-        private void GatherSymbolPoints(double3 sceneOriginRender, double symbolCullDistance,
-            in float3x3 rebase, double3 cameraRelative, double3 globeCentreRelative, double globeRadiusSq,
+        private void GatherSymbolPoints(in SceneFrame frame, double symbolCullDistance,
+            double3 globeCentreRelative, double globeRadiusSq,
             IReadOnlyList<SymbolRenderLayer> symbolLayers, double zoom)
         {
             _stagePointOffset.ResizeUninitialized(_mirrorCount);
@@ -621,7 +618,7 @@ namespace MapRenderer.Unity.Text.Placement
                     RepAnchor = _mirrorRepAnchor.AsArray(), Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(),
                     Points = _mirrorPoints.AsArray(), Curveds = _mirrorCurveds.AsArray(),
                     SlotVisible = _slotVisibleThisFrame.AsArray(),
-                    SceneOriginRender = sceneOriginRender, Rebase = rebase, CameraRelative = cameraRelative,
+                    Frame = frame,
                     GlobeCentreRelative = globeCentreRelative, GlobeRadiusSq = globeRadiusSq,
                     SymbolCullDistance = symbolCullDistance, SlotCount = slotCount,
                     OutTrigger = _gatherTrigger.AsArray(),
@@ -657,7 +654,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Projects the gathered _symbolPoints to screen/depth/valid via the Burst SymbolProjectionJob, run inline.
-        private void ProjectSymbols(double3 sceneOriginRender, in float4x4 viewProj, double2 viewportLogicalPx, in float3x3 rebase)
+        private void ProjectSymbols(in SymbolViewTransform view)
         {
             int total = _symbolPoints.Length;
             _symbolScreen.Resize(total, NativeArrayOptions.UninitializedMemory);
@@ -668,14 +665,11 @@ namespace MapRenderer.Unity.Text.Placement
             // .Run() executes inline — the caller blocks here regardless, since staging reads the output immediately.
             new SymbolProjectionJob
             {
-                Points            = _symbolPoints.AsArray(),
-                SceneOriginRender = sceneOriginRender,
-                Rebase            = rebase,
-                ViewProj          = viewProj,
-                ViewportLogicalPx = viewportLogicalPx,
-                OutScreen         = _symbolScreen.AsArray(),
-                OutDepth          = _symbolDepth.AsArray(),
-                OutValid          = _symbolValid.AsArray(),
+                Points = _symbolPoints.AsArray(),
+                View   = view,
+                OutScreen = _symbolScreen.AsArray(),
+                OutDepth  = _symbolDepth.AsArray(),
+                OutValid  = _symbolValid.AsArray(),
             }.Run(total);
         }
 

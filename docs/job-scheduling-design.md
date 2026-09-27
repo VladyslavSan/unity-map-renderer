@@ -143,10 +143,15 @@ value rather than a branch.
 
 **Fill extrusion** — `MapRenderer.Unity/Rendering/Meshing/FillExtrusionMeshGraph.Schedule`: the roof is
 `FillMeshGraph.Schedule` composed unchanged; the walls are their own chain,
-`RingSelectJob | RingClipJob → ProjectionColumnSizingJob → TileToGeoJob → ProjectionDispatch → WallQuadJob`.
-The wall chain takes the same clip-or-select branch on the same input the roof takes, so a building crossing
-a tile seam is cut identically in both. `ProjectionColumnSizingJob` exists because a clipped gather has no
-schedule-time output length.
+`VisitedRingCopy.Schedule → ProjectionColumnSizingJob → TileToGeoJob → ProjectionDispatch → WallQuadJob`.
+Roof and walls both copy their rings through `VisitedRingCopy.Schedule` on the same input, so a building
+crossing a tile seam is cut the same way in both. `ProjectionColumnSizingJob` exists because a clipped
+gather has no schedule-time output length.
+
+The per-feature paint columns stay outside `FillMeshPipeline.LayerInput`, because three producers share
+that struct: `StyledFillTileBuilder`, `StyledFillExtrusionTileBuilder` and `BackgroundQuad`. Every kind's
+write step reads the columns. Only extrusion also reads them earlier, at measure time: the wall chain
+takes colour and bake as parameters of `FillExtrusionMeshGraph.Schedule`.
 
 **Write** — one stream-write job per kind (`MapRenderer.Unity/Rendering/Meshing`, beside the builders that
 own the vertex-stream layout). An extrusion layer writes the roof at `[0, Vr)` and the walls at

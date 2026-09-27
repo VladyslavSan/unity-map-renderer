@@ -29,23 +29,14 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// serial loop instead — the Schedule+Complete overhead beats a parallel job only at high counts.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct SymbolProjectionJob : IJobParallelFor
+    internal struct SymbolProjectionJob : IJobParallelFor
     {
         // ── Input ─────────────────────────────────────────────────────────────────────────────
         /// <summary>The flat render-space world points to project (pre-RTC — the space <c>projection.Project</c> emits).</summary>
         [ReadOnly] public NativeArray<double3> Points;
 
-        /// <summary>The per-frame floating-origin the camera orbits (<c>SceneFrame.SceneOriginRender</c>) — subtracted before the camera transform.</summary>
-        [ReadOnly] public double3 SceneOriginRender;
-
-        /// <summary>The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>, identity on Mercator) — applied AFTER the double subtract.</summary>
-        [ReadOnly] public float3x3 Rebase;
-
-        /// <summary>The combined view-projection matrix for the current frame (<c>projectionMatrix * worldToCameraMatrix</c>).</summary>
-        [ReadOnly] public float4x4 ViewProj;
-
-        /// <summary>The logical (DPR-normalized) viewport size in pixels.</summary>
-        [ReadOnly] public double2 ViewportLogicalPx;
+        /// <summary>This frame's floating-origin, rebase, view-projection and logical viewport, as one value.</summary>
+        public SymbolViewTransform View;
 
         // ── Output (one entry per input point, same index) ──────────────────────────────────────
         [WriteOnly] public NativeArray<float2> OutScreen; // logical screen pixel (y-up, bottom-left origin)
@@ -55,7 +46,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
         public void Execute(int index)
         {
             bool ok = SymbolScreenProjection.TryProjectPoint(
-                Points[index], SceneOriginRender, ViewProj, ViewportLogicalPx, Rebase, out float2 screen, out float depth);
+                Points[index], View.SceneOriginRender, View.ViewProj, View.ViewportLogicalPx, View.Rebase,
+                out float2 screen, out float depth);
             OutScreen[index] = screen;
             OutDepth[index]  = depth;
             OutValid[index]  = (byte)(ok ? 1 : 0);

@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// Non-local invariant: this file names no format carrier type, even in prose, because it is on the
     /// WriteInto path and a raw-text scan forbids them there.
     /// </summary>
-    public static class SourceLayerResolver
+    internal static class SourceLayerResolver
     {
         /// <summary>
         /// Resolves the tile layer a style layer selects features from. Returns null (no throw) when the tile

@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// false, completed default handle); every other call allocates its lists up front, even for zero polygons,
     /// because the graph cannot tell at schedule time.
     /// </summary>
-    public struct FillGraphOutput : IDisposable
+    internal struct FillGraphOutput : IDisposable
     {
         /// <summary>Merged-polygon vertices in tile-space <c>double2</c> — the earcut IR on the flat arm, the
         /// SUBDIVIDED tile coordinate on the curved arm. One column set serves both arms.</summary>

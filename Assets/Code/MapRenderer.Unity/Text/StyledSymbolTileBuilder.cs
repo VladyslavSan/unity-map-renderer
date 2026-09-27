@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Text
     /// whose glyphs are still fetching emits its symbols later without stalling tile consume, and shaping
     /// never interleaves with an atlas append.
     /// </summary>
-    public sealed class StyledSymbolTileBuilder
+    internal sealed class StyledSymbolTileBuilder
     {
         private readonly GlyphManager _glyphManager;
         private readonly CodepointTextShaper _shaper = new CodepointTextShaper();

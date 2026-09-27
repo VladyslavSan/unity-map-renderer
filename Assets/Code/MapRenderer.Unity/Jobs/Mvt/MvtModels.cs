@@ -15,7 +15,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// A feature carries no geometry: coordinates belong to the layer (<see cref="MvtLayer.Geometry"/>), and
     /// a feature is only an evaluation surface for filters and expressions.
     /// </summary>
-    public sealed class MvtFeature : IFeature, IIndexedFeature
+    internal sealed class MvtFeature : IFeature, IIndexedFeature
     {
         /// <summary>Geometry type (MVT Feature.type field).</summary>
         public TileGeometryType GeometryType { get; init; }
@@ -58,7 +58,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// decoded geometry (<see cref="Geometry"/>) and its flattened tag words
     /// (<see cref="FeatureTagWords"/>).
     /// </summary>
-    public sealed class MvtLayer : ITileLayer, IIndexedFeatureSource, INativeFilterSource, IDisposable
+    internal sealed class MvtLayer : ITileLayer, IIndexedFeatureSource, INativeFilterSource, IDisposable
     {
         public string Name;
         public uint Extent = 4096;
@@ -230,7 +230,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
             NativeFilterSelection.TryBind(this, program);
     }
 
-    public sealed class MvtTile : IDecodedTile
+    internal sealed class MvtTile : IDecodedTile
     {
         public readonly List<MvtLayer> Layers = new List<MvtLayer>();
 

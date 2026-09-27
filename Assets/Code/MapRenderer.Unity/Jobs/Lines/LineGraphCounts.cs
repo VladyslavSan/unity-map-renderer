@@ -5,7 +5,7 @@ namespace MapRenderer.Unity.Jobs.Lines
     /// type from <see cref="FillGraphCounts"/>, whose four scalar fields are all fill-specific and none of
     /// which a line graph reports. The two share only the <see cref="Ok"/> = 0 convention.
     /// </summary>
-    public struct LineGraphCounts
+    internal struct LineGraphCounts
     {
         /// <summary>No error.</summary>
         public const int Ok = 0;

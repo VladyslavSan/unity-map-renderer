@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// them; only the output buffer transfers on return, and each call mints a fresh one, so one instance
     /// may be materialized more than once.
     /// </summary>
-    public sealed class MvtGeometryMaterializer : ITileGeometryMaterializer
+    internal sealed class MvtGeometryMaterializer : ITileGeometryMaterializer
     {
         private readonly TileId                          _tile;
         private readonly double                          _extent;

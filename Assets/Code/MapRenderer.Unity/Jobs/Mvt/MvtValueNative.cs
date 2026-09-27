@@ -10,7 +10,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// is the read boundary that rebuilds the expression <see cref="Value"/>. See
     /// <see cref="MvtDecoder.DecodeValue"/> for the wire-format mapping.
     /// </summary>
-    public readonly struct MvtValueNative
+    internal readonly struct MvtValueNative
     {
         // The double comes first, so the struct packs to 16 B; an int-sized field first would pad it to 24 B.
         // MvtValueCompactionTests pins the size.

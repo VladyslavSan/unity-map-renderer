@@ -27,7 +27,7 @@ namespace MapRenderer.Core.Text.Placement
         public SymbolKind AtlasKind;
 
         /// <summary>The world-anchored draw payload, read only by
-        /// <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/> when <see cref="IsWorld"/> is true.
+        /// <c>MapRenderer.Unity.Text.Placement.WorldSymbolRenderer</c> when <see cref="IsWorld"/> is true.
         /// It mirrors <see cref="PointStageInput"/>'s same-named fields; <see cref="TileKey"/> keys the
         /// renderer's per-(tile,slot,kind) dictionary.</summary>
         public float3 AnchorLocal;
@@ -53,7 +53,7 @@ namespace MapRenderer.Core.Text.Placement
         public bool IsWorld;
 
         /// <summary>True ONLY when <see cref="SymbolStagingMath.StageCurved"/> set
-        /// this candidate's emit — <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/> reads
+        /// this candidate's emit — <c>MapRenderer.Unity.Text.Placement.WorldSymbolRenderer</c> reads
         /// each quad's OWN <see cref="PlacedQuad.AnchorLocal"/>/<see cref="PlacedQuad.Tangent"/> instead of
         /// this record's per-CANDIDATE <see cref="AnchorLocal"/> (which a curved candidate leaves default —
         /// one anchor can't serve every glyph of an along-line symbol). False (default) on a point candidate.</summary>

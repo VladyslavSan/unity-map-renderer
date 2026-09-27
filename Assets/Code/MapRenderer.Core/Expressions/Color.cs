@@ -150,7 +150,7 @@ namespace MapRenderer.Core.Expressions
 
         /// <summary>
         /// Mix two colors in premultiplied-alpha sRGB space: the same arithmetic
-        /// <see cref="Ops.Ramps"/> uses for its default <c>interpolate</c> color space, hoisted here so
+        /// <see cref="Ops.InterpolateExpression"/> uses for its default <c>interpolate</c> color space, hoisted here so
         /// a style-transition ease and a zoom ramp share one implementation. At <c>t=0</c>/<c>t=1</c>
         /// this returns <paramref name="a"/>/<paramref name="b"/> exactly; between, RGB is
         /// premultiplied by alpha, mixed, then unpremultiplied by the mixed alpha.

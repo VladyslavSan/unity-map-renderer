@@ -17,9 +17,10 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// and each node bounds its loop by a column its sizing job resizes, so a capacity trip leaves later
     /// nodes with nothing to do.
     /// </summary>
-    public static class FillMeshGraph
+    internal static class FillMeshGraph
     {
-        /// <summary>Vertices per batch for this graph's tile→geo node (<see cref="TileToGeoJob"/>).
+        /// <summary>Vertices per batch for this graph's tile→geo node (<see cref="TileToGeoJob"/>), and also
+        /// for the fill-extrusion wall chain's own tile→geo node, which shares this constant.
         /// <see cref="TileToGeoJob.GeoAt"/> runs several transcendental functions per vertex, so 1024
         /// vertices carries enough work to cover a batch hand-off and still splits a corpus tile several
         /// ways. A starting value from that reasoning, not a measured optimum.</summary>
@@ -61,16 +62,7 @@ namespace MapRenderer.Unity.Jobs.Fill
             TileId tile   = source.Tile;
             double extent = source.Extent;
 
-            // ── Main-thread pre-pass: borrowed inputs only, never a job output. ────────────────
-            int maxRingLen = 0;
-            int totalVerts = 0;
-            for (int k = 0; k < visit.Length; k++)
-            {
-                int ri  = visit[k];
-                int len = source.RingOffsets[ri + 1] - source.RingOffsets[ri];
-                maxRingLen  = math.max(maxRingLen, len);
-                totalVerts += len;
-            }
+            VisitedRingCopy.Measure(source, visit, out int maxRingLen, out int totalVerts);
 
             int maxPolygons = math.max(1, visit.Length); // upper bound: clipping only ever DROPS rings
             int maxHoles    = maxPolygons;
@@ -80,37 +72,11 @@ namespace MapRenderer.Unity.Jobs.Fill
             var outOffsets = NewBuffer<int>(visit.Length + 1);
             var outFeatIdx = NewBuffer<int>(math.max(1, visit.Length));
 
-            JobHandle derived;
-            JobHandle clipDisposeHandle = default;
-
             // Kept as a local: the boundary-band node needs to know whether a window exists at all, and the
             // window value cannot say so — an unset double2 is (0,0), the tile's origin corner.
             bool clipEnabled = input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax);
-            if (clipEnabled)
-            {
-                int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
-                var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-                derived = new RingClipJob
-                {
-                    Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
-                    RingVisitOrder = visit, ClipMin = clipMin, ClipMax = clipMax,
-                    BufferA = bufferA, BufferB = bufferB,
-                    OutVertices = outVerts, OutRingOffsets = outOffsets, OutRingFeatureIdx = outFeatIdx,
-                }.Schedule(deps);
-
-                clipDisposeHandle = JobHandle.CombineDependencies(bufferA.Dispose(derived), bufferB.Dispose(derived));
-            }
-            else
-            {
-                derived = new RingSelectJob
-                {
-                    Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
-                    RingVisitOrder = visit,
-                    OutVertices = outVerts, OutRingOffsets = outOffsets, OutRingFeatureIdx = outFeatIdx,
-                }.Schedule(deps);
-            }
+            JobHandle derived = VisitedRingCopy.Schedule(
+                source, visit, maxRingLen, clipEnabled, clipMin, clipMax, outVerts, outOffsets, outFeatIdx, deps);
 
             // ── Ring assembly. ────────────────────────────────────────────────────────────────────────
             var polys = PolygonDescriptors.Allocate(maxPolygons, maxHoles);
@@ -313,7 +279,7 @@ namespace MapRenderer.Unity.Jobs.Fill
                     JobHandle.CombineDependencies(disposeGeo, deadAggregateColumnsDispose, subdivisionSourceDispose), disposeSubdivided);
             }
 
-            JobHandle buffersDisposeHandle = JobHandle.CombineDependencies(clipDisposeHandle, disposeAfterAggregate, geometryDisposeHandle);
+            JobHandle buffersDisposeHandle = JobHandle.CombineDependencies(disposeAfterAggregate, geometryDisposeHandle);
             JobHandle terminal = JobHandle.CombineDependencies(terminalGeometry, buffersDisposeHandle);
 
             return new FillGraphOutput

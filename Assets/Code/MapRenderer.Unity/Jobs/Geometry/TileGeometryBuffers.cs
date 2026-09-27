@@ -76,7 +76,7 @@ namespace MapRenderer.Unity.Jobs.Geometry
     /// the graph's own mesh-output columns feed; the two never interact. Never dispose while a job
     /// referencing these buffers is in flight.</para>
     /// </summary>
-    public struct TileGeometryBuffers : IDisposable
+    internal struct TileGeometryBuffers : IDisposable
     {
         /// <summary>Provenance: the slippy-map address (z/x/y) whose tile-local space
         /// <see cref="Vertices"/> lives in.</summary>

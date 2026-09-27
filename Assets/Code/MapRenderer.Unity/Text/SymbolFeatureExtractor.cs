@@ -28,7 +28,7 @@ namespace MapRenderer.Unity.Text
     /// </summary>
     /// <remarks>Symbol has no area concept: it never schedules <c>FillMeshGraph</c> or its ring/earcut jobs,
     /// and never applies an area test to a path (a Point path has no area; a straight road has zero).</remarks>
-    public static class SymbolFeatureExtractor
+    internal static class SymbolFeatureExtractor
     {
         /// <summary>
         /// Append every extracted symbol of <paramref name="layer"/> over <paramref name="tile"/> to

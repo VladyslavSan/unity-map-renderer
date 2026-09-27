@@ -12,7 +12,7 @@ namespace MapRenderer.Unity.Jobs.Projection
     /// This is the one place the concrete projection structs are enumerated: a new projection needs its struct,
     /// one <c>case</c> here, and its <c>RegisterGenericJobType</c> line in the generic job.
     /// </summary>
-    public static class ProjectionDispatch
+    internal static class ProjectionDispatch
     {
         /// <summary>Scheduled entry point — the fill(-extrusion) graph's tile→geo/project node.
         /// <paramref name="points"/>/<paramref name="world"/>/<paramref name="normals"/> are lists whose

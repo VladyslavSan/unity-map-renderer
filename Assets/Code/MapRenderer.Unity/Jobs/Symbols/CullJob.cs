@@ -1,4 +1,5 @@
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Unity.Rendering.Backend;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -14,7 +15,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// (<c>./Tools/run-tests.sh</c>), not in the interactive Test Runner.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct CullJob : IJobParallelFor
+    internal struct CullJob : IJobParallelFor
     {
         // ── Input — per-record flags/fields, index-parallel to the mirror ───────────────────────────────────
         /// <summary>Per-record: 1 = the record's tile was coverage-dropped (hard-skip, no fade). Tested first.</summary>
@@ -40,12 +41,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
         [ReadOnly] public NativeArray<bool> SlotVisible;
 
         // ── Input — per-frame scalars (the Horizon/Distance cull params + the zoom-gate bound) ────────────────
-        /// <summary>The per-frame floating-origin the camera orbits (<c>SceneFrame.SceneOriginRender</c>).</summary>
-        [ReadOnly] public double3  SceneOriginRender;
-        /// <summary>The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>, identity on Mercator).</summary>
-        [ReadOnly] public float3x3 Rebase;
-        /// <summary>The camera position, render-space RTC-relative — the horizon/distance culls measure from here.</summary>
-        [ReadOnly] public double3  CameraRelative;
+        /// <summary>This frame's floating-origin, rebase and camera-relative position, as one value.</summary>
+        public SceneFrame Frame;
         /// <summary>The globe centre, render-space RTC-relative — the horizon-plane origin (unused when <see cref="GlobeRadiusSq"/> &lt; 0).</summary>
         [ReadOnly] public double3  GlobeCentreRelative;
         /// <summary>Globe radius squared; &lt; 0 makes the horizon cull a no-op (planar projection).</summary>
@@ -66,11 +63,11 @@ namespace MapRenderer.Unity.Jobs.Symbols
             else if (SymbolDeparting[index] != 0) t = GatherTrigger.Departing;
             else if (SymbolCoverageFading[index] != 0) t = GatherTrigger.Coverage;
             else if (IsOutOfLiveZoom(index)) t = GatherTrigger.Zoom;
-            else if (HorizonCull.IsHiddenBeyondHorizon(RepAnchor[index], SceneOriginRender, Rebase,
-                                                        CameraRelative, GlobeCentreRelative, GlobeRadiusSq))
+            else if (HorizonCull.IsHiddenBeyondHorizon(RepAnchor[index], Frame.SceneOriginRender, Frame.Rebase,
+                                                        Frame.CameraRelativePosition, GlobeCentreRelative, GlobeRadiusSq))
                 t = GatherTrigger.Horizon;
-            else if (SymbolFarPlaneCull.IsCulled(RepAnchor[index], SceneOriginRender, Rebase,
-                                                 CameraRelative, SymbolCullDistance))
+            else if (SymbolFarPlaneCull.IsCulled(RepAnchor[index], Frame.SceneOriginRender, Frame.Rebase,
+                                                 Frame.CameraRelativePosition, SymbolCullDistance))
                 t = GatherTrigger.Distance;
             else t = GatherTrigger.None;
             OutTrigger[index] = t;

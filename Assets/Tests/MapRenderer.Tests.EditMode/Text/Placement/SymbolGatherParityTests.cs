@@ -976,7 +976,7 @@ namespace MapRenderer.Tests.Text.Placement
                     SymbolDropped = nDropped, SymbolDeparting = nDeparting, SymbolCoverageFading = nCoverage,
                     RepAnchor = nAnchor, Kinds = nKinds, Detail = nDetail, Points = nPoints, Curveds = nCurveds,
                     SlotVisible = nSlotVisible,
-                    SceneOriginRender = SceneOriginRender, Rebase = Rebase, CameraRelative = CameraRelative,
+                    Frame = new SceneFrame { SceneOriginRender = SceneOriginRender, Rebase = Rebase, CameraRelativePosition = CameraRelative },
                     GlobeCentreRelative = GlobeCentreRelative, GlobeRadiusSq = GlobeRadiusSq,
                     SymbolCullDistance = SymbolCullDistance, SlotCount = SlotCount,
                     OutTrigger = outTrigger,

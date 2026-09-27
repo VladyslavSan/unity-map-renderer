@@ -39,7 +39,7 @@ namespace MapRenderer.Unity.Jobs.Projection
     /// result.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct ProjectPointsJob<TProj> : IJobParallelFor, IJobParallelForDefer
+    internal struct ProjectPointsJob<TProj> : IJobParallelFor, IJobParallelForDefer
         where TProj : struct, IProjection
     {
         /// <summary>The projection — a stateless struct; Burst inlines its <c>ProjectPoint</c>.</summary>

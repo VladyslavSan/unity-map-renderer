@@ -754,13 +754,21 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(32, disabled.WallVertexCount,
                 "unclipped walls: both squares survive at 4 edges each ⇒ 8 edges × 4 vertices = 32.");
             Assert.AreEqual(48, disabled.WallIndexCount, "unclipped walls: 8 edges × 6 indices = 48.");
+
+            // No other byte-level test runs the extrusion wall chain's clip arm on a ring the window
+            // actually cuts, so this digest is the one place a regression there would be caught.
+            Assert.AreEqual("ht+QXDJ7GL6JqHOb620LWmcJgy0vwwkVOLQ8vsmYlYg=", enabled.WallsDigest,
+                "the enabled arm's wall PositionNormal.Position bits + Indices must stay bit-identical");
         }
 
         /// <summary>Roof and wall counts of one <see cref="FillExtrusionMeshGraph.Schedule"/> build — the
-        /// per-arm measurement <see cref="Walls_HonourTheTileBufferClip"/> compares.</summary>
+        /// per-arm measurement <see cref="Walls_HonourTheTileBufferClip"/> compares. <see cref="WallsDigest"/>
+        /// is a SHA-256 over the wall positions and indices — the byte-level pin for the extrusion wall
+        /// chain's clip arm.</summary>
         private struct BuildCounts
         {
             public int RoofVertexCount, WallVertexCount, WallIndexCount;
+            public string WallsDigest;
         }
 
         /// <summary>Runs the extrusion graph over one fixture at one clip setting and returns its counts.</summary>
@@ -794,6 +802,7 @@ namespace MapRenderer.Tests.Meshing
                     RoofVertexCount = ext.Roof.TileVertices.Length,
                     WallVertexCount = ext.Walls.VertexCount,
                     WallIndexCount  = ext.Walls.IndexCount,
+                    WallsDigest     = WallsDigest(ext.Walls),
                 };
             }
             finally
@@ -804,6 +813,29 @@ namespace MapRenderer.Tests.Meshing
                 ext.Dispose();
                 geometry.Dispose();
             }
+        }
+
+        /// <summary>SHA-256 over <c>walls.PositionNormal[i].Position</c>'s bits and <c>walls.Indices</c> —
+        /// normals/tangents are excluded, since they carry a ULP bound rather than bit-exactness.</summary>
+        private static string WallsDigest(StyledFillExtrusionTileBuilder.WallColumns walls)
+        {
+            var bytes = new List<byte>();
+            for (int i = 0; i < walls.VertexCount; i++)
+            {
+                Vector3 p = walls.PositionNormal[i].Position;
+                bytes.AddRange(BitConverter.GetBytes(p.x));
+                bytes.AddRange(BitConverter.GetBytes(p.y));
+                bytes.AddRange(BitConverter.GetBytes(p.z));
+            }
+            for (int i = 0; i < walls.IndexCount; i++)
+                bytes.AddRange(BitConverter.GetBytes(walls.Indices[i]));
+            return Sha256(bytes);
+        }
+
+        private static string Sha256(List<byte> bytes)
+        {
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            return System.Convert.ToBase64String(sha256.ComputeHash(bytes.ToArray()));
         }
 
         private struct WallGolden

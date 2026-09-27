@@ -9,7 +9,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// One world-anchored billboard-corner vertex — the world-space sibling of <see cref="BillboardVertex"/>.
+    /// One world-anchored billboard-corner vertex.
     /// The anchor is a real render-space position (GPU-projected via stock MVP,
     /// <c>TransformObjectToHClip</c>); the glyph corner is an offset the vertex shader applies — constant
     /// screen px, so text stays legible-sized at any distance, except a map-pitched glyph's, which is world
@@ -30,12 +30,12 @@ namespace MapRenderer.Core.Text.Placement
         public float3 ColorRGB;
 
         /// <summary>Normalized atlas UV (TEXCOORD0) — straight from <see cref="SymbolQuad.UvTopLeft"/>/
-        /// <see cref="SymbolQuad.UvBottomRight"/>, no flip (mirrors <see cref="BillboardVertex.Uv"/>).</summary>
+        /// <see cref="SymbolQuad.UvBottomRight"/>, no flip.</summary>
         public float2 Uv;
 
         /// <summary>The glyph atlas Texture2DArray layer (TEXCOORD1) <see cref="Uv"/> samples from — straight
-        /// from <see cref="SymbolQuad.Page"/> (mirrors <see cref="BillboardVertex.Page"/>); a <c>float</c>,
-        /// not an <c>int</c>, because it rides a Float32x1 vertex stream.</summary>
+        /// from <see cref="SymbolQuad.Page"/>; a <c>float</c>, not an <c>int</c>, because it rides a
+        /// Float32x1 vertex stream.</summary>
         public float Page;
 
         /// <summary>Glyph-corner offset from the anchor (TEXCOORD2), with the CPU rotation from

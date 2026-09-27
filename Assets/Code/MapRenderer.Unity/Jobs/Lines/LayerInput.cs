@@ -10,7 +10,7 @@ namespace MapRenderer.Unity.Jobs.Lines
     /// Input descriptor for one line layer's graph build — the line twin of
     /// <see cref="FillMeshPipeline.LayerInput"/>, with the same BORROWED/owned split.
     /// </summary>
-    public struct LayerInput
+    internal struct LayerInput
     {
         /// <summary>The shared tile geometry — <b>BORROWED</b>. <see cref="LineMeshGraph.Schedule"/>
         /// never disposes it, never writes into it, and does not retain it past <c>Handle.Complete()</c>.

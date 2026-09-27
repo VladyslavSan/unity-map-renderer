@@ -7,10 +7,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
     /// Reusable buffers for one mesh build's worker path: feature selection
-    /// (<see cref="TileMeshLayerProcessor.ProcessOnWorker"/>) and the fill sort/visit order
-    /// (<see cref="Meshing.StyledFillTileBuilder"/>'s <c>OrderBySortKey</c> and <c>BuildRingVisitOrder</c>). One build
-    /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) rents it from <see cref="TileBuildBuffersPool"/>, and no
-    /// concurrent build shares it. Buffers are grow-only: a renter reads only the <c>[0, count)</c> prefix it wrote.
+    /// (<see cref="TileMeshLayerProcessor.ProcessOnWorker"/>), fill's sort order, and the ring-visit order
+    /// fill and fill-extrusion both build through <see cref="Meshing.StyledFillTileBuilder.BuildRingVisitOrder"/>.
+    /// One build (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) rents it from <see cref="TileBuildBuffersPool"/>,
+    /// and no concurrent build shares it. Buffers are grow-only: a renter reads only the <c>[0, count)</c> prefix.
     /// </summary>
     internal sealed class TileBuildBuffers
     {
@@ -80,9 +80,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             return _selectedFeaturesView;
         }
 
-        /// <summary>The counting-sort bucket-start array for <c>BuildRingVisitOrder</c>, sized <paramref name="count"/>
-        /// (= rankCount + 1) and zero-cleared over that prefix — required, because the caller accumulates into
-        /// it from zero; a stale value left by a prior renter would corrupt the count.</summary>
+        /// <summary>The counting-sort bucket-start array
+        /// <see cref="Meshing.StyledFillTileBuilder.BuildRingVisitOrder"/> shares between fill and
+        /// fill-extrusion, sized <paramref name="count"/> (= rankCount + 1) and zero-cleared over that
+        /// prefix — required, because the caller accumulates into it from zero; a stale value left by a
+        /// prior renter would corrupt the count.</summary>
         internal int[] RankStart(int count)
         {
             int[] buffer = Ensure(ref _rankStart, count);
@@ -90,8 +92,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             return buffer;
         }
 
-        /// <summary>The cursor array <c>BuildRingVisitOrder</c> copies <see cref="RankStart"/>'s prefix sum
-        /// into before walking it — the pooled replacement for <c>(int[])rankStart.Clone()</c>.</summary>
+        /// <summary>The cursor array <see cref="Meshing.StyledFillTileBuilder.BuildRingVisitOrder"/> copies
+        /// <see cref="RankStart"/>'s prefix sum into before walking it — the pooled replacement for
+        /// <c>(int[])rankStart.Clone()</c>.</summary>
         internal int[] RankCursor(int count) => Ensure(ref _rankCursor, count);
 
         private static T[] Ensure<T>(ref T[] buffer, int count)

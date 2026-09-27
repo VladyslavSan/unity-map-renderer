@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// arrays are sized for one polygon per ring. The Burst path calls no Core code.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct RingAssemblyJob : IJob
+    internal struct RingAssemblyJob : IJob
     {
         /// <summary>Rings with |2*area| (shoelace) below this threshold are skipped (degenerate).</summary>
         private const double DegenerateThreshold = 1.0;

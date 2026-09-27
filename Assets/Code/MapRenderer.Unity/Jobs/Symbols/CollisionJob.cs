@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// and fills <see cref="CellHead"/> with -1, because a Burst job cannot grow its arrays.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct CollisionJob : IJob
+    internal struct CollisionJob : IJob
     {
         // ── Candidates (sorted IN PLACE into placement order) + boxes (read-only) ────────────────────────────
         public NativeArray<SymbolCandidate> Candidates; // [0..CandidateCount) — reordered by the placement sort
@@ -180,12 +180,12 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// TargetCellPx / MaxGridDim / the clamp must stay in lockstep, or the node bound under-counts and inserts
     /// drop.
     /// </summary>
-    public static class CollisionGridSizing
+    internal static class CollisionGridSizing
     {
         private const float TargetCellPx = 64f;
         private const int   MaxGridDim   = 512;
 
-        public struct Dims
+        internal struct Dims
         {
             public float MinX, MinY, InvCell;
             public int   W, H;

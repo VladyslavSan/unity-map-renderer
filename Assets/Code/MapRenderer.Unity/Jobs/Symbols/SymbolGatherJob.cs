@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// the per-frame masks (<c>SymbolDeparting</c>/<c>SymbolCoverageFading</c>/<c>SymbolDropped</c>).
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct SymbolGatherJob : IJob
+    internal struct SymbolGatherJob : IJob
     {
         // OutCounts indices — named so the caller and this job agree without bare literals.
         public const int CountPoint        = 0;
