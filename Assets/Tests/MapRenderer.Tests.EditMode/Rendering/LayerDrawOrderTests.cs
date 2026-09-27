@@ -14,26 +14,6 @@ namespace MapRenderer.Tests.Rendering
     [TestFixture]
     public class LayerDrawOrderTests
     {
-        // N5 — replaces Queues_AreExactly_BasePlusIndex_{DefaultBase,CustomBase} (see class doc above).
-        [Test]
-        public void BandStart_AndUniformStride_AreCorrect()
-        {
-            AssertBandStartAndStride(LayerDrawOrder.TransparentQueue); // default base
-            AssertBandStartAndStride(2501);                            // custom base — the band start
-
-            static void AssertBandStartAndStride(int baseQueue)
-            {
-                int[] q = LayerDrawOrder.ComputeQueues(6, baseQueue);
-                Assert.That(q[0], Is.EqualTo(baseQueue),
-                    $"the first layer's Base sub-slot must equal baseQueue ({baseQueue}) exactly.");
-                for (int i = 1; i < q.Length; i++)
-                    Assert.That(q[i] - q[i - 1], Is.EqualTo(LayerDrawOrder.SubSlotsPerLayer),
-                        $"stride between layer {i - 1} and layer {i} must equal SubSlotsPerLayer " +
-                        $"({LayerDrawOrder.SubSlotsPerLayer}) uniformly — a non-uniform stride would let two " +
-                        "layers' bands overlap or leave a gap that silently swallows a sub-slot.");
-            }
-        }
-
         // N1
         [Test]
         public void IconSubSlot_IsStrictlyBelow_ItsOwnLayersTextSubSlot()
@@ -50,10 +30,22 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void LayerBands_AreDisjoint_AndOrdered()
         {
+            int previousBase = LayerDrawOrder.QueueFor(0, LayerSubSlot.Base);
+            Assert.That(previousBase, Is.EqualTo(LayerDrawOrder.TransparentQueue),
+                "layer 0's Base sub-slot must anchor exactly at TransparentQueue.");
+
             for (int i = 0; i <= 7; i++)
             {
                 int bandBase = LayerDrawOrder.QueueFor(i, LayerSubSlot.Base);
                 int bandTop  = bandBase + LayerDrawOrder.SubSlotsPerLayer - 1;
+
+                if (i > 0)
+                    Assert.That(bandBase - previousBase, Is.EqualTo(LayerDrawOrder.SubSlotsPerLayer),
+                        $"stride between layer {i - 1} and layer {i}'s Base sub-slot must equal " +
+                        $"SubSlotsPerLayer ({LayerDrawOrder.SubSlotsPerLayer}) uniformly — a non-uniform " +
+                        "stride would let two layers' bands overlap or leave a gap that silently swallows " +
+                        "a sub-slot.");
+                previousBase = bandBase;
 
                 Assert.That(
                     LayerDrawOrder.QueueFor(i, LayerSubSlot.Above),
@@ -69,17 +61,6 @@ namespace MapRenderer.Tests.Rendering
                         $"layer {i}'s {subSlot} sub-slot ({value}) must lie inside its own band [{bandBase}, {bandTop}].");
                 }
             }
-        }
-
-        // N3 — no drift between the batch form and the single-sub-slot form.
-        [Test]
-        public void ComputeQueues_AgreesWith_QueueFor_BaseSubSlot()
-        {
-            int[] q = LayerDrawOrder.ComputeQueues(9);
-            for (int i = 0; i < q.Length; i++)
-                Assert.That(q[i], Is.EqualTo(LayerDrawOrder.QueueFor(i, LayerSubSlot.Base)),
-                    $"ComputeQueues(n)[{i}] must agree with QueueFor({i}, Base) — one formula home, no drift " +
-                    "between the batch and single forms.");
         }
 
         // N4
@@ -105,31 +86,6 @@ namespace MapRenderer.Tests.Rendering
         }
 
         [Test]
-        public void Queues_AreStrictlyMonotonicIncreasing_AndDistinct()
-        {
-            int[] q = LayerDrawOrder.ComputeQueues(8);
-            for (int i = 1; i < q.Length; i++)
-                Assert.That(q[i], Is.GreaterThan(q[i - 1]),
-                    $"queue[{i}] ({q[i]}) must be strictly greater than queue[{i - 1}] ({q[i - 1]}) " +
-                    "so higher-index layers draw on top (painter's algorithm).");
-
-            // Distinctness: a HashSet of all values must have full cardinality.
-            Assert.That(new System.Collections.Generic.HashSet<int>(q).Count, Is.EqualTo(q.Length),
-                "All queue values must be distinct — two layers sharing a queue lose strict ordering.");
-        }
-
-        [Test]
-        public void AllQueues_AreInsideTheTransparentBand()
-        {
-            // Every painter's flat layer must be >= 2501 (transparent band) so ZWrite-off ordering
-            // is not pre-empted by the opaque phase (the keystone constraint).
-            int[] q = LayerDrawOrder.ComputeQueues(10);
-            foreach (int v in q)
-                Assert.That(v, Is.GreaterThanOrEqualTo(LayerDrawOrder.TransparentBandStart),
-                    $"queue value {v} must be >= {LayerDrawOrder.TransparentBandStart} (transparent band).");
-        }
-
-        [Test]
         public void TransparentBandStart_Is2501_TransparentQueue_Is3000()
         {
             // Pin the band constants — these mirror Unity's RenderQueue values and are load-bearing.
@@ -138,50 +94,13 @@ namespace MapRenderer.Tests.Rendering
         }
 
         [Test]
-        public void ZeroLayers_ReturnsEmptyArray()
-        {
-            int[] q = LayerDrawOrder.ComputeQueues(0);
-            Assert.That(q, Is.Not.Null);
-            Assert.That(q.Length, Is.EqualTo(0));
-        }
-
-        [Test]
-        public void NegativeLayerCount_Throws()
-        {
-            Assert.Throws<ArgumentOutOfRangeException>(() => LayerDrawOrder.ComputeQueues(-1));
-        }
-
-        [Test]
-        public void BaseBelowTransparentBand_Throws()
-        {
-            // 2500 (opaque side) must be rejected — it would let the opaque phase pre-empt ordering.
-            Assert.Throws<ArgumentOutOfRangeException>(() => LayerDrawOrder.ComputeQueues(3, 2500));
-            Assert.Throws<ArgumentOutOfRangeException>(() => LayerDrawOrder.ComputeQueues(3, 2000));
-        }
-
-        // N7 — the ceiling must cover the BAND'S TOP (the last layer's Above sub-slot), not just its Base.
-        // Verified RED against a stride-1 formula, which accepts 1001 layers here.
-        [Test]
-        public void LayerCountExceedingQueueCeiling_Throws()
-        {
-            // base 3000 + 1000 layers: the LAST layer's Above sub-slot is 3000 + 999*2 + 1 = 4999 (OK).
-            int[] q = LayerDrawOrder.ComputeQueues(1000, 3000);
-            Assert.That(
-                LayerDrawOrder.QueueFor(999, LayerSubSlot.Above),
-                Is.EqualTo(4999),
-                "the 1000th layer's (index 999) Above sub-slot must land exactly on the derived boundary value.");
-            Assert.That(q[999], Is.EqualTo(4998), "and its own Base sub-slot sits one below that.");
-
-            // +1 more layer: the new last layer's Above sub-slot would need 3000 + 1000*2 + 1 = 5001 > ceiling.
-            Assert.Throws<ArgumentOutOfRangeException>(() => LayerDrawOrder.ComputeQueues(1001, 3000));
-        }
-
-        [Test]
         public void QueueFor_NegativeDrawIndex_Throws()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => LayerDrawOrder.QueueFor(-1));
         }
 
+        // N7 — the ceiling must cover the BAND'S TOP (the last layer's Above sub-slot), not just its Base.
+        // Verified RED against a stride-1 formula, which would accept drawIndex 1000 here.
         [Test]
         public void QueueFor_AboveSubSlotExceedingCeiling_Throws()
         {

@@ -33,8 +33,7 @@ namespace MapRenderer.Core.Rendering
         /// <summary>
         /// Unity's clamp bound for <c>Material.renderQueue</c> — values above this saturate rather than
         /// order correctly, which would silently collapse two sub-slots (or two layers) onto one queue.
-        /// <see cref="QueueFor"/> and <see cref="ComputeQueues(int, int)"/> both validate against it rather
-        /// than trust the caller.
+        /// <see cref="QueueFor"/> validates against it rather than trust the caller.
         /// </summary>
         public const int QueueCeiling = 5000;
 
@@ -52,8 +51,8 @@ namespace MapRenderer.Core.Rendering
 
         /// <summary>
         /// Render queue for one declared layer's sub-slot: the one home of the formula
-        /// <c>TransparentQueue + drawIndex * SubSlotsPerLayer + subSlot</c>. A caller that sets a single layer's
-        /// queue uses this instead of re-deriving the offset; <see cref="ComputeQueues(int)"/> is the batch form.
+        /// <c>TransparentQueue + drawIndex * SubSlotsPerLayer + subSlot</c>. Every caller derives its queue
+        /// from this, one layer at a time.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException">
         /// If <paramref name="drawIndex"/> is negative, or the resulting queue would exceed
@@ -72,8 +71,8 @@ namespace MapRenderer.Core.Rendering
                     $"sub-slot must be a declared {nameof(LayerSubSlot)} value (0..{SubSlotsPerLayer - 1}); " +
                     "an out-of-band sub-slot would spill into the next layer's queue band.");
 
-            // `long` throughout: in int arithmetic a large drawIndex overflows to negative, slips past the ceiling
-            // check below, and returns a NEGATIVE queue. Mirrors ComputeQueues' own widening.
+            // `long` throughout: in int arithmetic a large drawIndex overflows to negative, slipping past the
+            // ceiling check below and returning a NEGATIVE queue.
             long queue = (long)TransparentQueue + (long)drawIndex * SubSlotsPerLayer + (int)subSlot;
             if (queue > QueueCeiling)
                 throw new ArgumentOutOfRangeException(nameof(drawIndex), drawIndex,
@@ -81,56 +80,6 @@ namespace MapRenderer.Core.Rendering
                     $"Unity's render-queue ceiling ({QueueCeiling}). The integer-queue interim cannot " +
                     "represent this many layers; use the BatchRendererGroup target.");
             return (int)queue;
-        }
-
-        /// <summary>
-        /// Compute the per-layer render-queue values for <paramref name="layerCount"/> declared layers,
-        /// using the default <see cref="TransparentQueue"/> base.
-        /// </summary>
-        public static int[] ComputeQueues(int layerCount) => ComputeQueues(layerCount, TransparentQueue);
-
-        /// <summary>
-        /// Computes the <see cref="LayerSubSlot.Base"/> render queue of each of <paramref name="layerCount"/>
-        /// declared layers: the batch form of <see cref="QueueFor"/>, pinned against it by
-        /// <c>ComputeQueues_AgreesWith_QueueFor_BaseSubSlot</c>.
-        /// <c>queues[i] == baseQueue + i * SubSlotsPerLayer</c> increases strictly, so layer <c>i+1</c>'s whole
-        /// band draws on top of layer <c>i</c>'s. Index 0 is the bottom-most declared layer.
-        /// </summary>
-        /// <param name="layerCount">Number of declared layers (&gt;= 0).</param>
-        /// <param name="baseQueue">
-        /// Render queue of layer 0's <see cref="LayerSubSlot.Base"/> sub-slot; at least
-        /// <see cref="TransparentBandStart"/>, so ZWrite-off painter's ordering holds.
-        /// </param>
-        /// <returns>An <c>int[layerCount]</c> of render-queue values, one per declared layer index.</returns>
-        /// <exception cref="ArgumentOutOfRangeException">
-        /// If <paramref name="layerCount"/> is negative, or <paramref name="baseQueue"/> is below the
-        /// transparent band start, or the LAST layer's <see cref="LayerSubSlot.Above"/> sub-slot — the
-        /// band's top, not just its <see cref="LayerSubSlot.Base"/> — would overflow Unity's queue upper
-        /// bound (<see cref="QueueCeiling"/>).
-        /// </exception>
-        public static int[] ComputeQueues(int layerCount, int baseQueue)
-        {
-            if (layerCount < 0)
-                throw new ArgumentOutOfRangeException(nameof(layerCount),
-                    layerCount, "layerCount must be non-negative.");
-            if (baseQueue < TransparentBandStart)
-                throw new ArgumentOutOfRangeException(nameof(baseQueue), baseQueue,
-                    $"baseQueue must be in the transparent band (>= {TransparentBandStart}) so the " +
-                    "painter's-algorithm ZWrite-off ordering is not pre-empted by the opaque phase.");
-
-            // Unity clamps render queues to [0, 5000], which would merge two sub-slots onto one queue, so throw.
-            // Check the band's top (the last layer's Above slot): at base 3000, 1001 layers need 5001.
-            if (layerCount > 0 &&
-                (long)baseQueue + (long)layerCount * SubSlotsPerLayer - 1 > QueueCeiling)
-                throw new ArgumentOutOfRangeException(nameof(layerCount), layerCount,
-                    $"baseQueue ({baseQueue}) + {layerCount} layers (top sub-slot) exceeds Unity's " +
-                    $"render-queue ceiling ({QueueCeiling}). The integer-queue interim cannot represent " +
-                    "this many layers; use the BatchRendererGroup target.");
-
-            var queues = new int[layerCount];
-            for (int i = 0; i < layerCount; i++)
-                queues[i] = baseQueue + i * SubSlotsPerLayer;
-            return queues;
         }
     }
 }

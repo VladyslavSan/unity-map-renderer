@@ -94,13 +94,11 @@ namespace MapRenderer.Tests.Visual
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             {
-                // Painter's order via renderQueue: [0]=green fill (bottom), [1]=blue line, [2]=red fill (top).
+                // Painter's order via renderQueue: layer 0=green fill (bottom), 1=blue line, 2=red fill (top).
                 // Fill on top of a line is the keystone case.
-                int[] queues = LayerDrawOrder.ComputeQueues(3);
-
-                BuildFillQuad(sceneGo, FillBottom, OverlapHalf, queues[0], bag);
-                BuildWideLine(sceneGo, LineMid, LineHalfWidth, queues[1], bag);
-                BuildFillQuad(sceneGo, FillTop, OverlapHalf, queues[2], bag);
+                BuildFillQuad(sceneGo, FillBottom, OverlapHalf, LayerDrawOrder.QueueFor(0), bag);
+                BuildWideLine(sceneGo, LineMid, LineHalfWidth, LayerDrawOrder.QueueFor(1), bag);
+                BuildFillQuad(sceneGo, FillTop, OverlapHalf, LayerDrawOrder.QueueFor(2), bag);
 
                 snap.Render(camera);
                 snap.WritePng("layer-order-clean-composite.png");

@@ -2578,7 +2578,7 @@ namespace MapRenderer.Tests.Visual
                 material.SetFloat("_Opacity", alpha);
                 // Both tiles are ONE style layer, so they share a queue; the band comes from two draws of the
                 // same layer overlapping, not from layer order.
-                material.renderQueue = LayerDrawOrder.ComputeQueues(1)[0];
+                material.renderQueue = LayerDrawOrder.QueueFor(0);
                 _disposables.Add(material);
 
                 var projection = new WebMercatorProjection();
