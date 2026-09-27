@@ -1128,7 +1128,7 @@ namespace MapRenderer.Tests.Text
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(polygon), SyntheticTileId, 0.0, new WebMercatorProjection(),
                 polygonSymbols));
-            Assert.AreEqual(0, polygonSymbols.Count, "Polygon is never accepted at any placement (the fence)");
+            Assert.AreEqual(0, polygonSymbols.Count, "Polygon is never accepted under point placement (the fence)");
 
             // (3) a feature whose Geometry is null.
             IFeature nullGeometry = new DictionaryFeature(

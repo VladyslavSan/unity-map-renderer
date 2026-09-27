@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Editor
     /// Inspector for <c>Map/FillExtrusion</c>. It inherits the full Lit layout and keyword sync of
     /// <see cref="LitShaderGUI"/> unchanged, because fill-extrusion declares only the standard URP-Lit
     /// shader_features and no keyword of its own. It adds a foldout for the 3D-building paint properties.
-    /// Its runtime render-state contract is <see cref="FillExtrusionTweaker"/> (opaque, depth-writing).
+    /// Its runtime render-state contract is <see cref="FillExtrusionTweaker"/> (always depth-writing and blending).
     /// </summary>
     public sealed class FillExtrusionShaderGUI : LitShaderGUI
     {

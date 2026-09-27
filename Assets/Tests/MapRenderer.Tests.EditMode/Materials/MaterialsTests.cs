@@ -277,7 +277,7 @@ namespace MapRenderer.Tests.Materials
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // Map/FillExtrusionUnlit, structurally: the same bind/CBUFFER, vertex-layout and no-lighting checks as
-    // MapFillUnlitMaterialTests, plus ZWrite ON after ApplyElevatedContract, since buildings must still fill
+    // MapFillUnlitMaterialTests, plus ZWrite ON after ApplyContract, since buildings must still fill
     // the depth buffer unlit. Limitation: Unity exposes _ZWrite on any material, so only the forward pass's
     // [_ZWrite] binding test catches a hard-coded `ZWrite Off`.
     [TestFixture]
@@ -404,8 +404,8 @@ namespace MapRenderer.Tests.Materials
                 "orientations differ — otherwise unlit 3D buildings read as flat solid blocks.");
         }
 
-        // ── T4 — depth regime: the elevated-3D contract must survive on the UNLIT base too ─────
-        // Limitation: this catches a broken ApplyElevatedContract, not a broken shader [_ZWrite] binding.
+        // ── T4 — elevated-3D: the contract must survive on the UNLIT base too ──
+        // Limitation: this catches a broken ApplyContract, not a broken shader [_ZWrite] binding.
         [Test]
         public void FillExtrusionUnlit_KeepsZWriteOn_AfterElevatedContract()
         {
@@ -414,11 +414,11 @@ namespace MapRenderer.Tests.Materials
                 $"Shader '{ShaderName}' not found — FillExtrusionUnlit.shader missing or failed to compile.");
 
             var mat = Track(new Material(shader));
-            // Start from the flat/transparent state; the elevated contract must OVERRIDE it, as on the Lit
+            // Start from the flat/transparent state; the contract must OVERRIDE it, as on the Lit
             // material (MaterialTweakerTests).
             mat.SetFloat(ShaderProperties.PropertyNames.ZWrite, 0f);
 
-            FillExtrusionTweaker.ApplyElevatedContract(mat);
+            FillExtrusionTweaker.ApplyContract(mat);
 
             Assert.That((int)mat.GetFloat(ShaderProperties.PropertyNames.ZWrite), Is.EqualTo((int)DepthWrite.On),
                 "Map/FillExtrusionUnlit must keep ZWrite ON after the elevated-3D contract — buildings must " +
@@ -436,7 +436,7 @@ namespace MapRenderer.Tests.Materials
             Assert.That(text, Does.Contain("ZWrite [_ZWrite]"),
                 "Map/FillExtrusionUnlit's forward-pass render state must bind ZWrite to the [_ZWrite] " +
                 "material property. A hardcoded literal (e.g. 'ZWrite Off') would leave " +
-                "FillExtrusionTweaker.ApplyElevatedContract's SetDepthWrite call a silent no-op on the GPU " +
+                "FillExtrusionTweaker.ApplyContract's SetDepthWrite call a silent no-op on the GPU " +
                 "even though every Material.HasProperty/GetFloat check in T4 stays green — Unity exposes " +
                 "_ZWrite as a settable material property regardless of whether the shader's render state " +
                 "actually consumes it.");
@@ -807,32 +807,36 @@ namespace MapRenderer.Tests.Materials
             AssertWhite(m.GetColor(ShaderProperties.PropertyNames.BaseColor), "_BaseColor");
         }
 
-        // ── 1b. Elevated-3D contract: fill-extrusion is opaque + depth-writing, NOT the flat painter state ──
+        // ── 1b. Elevated-3D contract: fill-extrusion always depth-writes AND always blends ──
         // A building's own walls are one unsortable mesh, so they must occlude by depth, not draw order.
+        // Opacity 1 is a plain overwrite through this SAME blend, so there is no separate opaque state.
         [Test]
-        public void FillExtrusionTweaker_ApplyElevatedContract_SetsDepthWriteOpaqueAndWhiteIdentity()
+        public void FillExtrusionTweaker_ApplyContract_SetsDepthWriteAndAlphaBlend()
         {
             var m = Track(NewFillExtrusion());
-            // Simulate a base .mat left in the flat/transparent state — the elevated contract must OVERRIDE it.
+            // Simulate a base .mat left in the flat/opaque state — the contract must OVERRIDE it.
             m.SetFloat(ShaderProperties.PropertyNames.ZWrite, 0f);
-            m.SetFloat(ShaderProperties.PropertyNames.SrcBlend, (int)BlendMode.SrcAlpha);
-            m.SetFloat(ShaderProperties.PropertyNames.DstBlend, (int)BlendMode.OneMinusSrcAlpha);
+            m.SetFloat(ShaderProperties.PropertyNames.SrcBlend, (int)BlendMode.One);
+            m.SetFloat(ShaderProperties.PropertyNames.DstBlend, (int)BlendMode.Zero);
             m.EnableKeyword(FillMaterialTweaker.SurfaceTypeTransparentKeyword);
-            m.SetColor(ShaderProperties.PropertyNames.BaseColor, Color.red);
 
-            FillExtrusionTweaker.ApplyElevatedContract(m);
+            FillExtrusionTweaker.ApplyContract(m);
 
             Assert.AreEqual((int)DepthWrite.On, (int)m.GetFloat(ShaderProperties.PropertyNames.ZWrite),
                 "elevated-3D → ZWrite ON (buildings must occupy the depth buffer to self-occlude).");
             Assert.AreEqual((int)CompareFunction.LessEqual, (int)m.GetFloat(ShaderProperties.PropertyNames.ZTest),
                 "elevated-3D → ZTest LEqual.");
-            Assert.AreEqual((int)BlendMode.One, (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlend),
-                "elevated-3D → opaque One src blend (NOT the fill's SrcAlpha).");
-            Assert.AreEqual((int)BlendMode.Zero, (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlend),
-                "elevated-3D → opaque Zero dst blend.");
+            Assert.AreEqual((int)FillMaterialTweaker.DefaultSrcRGBBlend,
+                (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlend), "elevated-3D → straight-alpha SrcAlpha blend.");
+            Assert.AreEqual((int)FillMaterialTweaker.DefaultDstRGBBlend,
+                (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlend), "elevated-3D → straight-alpha OneMinusSrcAlpha blend.");
+            Assert.AreEqual((int)FillMaterialTweaker.DefaultSrcAlphaBlend,
+                (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlendAlpha), "elevated-3D → alpha-channel blend.");
+            Assert.AreEqual((int)FillMaterialTweaker.DefaultDstAlphaBlend,
+                (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlendAlpha), "elevated-3D → alpha-channel blend.");
             Assert.IsFalse(m.IsKeywordEnabled(FillMaterialTweaker.SurfaceTypeTransparentKeyword),
-                "elevated-3D → opaque: _SURFACE_TYPE_TRANSPARENT must be DISABLED (else URP alpha-blends the building).");
-            AssertWhite(m.GetColor(ShaderProperties.PropertyNames.BaseColor), "_BaseColor");
+                "elevated-3D → _SURFACE_TYPE_TRANSPARENT stays DISABLED — the fragment writes its own alpha " +
+                "directly, so URP's SSAO/decals/screen-space shadows (gated on this keyword) still run.");
         }
 
         [Test]
@@ -841,14 +845,19 @@ namespace MapRenderer.Tests.Materials
             // Guards the wiring, not just the tweaker: CreateFillExtrusionMaterial must route through the
             // ELEVATED contract. (The regression was that it called FillTweaker.ApplyPainterContract.)
             var settings = Track(ScriptableObject.CreateInstance<MapMaterialSet>());
-            settings.FillExtrusionMaterial = Track(NewFillExtrusion());
+            var baseMat = Track(NewFillExtrusion());
+            // Simulate a base .mat left non-white — CreateFillExtrusionMaterial is the ONLY writer of the
+            // white identity (ApplyContract is render-state only), so only this test catches it missing.
+            baseMat.SetColor(ShaderProperties.PropertyNames.BaseColor, Color.red);
+            settings.FillExtrusionMaterial = baseMat;
 
             Material mat = Track(MaterialFactory.CreateFillExtrusionMaterial(settings));
             Assert.IsNotNull(mat, "a configured fill-extrusion base must yield a material.");
             Assert.AreEqual((int)DepthWrite.On, (int)mat.GetFloat(ShaderProperties.PropertyNames.ZWrite),
                 "CreateFillExtrusionMaterial must apply the elevated contract (ZWrite On), not the flat painter one.");
             Assert.IsFalse(mat.IsKeywordEnabled(FillMaterialTweaker.SurfaceTypeTransparentKeyword),
-                "CreateFillExtrusionMaterial must produce an OPAQUE material (no _SURFACE_TYPE_TRANSPARENT).");
+                "CreateFillExtrusionMaterial must leave _SURFACE_TYPE_TRANSPARENT DISABLED — this layer writes its own alpha directly.");
+            AssertWhite(mat.GetColor(ShaderProperties.PropertyNames.BaseColor), "_BaseColor");
         }
 
         // ── 2. Editor keyword sync (the shader GUIs' ValidateMaterial) reads the material ──
@@ -1202,32 +1211,6 @@ namespace MapRenderer.Tests.Materials
         }
 
         // ── Alpha, per kind, both directions ───────────────────────────────────────────
-
-        /// <summary>
-        /// fill-extrusion's fragment computes <c>alpha = _BaseColor.a × vColor.a × _Opacity</c>, so a constant
-        /// colour's alpha was squared exactly as its rgb was.
-        /// </summary>
-        [Test]
-        public void ConstantFillExtrusionColorAlpha_IsNotAppliedTwice()
-        {
-            var paint = TestStyle.FillExtrusionPaint(
-                $"{{\"fill-extrusion-color\":{AuthoredRgbaHalfAlpha},\"fill-extrusion-height\":30}}");
-            Assert.That((float)paint.Color.Evaluate(Zoom).A, Is.EqualTo(HalfAlpha).Within(Tol),
-                "precondition: the fixture colour must carry the authored alpha 0.5 — a constant colour is " +
-                "not interpolated, so premultiplication cannot have moved it.");
-
-            Material mat  = Track(BoundFillExtrusionMaterial(paint));
-            Mesh     mesh = Track(BuildExtrusionMesh(paint));
-            float uniformA = mat.GetColor(ShaderProperties.PropertyId.BaseColor).a;
-            float streamA  = StreamColor(mesh, "constant fill-extrusion-color alpha").a;
-            float opacity  = mat.GetFloat(ShaderProperties.PropertyId.Opacity);
-            float composed = uniformA * streamA * opacity;
-
-            Assert.That(composed, Is.EqualTo(HalfAlpha).Within(Tol),
-                $"a CONSTANT fill-extrusion-color's ALPHA must reach the fragment exactly once. " +
-                $"_BaseColor.a={uniformA:F4} vColor.a={streamA:F4} _Opacity={opacity:F4} → {composed:F4}. " +
-                $"0.25 means alpha is squared, the same defect as rgb.");
-        }
 
         /// <summary>
         /// The line fragment sets alpha to <c>coverage × _Opacity × vColor.a × _BaseColor.a</c>, so a constant

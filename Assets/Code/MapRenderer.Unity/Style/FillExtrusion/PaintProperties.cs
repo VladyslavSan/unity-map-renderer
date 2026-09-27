@@ -33,8 +33,8 @@ namespace MapRenderer.Unity.Style.FillExtrusion
         public StyleProperty<Color> Color { get; init; }
 
         /// <summary>
-        /// fill-extrusion-opacity: opacity multiplier [0,1]. Default 1.0.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
+        /// fill-extrusion-opacity: opacity multiplier [0,1]. Default 1.0. Not data-driven per the spec —
+        /// Constant/Zoom rides the material uniform; a Feature/Composite value has no effect (pinned to 1).
         /// </summary>
         public StyleProperty<float> Opacity { get; init; }
 

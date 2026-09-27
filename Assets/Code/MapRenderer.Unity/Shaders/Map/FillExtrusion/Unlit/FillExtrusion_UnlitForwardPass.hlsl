@@ -18,12 +18,13 @@
 //   • [MAP DELTA] No TEXCOORD0/_BaseMap sampling in this pass: StyledFillExtrusionTileBuilder bakes no
 //     UV stream at all (see FillExtrusion_UnlitInput.hlsl's header) — the Lit twin's own texColor factor
 //     is always the same fixed-UV texel for every vertex, so this twin skips the degenerate sample rather
-//     than carry it. Fragment is flat: albedo = _BaseColor × vColor; alpha = _BaseColor.a × vColor.a ×
-//     _Opacity — the Lit twin's alpha with the texture factor (always 1 here) and the lighting-only surface
+//     than carry it. Fragment is flat: albedo = _BaseColor × vColor; alpha = _Opacity ALONE (the spec
+//     ignores fill-extrusion-color's alpha) — the Lit twin's alpha rule with the lighting-only surface
 //     plumbing removed.
 //   • No InitializeStandardLitSurfaceData, no InputData surface plumbing, no
 //     UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit (URP's own no-lighting exit point) composes
 //     the final colour instead.
+//   • Writes color.a from the local alpha directly, bypassing upstream's OutputAlpha() keyword gate.
 
 #ifndef MAP_FILL_EXTRUSION_FORWARD_UNLIT_PASS_INCLUDED
 #define MAP_FILL_EXTRUSION_FORWARD_UNLIT_PASS_INCLUDED
@@ -119,11 +120,13 @@ void UnlitPassFragment(
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    // [MAP DELTA] Flat albedo/alpha — no lighting, no InitializeStandardLitSurfaceData, no BaseMap sample
-    // (see this pass's header / FillExtrusion_UnlitInput.hlsl's header — the mesh carries no UV stream for
+    // [MAP DELTA] Flat albedo — no lighting, no InitializeStandardLitSurfaceData, no BaseMap sample (see
+    // this pass's header / FillExtrusion_UnlitInput.hlsl's header — the mesh carries no UV stream for
     // fill-extrusion).
     half3 albedo = _BaseColor.rgb * input.vColor.rgb;
-    half  alpha  = _BaseColor.a   * input.vColor.a * _Opacity;
+    // [MAP DELTA] Alpha is _Opacity ALONE — the spec ignores fill-extrusion-color's alpha, and this layer
+    // always blends, so _Opacity is the only knob that must reach the output.
+    half  alpha  = _Opacity;
 
     // [MAP DELTA — unlit fill-extrusion face shading] Unlit ≠ flat solid blocks. With NO normal term every
     // wall + the roof render the identical colour, so a building reads as one featureless block. Apply a
@@ -150,7 +153,9 @@ void UnlitPassFragment(
     half4 color = UniversalFragmentUnlit(inputData, albedo, alpha);
     // Fog depth counts from the near plane, as InitializeInputDataFog does for the Lit twin.
     color.rgb = MixFog(color.rgb, ComputeFogFactorZ0ToFar(max(-input.fogCoord - _ProjectionParams.y, 0.0)));
-    color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
+    // [MAP DELTA] extrusion always blends; alpha 1 overwrites, so no transparent keyword (which would
+    // drop SSAO/decals/screen shadows) — write our own alpha instead of OutputAlpha's keyword gate.
+    color.a = alpha;
 
     outColor = color;
 }

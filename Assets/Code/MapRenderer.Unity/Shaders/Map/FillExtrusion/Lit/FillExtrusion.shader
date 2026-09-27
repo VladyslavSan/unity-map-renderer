@@ -12,10 +12,11 @@
 //     plus the _Opacity map paint property (the layer color is the standard _BaseColor).
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
 //   • Render state: the property DEFAULTS below mirror URP/Map/Fill (_ZWrite=0, alpha blend), but the
-//     RUNTIME contract for fill-extrusion is ELEVATED-3D — opaque, depth-writing (ZWrite On, ZTest LEqual,
-//     One/Zero blend) — asserted by FillExtrusionTweaker.ApplyElevatedContract and baked into the
-//     Map/FillExtrusion .mat. Buildings must occupy the depth buffer to occlude one another and their
-//     own walls; see docs/depth-and-render-regimes-design.md § "Fill-extrusion — the degenerate case".
+//     RUNTIME contract is ELEVATED-3D — always depth-writing (ZWrite On, ZTest LEqual) AND always alpha
+//     blending, asserted once at creation by FillExtrusionTweaker.ApplyContract
+//     (docs/depth-and-render-regimes-design.md § 6 (E)). Opacity 1 is a plain overwrite, so there is no
+//     separate opaque path. Buildings must occupy the depth buffer to occlude one another and their own
+//     walls; see docs/depth-and-render-regimes-design.md § "Fill-extrusion — the degenerate case".
 //     [_Cull] drives winding as Fill's does.
 //
 // Clean-room: this is URP integration, not MapLibre. URP docs/source are fair reference.
@@ -65,7 +66,7 @@ Shader "Map/FillExtrusion"
         [HideInInspector] _ClearCoatSmoothness("_ClearCoatSmoothness", Float) = 0.0
 
         // ── Blending state (mirrors Map/Fill; consumed by URP's ValidateMaterial) ──
-        // Defaults are the FILL transparent-band values; FillExtrusionTweaker sets the opaque/depth state.
+        // Defaults are the FILL transparent-band values; FillExtrusionTweaker sets the depth-writing blend state.
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0

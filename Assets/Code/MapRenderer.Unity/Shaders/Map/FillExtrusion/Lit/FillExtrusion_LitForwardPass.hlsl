@@ -9,6 +9,7 @@
 //   • Attributes carries the extrusion inputs (extrudeUpAndT, bakedBaseHeight) alongside the usual
 //     positionOS/normalOS/tangentOS — MapVertexModify(...) is called with all six.
 //   • Modulates albedo/alpha by map paint properties after InitializeStandardLitSurfaceData.
+//   • Writes color.a from surfaceData.alpha directly, bypassing upstream's OutputAlpha() keyword gate.
 //   Keep verbatim-plus-delta so git diff against upstream (and against Fill_LitForwardPass.hlsl) stays
 //   meaningful.
 
@@ -285,15 +286,16 @@ void LitPassFragment(
     SurfaceData surfaceData;
     InitializeStandardLitSurfaceData(input.uv, surfaceData);
 
-    // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
-    // The constant/zoom layer color rides _BaseColor (applied in InitializeStandardLitSurfaceData);
-    // _Opacity modulates alpha (effective in transparent queue).
+    // [MAP DELTA] Modulate albedo by map paint properties (init-then-modulate pattern). The constant/zoom
+    // layer color rides _BaseColor (applied in InitializeStandardLitSurfaceData).
     // [MAP DELTA] Composite data-driven × constant:
     //   input.vColor.rgb = per-feature baked color (data-driven dimension)
     //   _BaseColor.rgb   = zoom-level or constant color (uniform dimension, applied above)
     //   Multiply combines both: a white vColor (the default) leaves the uniform color unchanged.
     surfaceData.albedo *= input.vColor.rgb;
-    surfaceData.alpha  *= input.vColor.a   * _Opacity;
+    // [MAP DELTA] Alpha is _Opacity ALONE — the spec ignores fill-extrusion-color's alpha, and this layer
+    // always blends (see the file header), so _Opacity is the only knob that must reach the output.
+    surfaceData.alpha = _Opacity;
 
     // No fill-pattern here — the spec has no fill-extrusion-pattern (unlike Fill_LitForwardPass).
 
@@ -313,7 +315,9 @@ void LitPassFragment(
 
     half4 color = UniversalFragmentPBR(inputData, surfaceData);
     color.rgb = MixFog(color.rgb, inputData.fogCoord);
-    color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
+    // [MAP DELTA] extrusion always blends; alpha 1 overwrites, so no transparent keyword (which would
+    // drop SSAO/decals/screen shadows) — write our own alpha instead of OutputAlpha's keyword gate.
+    color.a = surfaceData.alpha;
 
     outColor = color;
 

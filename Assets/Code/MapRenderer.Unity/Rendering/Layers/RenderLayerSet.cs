@@ -214,8 +214,10 @@ namespace MapRenderer.Unity.Rendering.Layers
                 {
                     if (!SurvivingLayerGate.LayerSurvives(_layers[slot].StyleLayer, newLayer))
                         return false; // a MESH-AFFECTING change — falls through to the full rebuild
+                    // A duplicate id claiming the SAME old slot twice: refuse rather than let the second
+                    // claim silently double up on the first (the old-side map above cannot tell them apart).
+                    if (!claimedSlots.Add(slot)) return false;
                     survivors.Add((slot, declaredOrder, newLayer));
-                    claimedSlots.Add(slot);
                     continue;
                 }
 

@@ -25,6 +25,10 @@ namespace MapRenderer.Unity.Style.Symbol
         {
             if (layout == null) return TextLayoutOptions.Default;
 
+            // TryEvaluate: a value that cannot evaluate for this feature must not take out this tile's
+            // whole label build; falls back to no extra spacing.
+            layout.TextLetterSpacing.TryEvaluate(zoom, feature, out float letterSpacingEm);
+
             return new TextLayoutOptions
             {
                 Anchor = layout.TextAnchor,
@@ -33,7 +37,7 @@ namespace MapRenderer.Unity.Style.Symbol
                 RadialOffset = layout.TextRadialOffset.Evaluate(zoom, feature),
                 MaxWidthEm = layout.TextMaxWidth.Evaluate(zoom, feature),
                 LineHeightEm = layout.TextLineHeight.Evaluate(zoom, feature),
-                LetterSpacingEm = layout.TextLetterSpacing.Evaluate(zoom, feature),
+                LetterSpacingEm = letterSpacingEm,
             };
         }
     }

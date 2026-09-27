@@ -205,16 +205,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         continue;
 
                     // DATA-DRIVEN ONLY: the uniform carries a constant color and the fragment multiplies
-                    // uniform × vertex, so baking it here too would square color AND alpha.
+                    // uniform × vertex, so baking it here too would square color.
                     Color featureColor = Color.white;
                     if (paint.Color.DependsOnFeature && paint.Color.TryEvaluate(zoom, feature, out var color))
                         featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
                     Color lin = featureColor.linear; // sRGB→linear off main thread, same as StyledFillTileBuilder
 
-                    float featureAlpha = lin.a;
-                    if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
-                        featureAlpha *= opacity;
-                    colors[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, featureAlpha);
+                    // The fragment reads alpha from _Opacity alone (the spec ignores colour alpha, and
+                    // opacity itself is not data-driven-able), never this vertex stream — fixed at 1.
+                    colors[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, 1f);
 
                     // Data-driven base/height: bake the EVALUATED value; constant/zoom stays at 0 here (the
                     // uniform carries it — see BindFillExtrusionPaintToApplier and ExtrudeAndBake's doc).

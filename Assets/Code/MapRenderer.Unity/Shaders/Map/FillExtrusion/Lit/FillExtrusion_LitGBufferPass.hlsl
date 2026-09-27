@@ -235,10 +235,12 @@ GBufferFragOutput LitGBufferPassFragment(Varyings input)
     SurfaceData surfaceData;
     InitializeStandardLitSurfaceData(input.uv, surfaceData);
 
-    // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
+    // [MAP DELTA] Modulate albedo by map paint properties (init-then-modulate pattern).
     // [MAP DELTA] Composite data-driven × constant — see FillExtrusion_LitForwardPass's comment.
     surfaceData.albedo *= input.vColor.rgb;
-    surfaceData.alpha  *= input.vColor.a   * _Opacity;
+    // [MAP DELTA] Alpha is _Opacity ALONE (see the Forward pass). This pass never runs for fill-extrusion —
+    // its transparent-band queue draws in forward even under deferred — kept in sync per this file's header.
+    surfaceData.alpha = _Opacity;
 
     // No fill-pattern here — the spec has no fill-extrusion-pattern (unlike Fill_LitGBufferPass).
 

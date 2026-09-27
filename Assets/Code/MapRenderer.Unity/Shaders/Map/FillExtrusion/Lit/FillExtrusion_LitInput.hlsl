@@ -298,7 +298,7 @@ half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask)
 // _BaseColor (rgb→albedo, a→alpha) is applied INSIDE this function, like stock Lit. After calling,
 // the fragment applies the remaining map modulation:
 //   surfaceData.albedo *= input.vColor.rgb;   // per-feature data-driven tint
-//   surfaceData.alpha  *= input.vColor.a * _Opacity;
+//   surfaceData.alpha   = _Opacity;           // alpha is _Opacity ALONE — the spec ignores colour alpha
 // NEVER hand-assemble SurfaceData field-by-field — this function is the gate.
 inline void InitializeStandardLitSurfaceData(float2 uv, out SurfaceData outSurfaceData)
 {

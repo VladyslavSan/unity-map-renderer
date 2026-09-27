@@ -47,6 +47,7 @@ using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
 using Fill = MapRenderer.Unity.Style.Fill;
 using Line = MapRenderer.Unity.Style.Line;
 using Symbol = MapRenderer.Unity.Style.Symbol;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Rendering
 {
@@ -691,8 +692,37 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual("s", sourceId, "the fetched source id must be the layer's declared source.");
         }
 
+        /// <summary><see cref="FillExtrusionStyleJson"/>'s shape with an explicit constant
+        /// <c>fill-extrusion-opacity</c> — the absent-opacity case is the const itself.</summary>
+        private static string FillExtrusionStyleJsonWithOpacity(float opacity) => $@"{{
+    ""version"": 8,
+    ""name"": ""FillExtrusion"",
+    ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
+    ""layers"": [
+        {{ ""id"": ""buildings-3d"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""buildings"",
+          ""paint"": {{ ""fill-extrusion-color"": [""rgba"",120,120,120,1], ""fill-extrusion-height"": 30,
+          ""fill-extrusion-opacity"": {opacity.ToString(System.Globalization.CultureInfo.InvariantCulture)} }} }}
+    ]
+}}";
+
+        /// <summary>The ONE fill-extrusion contract — depth ON, always alpha blend, keyword OFF (the
+        /// fragment writes its own alpha directly). Opacity 1 is a plain overwrite through this SAME blend,
+        /// so no separate opaque state exists to flip to.</summary>
+        private static void AssertAlwaysBlendState(Material m, string when)
+        {
+            Assert.AreEqual((int)DepthWrite.On, (int)m.GetFloat(ShaderProperties.PropertyNames.ZWrite), $"{when}: fill-extrusion always writes depth.");
+            Assert.AreEqual((int)CompareFunction.LessEqual, (int)m.GetFloat(ShaderProperties.PropertyNames.ZTest), $"{when}: fill-extrusion always tests LEqual.");
+            Assert.IsFalse(m.IsKeywordEnabled(FillTweaker.SurfaceTypeTransparentKeyword), $"{when}: the transparent surface keyword stays OFF.");
+            Assert.AreEqual((int)BlendMode.SrcAlpha, (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlend), $"{when}: fill-extrusion always blends SrcAlpha src.");
+            Assert.AreEqual((int)BlendMode.OneMinusSrcAlpha, (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlend), $"{when}: fill-extrusion always blends OneMinusSrcAlpha dst.");
+        }
+
+        /// <summary>Dispatch and slot at CREATE; the render state is the SAME always-blend contract before
+        /// and after a restyle through several opacity values — Restyle never touches render state or
+        /// <c>_BaseColor</c>, only <c>_Opacity</c> and the other paint uniforms, which genuinely EASES over
+        /// <see cref="StyleTransition.Default"/> (no state to pop between, so it blends the whole way).</summary>
         [Test]
-        public void Create_FillExtrusionLayer_ReturnsNonNullRenderLayer_TakingItsSlot()
+        public void Create_FillExtrusionLayer_TakingItsSlot_RestyleEasesOpacityWithNoContractChange()
         {
             StyleDocument style = StyleParser.Parse(FillExtrusionStyleJson);
             var settings = SettingsWithFillExtrusionMaterial();
@@ -708,6 +738,45 @@ namespace MapRenderer.Tests.Rendering
                 Assert.AreEqual(drawIndex, created.DrawIndex, "the factory must set DrawIndex from its parameter.");
                 Assert.IsInstanceOf<FillExtrusion.StyleLayer>(created.StyleLayer);
                 Assert.IsInstanceOf<ITileMeshRenderLayer>(created, "fill-extrusion is a tile-mesh layer.");
+                AssertAlwaysBlendState(created.Material, "at CREATE (absent opacity)");
+                // MaterialFactory writes the white identity, then binds the fixture's CONSTANT
+                // fill-extrusion-color over it — the bound colour must be what survives.
+                Color boundColor = created.Material.GetColor(ShaderProperties.PropertyNames.BaseColor);
+                Assert.AreNotEqual(Color.white, boundColor, "at CREATE: _BaseColor must be the BOUND paint colour, not the identity white.");
+
+                var extrusionLayer = (FillExtrusionRenderLayer)created;
+
+                // Default, not Instant: an Instant retarget re-pushes every constant binding regardless of
+                // value, which would mask a stray white write here that a real transition would not.
+                StyleDocument halfOpacityStyle = StyleParser.Parse(FillExtrusionStyleJsonWithOpacity(0.5f));
+                extrusionLayer.Restyle(halfOpacityStyle.Layers[0], StyleTransition.Default, nowSeconds: 0.0);
+                extrusionLayer.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.0)); // past the 0.3s duration — settled
+                AssertAlwaysBlendState(created.Material, "after the 0.5 transition settles");
+                Assert.AreEqual(0.5f, created.Material.GetFloat(ShaderProperties.PropertyNames.Opacity), 1e-6f,
+                    "after the 0.5 transition settles: _Opacity must carry the new value.");
+                Assert.AreEqual(boundColor, created.Material.GetColor(ShaderProperties.PropertyNames.BaseColor),
+                    "after Restyle to opacity 0.5: _BaseColor must still be the bound paint colour — Restyle " +
+                    "must never write the identity white itself.");
+
+                // A SECOND restyle, 0.5 -> 1, starting where the first left off: no separate opaque contract
+                // to switch to means nothing can pop mid-ease — the blend state is unchanged, and only the
+                // uniform moves. Mid-transition (0.15s into the 0.3s window) must read STRICTLY between.
+                StyleDocument constantOneStyle = StyleParser.Parse(FillExtrusionStyleJsonWithOpacity(1f));
+                extrusionLayer.Restyle(constantOneStyle.Layers[0], StyleTransition.Default, nowSeconds: 1.0);
+                extrusionLayer.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.15));
+                AssertAlwaysBlendState(created.Material, "mid-transition from 0.5 to 1");
+                float mid = created.Material.GetFloat(ShaderProperties.PropertyNames.Opacity);
+                Assert.Greater(mid, 0.5f, "mid-transition: _Opacity must have moved past 0.5.");
+                Assert.Less(mid, 1f, "mid-transition: _Opacity must not yet be at the target 1 — a real ease, not a pop.");
+                Assert.AreEqual(boundColor, created.Material.GetColor(ShaderProperties.PropertyNames.BaseColor),
+                    "mid-transition: _BaseColor must still be the bound paint colour.");
+
+                extrusionLayer.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 2.0)); // past the 1.0-1.3s window — settled
+                AssertAlwaysBlendState(created.Material, "after the 1.0 transition settles");
+                Assert.AreEqual(1f, created.Material.GetFloat(ShaderProperties.PropertyNames.Opacity), 1e-6f,
+                    "after the 1.0 transition settles: _Opacity must carry the target value.");
+                Assert.AreEqual(boundColor, created.Material.GetColor(ShaderProperties.PropertyNames.BaseColor),
+                    "after the 1.0 transition settles: _BaseColor must still be the bound paint colour.");
             }
             finally
             {

@@ -435,14 +435,16 @@ which is its value at every zoom.
 Two properties of that predicate are load-bearing, and each has its own tooth:
 
 - **Settled, not merely heading for zero.** A layer mid-fade still shows something, so it keeps submitting —
-  the fade needs something to blend. `fill-extrusion` never takes an intermediate value at all:
-  `RenderLayerSet.AdvanceFade` substitutes `StyleTransition.Instant` when
-  `FillExtrusionRenderLayer.FadesGradually` is false, because `FillExtrusionTweaker.ApplyElevatedContract`
-  blends `One`/`Zero` with depth write on. Alpha is discarded there, so a partly-present building would render
-  solid rather than translucent.
+  the fade needs something to blend. For `fill-extrusion`, the visibility fade (entering/leaving the zoom
+  range) snaps instead of easing: `RenderLayerSet.AdvanceFade` arms it Instant whenever
+  `FillExtrusionRenderLayer.FadesGradually` is a constant false. The always-blend contract can carry a
+  gradual fade (`true`) but is not built.
 - **A feature-dependent opacity fails safe.** All four paint binders in `Materials.MaterialFactory` bind a
-  constant `1` when `Opacity.DependsOnFeature`, because the per-feature value is baked into vertex alpha
-  instead. The authored term reads 1, so such a layer is never gated out on a value that does not describe it.
+  constant `1` when `Opacity.DependsOnFeature`. For fill/line/background the per-feature value is baked into
+  vertex alpha instead; fill-extrusion-opacity is not data-driven per the spec, so there a per-feature value
+  is simply dropped (the vertex alpha bake there is a fixed 1, and the fragment never reads it — § 6 (E) of
+  `depth-and-render-regimes-design.md`). Either way the authored term reads 1, so such a layer is never
+  gated out on a value that does not describe it.
 
 **Why fade rides `_Opacity` rather than a dedicated uniform.** `_Opacity` has one binding path
 (`ZoomStyleApplier.BindOpacity`), so fade composes with authored opacity at a single site. A dedicated uniform
@@ -590,6 +592,6 @@ snapshot per tile build, on the load path.
 `UnregisterMesh`), `BRG/TileRenderer` (`ComputeEmitOrder`, `DrawItem.LayerRenderQueue`),
 `GameObjects/TileRenderer`.
 `MapRenderer.Unity/Rendering/Materials/`: `MapMaterialSet.Validate`, `MaterialFactory`,
-`FillExtrusionTweaker.ApplyElevatedContract`.
+`FillExtrusionTweaker.ApplyContract`.
 `MapRenderer.Core/Text/`: `GlyphCache`, `GlyphAtlas`, `FontStackResolver`, `IGlyphAtlasView`.
 `MapRenderer.Unity/Text/Placement/`: `SymbolPlacementSystem.Tick`.

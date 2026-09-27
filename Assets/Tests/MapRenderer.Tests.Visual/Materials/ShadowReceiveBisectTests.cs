@@ -258,7 +258,7 @@ namespace MapRenderer.Tests.Visual
             ground.renderQueue = LayerDrawOrder.QueueFor(0);
 
             Material cube = Track(BuildMapFillExtrusionMaterial("BisectMapFillExtrusion"));
-            FillExtrusionTweaker.ApplyElevatedContract(cube);
+            FillExtrusionTweaker.ApplyContract(cube);
             cube.SetColor(ShaderProperties.PropertyNames.BaseColor, CubeColor);
             cube.renderQueue = LayerDrawOrder.QueueFor(1);
 
@@ -287,7 +287,7 @@ namespace MapRenderer.Tests.Visual
             ground.renderQueue = LayerDrawOrder.QueueFor(0);
 
             Material cube = Track(BuildMapFillExtrusionMaterial("BisectEntitiesCube"));
-            FillExtrusionTweaker.ApplyElevatedContract(cube);
+            FillExtrusionTweaker.ApplyContract(cube);
             cube.SetColor(ShaderProperties.PropertyNames.BaseColor, CubeColor);
             cube.renderQueue = LayerDrawOrder.QueueFor(1);
 
@@ -1016,7 +1016,7 @@ namespace MapRenderer.Tests.Visual
             ground.renderQueue = LayerDrawOrder.QueueFor(0);
 
             Material cube = BuildMapFillExtrusionMaterial($"{namePrefix}Building");
-            FillExtrusionTweaker.ApplyElevatedContract(cube);
+            FillExtrusionTweaker.ApplyContract(cube);
             cube.SetColor(ShaderProperties.PropertyNames.BaseColor, buildingColor);
             if (cube.HasProperty(ShaderProperties.PropertyNames.Opacity))
                 cube.SetFloat(ShaderProperties.PropertyNames.Opacity, buildingOpacity);

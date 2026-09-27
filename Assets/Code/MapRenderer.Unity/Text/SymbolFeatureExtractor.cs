@@ -21,20 +21,24 @@ namespace MapRenderer.Unity.Text
 {
     /// <summary>
     /// Extracts pre-shaping <see cref="SymbolFeature"/>s from a decoded tile for one symbol style layer, one
-    /// per anchor. Accepts Point and LineString geometry, never Polygon; a map-resolved line icon emits one
-    /// curved symbol per path. Non-local invariant: the layer's <see cref="TileGeometryBuffers"/> is BORROWED
+    /// per anchor. Accepts Point and LineString geometry always; Polygon only under line/line-center placement,
+    /// exterior rings only (<see cref="RingExteriorClassifier"/>). A map-resolved line icon emits one curved
+    /// symbol per path. Non-local invariant: the layer's <see cref="TileGeometryBuffers"/> is BORROWED
     /// from the decoded tile and never disposed here, and it must stay unfiltered upstream — a 1-point path is
     /// a real symbol, so a shared short-ring filter would delete every Point-feature symbol.
     /// </summary>
-    /// <remarks>Symbol has no area concept: it never schedules <c>FillMeshGraph</c> or its ring/earcut jobs,
-    /// and never applies an area test to a path (a Point path has no area; a straight road has zero).</remarks>
+    /// <remarks>Symbol has no area concept for PLACEMENT: it never schedules <c>FillMeshGraph</c> or its
+    /// ring/earcut jobs, and never applies an area test to a path (a Point path has no area; a straight road
+    /// has zero). A Polygon feature's own rings ARE classified by signed area, to select exterior-only rings —
+    /// see <see cref="RingExteriorClassifier"/>.</remarks>
     internal static class SymbolFeatureExtractor
     {
         /// <summary>
         /// Append every extracted symbol of <paramref name="layer"/> over <paramref name="tile"/> to
         /// <paramref name="output"/>. Features whose <c>text-field</c> resolves to null/empty AND whose
-        /// <c>icon-image</c> resolves to nothing are skipped; Polygon features are always ignored (LineString
-        /// IS accepted — see the class doc). <paramref name="output"/> is appended to, never cleared.
+        /// <c>icon-image</c> resolves to nothing are skipped; Polygon features are accepted only under
+        /// line/line-center placement, exterior rings only (LineString IS always accepted — see the class doc).
+        /// <paramref name="output"/> is appended to, never cleared.
         /// </summary>
         /// <param name="layer">The symbol style layer (a non-symbol layer is a no-op).</param>
         /// <param name="tile">The decoded tile.</param>
@@ -136,10 +140,11 @@ namespace MapRenderer.Unity.Text
             {
                 int      f       = selected[si].Ordinal;
                 IFeature feature = selected[si].Feature;
-                // Point placement also accepts a LineString (one anchor at mid arc-length, below). Polygon is
-                // never accepted.
+                // Point placement also accepts a LineString (one anchor at mid arc-length, below); Polygon is
+                // accepted only under line placement (below), exterior rings only.
                 if (isLine
-                        ? feature.GeometryType != TileGeometryType.LineString
+                        ? (feature.GeometryType != TileGeometryType.LineString &&
+                           feature.GeometryType != TileGeometryType.Polygon)
                         : (feature.GeometryType != TileGeometryType.Point &&
                            feature.GeometryType != TileGeometryType.LineString))
                     continue;
@@ -179,6 +184,10 @@ namespace MapRenderer.Unity.Text
                 float      sortKey    = layout.SymbolSortKey.Evaluate(zoom, feature);
                 float      spacing    = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, feature)); // px, >= 1 (spec)
                 float      maxAngle   = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees
+                // Curved branch only. TryEvaluate: a value that cannot evaluate falls back to 0, not a
+                // failed tile build.
+                float letterSpacingEm = 0f;
+                if (isLine && !textAtAnchors) layout.TextLetterSpacing.TryEvaluate(zoom, feature, out letterSpacingEm);
                 SymbolPaint symbolPaint = EvaluatePaint(paint, zoom, feature);
 
                 // The icon quad/paint are feature-constant (icon-size/-padding/-opacity don't vary per
@@ -244,9 +253,26 @@ namespace MapRenderer.Unity.Text
                         }
                         : default;
 
+                    // Only meaningful for a Polygon feature: one instance walks this feature's own rings in
+                    // decode order, so a hole ring never has to be told apart from a fresh feature's exterior.
+                    var ringClassifier = default(RingExteriorClassifier.State);
+
                     for (int p = 0; p < pathCount; p++)
                     {
-                        IReadOnlyList<double2> path = CopyRing(geometry, ringOrder[ringStart[f] + p]);
+                        int ring = ringOrder[ringStart[f] + p];
+
+                        // A Polygon feature places along exterior rings only — RingExteriorClassifier is the
+                        // same one RingAssemblyJob classifies fill rings with, so fill and symbol classify by
+                        // the same rule (fill classifies clipped rings; symbol classifies raw ones).
+                        if (feature.GeometryType == TileGeometryType.Polygon)
+                        {
+                            int rStart = geometry.RingOffsets[ring];
+                            int rLen   = geometry.RingOffsets[ring + 1] - rStart;
+                            if (ringClassifier.Classify(geometry.Vertices, rStart, rLen) != RingExteriorClassifier.Role.Outer)
+                                continue; // hole, or a degenerate/disjoint ring
+                        }
+
+                        IReadOnlyList<double2> path = CopyRing(geometry, ring, closeRing: feature.GeometryType == TileGeometryType.Polygon);
                         if (path.Count < 2) continue; // need at least one segment to place along
                         // Anchors live in tile space (zoom-invariant): px → tile units is
                         // `spacing · extent / TilePixelSize`, with no projection scale.
@@ -300,6 +326,7 @@ namespace MapRenderer.Unity.Text
                                 SortKey         = sortKey,
                                 SpacingPx       = spacing,
                                 MaxAngleDeg     = maxAngle,
+                                LetterSpacingEm = letterSpacingEm,
                                 KeepUpright     = layout.TextKeepUpright,
                                 AllowOverlap    = layout.TextAllowOverlap,
                                 IgnorePlacement = layout.TextIgnorePlacement,
@@ -428,12 +455,18 @@ namespace MapRenderer.Unity.Text
         /// the shared buffer into a managed array, the shape every downstream path consumer reads.
         /// <paramref name="geometry"/> is by value, not <c>in</c>: <see cref="TileGeometryBuffers"/> is not a
         /// <c>readonly struct</c>, so <c>in</c> would force a defensive copy per field read.</summary>
-        private static double2[] CopyRing(TileGeometryBuffers geometry, int r)
+        /// <param name="closeRing">A Polygon ring is implicitly closed (decode never repeats the first vertex),
+        /// so line placement needs the closing edge walked; appends the first vertex when it differs from the
+        /// last. A LineString path leaves this <c>false</c> and stays open.</param>
+        private static double2[] CopyRing(TileGeometryBuffers geometry, int r, bool closeRing = false)
         {
             int start = geometry.RingOffsets[r];
             int n     = geometry.RingOffsets[r + 1] - start;
-            var ring  = new double2[n];
+            bool needsClose = closeRing && n > 0 &&
+                !geometry.Vertices[start].Equals(geometry.Vertices[start + n - 1]);
+            var ring = new double2[needsClose ? n + 1 : n];
             for (int k = 0; k < n; k++) ring[k] = geometry.Vertices[start + k];
+            if (needsClose) ring[n] = ring[0];
             return ring;
         }
 

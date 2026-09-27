@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 54 supported, 57 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 55 supported, 56 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -224,7 +224,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 
 | Property | Status | Note |
 |---|---|---|
-| `symbol-placement` | `partial` | `point` places Point and LineString features. `line` and `line-center` place LineString features only. A Polygon feature gets no symbol. |
+| `symbol-placement` | `partial` | `point` places Point and LineString features. `line` and `line-center` also place a Polygon feature's exterior rings, closed at the ring seam; holes get no symbol. |
 | `symbol-spacing` | `supported` | |
 | `symbol-avoid-edges` | `not supported` | Not built. |
 | `symbol-sort-key` | `supported` | |
@@ -251,7 +251,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `text-size` | `supported` | |
 | `text-max-width` | `supported` | |
 | `text-line-height` | `supported` | |
-| `text-letter-spacing` | `partial` | Point text and upright line text only. Curved line text ignores it. |
+| `text-letter-spacing` | `supported` | |
 | `text-justify` | `partial` | Constant only; the spec also allows data-driven. |
 | `text-radial-offset` | `supported` | |
 | `text-variable-anchor` | `not supported` | Placement tries one anchor only. |
@@ -299,8 +299,8 @@ Owning design: [`depth-and-render-regimes-design.md`](depth-and-render-regimes-d
 | Property | Status | Note |
 |---|---|---|
 | `fill-extrusion-rounded-corner-distance` | `not supported` | Not built. |
-| `fill-extrusion-opacity` | `partial` | The layer draws opaque. Only 0 has an effect (the layer is not drawn). Translucent 3D is § 6 (E) of the owning design. |
-| `fill-extrusion-color` | `supported` | Data-driven values are †. |
+| `fill-extrusion-opacity` | `partial` | Always blends (§ 6 (E) of the owning design); a Constant 1 is a plain overwrite through the SAME blend. Correct for one convex building; two overlapping translucent buildings (or one concave self-overlap) composite by draw/triangle order, not distance — a tile boundary splitting one building can show a seam band the same way (`docs/job-scheduling-design.md` § 13, item 3). Not evaluated per feature. A translucent building casts a fully opaque shadow (the `ShadowCaster` pass is opaque). |
+| `fill-extrusion-color` | `supported` | Data-driven values are †. Its own alpha is ignored, matching the spec — `fill-extrusion-opacity` alone sets transparency. |
 | `fill-extrusion-translate` | `supported` | |
 | `fill-extrusion-translate-anchor` | `partial` | Constant only. |
 | `fill-extrusion-pattern` | `not supported` | Not built. |

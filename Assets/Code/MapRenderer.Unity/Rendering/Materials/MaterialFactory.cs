@@ -83,10 +83,11 @@ namespace MapRenderer.Unity.Rendering.Materials
         }
 
         /// <summary>
-        /// Creates a per-style-layer fill-extrusion Material by cloning <paramref name="settings"/>'s
-        /// <see cref="MapMaterialSet.FillExtrusionMaterial"/> base, then applies the opaque, depth-writing
-        /// <c>FillExtrusionTweaker.ApplyElevatedContract</c>, because buildings must occlude one another and
-        /// their own walls. Returns <c>null</c> (with a warning) when no base material is assigned.
+        /// Creates a per-style-layer fill-extrusion Material by cloning
+        /// <see cref="MapMaterialSet.FillExtrusionMaterial"/>, applying <c>FillExtrusionTweaker.ApplyContract</c>
+        /// and the white <c>_BaseColor</c> identity — both ONCE here, never by a restyle (the contract never
+        /// changes, and a restyle would stomp an already-bound paint colour). Returns <c>null</c> (warns)
+        /// when no base is assigned.
         /// </summary>
         public static Material CreateFillExtrusionMaterial(MapMaterialSet settings)
         {
@@ -101,7 +102,8 @@ namespace MapRenderer.Unity.Rendering.Materials
 
             var mat = baseMat.CloneWithParent();
             mat.name = "MapView_FillExtrusion";
-            FillExtrusionTweaker.ApplyElevatedContract(mat);
+            FillExtrusionTweaker.ApplyContract(mat);
+            mat.SetColor(ShaderProperties.PropertyId.BaseColor, Color.white);
             return mat;
         }
 
@@ -110,7 +112,8 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// Non-local invariant: a data-driven height/base uniform is zeroed, because
         /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> bakes that value per vertex and the VS adds
         /// uniform and bake, so a stray non-zero uniform doubles the elevation. <c>fill-extrusion-color</c>'s
-        /// alpha is not special-cased to 1, matching <see cref="BindFillPaintToApplier"/>.
+        /// alpha binds to <c>_BaseColor.a</c> along with its RGB but the fragment never reads it — the spec
+        /// ignores it, and <c>fill-extrusion-opacity</c> alone sets alpha.
         /// </summary>
         /// <param name="paint">The layer's parsed fill-extrusion paint properties.</param>
         /// <param name="applier">The layer's per-frame zoom→uniform applier; constant bindings apply

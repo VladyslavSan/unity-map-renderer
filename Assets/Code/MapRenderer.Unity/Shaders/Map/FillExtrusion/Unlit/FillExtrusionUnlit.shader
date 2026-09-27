@@ -10,16 +10,16 @@
 //   • Unlit ≠ 2D: the height extrusion happens ENTIRELY in the vertex hook (FillExtrusion_VertexModify.hlsl,
 //     reused VERBATIM, unchanged from the Lit twin), so this shader still renders flat-coloured 3D blocks
 //     that self-occlude — not a flattened fill. See that file's class doc for the sec(φ) derivation.
-//   • Fragment is flat albedo = _BaseColor × vColor / alpha = _BaseColor.a × vColor.a × _Opacity — no
-//     lighting, no SurfaceData. See FillExtrusion_UnlitForwardPass.hlsl for the exact composite.
+//   • Fragment is flat albedo = _BaseColor × vColor, alpha = _Opacity ALONE (the spec ignores
+//     fill-extrusion-color's alpha) — no lighting, no SurfaceData. See FillExtrusion_UnlitForwardPass.hlsl.
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
 //   • ELEVATED-3D CONTRACT: the property DEFAULTS below mirror FillExtrusion.shader's OWN declared
 //     defaults verbatim (which are, as that file documents, the same transparent-band numbers Fill.shader
-//     uses). The RUNTIME contract — opaque, ZWrite On, LEqual, One/Zero blend — is asserted by
-//     FillExtrusionTweaker.ApplyElevatedContract, which MaterialFactory.CreateFillExtrusionMaterial calls
-//     on every clone of this shader's base .mat exactly as it does for the Lit twin; see that tweaker.
-//     Declaring the full render-state block (below) is what lets it bind (import guard — omitting a
-//     render-state property lets URP force queue 2000 on import).
+//     uses). The RUNTIME contract — always ZWrite On, LEqual, always alpha blend — is asserted ONCE, at
+//     creation, by FillExtrusionTweaker.ApplyContract, which MaterialFactory.CreateFillExtrusionMaterial
+//     calls on every clone of this shader's base .mat exactly as it does for the Lit twin; see that
+//     tweaker. Declaring the full render-state block (below) is what lets it bind (import guard — omitting
+//     a render-state property lets URP force queue 2000 on import).
 //   • The DepthOnly/DepthNormalsOnly passes reuse FillExtrusion_DepthOnlyPass.hlsl /
 //     FillExtrusion_DepthNormalsPass.hlsl VERBATIM (no new file) — buildings must keep writing depth so
 //     overlapping buildings, and a single building's own near/far walls, occlude correctly (SSAO too).

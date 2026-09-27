@@ -443,8 +443,10 @@ capped (`GlyphAtlas.MaxPages`); a glyph that would need a page beyond the cap is
 
 # 3. Curved along-line text
 
-`symbol-placement: line` / `line-center` — per-glyph text that follows a line feature's geometry (the real
-subsystem, not a straight-block approximation). Clean-room from the public MapLibre Style Spec.
+`symbol-placement: line` / `line-center` — per-glyph text that follows a line feature's geometry, or a Polygon
+feature's exterior ring closed at its start vertex (holes carry no symbol; see `RingExteriorClassifier` and
+KL-A6). This is the real subsystem, not a straight-block approximation. Clean-room from the public MapLibre
+Style Spec.
 
 **What it does (spec-confirmed):** `line` repeats the label along the line at `symbol-spacing` intervals (pixels,
 default 250); `line-center` places exactly one label at the line center. Each glyph is placed at its along-line
@@ -505,7 +507,8 @@ different anchors/rotations instead of N sharing one. The rest is two pure Core 
   advance-center, and **vertically on the run's optical (cap-band) centre** — the same
   `TextQuadLayout.OpticalCentreBelowReferencePx` a centre-anchored point label applies (`docs/road-shields-design.md`
   D12), so a curved and a point label of the same string sit the same way on their anchor.
-  `ArcCenter` = cumulative advance to that center.
+  `ArcCenter` = cumulative advance to that center. The pen advances by the glyph's advance plus
+  `text-letter-spacing`, as in `TextQuadLayout`.
 
   > **Rejected: centering each glyph on its own ink.** The centering above adds exactly **one constant per
   > LABEL**, with no per-glyph term, so every glyph in a run keeps its exact relative offset and descenders
@@ -1115,6 +1118,15 @@ this by copying `TextKeepUpright`'s default.**
   stretch emits its own anchors and the road stays labelled; a short stub clipping a tile corner is the case
   that can genuinely go unlabelled there.
   No test reproduces this case, so nothing tracks how often it occurs on the committed fixtures.
+* **KL-A6 — a Polygon ring's start vertex is a hard seam, and a buffer clip edge is a real ring edge
+  (accepted).** Line/line-center placement closes a Polygon's exterior ring at `CopyRing`'s first vertex, so a
+  label can never straddle that seam — the path is cut there even though the ring has no such break. A
+  producer's buffer-strip clip edge is likewise an ordinary ring edge to this pipeline: an anchor on it is
+  dropped by the same `KeepAnchorsInsideTile` partition as KL-A1, but a curved label walking *toward* one can
+  still reach it. At the default `text-max-angle` the sharp turn at a clip corner drops the label instead of
+  bending it; at a large `text-max-angle` it bends along the invisible edge. Fixing the seam needs
+  wrap-around placement on a closed path; fixing the clip edge needs the decoder to mark edges that lie on
+  the producer's buffer boundary. Neither exists today.
 * **KL-B1 — `icon-rotate` does not rotate the point collision box.** The point path's box is the unrotated
   `BoundsMin/BoundsMax` AABB even under a live map bearing, so rotating it for `icon-rotate` alone would
   make the convention inconsistent with the case it must match. (The *along-line* box IS rotated — by the

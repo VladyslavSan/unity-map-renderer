@@ -232,9 +232,8 @@ namespace MapRenderer.Tests.Visual
     // The RENDERED half of the layer draw gate (LayerFadeGateTests and BackendDrawGateTests cover the C# and
     // per-backend halves). It drives the GameObjects backend, whose gated draw item a camera sees in EditMode.
     //
-    // Non-obvious why: the probe is fill-extrusion because FillExtrusionTweaker.ApplyElevatedContract blends
-    // One/Zero with DepthWrite.On, so alpha is discarded. A submitted draw is always a solid building, so pixels
-    // show whether the draw was submitted at all.
+    // Non-obvious why: the gate test probes at opacity 1, where SrcAlpha blend IS an overwrite (1·src +
+    // 0·dst = src). A submitted draw is always a solid building, so pixels show whether it was submitted.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // FillExtrusionDrawGateTests — Unity-only: render tests requiring a GPU context (SnapshotRenderer).
@@ -277,6 +276,18 @@ namespace MapRenderer.Tests.Visual
             return sum / n;
         }
 
+        /// <summary>Lerps two sRGB-byte colours in LINEAR space (the space the GPU actually blends in under
+        /// this project's Linear colour space setting), then encodes the result back to sRGB bytes for
+        /// comparison against a <see cref="SampleCentre"/> readback.</summary>
+        private static float3 LinearLerpToGamma(float3 aSrgb, float3 bSrgb, float t)
+        {
+            Color aLin = new Color(aSrgb.x, aSrgb.y, aSrgb.z).linear;
+            Color bLin = new Color(bSrgb.x, bSrgb.y, bSrgb.z).linear;
+            float3 mixLin = math.lerp(new float3(aLin.r, aLin.g, aLin.b), new float3(bLin.r, bLin.g, bLin.b), t);
+            Color mixGamma = new Color(mixLin.x, mixLin.y, mixLin.z).gamma;
+            return new float3(mixGamma.r, mixGamma.g, mixGamma.b);
+        }
+
         private static IFeature BuildingFootprint()
         {
             uint ZigZag(int v) => (uint)((v << 1) ^ (v >> 31));
@@ -292,14 +303,16 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Renders one fill-extrusion layer registered as a REAL draw item on the GameObjects backend, and
-        /// returns the sampled centre pixel. The authored opacity is 1 in both arms; the ONLY variable is
-        /// the backend's per-slot draw gate.
+        /// returns the sampled centre pixel. Callers vary either the backend's per-slot draw gate or the
+        /// authored paint — never both in the same call.
         /// </summary>
         /// <param name="drawn">False to gate the layer's slot out before rendering.</param>
-        private static float3 RenderGatedExtrusionLayer(bool drawn, string tag)
+        /// <param name="paintJson">Overrides the default opaque-hex paint — for probing OTHER paint values
+        /// (e.g. the colour's own alpha component) through this same real render path.</param>
+        private static float3 RenderGatedExtrusionLayer(bool drawn, string tag, string paintJson = null)
         {
-            var paint = TestStyle.FillExtrusionPaint($"{{\"fill-extrusion-color\":\"{BuildingHex}\",\"fill-extrusion-height\":40," +
-                "\"fill-extrusion-opacity\":1}");
+            var paint = TestStyle.FillExtrusionPaint(paintJson ??
+                $"{{\"fill-extrusion-color\":\"{BuildingHex}\",\"fill-extrusion-height\":40,\"fill-extrusion-opacity\":1}}");
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             using var meshMatBag = new ObjectDisposalBag();
@@ -311,7 +324,6 @@ namespace MapRenderer.Tests.Visual
             // gated slot must never reach.
             Material mat = meshMatBag.Track(MaterialFactory.CreateFillExtrusionMaterial(MapMaterialSetTestUtil.Load()));
             Assert.IsNotNull(mat, "Map/FillExtrusion base material must be configured.");
-            FillExtrusionTweaker.ApplyElevatedContract(mat);
 
             var applier = new ZoomStyleApplier(mat);
             MaterialFactory.BindFillExtrusionPaintToApplier(paint, applier, mat);
@@ -346,8 +358,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// A gated-out fill-extrusion slot produces NO pixels: the background survives where the building
-        /// would be. Arm 1 (ungated) proves the building draws and is framed; arm 2 changes only the gate.
-        /// Both arms author opacity 1, and One/Zero blending discards alpha, so no uniform explains arm 2.
+        /// would be. Arm 1 (ungated) proves the building draws and is framed; arm 2 changes only the gate,
+        /// so no uniform explains its background result.
         /// </summary>
         [Test]
         public void GatedFillExtrusion_RendersBackground_NotASolidBuilding()
@@ -367,6 +379,40 @@ namespace MapRenderer.Tests.Visual
                 $"came back as {gated} against a background of {bg} (the control drew " +
                 $"{drawn}). Both arms author fill-extrusion-opacity 1, so the draw item reached " +
                 "the GPU: ITileRenderBackend.SetLayerVisible did not retire it.");
+        }
+
+        /// <summary>
+        /// Alpha comes from <c>fill-extrusion-opacity</c> ALONE. Arm 1 is the solid control (opacity 1, the
+        /// plain hex). Arm 2: the spec ignores fill-extrusion-color's own alpha, so alpha 0.4 (same RGB,
+        /// opacity 1) renders exactly as solid as the control. Arm 3: opacity 0.5 (same hex, full colour
+        /// alpha) must sample strictly between the background and the control, near their midpoint.
+        /// </summary>
+        [Test]
+        public void FillExtrusion_AlphaComesFromOpacityAlone()
+        {
+            float3 drawn = RenderGatedExtrusionLayer(true, "solid-control");
+            var bg = new float3(Background.r, Background.g, Background.b);
+            Assert.Greater(math.length(drawn - bg), 0.05f,
+                $"CONTROL: the solid building must differ from the background — sampled={drawn} background={bg}.");
+
+            float3 colorAlpha04 = RenderGatedExtrusionLayer(true, "color-alpha-0.4",
+                "{\"fill-extrusion-color\":[\"rgba\",204,102,51,0.4],\"fill-extrusion-height\":40,\"fill-extrusion-opacity\":1}");
+            Assert.Less(math.length(colorAlpha04 - drawn), 0.02f,
+                $"fill-extrusion-color's own alpha must be IGNORED (fill-extrusion-opacity alone sets " +
+                $"transparency): the same RGB at colour-alpha 0.4 sampled {colorAlpha04}, at colour-alpha " +
+                $"1 (the control, same hex) sampled {drawn} — they must match, both fully solid.");
+
+            float3 opacityHalf = RenderGatedExtrusionLayer(true, "opacity-0.5",
+                $"{{\"fill-extrusion-color\":\"{BuildingHex}\",\"fill-extrusion-height\":40,\"fill-extrusion-opacity\":0.5}}");
+            // The project renders in LINEAR colour space (ProjectSettings.asset: m_ActiveColorSpace: 1), so
+            // the GPU blends bg/drawn in LINEAR before the sRGB-encoded readback — lerp in linear, not sRGB bytes.
+            float3 expectedMid = LinearLerpToGamma(bg, drawn, 0.5f);
+            Assert.Less(math.length(opacityHalf - expectedMid), 0.05f,
+                $"fill-extrusion-opacity 0.5 must reach the output as a genuine blend near the midpoint " +
+                $"between background {bg} and the solid control {drawn}: expected≈{expectedMid}, " +
+                $"sampled={opacityHalf}.");
+            Assert.Greater(math.length(opacityHalf - bg), 0.02f, $"opacity 0.5 must differ from the background — sampled={opacityHalf}.");
+            Assert.Greater(math.length(opacityHalf - drawn), 0.02f, $"opacity 0.5 must differ from the solid control — sampled={opacityHalf}.");
         }
     }
 

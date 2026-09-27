@@ -1,11 +1,11 @@
 # Depth & render regimes — how 2D and 3D map layers compose
 
 **Status:** design SSOT for the depth architecture. Fill-extrusion (3D buildings) is the **degenerate case**
-of the model, and it ships (§ "Fill-extrusion — the degenerate case" below). The **general model**
-(§ "The general model — sub-areas" below) is not built. It retrofits fill-extrusion onto the general seam and
-adds bridges, tunnels, terrain, and translucent 3D. This doc is the *why*; the open epic `UMR-74` — "3D depth
-layers & the depth-regime architecture" holds the order and the acceptance. Where this doc and the code
-disagree, the difference is the general model that is not built.
+of the model, and it ships, opaque and translucent alike (§ "Fill-extrusion — the degenerate case" and § 6
+(E) below). The rest of the **general model** (§ "The general model — sub-areas" below) is not built. It
+retrofits fill-extrusion onto the general seam and adds bridges, tunnels, and terrain. This doc is the *why*;
+the open epic `UMR-74` — "3D depth layers & the depth-regime architecture" holds the order and the
+acceptance. Where this doc and the code disagree, the difference is the general model that is not built.
 
 Related: [`meshing-design.md`](meshing-design.md) (§ "Styling as material properties", § "Fill-extrusion and
 the raster seat"), `LayerDrawOrder.cs` / `RenderLayerSet.cs` (the queue model).
@@ -85,7 +85,7 @@ Corollaries:
 | regime | writes | conforms | `ZWrite` | `ZTest` | Blend | example |
 |---|---|---|---|---|---|---|
 | **flat** | no | no | Off | **Always** | alpha | road, fill, water |
-| **elevated-3D** | yes | self only | **On** | LEqual | off (opaque) | building, bridge |
+| **elevated-3D** | yes | self only | **On** | LEqual | alpha (opacity 1 overwrites) | building, bridge |
 | **sunken/conforming** | no* | **yes** | Off* | LEqual | alpha | tunnel (under ground) |
 | **surface** | yes | (conformed-*to*) | On | LEqual | — | terrain |
 
@@ -124,8 +124,9 @@ the flip is sub-area A of § "The general model — sub-areas" below.
 Fill-extrusion is the minimum for **buildings only**, and it needs no general refactor:
 
 - `fill-extrusion` resolves (trivially, by type) to **elevated-3D**: the material carries `ZWrite On`,
-  `ZTest LEqual`, no blend (opaque case) (`FillExtrusionTweaker.ApplyElevatedContract`). It sits at its
-  **style-order queue slot in the transparent band**, like every flat layer; only its render state differs.
+  `ZTest LEqual`, and always blends (`FillExtrusionTweaker.ApplyContract`) — see § 6 (E) for why opacity 1
+  needs no separate path. It sits at its **style-order queue slot in the transparent band**, like every
+  flat layer; only its render state differs.
 - Height is extruded **in the vertex shader** along a per-vertex, `sec φ`-scaled extrude-up. The mesh is built
   once; a constant or zoom-driven height is a uniform, and a data-driven height is baked per vertex
   (`FillExtrusion_VertexModify.hlsl`). This is orthogonal to depth but is why buildings are "3D".
@@ -146,8 +147,9 @@ Translucent buildings (`fill-extrusion-opacity < 1`) are sub-area E below.
 
 ## 6. The general model — sub-areas
 
-This model is not built (open: `UMR-74`). Its seam is "**the layer resolves a two-axis depth-participation
-policy from its config**," per-layer and extensible to per-feature. The sub-areas:
+This general model is not built (open: `UMR-74`), except sub-area E below. Its seam is "**the layer resolves
+a two-axis depth-participation policy from its config**," per-layer and extensible to per-feature. The
+sub-areas:
 
 - **A. Depth-regime abstraction + refactor (keystone).** Replace the "fill-extrusion ⇒ 3D" special case
   with the general resolve-from-config seam. Flip flat Fill/Line to `ZTest Always` (P4). Retrofit
@@ -162,11 +164,26 @@ policy from its config**," per-layer and extensible to per-feature. The sub-area
   *conformed-to* surface; tunnels are its mirror. This is where building-style "self-contained depth" breaks:
   the flat layers now *read* terrain depth. Relates to `UMR-56` (terrain DEM mesh) and `UMR-53`
   (raster-DEM hillshade).
-- **E. Translucent 3D (`fill-extrusion-opacity < 1`).** The depth-prepass variant of fill-extrusion: a
-  building tile is one mesh, and per-object back-to-front transparent sort cannot order a shared mesh's own
-  walls, so a translucent building needs a **depth prepass** (`ZWrite On`, colour off) + a **colour pass**
-  (`ZTest LEqual/Equal`, `ZWrite Off`, blend) — front-surface-correct without triangle sorting. Full OIT
-  (translucent-behind-translucent) is out.
+- **E. Translucent 3D (`fill-extrusion-opacity < 1`).** Fill-extrusion always blends with depth write —
+  `ZWrite On`, `ZTest LEqual`, `SrcAlpha`/`OneMinusSrcAlpha` blend, the transparent surface keyword ALWAYS
+  OFF — asserted ONCE, at creation (`FillExtrusionTweaker.ApplyContract`); a restyle never touches render
+  state, only `_Opacity` and the other paint uniforms. At opacity 1 this blend IS an overwrite (`SrcAlpha`
+  is 1, so `1·src + 0·dst = src`), so there is no separate opaque path to switch to or pop between. The
+  keyword stays OFF so URP's SSAO, decals and screen-space shadows keep running as they would for an opaque
+  draw; the fragment bypasses URP's keyword-gated alpha output and writes its own (`_Opacity` alone — the
+  spec ignores `fill-extrusion-color`'s alpha) directly. Depth ON buys only this: a fragment behind whatever
+  already wrote a nearer depth at that pixel is rejected — a convex building's own walls need nothing more
+  (`Cull Back` removes the rest). **Limitation:** where two translucent buildings overlap on screen — or one
+  concave building's own walls overlap themselves — the depth test still picks the nearer surface, but
+  whether the farther one's colour shows through depends on draw and TRIANGLE order, not distance: two
+  buildings in different tiles, or different layers in one tile, are separate meshes ordered by DRAW order;
+  two buildings in one tile OF THE SAME LAYER, or one concave building's own overlap, share one mesh and are
+  ordered by TRIANGLE order within it. If the farther surface draws first, it blends into the frame and the
+  nearer one's later, partial-alpha draw does not erase it — the farther surface shows through, correctly.
+  If the farther surface draws after, the depth test rejects it outright — it does not show through at all.
+  The SAME mechanism also reopens the cut-wall seam a tile boundary leaves inside one building
+  (`docs/job-scheduling-design.md` § 13, item 3): if the far tile draws first, the cut wall can show as a
+  band at the seam; at opacity 1 it never shows. Full OIT (an order-independent resolution) is out.
 - **F. Style linter (DX, non-mutating).** Load-time detection of likely-mistake orderings (a non-3D layer
   above a 3D layer; `fill-extrusion` at the bottom) → developer-console warning. Changes **no** output.
 
@@ -196,6 +213,4 @@ Each question names its sub-area of § "The general model — sub-areas" above.
   depth-conforming projection — undecided; the biggest unknown in the general model.
 - **Per-feature regime plumbing** (B): how a single line layer's mesh carries mixed flat/elevated features
   and what render state the (shared, per-layer) material must therefore hold.
-- **Translucent-3D depth-prepass** (E): pass wiring across the three backends; interaction with URP depth
-  priming.
 - **Linter rule set** (F): which orderings warrant a warning without false positives on legitimate styles.

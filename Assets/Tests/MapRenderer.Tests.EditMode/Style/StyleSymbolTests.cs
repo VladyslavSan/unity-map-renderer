@@ -503,16 +503,8 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        /// <summary>Not a mid-call check like <c>EveryCommitPhase_KeepsAtLeastTheSmallerLiveMaterialCount</c>
-        /// (that needs an observation hook <c>TryRestyleInPlace</c>
-        /// exposes none of — no <c>CommitProbe</c>-equivalent exists inside a single synchronous call).
-        /// This is the two-pass shape's OTHER half instead: a REFUSED restyle must leave every original
-        /// Material and instance completely untouched — never disposed, never replaced.</summary>
-        [Test]
-        public void RefusedRestyle_LeavesEveryLayerAndMaterialInstanceUntouched()
-        {
-            // "b" changes filter — a MESH-AFFECTING change — so the whole restyle must refuse.
-            const string MeshAffectingChange = @"{
+        // "c" changes filter — a MESH-AFFECTING change — so the whole restyle must refuse.
+        private const string MeshAffectingChange = @"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [
@@ -520,14 +512,40 @@ namespace MapRenderer.Tests.Style
         { ""id"": ""c"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""c"", ""filter"": [""=="",""class"",""x""], ""paint"": { ""fill-color"": [""rgba"",0,0,255,1] } }
     ]
 }";
-            var oldStyle = StyleParser.Parse(ThreeFillOld);
-            var newStyle = StyleParser.Parse(MeshAffectingChange);
-            var set = Build(ThreeFillOld);
+
+        private const string DuplicateLayerIdJson = @"{
+    ""version"": 8, ""name"": ""T"",
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
+        { ""id"": ""x"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""x"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1], ""line-width"": 2 } },
+        { ""id"": ""a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } }
+    ]
+}";
+
+        /// <summary>Not a mid-call check like <c>EveryCommitPhase_KeepsAtLeastTheSmallerLiveMaterialCount</c>
+        /// (that needs an observation hook <c>TryRestyleInPlace</c>
+        /// exposes none of — no <c>CommitProbe</c>-equivalent exists inside a single synchronous call).
+        /// This is the two-pass shape's OTHER half instead: a REFUSED restyle must leave every original
+        /// Material and instance completely untouched — never disposed, never replaced.</summary>
+        [TestCase(ThreeFillOld, MeshAffectingChange,
+            "an added-relative-to-removed pairing plus a filter change on the survivor must refuse.",
+            TestName = "RefusedRestyle_LeavesEveryLayerAndMaterialInstanceUntouched_MeshAffectingChange")]
+        // Row 2: a duplicate "a" id (self-restyle). Without the guard, the old-side map's last write wins
+        // and slot 0 (unchanged) is tombstoned instead of refused.
+        [TestCase(DuplicateLayerIdJson, DuplicateLayerIdJson,
+            "a duplicate layer id must refuse the in-place path — the old-side map cannot tell the two " +
+            "'a' slots apart, so it cannot safely resolve which one each new 'a' declaration means.",
+            TestName = "RefusedRestyle_LeavesEveryLayerAndMaterialInstanceUntouched_DuplicateLayerId")]
+        public void RefusedRestyle_LeavesEveryLayerAndMaterialInstanceUntouched(string oldJson, string newJson, string refusalReason)
+        {
+            var oldStyle = StyleParser.Parse(oldJson);
+            var newStyle = StyleParser.Parse(newJson);
+            var set = Build(oldJson);
             var instances = new IRenderLayer[] { set[0], set[1], set[2] };
             var materials = new Material[] { set[0].Material, set[1].Material, set[2].Material };
 
-            Assert.IsFalse(set.TryRestyleInPlace(oldStyle, newStyle, StyleTransition.Default, nowSeconds: 0.0),
-                "an added-relative-to-removed pairing plus a filter change on the survivor must refuse.");
+            Assert.IsFalse(set.TryRestyleInPlace(oldStyle, newStyle, StyleTransition.Default, nowSeconds: 0.0), refusalReason);
 
             for (int i = 0; i < 3; i++)
             {

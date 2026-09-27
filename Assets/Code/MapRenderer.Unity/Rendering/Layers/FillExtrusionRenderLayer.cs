@@ -15,9 +15,10 @@ namespace MapRenderer.Unity.Rendering.Layers
 {
     /// <summary>
     /// Fill-extrusion <see cref="ITileMeshRenderLayer"/>: a <c>fill-extrusion</c> layer as a runtime render
-    /// object. <see cref="Meshing.StyledFillExtrusionTileBuilder"/> builds the roof and walls, which the
-    /// vertex shader extrudes along a per-vertex <c>sec φ</c>-baked up. <see cref="TryCreate"/> clones the
-    /// <c>Map/FillExtrusion</c> base (<see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/>).
+    /// object, ONE material that always blends — opacity 1 is a plain overwrite, so there is no separate
+    /// opaque contract (see <c>docs/depth-and-render-regimes-design.md</c> § 6 (E)).
+    /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> builds the roof and walls, extruded in the
+    /// vertex shader along a per-vertex <c>sec φ</c>-baked up.
     /// </summary>
     internal sealed class FillExtrusionRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {
@@ -70,11 +71,9 @@ namespace MapRenderer.Unity.Rendering.Layers
             return new FillExtrusionRenderLayer(layer, mat, applier, drawIndex);
         }
 
-        /// <summary>
-        /// False: <see cref="Materials.FillExtrusionTweaker.ApplyElevatedContract"/> blends
-        /// <c>One/Zero</c> with depth write, so alpha is discarded and a part-faded building would render
-        /// SOLID. This kind is fully drawn or fully absent, never part-way.
-        /// </summary>
+        /// <summary>A constant <c>false</c>: the visibility fade (entering/leaving the zoom range) snaps
+        /// instead of easing (<see cref="RenderLayerSet.AdvanceFade"/> arms it Instant). A gradual fade
+        /// (<c>true</c>) would work under the always-blend contract but is not built.</summary>
         public bool FadesGradually => false;
 
         /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
@@ -87,7 +86,8 @@ namespace MapRenderer.Unity.Rendering.Layers
 
         /// <summary>
         /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
-        /// already proven its mesh-affecting content unchanged.
+        /// already proven its mesh-affecting content unchanged. Touches no render state: the contract is
+        /// constant, applied once at creation.
         /// </summary>
         public void Restyle(MapRenderer.Unity.Style.StyleLayer layer, in StyleTransition transition, double nowSeconds)
         {

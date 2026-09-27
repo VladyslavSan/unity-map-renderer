@@ -16,15 +16,17 @@ namespace MapRenderer.Core.Text
     {
         /// <summary>Allocating overload — returns a fresh list. For the per-frame path prefer the caller-buffer
         /// overload; this layout is build-time (cached on the symbol), so the allocation is once per symbol.</summary>
-        public static List<CurvedGlyph> Layout(ShapedRun run, IGlyphAtlasView atlas)
+        public static List<CurvedGlyph> Layout(ShapedRun run, IGlyphAtlasView atlas, float letterSpacingEm = 0f)
         {
             var output = new List<CurvedGlyph>(run?.Glyphs?.Count ?? 0);
-            Layout(run, atlas, output);
+            Layout(run, atlas, output, letterSpacingEm);
             return output;
         }
 
-        /// <summary>Caller-buffer overload: clears and writes into <paramref name="output"/>.</summary>
-        public static void Layout(ShapedRun run, IGlyphAtlasView atlas, List<CurvedGlyph> output)
+        /// <summary>Caller-buffer overload: clears and writes into <paramref name="output"/>.
+        /// <paramref name="letterSpacingEm"/> is <c>text-letter-spacing</c>, added after every glyph's advance
+        /// (including notdef), mirroring <see cref="TextQuadLayout"/>.</summary>
+        public static void Layout(ShapedRun run, IGlyphAtlasView atlas, List<CurvedGlyph> output, float letterSpacingEm = 0f)
         {
             if (run == null) throw new ArgumentNullException(nameof(run));
             if (atlas == null) throw new ArgumentNullException(nameof(atlas));
@@ -34,6 +36,7 @@ namespace MapRenderer.Core.Text
             IReadOnlyList<PositionedGlyph> glyphs = run.Glyphs;
             float2 atlasSize = atlas.Size;
             float penX = 0f;
+            float letterPx = letterSpacingEm * TextQuadLayout.OneEm;
 
             for (int i = 0; i < glyphs.Count; i++)
             {
@@ -42,6 +45,7 @@ namespace MapRenderer.Core.Text
                 {
                     // notdef: no quad, fall back to the shaped advance (mirrors TextQuadLayout).
                     penX += glyph.XAdvance;
+                    penX += letterPx;
                     continue;
                 }
 
@@ -77,6 +81,7 @@ namespace MapRenderer.Core.Text
                 }
 
                 penX += advance;
+                penX += letterPx;
             }
         }
 

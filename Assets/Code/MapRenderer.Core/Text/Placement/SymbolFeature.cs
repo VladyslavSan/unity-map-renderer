@@ -65,6 +65,11 @@ namespace MapRenderer.Core.Text.Placement
         /// symbol may bend before it is dropped at that anchor (spec default 45; line placement only).</summary>
         public float MaxAngleDeg { get; init; }
 
+        /// <summary>Evaluated <c>text-letter-spacing</c> in ems — curved (along-line) text only; text that
+        /// <c>TextQuadLayout</c> lays out (point and upright line text) carries the same value inside
+        /// <see cref="LayoutOptions"/> instead. Fed straight into <see cref="CurvedTextLayout"/>.</summary>
+        public float LetterSpacingEm { get; init; }
+
         /// <summary><c>text-keep-upright</c> — flip a right-to-left curved symbol so it reads left-to-right
         /// (default true; line placement only). On an ICON curved symbol this is always
         /// <c>false</c>: <c>icon-keep-upright</c>'s spec default is false, and a one-way arrow that flipped

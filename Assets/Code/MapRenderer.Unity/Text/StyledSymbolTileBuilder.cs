@@ -346,7 +346,7 @@ namespace MapRenderer.Unity.Text
                         {
                             // Curved along-line symbol, oriented by the line tangent each frame, so it takes
                             // no point-layout options. Same reused-then-copied pattern as above.
-                            CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedPlacements);
+                            CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedPlacements, s.LetterSpacingEm);
                             int textGlyphStart = buffer.Glyphs.Count;
                             for (int g = 0; g < curvedPlacements.Count; g++) buffer.Glyphs.Add(curvedPlacements[g]);
                             int textAnchorStart = buffer.AppendAnchors(s.LineAnchors, out int textAnchorCount);

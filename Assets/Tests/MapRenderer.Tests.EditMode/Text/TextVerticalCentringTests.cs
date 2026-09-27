@@ -14,6 +14,7 @@
 //   IconQuadLayoutTests           — Layout over the committed sample-sprite.json fixture's own numbers (sheet 64×64 — marker 16×16@1x, star 24×24@2x, dot 8×8@1x at (0,32)), hand-pinned rather than re-derived, so a formula regression (e.g.
 //   SdfDistanceFieldTests         — The decoded glyph-PBF bitmap is a REAL signed distance field, not a coverage bitmap masquerading as one, against the same committed fixture (Assets/Fixtures/glyphs/NotoSansRegular/0-255.pbf.bytes) Slice 1's decode tests use.
 //   TextAnchorOffsetJustifyTests  — T2 (text-anchor shifts the whole multi-line block bbox, H and V), T3 (text-offset / text-radial-offset, ems -&gt; baked px), T4 (text-justify incl.
+//   TextLayoutOptionsBuilderTests — TextLayoutOptionsBuilder.Build must survive a text-letter-spacing expression that cannot evaluate (falls back to 0, does not abort the label).
 //   TextQuadLayoutTests           — T1 (THE decisive per-glyph quad golden: buffer + UV + pen-advance + anchor, element-by-element) and T8 (structural: no text-size parameter; SymbolQuad is blittable).
 //   TextRtlLayoutTests            — RTL single-line correctness.
 //   TextShapingTests              — THE decisive Model-A/Option-Y shaping test.
@@ -21,6 +22,8 @@
 //   TextWrapTests                 — T5 (greedy word-wrap, golden line assignment) and T6 (whitespace advances the pen but emits no quad).
 
 using NUnit.Framework;
+using MapRenderer.Core.Expressions;
+using MapRenderer.Core.Json;
 using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Tests.Style; // SymbolTestFixtures lives in the Style test folder
@@ -439,6 +442,81 @@ namespace MapRenderer.Tests.Text
             // The second visible glyph's arc-center includes the (skipped) space's advance.
             float expected = entryA.Advance + entrySpace.Advance + entryLowerA.Advance * 0.5f;
             Assert.AreEqual(expected, glyphs[1].ArcCenter, 1e-4f, "arc still advances through whitespace");
+        }
+
+        // =========================================================================================
+        // UMR-227 part C — text-letter-spacing on curved (along-line) text. Tracking is in ems and scales
+        // like the advance, so it belongs only on the pen advance, exactly as TextQuadLayout does it.
+        // =========================================================================================
+
+        [Test]
+        public void LetterSpacing_AddsExactPixelGapBetweenArcCenters()
+        {
+            FontStackGlyphs latin = DecodeLatin();
+            var atlas = new GlyphAtlas();
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            GlyphAtlasEntry entryB = atlas.Append(latin.Glyphs[(uint)'B'], 0);
+            ShapedRun run = MakeRun((uint)'A', (uint)'B');
+
+            IReadOnlyList<CurvedGlyph> glyphs = CurvedTextLayout.Layout(run, atlas, letterSpacingEm: 0.5f);
+            Assert.AreEqual(2, glyphs.Count, "both glyphs are visible");
+
+            // 0.5em * OneEm(24) = 12px, added once between the two glyphs' advance-midpoints.
+            float expectedGap = entryA.Advance * 0.5f + entryB.Advance * 0.5f + 12f;
+            float gap = glyphs[1].ArcCenter - glyphs[0].ArcCenter;
+            Assert.AreEqual(expectedGap, gap, 1e-4f);
+        }
+
+        [Test]
+        public void LetterSpacing_AppliesAcrossANotdefGlyph_NotJustPlacedOnes()
+        {
+            FontStackGlyphs latin = DecodeLatin();
+            var atlas = new GlyphAtlas();
+            atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            atlas.Append(latin.Glyphs[(uint)'B'], 0);
+            // A codepoint absent from the atlas: notdef, falls back to the shaped advance and emits no cell.
+            ShapedRun run = MakeRun((uint)'A', 0xFFFFu, (uint)'B');
+
+            IReadOnlyList<CurvedGlyph> zeroSpacing = CurvedTextLayout.Layout(run, atlas, letterSpacingEm: 0f);
+            IReadOnlyList<CurvedGlyph> withSpacing = CurvedTextLayout.Layout(run, atlas, letterSpacingEm: 0.5f);
+            Assert.AreEqual(2, zeroSpacing.Count, "the notdef emits no cell");
+            Assert.AreEqual(2, withSpacing.Count);
+
+            // 'B' is the second VISIBLE glyph but the THIRD glyph overall: spacing must apply after 'A's
+            // advance AND after the notdef's advance, so 'B' shifts by TWO letterPx increments — a fix that
+            // only adds spacing on placed glyphs (skipping the notdef's early-continue branch) shifts it by one.
+            float letterPx = 0.5f * TextQuadLayout.OneEm;
+            float expectedShift = 2f * letterPx;
+            float actualShift = withSpacing[1].ArcCenter - zeroSpacing[1].ArcCenter;
+            Assert.AreEqual(expectedShift, actualShift, 1e-4f);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // TextLayoutOptionsBuilderTests — a value that cannot evaluate must not drop the label
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="TextLayoutOptionsBuilder.Build"/> must survive a <c>text-letter-spacing</c> expression
+    /// that cannot evaluate (UMR-224's <c>icon-padding</c> precedent) — the same tile-build-must-not-die
+    /// contract <c>SymbolFeatureExtractor</c>'s curved branch already holds for this property.
+    /// </summary>
+    [TestFixture]
+    public class TextLayoutOptionsBuilderTests
+    {
+        [Test]
+        public void Build_MalformedLetterSpacingExpression_FallsBackToZero_NotThrow()
+        {
+            // Mismatched interpolate stop types (a number stop, a string stop) — Evaluate throws.
+            JsonValue layoutJson = JsonParser.Parse(
+                "{\"text-letter-spacing\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,0,10,\"oops\"]}");
+            LayoutProperties layout = LayoutProperties.Parse(layoutJson);
+            Assert.Throws<ExpressionEvaluationException>(() => layout.TextLetterSpacing.Evaluate(5.0));
+
+            TextLayoutOptions options = default;
+            Assert.DoesNotThrow(() => options = TextLayoutOptionsBuilder.Build(layout, 5.0, null),
+                "a text-letter-spacing expression that cannot evaluate must not abort the whole point/upright label");
+            Assert.AreEqual(0f, options.LetterSpacingEm, 1e-6f, "TryEvaluate must degrade to no extra spacing");
         }
     }
 
