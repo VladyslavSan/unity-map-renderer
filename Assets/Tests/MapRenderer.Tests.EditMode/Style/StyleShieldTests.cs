@@ -209,9 +209,9 @@ namespace MapRenderer.Tests.Style
             // Each half's box must be `sharedAnchor + ITS OWN bounds at ITS OWN size`. Collapsing the rider
             // onto the owner's box, or scaling the rider's bounds by the owner's text size, fails here.
             SymbolBox expectedIcon = SymbolBox.Build(sharedScreenPx, iconBoundsMin, iconBoundsMax,
-                TextQuadLayout.OneEm, icon.PaddingPx, 0f, 0, 0, 0, false, false);
+                TextQuadLayout.OneEm, icon.PaddingPx);
             SymbolBox expectedText = SymbolBox.Build(sharedScreenPx, textLayout.Min, textLayout.Max,
-                text.TextSizePx, text.PaddingPx, 0f, 0, 0, 0, false, false);
+                text.TextSizePx, text.PaddingPx);
             AssertBoxEqual(expectedIcon, iconBox, "the owner's box");
             AssertBoxEqual(expectedText, textBox, "the rider's box");
 
@@ -272,7 +272,6 @@ namespace MapRenderer.Tests.Style
             var blockerBox = new SymbolBox
             {
                 Min = textBox.Min - new float2(1f, 1f), Max = textBox.Max + new float2(1f, 1f),
-                SortKey = -1f, FeatureIndex = -1, TileKey = 999, SymbolIndex = 99,
             };
             Assert.IsFalse(SymbolCollision.Overlaps(in blockerBox, in boxes[0]),
                 "precondition: the blocker must address the TEXT half alone, never the dot's box");

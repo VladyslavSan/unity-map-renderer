@@ -1228,15 +1228,16 @@ correct for a displaced half.
 
 **F-PA-1 — a spec divergence that non-centred pairing makes reachable. Read this before blaming the
 predicate.** `SymbolStagingMath.StagePointPair` sets the candidate's
-`AllowOverlap = owner.AllowOverlap && rider.AllowOverlap`, and `CollisionJob` consults only that
-**candidate** flag — `SymbolBox.AllowOverlap` is carried per box but never read there. Per the Style Spec,
-each `*-allow-overlap` governs its own element. The two agree when the text is blocked (both drop) and
-**diverge in the mirror case**: dot's box blocked, text's box free — the spec places both, this renderer
-drops both. No shield layer sets allow-overlap, but `label_city`/`_capital`/`_town`/`_village` all set
-`icon-allow-overlap: true`, so the case is reachable. *Consequence:* slightly fewer city labels at z<9/10,
-**on top of** the intended reduction above. **If the eyeball reads "too few labels", this is the suspect —
-not the pairing predicate.** Do not re-widen the predicate to compensate. Fix shape when it matters: test
-each box with its own carried `AllowOverlap`, keep the all-or-nothing AND on the verdicts.
+`AllowOverlap = owner.AllowOverlap && rider.AllowOverlap`, and `CollisionJob` consults only that one
+**candidate**-level, AND-ed flag for the whole pair. Per the Style Spec, each `*-allow-overlap` governs its
+own element. The two agree when the text is blocked (both drop) and **diverge in the mirror case**: dot's
+box blocked, text's box free — the spec places both, this renderer drops both. No shield layer sets
+allow-overlap, but `label_city`/`_capital`/`_town`/`_village` all set `icon-allow-overlap: true`, so the
+case is reachable. *Consequence:* slightly fewer city labels at z<9/10, **on top of** the intended
+reduction above. **If the eyeball reads "too few labels", this is the suspect — not the pairing
+predicate.** Do not re-widen the predicate to compensate. Fix shape when it matters: carry a per-half
+allow-overlap bit mask on `SymbolCandidate` (like `OptionalBoxMask`), test each box against its own bit,
+and keep the all-or-nothing AND on the verdicts.
 
 **F-PA-2 — `AnchorEmitContext.PairedInstance` could be structural instead of hand-maintained.** It is an
 `init` property set at two call sites in `SymbolFeatureExtractor`, and both reduce to `hasIcon && text !=

@@ -191,15 +191,13 @@ namespace MapRenderer.Tests.TestSupport
                 float y = (float)(rng.NextDouble() * worldH);
                 float w = wMin + (float)(rng.NextDouble() * (wMax - wMin));
                 float h = hMin + (float)(rng.NextDouble() * (hMax - hMin));
-                boxes[i] = new SymbolBox
-                {
-                    Min = new float2(x, y), Max = new float2(x + w, y + h),
-                    SortKey = rng.Next(0, 6), FeatureIndex = i, TileKey = rng.Next(0, 4), SymbolIndex = i,
-                };
+                float sortKey = rng.Next(0, 6);
+                long tileKey = rng.Next(0, 4);
+                boxes[i] = new SymbolBox { Min = new float2(x, y), Max = new float2(x + w, y + h) };
                 cands[i] = new SymbolCandidate
                 {
-                    BoxStart = i, BoxCount = 1, SortKey = boxes[i].SortKey, FeatureIndex = i,
-                    TileKey = boxes[i].TileKey, SymbolIndex = i,
+                    BoxStart = i, BoxCount = 1, SortKey = sortKey, FeatureIndex = i,
+                    TileKey = tileKey, SymbolIndex = i,
                 };
             }
             return (cands, boxes);

@@ -43,7 +43,7 @@ namespace MapRenderer.Core.Text.Placement
 
             int boxStart  = boxCount;
             int emitStart = emitCount;
-            AppendPointHalf(in s, quads, s.ScreenPx, s.SurfaceUp, bearingRadians, ordinal,
+            AppendPointHalf(in s, quads, s.ScreenPx, s.SurfaceUp, bearingRadians,
                 boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
 
             candidates[ordinal] = new SymbolCandidate
@@ -82,7 +82,7 @@ namespace MapRenderer.Core.Text.Placement
             int emitStart = emitCount;
             // Both halves use the OWNER's raw anchor and SurfaceUp; AppendPointHalf adds each half's own
             // translate, so a text-translate still resolves.
-            AppendPointHalf(in owner, ownerQuads, owner.ScreenPx, owner.SurfaceUp, bearingRadians, ordinal,
+            AppendPointHalf(in owner, ownerQuads, owner.ScreenPx, owner.SurfaceUp, bearingRadians,
                 boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
 
             int boxCountForCandidate = 1;
@@ -91,7 +91,7 @@ namespace MapRenderer.Core.Text.Placement
             byte optionalMask = owner.PairOptional ? (byte)0b01 : (byte)0;
             if (riderQuads.Length > 0)
             {
-                AppendPointHalf(in rider, riderQuads, owner.ScreenPx, owner.SurfaceUp, bearingRadians, ordinal,
+                AppendPointHalf(in rider, riderQuads, owner.ScreenPx, owner.SurfaceUp, bearingRadians,
                     boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
                 boxCountForCandidate = 2;
                 if (rider.PairOptional) optionalMask |= 0b10;
@@ -118,7 +118,7 @@ namespace MapRenderer.Core.Text.Placement
         // Appends ONE half of a point symbol (box, quads, CandidateEmit) with this half's own translate and
         // rotation at the shared un-translated `screenPx`; lone symbols and pair halves share it, so cannot drift.
         private static void AppendPointHalf(in PointStageInput s, ReadOnlySpan<SymbolQuad> quads,
-            float2 screenPx, float3 surfaceUp, float bearingRadians, int candidateOrdinal,
+            float2 screenPx, float3 surfaceUp, float bearingRadians,
             Span<SymbolBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
             Span<CandidateEmit> emit, ref int emitCount)
         {
@@ -127,11 +127,8 @@ namespace MapRenderer.Core.Text.Placement
             // composes them. IconRotationRadians is the one sense negation, shared with the along-line path.
             float rotationRadians = SymbolBearing.BillboardRotationRadians(s.RotationAlignment, bearingRadians)
                                     + SymbolBearing.IconRotationRadians(s.IconRotateRadians);
-            float sortKey = SanitizeSortKey(s.SortKey); // finite-SortKey invariant (comparator totality)
-
             boxes[boxCount++] = SymbolBox.Build(
-                translatedScreenPx, s.BoundsMin, s.BoundsMax, s.TextSizePx, s.PaddingPx,
-                sortKey, s.FeatureIndex, s.TileKey, candidateOrdinal, s.AllowOverlap, s.IgnorePlacement);
+                translatedScreenPx, s.BoundsMin, s.BoundsMax, s.TextSizePx, s.PaddingPx);
 
             int quadStart = quadCount;
             for (int q = 0; q < quads.Length; q++)

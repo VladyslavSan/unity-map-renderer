@@ -7,11 +7,10 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// One symbol's screen-space collision record — the axis-aligned bounding box <c>CollisionJob</c> tests
-    /// for overlap, plus the greedy placement-order key (<see cref="SortKey"/> + the
-    /// <see cref="FeatureIndex"/>/<see cref="TileKey"/> stable tiebreak) and the per-symbol overlap flags.
-    /// <see cref="Min"/>/<see cref="Max"/> are in logical screen pixels with <c>text-padding</c> ALREADY
-    /// applied (see <see cref="Build"/>); <see cref="SymbolIndex"/> is the back-reference to the source symbol list.
+    /// One symbol's screen-space collision AABB, in logical screen pixels with <c>text-padding</c> ALREADY
+    /// applied (see <see cref="Build"/>). The placement-order key and the per-symbol overlap flags live on
+    /// <see cref="SymbolCandidate"/>, which <c>CollisionJob</c> reads for them; only <see cref="Min"/>/
+    /// <see cref="Max"/> feed the collision test itself.
     /// </summary>
     public struct SymbolBox
     {
@@ -20,25 +19,6 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Collision AABB maximum corner, logical screen px (padding applied).</summary>
         public float2 Max;
-
-        /// <summary>`symbol-sort-key` — greedy placement order. LOWER is placed FIRST (MapLibre priority:
-        /// a lower sort key wins a collision against a higher one).</summary>
-        public float SortKey;
-
-        /// <summary>Feature index within its tile — the first stable tiebreak when <see cref="SortKey"/>s are equal.</summary>
-        public int FeatureIndex;
-
-        /// <summary>Owning tile id (opaque key) — the second stable tiebreak, guaranteeing a total order.</summary>
-        public long TileKey;
-
-        /// <summary>Index back into the caller's symbol list — survivor identity after the box array is sorted.</summary>
-        public int SymbolIndex;
-
-        /// <summary>`text-allow-overlap` — skip the collision test and always place this symbol.</summary>
-        public bool AllowOverlap;
-
-        /// <summary>`text-ignore-placement` — place this symbol but do NOT let it block later ones.</summary>
-        public bool IgnorePlacement;
 
         /// <summary>
         /// Builds the screen-space collision box for a symbol from its projected anchor, the block bbox
@@ -52,13 +32,7 @@ namespace MapRenderer.Core.Text.Placement
             in float2 boundsMin,
             in float2 boundsMax,
             float textSizePx,
-            float paddingPx,
-            float sortKey,
-            int featureIndex,
-            long tileKey,
-            int symbolIndex,
-            bool allowOverlap,
-            bool ignorePlacement)
+            float paddingPx)
         {
             float scale = textSizePx / TextQuadLayout.OneEm;
             var pad = new float2(paddingPx, paddingPx);
@@ -66,12 +40,6 @@ namespace MapRenderer.Core.Text.Placement
             {
                 Min = anchorScreenPx + boundsMin * scale - pad,
                 Max = anchorScreenPx + boundsMax * scale + pad,
-                SortKey = sortKey,
-                FeatureIndex = featureIndex,
-                TileKey = tileKey,
-                SymbolIndex = symbolIndex,
-                AllowOverlap = allowOverlap,
-                IgnorePlacement = ignorePlacement,
             };
         }
 
@@ -79,8 +47,7 @@ namespace MapRenderer.Core.Text.Placement
         /// The AABB of ONE curved-symbol glyph's four ROTATED cell corners, so the box tracks the glyph on a
         /// sloped line: <see cref="BillboardMath.BuildWorldQuad"/>'s scale and CCW rotation about
         /// <paramref name="anchorScreenPx"/>, grown by <paramref name="paddingPx"/>. <paramref name="cellSkirt"/>
-        /// is removed first, so the box bounds icon ink; text passes 0 and stays byte-identical. Only
-        /// <see cref="Min"/>/<see cref="Max"/> are meaningful.
+        /// is removed first, so the box bounds icon ink; text passes 0 and stays byte-identical.
         /// </summary>
         public static SymbolBox BuildRotatedGlyph(
             in float2 anchorScreenPx,
