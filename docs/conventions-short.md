@@ -192,13 +192,13 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     validation walks **native container** fields; a field with no container in it is never on that walk. Unity
     ships `[ReadOnly] public int Num;` in its own Collections test fixtures — the habit is not a smell.
   - *The trap, and the reason NOT to sweep:* on a **generic** field the declaration site cannot see whether
-    the argument holds a container. `FillGatherJob.cs:54`'s `[ReadOnly] public TComparer Comparer;` is
+    the argument holds a container. `FillGatherJob.Comparer` (`[ReadOnly] public TComparer Comparer;`) is
     **load-bearing** — the comparer holds two `NativeArray` fields built from the *same allocation* the job's
     own `Vertices`/`RingOffsets` view, so without it the safety system sees one read-only and one implicitly
     writable alias and throws at schedule (*"two containers may not be the same (aliasing)"*), caught by
     `FillGraphBurstProbeTests`. A mechanical "strip it from anything that isn't a `Native*`" sweep deletes
     exactly that one.
-  - *Also generic, inert only for now:* `ProjectPointsJob.cs:45` and `GlobeFillSubdivider.cs:63`
+  - *Also generic, inert only for now:* `ProjectPointsJob.Projection` and `GlobeFillSubdivideJob.Projection`
     (`[ReadOnly] public TProj Projection;`) — inert while every projection struct stays stateless,
     load-bearing the moment one holds a container.
   - *Applied:* new code follows the containers-only half. The second half only ever answers "leave it".

@@ -11,8 +11,8 @@ namespace MapRenderer.Core.Text.Placement
     /// The per-frame symbol STAGING geometry — projecting/placing one symbol's collision boxes + drawn quads —
     /// as pure, engine-free static functions over BLITTABLE inputs (<see cref="PointStageInput"/>/
     /// <see cref="CurvedStageInput"/>) plus this frame's projected geometry. Values that need managed state
-    /// (point fade id, <see cref="LinearColor"/>, last-frame incumbency) arrive pre-resolved. Outputs append to
-    /// caller-owned pools that grow and never shrink, so a warm frame allocates nothing.
+    /// (point fade id, <c>SymbolPlacementSystem.LinearColor</c>, last-frame incumbency) arrive pre-resolved.
+    /// Outputs append to caller-owned pools that grow and never shrink, so a warm frame allocates nothing.
     /// </summary>
     public static class SymbolStagingMath
     {
@@ -424,7 +424,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>LINE fade identity: (tile, LAYER, feature, anchor-index) FNV-1a-64; anchor index -1 is the
         /// centred fallback. Non-local invariant: <paramref name="layerId"/> is required, because the extractor
         /// restarts <c>FeatureIndex</c> per layer, and two candidates sharing a fade id fight over one opacity in
-        /// <see cref="SymbolPlacementSystem"/>. <see cref="SymbolPlacementSystem.PointFadeId"/> does the same.</summary>
+        /// <c>SymbolPlacementSystem</c>. <c>SymbolPlacementSystem.PointFadeId</c> does the same.</summary>
         public static long LineFadeId(long tileKey, int layerId, int featureIndex, int anchorIndex)
         {
             unchecked

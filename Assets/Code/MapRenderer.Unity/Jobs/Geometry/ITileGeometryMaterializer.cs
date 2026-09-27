@@ -62,7 +62,7 @@ namespace MapRenderer.Unity.Jobs.Geometry
     /// <para><b>Empty input ⇒ <c>default(TileGeometryBuffers)</c></b> (<c>IsCreated == false</c>), allocating
     /// nothing.</para>
     /// </summary>
-    public interface ITileGeometryMaterializer
+    internal interface ITileGeometryMaterializer
     {
         /// <summary>Mints one tile's decoded rings. Ownership of the result transfers to the caller.</summary>
         TileGeometryBuffers Materialize();

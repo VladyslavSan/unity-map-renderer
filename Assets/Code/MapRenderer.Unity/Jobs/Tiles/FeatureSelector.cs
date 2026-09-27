@@ -15,7 +15,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// and an ordinal member on <see cref="IFeature"/> would put a geometry-join concern on the neutral
     /// evaluation surface. Use a <b>single</b> list of pairs, never two parallel lists that can desync.
     /// </summary>
-    public readonly struct SelectedTileFeature
+    internal readonly struct SelectedTileFeature
     {
         /// <summary>The selected feature itself.</summary>
         public IFeature Feature { get; init; }
@@ -32,7 +32,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// <see cref="ITileLayer"/> entry point, a VM-compilable filter over an <see cref="INativeFilterSource"/>
     /// layer runs on the Burst filter VM instead (<see cref="NativeProgramFor"/>), with the same result.
     /// </summary>
-    public static class FeatureSelector
+    internal static class FeatureSelector
     {
         /// <summary>
         /// Selects features from <paramref name="tile"/> that belong to the source-layer declared by

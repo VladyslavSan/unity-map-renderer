@@ -91,7 +91,7 @@ namespace MapRenderer.Core.Text
 
         /// <summary>The dense id for <paramref name="fontName"/>, assigned on first use and stable for this
         /// atlas's lifetime. A null name interns as the empty name — one shared id, not a per-call new one.
-        /// <see cref="MapRenderer.Unity.Text.GlyphManager"/> stamps the SAME id onto every shaped glyph, which
+        /// <c>MapRenderer.Unity.Text.GlyphManager</c> stamps the SAME id onto every shaped glyph, which
         /// is what makes <see cref="TryGetEntry"/> find the face the style asked for.</summary>
         public int FontId(string fontName)
         {

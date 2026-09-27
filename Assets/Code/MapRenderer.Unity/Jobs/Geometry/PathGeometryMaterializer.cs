@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Jobs.Geometry
     /// producer's buffer), because ring assembly and earcut thresholds assume tile-integer scale. Each call
     /// returns a fresh buffer that the caller owns.
     /// </summary>
-    public sealed class PathGeometryMaterializer : ITileGeometryMaterializer
+    internal sealed class PathGeometryMaterializer : ITileGeometryMaterializer
     {
         private readonly TileId                                             _tile;
         private readonly double                                            _extent;

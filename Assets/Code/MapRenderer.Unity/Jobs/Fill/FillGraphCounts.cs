@@ -7,7 +7,7 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// the interior prefix from what <see cref="FillBandJob"/> appends. The error flag is the separate
     /// <see cref="FillGraphOutput.Error"/>, so an error-only writer does not write counts.
     /// </summary>
-    public struct FillGraphCounts
+    internal struct FillGraphCounts
     {
         /// <summary>No error.</summary>
         public const int Ok = 0;

@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Geometry
     /// because the graph reports this ring count and the length filters belong to the consumers.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct RingSelectJob : IJob
+    internal struct RingSelectJob : IJob
     {
         // ── Input (borrowed — never written, never disposed here) ──────────────────────────────
         [ReadOnly] public NativeArray<double2> Vertices;

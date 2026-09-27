@@ -164,6 +164,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// caller from here on.</param>
         /// <param name="featureBake">Per-feature data-driven base/height bake (x=base, y=height),
         /// Persistent-allocated and owned by the caller from here on.</param>
+        /// <param name="buffers">Optional pooled ring-visit-order scratch, shared with fill's own
+        /// <see cref="StyledFillTileBuilder.BuildLayerInput"/> use of it.</param>
         internal static FillMeshPipeline.LayerInput BuildLayerInput(
             IReadOnlyList<SelectedTileFeature> selectedFeatures,
             TileGeometryBuffers                geometry,
@@ -235,7 +237,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     return default; // no polygon geometry
                 }
 
-                order = BuildRingVisitOrder(geometry, rankByOrdinal, rank);
+                order = StyledFillTileBuilder.BuildRingVisitOrder(geometry, rankByOrdinal, rank, buffers);
 
                 featureColors = colors;
                 featureBake   = bake;
@@ -344,37 +346,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
             {
                 Mda = mda, Bounds = bounds, VertexCount = vr + vw, Handle = handle, IsCreated = true,
             };
-        }
-
-        /// <summary>
-        /// The rings this layer wants drawn, in draw order — a plain declared-order selection (no
-        /// fill-sort-key equivalent for fill-extrusion), otherwise identical in shape to
-        /// <see cref="StyledFillTileBuilder"/>'s counting-sort ring-visit builder: rings of one feature stay
-        /// contiguous (<c>RingAssemblyJob</c> resets its exterior sign on a feature change).
-        /// </summary>
-        private static NativeArray<int> BuildRingVisitOrder(
-            TileGeometryBuffers geometry, NativeArray<int> rankByOrdinal, int rankCount)
-        {
-            var rankStart = new int[rankCount + 1];
-            int visited = 0;
-            for (int r = 0; r < geometry.RingCount; r++)
-            {
-                int rk = rankByOrdinal[geometry.RingFeatureIdx[r]];
-                if (rk < 0) continue;
-                rankStart[rk + 1]++;
-                visited++;
-            }
-            for (int i = 0; i < rankCount; i++) rankStart[i + 1] += rankStart[i];
-
-            var order  = new NativeArray<int>(visited, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var cursor = (int[])rankStart.Clone();
-            for (int r = 0; r < geometry.RingCount; r++)
-            {
-                int rk = rankByOrdinal[geometry.RingFeatureIdx[r]];
-                if (rk < 0) continue;
-                order[cursor[rk]++] = r;
-            }
-            return order;
         }
 
         /// <summary>metres→world factor at one vertex: 1.0 on the globe (true ECEF metres); the Web

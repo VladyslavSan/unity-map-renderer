@@ -9,7 +9,7 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// Runs the per-tile screen-coverage pre-cull (<see cref="SymbolTileCoverage"/>) after the cross-tile dedup
-    /// (<see cref="Text.SymbolTileStore.CollectInto"/>) and before the SoA batch build, so a low-coverage tile's
+    /// (<c>MapRenderer.Unity.Text.SymbolTileStore.CollectInto</c>) and before the SoA batch build, so a low-coverage tile's
     /// records never enter it. Non-obvious why: culling before dedup would change dedup winners. A tile below
     /// threshold is Fade (eased out) while it was above last frame or is inside its grace window, else Drop;
     /// the caller owns the grace window and easing, and this only classifies and stamps the deadline.

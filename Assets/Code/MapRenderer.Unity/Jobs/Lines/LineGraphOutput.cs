@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Lines
     /// <see cref="Dispose"/> (which completes first) or reads outputs only after its own
     /// <c>Handle.Complete()</c>.
     /// </summary>
-    public struct LineGraphOutput : IDisposable
+    internal struct LineGraphOutput : IDisposable
     {
         /// <summary>Ribbon vertices in emission order, across every ring the layer's rings gathered.</summary>
         public NativeList<LineRibbonVertex> Vertices;

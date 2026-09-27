@@ -11,6 +11,8 @@
 //   FillMeshPipelineRetirementFenceTests    — retired fill-pipeline symbols never regrow a caller.
 //   WallChainCallerFenceTests               — the wall-job chain cannot re-inline into the extrusion prologue.
 //   ProjectPointsJobConstructionFenceTests  — only its declaration + scheduler may construct ProjectPointsJob.
+//   RingCopyConstructionFenceTests          — only their declaration + VisitedRingCopy may construct RingClipJob/RingSelectJob.
+//   JobsNamespaceVisibilityTests            — every type under MapRenderer.Unity.Jobs is internal.
 //   TileBuildGraphKindNeutralityTests       — TileBuildGraph retains no per-kind (fill/line/extrusion) knowledge.
 //   RenderModeMeshingFenceTests             — mesh preparation never branches on render mode (Lit vs Unlit).
 //   GlobeFillVertexKeySizeTests             — GlobeFillVertexKey is hand-enumerated field by field; a new GlobeFillVertex column is not picked up automatically.
@@ -2146,6 +2148,39 @@ namespace MapRenderer.Tests.Structure
                 "its own handle.");
         }
 
+        /// <summary>The same shape check as <see cref="FillMeshGraph_HasNoCompleteNoScheduleTimeAsArray_AndReferencesEveryNode"/>,
+        /// applied to the shared ring-copy helper and the fill-extrusion graph that calls it.
+        /// <paramref name="minDisposeCalls"/> pins <c>VisitedRingCopy</c>'s clip-arm ping-pong dispose (one
+        /// per buffer); it is 0 (no check) for the file that only calls it.</summary>
+        [TestCase("Jobs/Geometry/VisitedRingCopy.cs", "RingClipJob,RingSelectJob,JobHandle", 2)]
+        [TestCase("Rendering/Meshing/FillExtrusionMeshGraph.cs", "VisitedRingCopy,ProjectionColumnSizingJob,WallQuadJob,JobHandle", 0)]
+        public void GraphHelperSources_HaveNoCompleteNoScheduleTimeAsArray_AndReferenceRequiredTokens(
+            string relativePath, string requiredTokensCsv, int minDisposeCalls)
+        {
+            string code = StripLineComments(SourceUnderMapRendererUnity(relativePath.Split('/')));
+            Assert.Greater(code.Trim().Length, 0, $"precondition: {relativePath} source is non-empty");
+
+            foreach (string token in requiredTokensCsv.Split(','))
+                Assert.Greater(CountOccurrences(code, token), 0,
+                    $"precondition: {relativePath} must still reference '{token}' — without it this test's " +
+                    "zero-counts below would be satisfied by a gutted or renamed file");
+
+            foreach (string token in ForbiddenTokens)
+                Assert.AreEqual(0, CountOccurrences(code, token),
+                    $"{relativePath} must contain ZERO occurrences of '{token}' — this graph builder never " +
+                    "takes a schedule-time array view of a list it resizes, never dispatches synchronously, " +
+                    "and never touches the managed-closure seam.");
+
+            Assert.AreEqual(0, CompleteCallPattern.Matches(code).Count,
+                $"{relativePath} must contain ZERO Complete() calls — this graph builder never completes " +
+                "its own handle.");
+
+            if (minDisposeCalls > 0)
+                Assert.GreaterOrEqual(CountOccurrences(code, ".Dispose("), minDisposeCalls,
+                    $"{relativePath} must dispose at least {minDisposeCalls} buffers — one per clip-arm " +
+                    "ping-pong array, or the combined handle it returns would not cover them.");
+        }
+
         // ── The attribute fence over the graph-builder and stream-write directories: no
         // NativeDisableContainerSafetyRestriction anywhere, and NativeDisableParallelForRestriction exactly once
         // each in EarcutBatchJob.cs and RibbonBatchJob.cs. Non-obvious why: an exception is a (file, token,
@@ -2285,9 +2320,13 @@ namespace MapRenderer.Tests.Structure
                 "job resizes, never a borrowed count; verify the new/removed file against that rule before updating this list.");
         }
 
-        private static string FillMeshGraphSource()
+        private static string FillMeshGraphSource() => SourceUnderMapRendererUnity("Jobs", "Fill", "FillMeshGraph.cs");
+
+        /// <summary>Reads a file's source, given a path relative to <c>MapRenderer.Unity/</c>.</summary>
+        private static string SourceUnderMapRendererUnity(params string[] relativeParts)
         {
-            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Jobs", "Fill", "FillMeshGraph.cs");
+            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            foreach (string part in relativeParts) path = Path.Combine(path, part);
             FileAssert.Exists(path);
             return File.ReadAllText(path);
         }
@@ -2606,6 +2645,108 @@ namespace MapRenderer.Tests.Structure
                 if (idx >= 0) lines[i] = lines[i].Substring(0, idx);
             }
             return string.Join('\n', lines);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // RingCopyConstructionFenceTests — only their declaration + VisitedRingCopy may construct RingClipJob/RingSelectJob
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>RingClipJob</c> and <c>RingSelectJob</c> are each constructed in exactly two places: their own
+    /// declaring file, and <c>VisitedRingCopy.Schedule</c> — the one site fill and fill-extrusion both route
+    /// through. Same bare-identifier scan as <see cref="ProjectPointsJobConstructionFenceTests"/>
+    /// / <see cref="WallChainCallerFenceTests"/>: a <c>new\s+</c> anchor would miss
+    /// <c>RingClipJob j = new() {...}</c> and <c>default(RingClipJob)</c>.
+    /// </summary>
+    [TestFixture]
+    public class RingCopyConstructionFenceTests
+    {
+        [TestCase("RingClipJob", "RingClipJob.cs")]
+        [TestCase("RingSelectJob", "RingSelectJob.cs")]
+        public void JobType_AppearsInExactlyItsDeclarationAndVisitedRingCopy(string identifier, string declaringFile)
+        {
+            string unityDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            DirectoryAssert.Exists(unityDir);
+
+            var files = new List<string>();
+            files.AddRange(Directory.GetFiles(unityDir, "*.cs", SearchOption.AllDirectories));
+            Assert.GreaterOrEqual(files.Count, 200,
+                "precondition: expected to scan at least 200 .cs files under MapRenderer.Unity/ — a path " +
+                "typo would silently scan nothing.");
+
+            var pattern = new Regex($@"\b{identifier}\b");
+            var actual  = new List<string>();
+            foreach (string path in files)
+            {
+                string stripped = StripLineComments(File.ReadAllText(path));
+                if (pattern.IsMatch(stripped))
+                    actual.Add(Path.GetFileName(path));
+            }
+            actual.Sort();
+
+            var expected = new List<string> { declaringFile, "VisitedRingCopy.cs" };
+            expected.Sort();
+
+            CollectionAssert.AreEqual(expected, actual,
+                $"{identifier} must appear in exactly its declaring file and VisitedRingCopy.Schedule, the " +
+                "one site that constructs it — a THIRD file means something else can construct it directly, " +
+                $"bypassing the shared select-or-clip branch. Actual: {string.Join(", ", actual)}");
+        }
+
+        /// <summary>Strips everything from <c>//</c> to end of line, including <c>///</c> XML-doc lines —
+        /// the same idiom every sibling fence in this directory uses.</summary>
+        private static string StripLineComments(string text)
+        {
+            string[] lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                int idx = lines[i].IndexOf("//", StringComparison.Ordinal);
+                if (idx >= 0) lines[i] = lines[i].Substring(0, idx);
+            }
+            return string.Join('\n', lines);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // JobsNamespaceVisibilityTests — every type under MapRenderer.Unity.Jobs is internal
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The closing fence: no type declared under the <c>MapRenderer.Unity.Jobs</c> namespace is public. A
+    /// type crosses the assembly boundary only through a render/tile seam that deliberately exposes it
+    /// (<c>ITileFeatureSource</c>, <c>StyledSymbolTileBuilder</c>, <c>SymbolFeatureExtractor</c>), and none
+    /// of those live under <c>Jobs</c>.
+    /// </summary>
+    [TestFixture]
+    public class JobsNamespaceVisibilityTests
+    {
+        [Test]
+        public void EveryTypeUnderJobsNamespace_IsNotPublic()
+        {
+            Type[] allTypes = typeof(FillMeshGraph).Assembly.GetTypes();
+
+            var jobsTypes = new List<Type>();
+            foreach (Type t in allTypes)
+            {
+                if (t.Namespace == null) continue;
+                if (t.Namespace != "MapRenderer.Unity.Jobs" && !t.Namespace.StartsWith("MapRenderer.Unity.Jobs."))
+                    continue;
+                if (t.IsDefined(typeof(System.Runtime.CompilerServices.CompilerGeneratedAttribute), false)) continue;
+                if (t.Name.StartsWith("<") || t.Name.StartsWith("__")) continue;
+                jobsTypes.Add(t);
+            }
+
+            // Non-vacuity: main declares 93 types under Jobs/ by source count; 60 catches a wrong namespace
+            // or wrong assembly (which would report close to 0) and still leaves room for #if-guarded ones.
+            Assert.GreaterOrEqual(jobsTypes.Count, 60,
+                $"precondition: expected at least 60 real types under MapRenderer.Unity.Jobs, found {jobsTypes.Count}");
+
+            List<string> offenders = jobsTypes.Where(t => t.IsPublic || t.IsNestedPublic)
+                .Select(t => t.FullName).ToList();
+            Assert.IsEmpty(offenders,
+                "no type under MapRenderer.Unity.Jobs may be public — the namespace exposes nothing outside " +
+                $"the assembly. Offenders: {string.Join(", ", offenders)}");
         }
     }
 

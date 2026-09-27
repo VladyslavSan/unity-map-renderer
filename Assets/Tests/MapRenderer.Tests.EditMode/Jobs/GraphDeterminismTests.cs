@@ -1545,9 +1545,10 @@ namespace MapRenderer.Tests.Jobs
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_ExtrusionTileToGeo()
         {
             // The wall chain's TileToGeoJob processes the fill pre-pass's totalVerts (RingOffsets summed over the
-            // same visit order), so measure that directly instead of scheduling the whole wall chain.
+            // same visit order), so measure that directly instead of scheduling the whole wall chain. The wall
+            // chain shares FillMeshGraph.VertexBatch; it no longer declares its own constant.
             int maxVertices = LargestRawVisitedRingVertexCount();
-            Assert.GreaterOrEqual(maxVertices / MapRenderer.Unity.Rendering.Meshing.FillExtrusionMeshGraph.VertexBatch, 2, RefusalMessage);
+            Assert.GreaterOrEqual(maxVertices / FillMeshGraph.VertexBatch, 2, RefusalMessage);
         }
 
         [Test]

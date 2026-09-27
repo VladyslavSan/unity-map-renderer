@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Jobs.Projection
     ///   lon = u·360 − 180 ;  lat = atan(sinh(π·(1 − 2v)))·180/π
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct TileToGeoJob : IJobParallelFor, IJobParallelForDefer
+    internal struct TileToGeoJob : IJobParallelFor, IJobParallelForDefer
     {
         [ReadOnly] public TileId Tile;   // slippy-map address (z/x/y); blittable readonly struct, Burst-safe
         [ReadOnly] public double Extent;

@@ -15,7 +15,7 @@ namespace MapRenderer.Tests
     /// the release a property of the fixture, not of each helper call site.
     /// Test-thread only: fixtures build tiles in the test body, even when a pool task consumes them.
     /// </summary>
-    public static class TestDecodedTiles
+    internal static class TestDecodedTiles
     {
         private static readonly List<IDisposable> Live = new List<IDisposable>();
 

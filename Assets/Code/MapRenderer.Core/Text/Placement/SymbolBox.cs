@@ -44,7 +44,7 @@ namespace MapRenderer.Core.Text.Placement
         /// Builds the screen-space collision box for a symbol from its projected anchor, the block bbox
         /// (baked-px, anchor-relative — <see cref="TextLayoutBounds.Min"/>/<c>Max</c>), the resolved
         /// <c>text-size</c>, and <c>text-padding</c>. Applies the SAME <c>textSizePx / OneEm</c> scale
-        /// <see cref="BillboardMath.BuildQuad"/> uses for the visible quads (so the collision box tracks the
+        /// <see cref="BillboardMath.BuildWorldQuad"/> uses for the visible quads (so the collision box tracks the
         /// rendered glyphs exactly), then grows it by <paramref name="paddingPx"/> on every edge.
         /// </summary>
         public static SymbolBox Build(
@@ -77,7 +77,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// The AABB of ONE curved-symbol glyph's four ROTATED cell corners, so the box tracks the glyph on a
-        /// sloped line: <see cref="BillboardMath.BuildQuad"/>'s scale and CCW rotation about
+        /// sloped line: <see cref="BillboardMath.BuildWorldQuad"/>'s scale and CCW rotation about
         /// <paramref name="anchorScreenPx"/>, grown by <paramref name="paddingPx"/>. <paramref name="cellSkirt"/>
         /// is removed first, so the box bounds icon ink; text passes 0 and stays byte-identical. Only
         /// <see cref="Min"/>/<see cref="Max"/> are meaningful.

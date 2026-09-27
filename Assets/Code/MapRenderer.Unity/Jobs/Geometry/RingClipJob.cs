@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Geometry
     /// from concave rings are left to ring assembly's filters and earcut.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct RingClipJob : IJob
+    internal struct RingClipJob : IJob
     {
         /// <summary>Working-buffer sizing, as a multiple of the LONGEST input ring — <c>BufferA</c>/<c>BufferB</c>
         /// must each be at least this. Non-obvious why: it over-estimates, because a Burst overrun corrupts

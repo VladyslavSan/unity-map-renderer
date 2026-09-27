@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// It is an <c>IJob</c> because decoding is sequential per tile; parallelism is one job per tile.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct MvtDecodeJob : IJob
+    internal struct MvtDecodeJob : IJob
     {
         // Zigzag command IDs (per MVT spec §4.3)
         private const uint MoveTo    = 1;

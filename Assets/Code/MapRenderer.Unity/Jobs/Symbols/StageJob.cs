@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// the point arm inline, the curved arm via <see cref="AnchorWasPlaced"/>.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct StageJob : IJob
+    internal struct StageJob : IJob
     {
         // ── batch mirror (per-symbol records, in collected order) ──
         public NativeArray<SymbolPlacementKind> Kinds;   // point / curved

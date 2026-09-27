@@ -19,7 +19,7 @@ namespace MapRenderer.Core.Text.Placement
         public bool   Projected;                    // false = behind the camera (skip)
 
         /// <summary>The unit surface normal at this anchor, from <c>IProjection.ProjectPoint(...).Up</c>.
-        /// PER-FRAME PATCHED by <see cref="StageJob"/> — like <see cref="ScreenPx"/>/<see cref="Depth"/>/
+        /// PER-FRAME PATCHED by <c>StageJob</c> — like <see cref="ScreenPx"/>/<see cref="Depth"/>/
         /// <see cref="Projected"/> — NOT a stable baked field (the baker/<c>BuildPointInput</c> never sets it).
         /// Written, but not yet consumed by any placement math.</summary>
         public float3 SurfaceUp;
@@ -85,7 +85,7 @@ namespace MapRenderer.Core.Text.Placement
     /// <see cref="SymbolStagingMath.StageCurved"/> needs beyond this frame's projected path, its glyphs/anchors,
     /// and the pre-resolved per-anchor fade id + incumbency spans; the caller pre-resolves <see cref="Color"/>
     /// and <see cref="Slot"/>. Stable per symbol except <see cref="MetresPerLogicalPixel"/>, which
-    /// <see cref="StageJob"/> patches per frame, as it does <see cref="PointStageInput.ScreenPx"/>.
+    /// <c>StageJob</c> patches per frame, as it does <see cref="PointStageInput.ScreenPx"/>.
     /// </summary>
     public struct CurvedStageInput
     {
@@ -135,7 +135,7 @@ namespace MapRenderer.Core.Text.Placement
         /// This frame's world ruler: METRES per LOGICAL screen pixel at the camera's reference depth
         /// (<c>MapCamera.MetresPerDevicePixel × MapCamera.DevicePixelRatio</c>, combined once in
         /// <c>SymbolPlacementSystem.Tick</c>), because screen positions, <see cref="TextSizePx"/> and
-        /// <see cref="CurvedGlyph.ArcCenter"/> are logical px. <see cref="StageJob"/> patches it per frame; only
+        /// <see cref="CurvedGlyph.ArcCenter"/> are logical px. <c>StageJob</c> patches it per frame; only
         /// the <see cref="AlignmentMode.Map"/> branch reads it, and 0 degrades that branch to the screen walk.
         /// </summary>
         public float MetresPerLogicalPixel;

@@ -40,6 +40,11 @@ using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Fill = MapRenderer.Unity.Style.Fill;
+using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
+// UnityEngine.TestTools.Constraints.Is derives from NUnit's Is, so aliasing it also covers the file's
+// existing bare NUnit Is call sites (GreaterThanOrEqualTo/EqualTo).
+using UnityEngine.TestTools.Constraints;
+using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Collections;
 using MapRenderer.Tests.TestSupport;
 using UnityEngine.Rendering;
@@ -629,6 +634,80 @@ namespace MapRenderer.Tests.Meshing
             }
             finally
             {
+                geometry.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// The same routing claim for fill-extrusion: a real <see cref="SyncMeshWrite.FillExtrusion"/> build
+        /// routes its ring-visit-order allocation through the pooled <see cref="TileBuildBuffers"/> too — fill
+        /// and fill-extrusion share <see cref="StyledFillTileBuilder.BuildRingVisitOrder"/>.
+        /// </summary>
+        [Test]
+        public void FillExtrusionBuild_RoutesRingVisitOrder_ThroughThePooledBuffers()
+        {
+            List<IFeature> features = MakeFeatures(2);
+            IReadOnlyList<SelectedTileFeature> selected = TestTileMeshBuilder.Selection(features);
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            try
+            {
+                Assert.Greater(geometry.RingCount, 1, "precondition: multiple rings");
+
+                var buffers = new TileBuildBuffers();
+                Assert.AreEqual(0, buffers.RankStart(0).Length, "precondition: RankStart buffer is empty before any build");
+
+                Mesh.MeshDataArray mda = Mesh.AllocateWritableMeshData(1);
+                SyncMeshWrite.FillExtrusion(mda[0], selected, geometry, TestStyle.FillExtrusionPaint(), Zoom,
+                    double3.zero, out int verts, out Bounds _, null, default, buffers);
+                mda.Dispose();
+                Assert.Greater(verts, 0, "non-vacuity: the build must produce geometry");
+
+                Assert.Greater(buffers.RankStart(0).Length, 0,
+                    "fill-extrusion's BuildLayerInput must route BuildRingVisitOrder through buffers.RankStart, " +
+                    "the same pool fill uses — its buffer grew past empty during the build.");
+            }
+            finally
+            {
+                geometry.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// The pooled path (<paramref name="buffers"/>-not-null) of
+        /// <see cref="StyledFillTileBuilder.BuildRingVisitOrder"/> allocates no managed memory. Warms the
+        /// SAME delegate the meter measures, at the SAME rank count: <c>RankStart</c> grows on first use at
+        /// a larger size, so a fresh lambda or a smaller warm-up would measure that growth instead of the
+        /// steady-state pooled path.
+        /// </summary>
+        [Test]
+        public void BuildRingVisitOrder_PooledPath_AllocatesNoManagedMemory()
+        {
+            const int n = 2;
+            List<IFeature> features = MakeFeatures(n);
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            var buffers = new TileBuildBuffers();
+            var rank = new NativeArray<int>(n, Allocator.Persistent);
+            for (int i = 0; i < n; i++) rank[i] = i;
+            try
+            {
+                TestDelegate act = () =>
+                {
+                    NativeArray<int> order = StyledFillTileBuilder.BuildRingVisitOrder(geometry, rank, n, buffers);
+                    order.Dispose();
+                };
+                for (int w = 0; w < 50; w++) act();
+
+                NativeArray<int> warm = StyledFillTileBuilder.BuildRingVisitOrder(geometry, rank, n, buffers);
+                Assert.Greater(warm.Length, 1, "precondition: the warm-up call must really visit multiple rings");
+                warm.Dispose();
+
+                Assert.That(act, Is.Not.AllocatingGCMemory(),
+                    "the pooled path (buffers != null) must allocate NO managed memory — RankStart/RankCursor " +
+                    "come from the pool, and the returned NativeArray<int> is native, not managed.");
+            }
+            finally
+            {
+                rank.Dispose();
                 geometry.Dispose();
             }
         }

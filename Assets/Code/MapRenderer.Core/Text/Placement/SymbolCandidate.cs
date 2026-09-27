@@ -60,10 +60,10 @@ namespace MapRenderer.Core.Text.Placement
         public bool IgnorePlacement;
 
         /// <summary>Opaque caller ordinal identifying the survivor after the candidate array is sorted in place
-        /// (<see cref="SymbolPlacementSystem"/> keys its per-candidate emit data by this).</summary>
+        /// (<c>SymbolPlacementSystem</c> keys its per-candidate emit data by this).</summary>
         public int SymbolIndex;
 
-        /// <summary>This candidate's cross-frame FADE identity, which keys <see cref="SymbolPlacementSystem"/>'s
+        /// <summary>This candidate's cross-frame FADE identity, which keys <c>SymbolPlacementSystem</c>'s
         /// opacity record. It must be unique per live candidate, or two candidates fight over one opacity. Point:
         /// a quantized-anchor hash with the layer; line: <see cref="SymbolStagingMath.LineFadeId"/>.</summary>
         public long FadeId;
@@ -84,7 +84,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Debug check of the collision contract: in staging order the candidate box ranges tile
-        /// <c>[0, boxCount)</c> exactly, as <see cref="CollisionGridSizing.NodeUpperBoundByCandidates"/> assumes; a
+        /// <c>[0, boxCount)</c> exactly, as <c>CollisionGridSizing.NodeUpperBoundByCandidates</c> assumes; a
         /// violation can overflow the grid's node pool. Returns <c>true</c> with the offending index (or
         /// <c>candidates.Length</c> on under-cover) and the expected <see cref="BoxStart"/>. Allocation-free for a
         /// per-frame <c>[Conditional("UNITY_ASSERTIONS")]</c> caller; pass candidates sliced to the live count.

@@ -19,11 +19,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// </summary>
     public static class FillExtrusionMeshGraph
     {
-        /// <summary>Vertices per batch for this graph's wall-chain <see cref="TileToGeoJob"/> node
-        /// (docs/job-scheduling-design.md), chosen by the same reasoning as
-        /// <see cref="FillMeshGraph.VertexBatch"/>. It is a starting value, not a measured optimum.</summary>
-        internal const int VertexBatch = 1024;
-
         /// <summary>Schedules the roof + wall graph for one fill-extrusion layer. Returns <see cref="default"/>
         /// (<c>IsCreated == false</c>) for an uncreated geometry buffer or an empty
         /// <see cref="FillMeshPipeline.LayerInput.RingVisitOrder"/>. Otherwise returns a
@@ -60,55 +55,20 @@ namespace MapRenderer.Unity.Rendering.Meshing
             input.SuppressBoundaryBand = true;
             FillGraphOutput roof = FillMeshGraph.Schedule(input, deps);
 
-            // ── Walls: raw (pre-earcut) ring vertices via the SAME select-or-clip branch the roof takes on
-            // input.Clip, then tile→geo→project, then WallQuadJob emits quads. ───────────────────────────────
+            // ── Walls: raw (pre-earcut) ring vertices via VisitedRingCopy — the SAME select-or-clip branch
+            // the roof takes on input.Clip, then tile→geo→project, then WallQuadJob emits quads. ────────────
 
-            // Main-thread pre-pass over BORROWED inputs only, never a job output. totalVerts is a CAPACITY HINT:
-            // clipping may add or drop vertices, so ProjectionColumnSizingJob sets the real lengths at execute.
-            int maxRingLen = 0;
-            int totalVerts = 0;
-            for (int k = 0; k < visit.Length; k++)
-            {
-                int ri  = visit[k];
-                int len = source.RingOffsets[ri + 1] - source.RingOffsets[ri];
-                maxRingLen  = math.max(maxRingLen, len);
-                totalVerts += len;
-            }
+            // totalVerts is a CAPACITY HINT: clipping may add or drop vertices, so ProjectionColumnSizingJob
+            // sets the real lengths at execute.
+            VisitedRingCopy.Measure(source, visit, out int maxRingLen, out int totalVerts);
 
             var flatTile    = NewBuffer<double2>(math.max(1, totalVerts));
             var flatOffsets = NewBuffer<int>(visit.Length + 1);
             var flatFeatIdx = NewBuffer<int>(math.max(1, visit.Length));
 
-            JobHandle gathered;
-            JobHandle clipDisposeHandle = default;
-
-            if (input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax))
-            {
-                // Raw NativeArrays, not NewBuffer, as the roof's ping-pong buffers are: the
-                // DebugBuffersAllocated/DebugBufferDisposeNodes pair counts only this graph's NativeLists.
-                int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
-                var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-                gathered = new RingClipJob
-                {
-                    Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
-                    RingVisitOrder = visit, ClipMin = clipMin, ClipMax = clipMax,
-                    BufferA = bufferA, BufferB = bufferB,
-                    OutVertices = flatTile, OutRingOffsets = flatOffsets, OutRingFeatureIdx = flatFeatIdx,
-                }.Schedule(deps);
-
-                clipDisposeHandle = JobHandle.CombineDependencies(bufferA.Dispose(gathered), bufferB.Dispose(gathered));
-            }
-            else
-            {
-                gathered = new RingSelectJob
-                {
-                    Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
-                    RingVisitOrder = visit,
-                    OutVertices = flatTile, OutRingOffsets = flatOffsets, OutRingFeatureIdx = flatFeatIdx,
-                }.Schedule(deps);
-            }
+            bool clipEnabled = input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax);
+            JobHandle gathered = VisitedRingCopy.Schedule(
+                source, visit, maxRingLen, clipEnabled, clipMin, clipMax, flatTile, flatOffsets, flatFeatIdx, deps);
 
             var geo   = NewBuffer<GeoCoordinate>(math.max(1, totalVerts));
             var world = NewBuffer<double3>(math.max(1, totalVerts));
@@ -125,7 +85,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             {
                 Tile = source.Tile, Extent = source.Extent,
                 TileCoords = flatTile.AsDeferredJobArray(), OutGeo = geo.AsDeferredJobArray(),
-            }.Schedule(flatTile, VertexBatch, sized);
+            }.Schedule(flatTile, FillMeshGraph.VertexBatch, sized);
 
             // flatTile's last reader is TileToGeoJob (as TileCoords) — WallQuadJob never reads it, only the
             // columns TileToGeoJob/ProjectionDispatch derive from it.
@@ -154,12 +114,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JobHandle worldDisposed       = ScheduleDispose(world, walled);
             JobHandle upDisposed          = ScheduleDispose(up, walled);
 
-            // clipDisposeHandle (default on the select arm) makes the clip buffers' dispose nodes reachable
-            // from the returned handle; without it they leak once per extrusion layer per tile.
             JobHandle scratchDisposed = JobHandle.CombineDependencies(
                 JobHandle.CombineDependencies(flatTileDisposed, flatOffsetsDisposed, flatFeatIdxDisposed),
-                JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed),
-                clipDisposeHandle);
+                JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed));
 
             JobHandle terminal = JobHandle.CombineDependencies(roof.Handle, walled, scratchDisposed);
 

@@ -12,7 +12,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// the synchronous gather that built it (<c>SymbolPlacementSystem.BuildBlockViews</c> + the following
     /// <c>SymbolGatherJob.Run()</c>) and must never be stored across a frame boundary.
     /// </summary>
-    public struct BlockView
+    internal struct BlockView
     {
         // ── per-symbol records, RAW list order ──
         public UnsafeList<SymbolPlacementKind> Kinds;

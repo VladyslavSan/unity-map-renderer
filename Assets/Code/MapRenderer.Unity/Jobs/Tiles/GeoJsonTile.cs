@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// filters read the authored properties directly. A geojson source has one layer and ignores
     /// <c>source-layer</c> (<see cref="GeoJsonTile.GetLayer"/>), so <see cref="Name"/> is diagnostic only.
     /// </summary>
-    public sealed class GeoJsonTileLayer : ITileLayer, IDisposable
+    internal sealed class GeoJsonTileLayer : ITileLayer, IDisposable
     {
         /// <summary>The name this layer reports. Diagnostic only — <see cref="GeoJsonTile.GetLayer"/> does
         /// not match on it, because a geojson source has nothing to disambiguate.</summary>
@@ -71,7 +71,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// yields a layer-less tile, never a layer with zero features, so <see cref="GetLayer"/> returns a real
     /// layer or null.
     /// </summary>
-    public sealed class GeoJsonTile : IDecodedTile
+    internal sealed class GeoJsonTile : IDecodedTile
     {
         private readonly GeoJsonTileLayer _layer;
 
@@ -93,7 +93,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// Paths to <see cref="PathGeometryMaterializer"/> are tile-local integers in <c>[−b, extent+b]</c>, Y-down,
     /// never degrees (docs/tile-geometry-ir-design.md § "Invariants the mechanism must hold").
     /// </summary>
-    public sealed class GeoJsonTileDecoder : ITileDecoder
+    internal sealed class GeoJsonTileDecoder : ITileDecoder
     {
         private readonly GeoJsonProjectedDataset _dataset;
         private readonly GeoJsonSliceOptions     _options;

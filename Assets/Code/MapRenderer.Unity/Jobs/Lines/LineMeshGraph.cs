@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.Jobs.Lines
     /// aggregate. Non-local invariant: no node takes a schedule-time <c>.AsArray()</c> of a list a later node
     /// resizes, as in <see cref="FillMeshGraph"/>, and nothing here calls <c>Complete()</c>.
     /// </summary>
-    public static class LineMeshGraph
+    internal static class LineMeshGraph
     {
         /// <summary>Vertices per batch for this graph's TWO <see cref="TileToGeoJob"/> nodes — same
         /// reasoning as <see cref="FillMeshGraph.VertexBatch"/>: enough work per batch to cover the

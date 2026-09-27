@@ -22,7 +22,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s in TL, TR, BR, BL order, triangles (TL,TR,BR)
-        /// and (TL,BR,BL), as <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>'s index emit expects.
+        /// and (TL,BR,BL), as <c>MapRenderer.Unity.Text.Placement.WorldSymbolRenderer</c>'s index emit expects.
         /// <c>Offset</c> is y-down, so each corner's (and the translate delta's) Y is negated.
         /// <paramref name="colorRgb"/> is already linear and copied verbatim; anchor, flags, tangent and
         /// surface-up go onto all four corners, and the renderer appends opacity.

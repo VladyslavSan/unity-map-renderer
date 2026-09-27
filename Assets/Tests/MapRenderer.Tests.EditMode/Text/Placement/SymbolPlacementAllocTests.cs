@@ -868,7 +868,11 @@ namespace MapRenderer.Tests.Text.Placement
 
                 new SymbolProjectionJob
                 {
-                    Points = points, SceneOriginRender = origin, Rebase = float3x3.identity, ViewProj = viewProj, ViewportLogicalPx = viewport,
+                    Points = points,
+                    View = new SymbolViewTransform
+                    {
+                        SceneOriginRender = origin, Rebase = float3x3.identity, ViewProj = viewProj, ViewportLogicalPx = viewport,
+                    },
                     OutScreen = outScreen, OutDepth = outDepth, OutValid = outValid,
                 }.Schedule(n, 8).Complete();
 
@@ -924,7 +928,11 @@ namespace MapRenderer.Tests.Text.Placement
 
                 new SymbolProjectionJob
                 {
-                    Points = points, SceneOriginRender = origin, Rebase = rebase, ViewProj = viewProj, ViewportLogicalPx = viewport,
+                    Points = points,
+                    View = new SymbolViewTransform
+                    {
+                        SceneOriginRender = origin, Rebase = rebase, ViewProj = viewProj, ViewportLogicalPx = viewport,
+                    },
                     OutScreen = outScreen, OutDepth = outDepth, OutValid = outValid,
                 }.Schedule(n, 8).Complete();
 

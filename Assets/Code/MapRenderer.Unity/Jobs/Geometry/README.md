@@ -45,6 +45,7 @@ backing lists — and disposing a view is invalid. That is the entire reason the
 | `PathGeometryMaterializer` | `Geometry/` | materializes synthetic geometry (the background quad's full-extent ring) |
 | `RingSelectJob` | `Geometry/` | narrows a tile's rings to one layer's visit order |
 | `RingClipJob` | `Geometry/` | the same, clipped to the tile's buffer window — production's default path |
+| `VisitedRingCopy` | `Geometry/` | the one schedule site for `RingClipJob` / `RingSelectJob`; returns one handle that also frees the clip scratch |
 
 `FillGraphOutput` — the mesh-side columns a build produces — lives in `Fill/`, not here, with the rest of
 the fill mesher's namespace.
@@ -54,4 +55,5 @@ the fill mesher's namespace.
 `RingClipJob` and `RingSelectJob` are alternatives, chosen by whether clipping is enabled — and clipping is
 **enabled by default in production**. A test that builds a layer input without setting the clip runs the
 *other* job. Several tests in this repo did exactly that, and each one silently exercised an arm production
-never takes. If you are writing a test here, set the clip explicitly.
+never takes. If you are writing a test here, set the clip explicitly. `VisitedRingCopy` is the only place
+either job is scheduled — fill and fill-extrusion both go through it.

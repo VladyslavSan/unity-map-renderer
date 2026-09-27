@@ -41,7 +41,7 @@ namespace MapRenderer.Core.Text.Placement
         public float3 AnchorLocal;
 
         /// <summary>Curved arm: this glyph's tile-local world tangent along the line (unit-normalized, the
-        /// keep-upright negation baked in) — the world-space direction <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>
+        /// keep-upright negation baked in) — the world-space direction <c>MapRenderer.Unity.Text.Placement.WorldSymbolRenderer</c>
         /// projects live to derive the on-screen rotation. Default <see cref="float3.zero"/> for a point
         /// symbol (unread there).</summary>
         public float3 Tangent;

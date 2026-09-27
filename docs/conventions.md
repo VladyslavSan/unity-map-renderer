@@ -511,14 +511,14 @@ inspect the field's type.
 **The generic exception, which is why there is a rule at all.** On a generic field the declaration site
 cannot see whether the type argument holds a container:
 
-- `FillGatherJob.cs:54` — `[ReadOnly] public TComparer Comparer;`. `TComparer` is
+- `FillGatherJob.Comparer` — `[ReadOnly] public TComparer Comparer;`. `TComparer` is
   `FillMeshPipeline.HoleRingComparer`, which holds two `NativeArray` fields built from the **same
   allocations** this job's `Vertices`/`RingOffsets` already view. Without the attribute the safety system
   sees one read-only and one implicitly writable alias of that allocation and throws at schedule time —
   `InvalidOperationException`, *"two containers may not be the same (aliasing)"*. Observed by
   `FillGraphBurstProbeTests`. **This attribute is load-bearing and a sweep would delete it.**
-- `ProjectPointsJob.cs:45`, `GlobeFillSubdivider.cs:63` — `[ReadOnly] public TProj Projection;`. Inert today
-  because every projection struct is stateless; load-bearing the moment one holds a container.
+- `ProjectPointsJob.Projection`, `GlobeFillSubdivideJob.Projection` — `[ReadOnly] public TProj Projection;`.
+  Inert today because every projection struct is stateless; load-bearing the moment one holds a container.
 
 **Sweep verdict: no — not as its own change, and not opportunistically.** A repo-wide audit enumerated every
 `[ReadOnly]` under `MapRenderer.Unity/Jobs/` and `MapRenderer.Unity/Rendering/Meshing/` (147 real attribute sites

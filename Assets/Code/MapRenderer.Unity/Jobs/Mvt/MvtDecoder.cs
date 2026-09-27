@@ -15,12 +15,12 @@ namespace MapRenderer.Unity.Jobs.Mvt
     /// <see cref="Decode"/> returns. The tile address enters the pipeline once, here. See
     /// docs/tile-geometry-ir-design.md § "Why decode is eager and whole-tile".
     /// </summary>
-    public static class MvtDecoder
+    internal static class MvtDecoder
     {
         /// <summary>Profiler marker name constants (SSOT) — referenced by the marker field below and by
         /// <c>ProfilerMarkerTests</c>. The marker brackets the geometry materialization, so it lives
         /// wherever that happens.</summary>
-        public static class ProfilerMarkerNames
+        internal static class ProfilerMarkerNames
         {
             public const string Decode = "MapRenderer.Pipeline.Decode";
         }

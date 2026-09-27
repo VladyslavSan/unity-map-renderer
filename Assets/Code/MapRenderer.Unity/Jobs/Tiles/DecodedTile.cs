@@ -11,7 +11,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// <see cref="Geometry"/> eagerly, so the buffer's <c>Tile</c>/<c>Extent</c> cannot disagree with the
     /// layer.
     /// </summary>
-    public interface ITileLayer
+    internal interface ITileLayer
     {
         string Name { get; }
         uint   Extent { get; }
@@ -30,7 +30,7 @@ namespace MapRenderer.Unity.Jobs.Tiles
     /// <c>SharedDisposable{IDecodedTile}</c> that wraps it; consumers read layers inside a held reference and
     /// <b>never</b> dispose the tile themselves.
     /// </summary>
-    public interface IDecodedTile : IDisposable
+    internal interface IDecodedTile : IDisposable
     {
         ITileLayer GetLayer(string name);
     }

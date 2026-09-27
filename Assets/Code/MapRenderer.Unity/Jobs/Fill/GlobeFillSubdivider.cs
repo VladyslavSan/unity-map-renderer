@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Fill
 {
     /// <summary>One refined fill vertex (origin-relative). <see cref="Tile"/> keeps the tile-space coord the
     /// caller normalises into a UV; the rest is ready-to-stream Position / Normal / Tangent data.</summary>
-    public struct GlobeFillVertex
+    internal struct GlobeFillVertex
     {
         public double3 World;   // origin-relative render position (→ Position)
         public double3 Up;      // geodetic surface up            (→ Normal)
@@ -84,7 +84,7 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// docs/mesh-triangulation-robustness-design.md § "Globe subdivision must be conforming".
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct GlobeFillSubdivideJob<TProj> : IJob where TProj : struct, IProjection
+    internal struct GlobeFillSubdivideJob<TProj> : IJob where TProj : struct, IProjection
     {
         [ReadOnly] public TProj                  Projection;
         [ReadOnly] public NativeArray<double2>   TileVerts;         // earcut vertices (tile space)
@@ -268,7 +268,7 @@ namespace MapRenderer.Unity.Jobs.Fill
 
     /// <summary>Managed side of the globe-fill subdivide job: picks the concrete projection struct and
     /// schedules the matching Burst specialisation. <see cref="Schedule"/> is the only entry point.</summary>
-    public static class GlobeFillSubdivideDispatch
+    internal static class GlobeFillSubdivideDispatch
     {
         /// <summary>Split an edge until it subtends less than this (≈3°): sagitta ≈ R(1−cos(θ/2)) ≈ 0.05% of R.</summary>
         public const double DefaultMaxEdgeAngleRad   = 0.05236;   // 3 degrees

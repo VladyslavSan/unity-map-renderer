@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// is appended at <see cref="OutPoints"/>' length. It has no FMA math, so Burst and managed are bit-identical.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct CompactJob : IJob
+    internal struct CompactJob : IJob
     {
         // ── Input — per-record verdict + fields, index-parallel to the mirror ───────────────────────────────
         /// <summary>Per-record cull verdict from <see cref="CullJob"/>, consumed in record order.</summary>

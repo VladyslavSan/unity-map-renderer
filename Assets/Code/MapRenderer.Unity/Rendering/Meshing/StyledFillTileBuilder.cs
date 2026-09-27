@@ -288,9 +288,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// The ring indices this layer wants triangulated, in draw order: a <b>counting sort</b> of the shared
-        /// buffer's rings bucketed on their feature's <c>fill-sort-key</c> rank, skipping rings whose feature
-        /// this layer does not draw (<c>rank == -1</c>). Non-local invariant: this is byte-identical to
+        /// The ring indices a caller wants triangulated, in draw order: a <b>counting sort</b> of the shared
+        /// buffer's rings bucketed on the caller's per-feature rank (fill: <c>fill-sort-key</c> order;
+        /// fill-extrusion: declared order), skipping rings whose feature the caller does not draw
+        /// (<c>rank == -1</c>). Non-local invariant: this is byte-identical to
         /// "reorder the feature list, then decode it" only because the counting sort is <b>stable</b>:
         /// <list type="bullet">
         /// <item>rings of one feature stay <b>contiguous</b> — <c>RingAssemblyJob</c> resets its exterior sign
@@ -302,7 +303,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// instead of a fresh array — same arithmetic, byte-identical <c>order</c>. The returned
         /// <see cref="NativeArray{T}"/> is always a fresh <c>Allocator.Persistent</c> array the caller disposes.
         /// </summary>
-        private static NativeArray<int> BuildRingVisitOrder(
+        internal static NativeArray<int> BuildRingVisitOrder(
             TileGeometryBuffers geometry, NativeArray<int> rankByOrdinal, int rankCount, TileBuildBuffers buffers)
         {
             int   rankStartLength = rankCount + 1;

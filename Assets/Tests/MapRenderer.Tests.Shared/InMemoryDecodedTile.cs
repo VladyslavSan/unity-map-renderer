@@ -17,7 +17,7 @@ namespace MapRenderer.Tests
     /// before any read, and a lazy property would let <c>SourceLayerBufferSharingTests</c> pass for a
     /// reason production lacks. Dispose it via <see cref="InMemoryDecodedTile"/>; the buffer is Persistent.
     /// </summary>
-    public sealed class InMemoryTileLayer : ITileLayer, IDisposable
+    internal sealed class InMemoryTileLayer : ITileLayer, IDisposable
     {
         public string                  Name     { get; }
         public uint                    Extent   { get; }
@@ -53,7 +53,7 @@ namespace MapRenderer.Tests
     /// A synthetic <see cref="IDecodedTile"/> over <see cref="InMemoryTileLayer"/>s, mirroring
     /// <c>MvtTile</c>: it owns its layers and frees their geometry on <see cref="Dispose"/>.
     /// </summary>
-    public sealed class InMemoryDecodedTile : IDecodedTile
+    internal sealed class InMemoryDecodedTile : IDecodedTile
     {
         private readonly List<InMemoryTileLayer> _layers;
 
