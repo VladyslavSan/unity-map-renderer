@@ -145,7 +145,7 @@ namespace MapRenderer.Unity.Text
                     continue;
 
                 // Text and icon are independent: a feature is skipped only when neither resolves.
-                string text = TextFieldResolver.Resolve(layout.TextField, feature, zoom);
+                string text = ResolveSymbolString(layout.TextField, zoom, feature);
                 if (text != null)
                 {
                     // text-transform: case-fold the resolved symbol before it is shaped downstream.
@@ -162,7 +162,7 @@ namespace MapRenderer.Unity.Text
                 // icon to the projected tangent.
                 if ((!isLine || iconAtAnchors || iconAlongLine) && spriteAtlas != null)
                 {
-                    iconImage = IconImageResolver.Resolve(layout.IconImage, feature, zoom);
+                    iconImage = ResolveSymbolString(layout.IconImage, zoom, feature);
                     if (iconImage != null)
                         hasIcon = spriteAtlas.Index.TryGetSprite(iconImage, out iconEntry);
                 }
@@ -685,6 +685,15 @@ namespace MapRenderer.Unity.Text
             }
 
             return pts;
+        }
+
+        /// <summary>Evaluates one text-field/icon-image property for one feature. An absent property, a
+        /// malformed expression, or a resolved empty/whitespace string all resolve to null — skipping only
+        /// THIS property (for icon-image, only the icon); text and icon fail independently.</summary>
+        private static string ResolveSymbolString(StyleProperty<string> prop, double zoom, IFeature feature)
+        {
+            if (prop == null || !prop.TryEvaluate(zoom, feature, out string resolved)) return null;
+            return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
         }
 
         private static SymbolPaint EvaluatePaint(PaintProperties paint, double zoom, IFeature feature)

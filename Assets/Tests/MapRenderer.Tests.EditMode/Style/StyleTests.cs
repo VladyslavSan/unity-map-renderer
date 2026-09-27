@@ -11,9 +11,8 @@
 //   LinePaintTests              — Line.PaintProperties/LayoutProperties: classification, translate, join/cap layout.
 //   BackgroundPaintTests        — Background.PaintProperties: spec defaults, explicit parse, zoom classification.
 //   SymbolStyleLayerTests       — a symbol layer parses to the typed Symbol.StyleLayer with spec defaults.
-//   TextFieldResolverTests      — Symbol.TextFieldResolver.Resolve: token sugar + expression form -> label.
+//   SymbolStringPropertyTests   — Symbol.LayoutProperties.{TextField,IconImage}: shared token desugar + expression form.
 //   LineDashTests               — Line.LineDash: dash coverage, zoom-stability, width coupling, dasharray parse/eval.
-//   IconImageResolverTests      — Symbol.IconImageResolver.Resolve: token sugar + expression form -> sprite name.
 //   LightSkyTests               — root light/sky blocks: parse, spec defaults, malformed input.
 //
 // LineOffsetTests.cs stays its own file: its `using MapRenderer.Unity.Style.Line;` (a namespace import, for
@@ -2305,9 +2304,11 @@ namespace MapRenderer.Tests.Style
                 "a 'symbol' layer must parse to the typed Symbol.StyleLayer, not the generic base");
             var sym = (SymbolStyle.StyleLayer)layer;
 
-            // text-field kept as raw JSON (resolved per-feature, not a scalar).
-            Assert.IsNotNull(sym.Layout.TextField, "text-field must be retained (raw) for per-feature resolution");
-            Assert.AreEqual("{NAME}", sym.Layout.TextField.AsString(null));
+            // text-field is a StyleProperty<string>, evaluated per feature.
+            var nameFeature = new DictionaryFeature(
+                new Dictionary<string, Value> { ["NAME"] = Value.String("Test") }, TileGeometryType.Point);
+            Assert.AreEqual("Test", sym.Layout.TextField.Evaluate(0.0, nameFeature),
+                "the {NAME} token text-field must resolve against a feature.");
 
             // Layout scalars.
             Assert.AreEqual(24f, sym.Layout.TextSize.Evaluate(0.0), 1e-6);
@@ -2385,8 +2386,10 @@ namespace MapRenderer.Tests.Style
                     'icon-padding':5 },
                   'paint':{ 'icon-opacity':0.5 } } ] }").Layers[0];
 
-            Assert.IsNotNull(sym.Layout.IconImage, "icon-image must be retained (raw) for per-feature resolution");
-            Assert.IsTrue(sym.Layout.IconImage.IsArray, "icon-image data-driven expression survives as a raw array (resolved per feature)");
+            var iconFeature = new DictionaryFeature(
+                new Dictionary<string, Value> { ["icon"] = Value.String("marker") }, TileGeometryType.Point);
+            Assert.AreEqual("marker", sym.Layout.IconImage.Evaluate(0.0, iconFeature),
+                "the [\"get\",\"icon\"] icon-image must resolve against a feature.");
             Assert.AreEqual(2f, sym.Layout.IconSize.Evaluate(0.0), 1e-6);
             Assert.AreEqual(5f, sym.Layout.IconPadding.Evaluate(0.0), 1e-6);
             Assert.AreEqual(new float2(3, 4), sym.Layout.IconOffset);
@@ -2662,19 +2665,30 @@ namespace MapRenderer.Tests.Style
 
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TextFieldResolverTests — Symbol.TextFieldResolver.Resolve: token sugar + expression form → label
+    // SymbolStringPropertyTests — Symbol.LayoutProperties.{TextField,IconImage}: shared parse/resolve path
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="SymbolStyle.TextFieldResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND
-    /// expression form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact label string; a missing
-    /// property SKIPS the feature (returns null), never a blank label. Engine-free; runs in both runners.
+    /// <c>text-field</c> and <c>icon-image</c> share one path (<c>LayoutProperties.ParseSymbolString</c>):
+    /// token sugar (<c>{prop}</c>, desugared to <c>["concat",…]</c> at parse time) and expression form
+    /// (<c>["get",…]</c>/<c>["coalesce",…]</c>) both resolve to a string, empty for a missing property.
+    /// Exercised once against <c>text-field</c>; <c>SharedPath_TokenResolvesWithFeatureKind_LegacyObjectIsNull</c>
+    /// is the tooth proving <c>icon-image</c> rides the same path. Engine-free; runs in both runners.
     /// </summary>
     [TestFixture]
-    public class TextFieldResolverTests
+    public class SymbolStringPropertyTests
     {
-        // Author field JSON with single quotes, then swap to real quotes.
-        private static JsonValue Field(string json) => JsonParser.Parse(json.Replace('\'', '"'));
+        // Author the property's value with single quotes, then swap to real quotes, wrapped in a layout.
+        private static SymbolStyle.LayoutProperties Layout(string valueJson, string property = "text-field")
+            => SymbolStyle.LayoutProperties.Parse(
+                JsonParser.Parse(("{'" + property + "':" + valueJson + "}").Replace('\'', '"')));
+
+        // The raw evaluated string — null only when the property is absent or malformed. The
+        // empty/whitespace-skip decision is the extractor's, not StyleProperty's (see StyleShieldTests.cs).
+        private static string Resolve(SymbolStyle.LayoutProperties layout, IFeature feature, double zoom)
+            => layout.TextField != null && layout.TextField.TryEvaluate(zoom, feature, out string resolved)
+                ? resolved
+                : null;
 
         private static IFeature Feature(params (string key, string val)[] props)
         {
@@ -2683,26 +2697,25 @@ namespace MapRenderer.Tests.Style
             return new DictionaryFeature(dict, TileGeometryType.Point);
         }
 
-        private static readonly IFeature Aruba = Feature(("NAME", "Aruba"));
+        private static readonly IFeature Aruba = Feature(("NAME", "Aruba"), ("A", "foo"), ("B", "bar"));
         private static readonly IFeature Afghanistan = Feature(("NAME", "Afghanistan"), ("ABBREV", "Afg."));
 
         [Test]
         public void Token_SingleProperty_Resolves()
         {
-            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME}'"), Aruba, 0.0));
+            Assert.AreEqual("Aruba", Resolve(Layout("'{NAME}'"), Aruba, 0.0));
         }
 
         [Test]
         public void Expression_Get_Resolves()
         {
-            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("['get','NAME']"), Aruba, 0.0));
+            Assert.AreEqual("Aruba", Resolve(Layout("['get','NAME']"), Aruba, 0.0));
         }
 
         [Test]
         public void Token_MultiTokenWithLiterals_Resolves()
         {
-            Assert.AreEqual("Afghanistan (Afg.)",
-                SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME} ({ABBREV})'"), Afghanistan, 0.0));
+            Assert.AreEqual("Afghanistan (Afg.)", Resolve(Layout("'{NAME} ({ABBREV})'"), Afghanistan, 0.0));
         }
 
         [Test]
@@ -2710,45 +2723,74 @@ namespace MapRenderer.Tests.Style
         {
             // name:en absent → coalesce falls back to NAME.
             Assert.AreEqual("Aruba",
-                SymbolStyle.TextFieldResolver.Resolve(Field("['coalesce',['get','name:en'],['get','NAME']]"), Aruba, 0.0));
+                Resolve(Layout("['coalesce',['get','name:en'],['get','NAME']]"), Aruba, 0.0));
         }
 
         [Test]
-        public void MissingProperty_Token_SkipsWithNull()
+        public void MissingProperty_Token_ResolvesToEmpty()
         {
-            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("'{missing}'"), Aruba, 0.0),
-                "an unknown token resolving to empty text must SKIP the feature (null), not emit a blank label");
+            Assert.AreEqual("", Resolve(Layout("'{missing}'"), Aruba, 0.0), "an unknown token resolves to empty text.");
         }
 
         [Test]
-        public void MissingProperty_Expression_SkipsWithNull()
+        public void MissingProperty_Expression_ResolvesToEmpty()
         {
-            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("['get','missing']"), Aruba, 0.0),
-                "a get on a missing property must SKIP the feature (null), not emit a blank label");
+            Assert.AreEqual("", Resolve(Layout("['get','missing']"), Aruba, 0.0),
+                "a get on a missing property resolves to empty text.");
         }
 
-        [Test]
-        public void LiteralNoTokens_PassesThrough()
+        [TestCase("'Airport'", "Airport", TestName = "LiteralNoTokens_PassesThrough")]
+        [TestCase("42", "42", TestName = "BareNumber_RendersToString")]
+        [TestCase("true", "true", TestName = "BareBool_RendersToString")]
+        [TestCase("'{A}{B}'", "foobar", TestName = "Token_AdjacentTokens_NoLiteralBetween_Resolves")]
+        [TestCase("'a{'", "a{", TestName = "Token_UnterminatedBrace_TreatsRestAsLiteral")]
+        [TestCase("'{}'", "", TestName = "Token_EmptyBraces_ResolvesToEmpty")]
+        public void Template_Resolves(string json, string expected)
         {
-            Assert.AreEqual("Airport", SymbolStyle.TextFieldResolver.Resolve(Field("'Airport'"), Aruba, 0.0));
+            Assert.AreEqual(expected, Resolve(Layout(json), Aruba, 0.0));
         }
 
         [Test]
         public void NullField_Skips()
         {
-            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(null, Aruba, 0.0));
+            Assert.IsNull(Resolve(TestStyle.SymbolLayout(), Aruba, 0.0));
         }
 
         [Test]
         public void Expression_ZoomStep_EvaluatesAtTheGivenZoom_NotZero()
         {
-            JsonValue step = Field("['step',['zoom'],'low',10,'high']");
-            Assert.AreEqual("low", SymbolStyle.TextFieldResolver.Resolve(step, Aruba, 0.0),
+            var layout = Layout("['step',['zoom'],'low',10,'high']");
+            Assert.AreEqual("low", Resolve(layout, Aruba, 0.0),
                 "below the first stop, zoom 0 reads the default output");
-            Assert.AreEqual("low", SymbolStyle.TextFieldResolver.Resolve(step, Aruba, 5.0),
+            Assert.AreEqual("low", Resolve(layout, Aruba, 5.0),
                 "below the first stop, zoom 5 reads the same default output as zoom 0");
-            Assert.AreEqual("high", SymbolStyle.TextFieldResolver.Resolve(step, Aruba, 12.0),
+            Assert.AreEqual("high", Resolve(layout, Aruba, 12.0),
                 "a text-field zoom step must read the CALLER's zoom, not always zoom 0");
+        }
+
+        [Test]
+        public void PlainLiteral_IsConstant_TokenForm_IsFeature()
+        {
+            Assert.AreEqual(ExpressionKind.Constant, Layout("'Airport'").TextField.Kind,
+                "a plain literal text-field must classify as Constant.");
+            Assert.AreEqual(ExpressionKind.Feature, Layout("'{NAME}'").TextField.Kind,
+                "a token text-field must classify as Feature — Kind is now observable on text-field.");
+        }
+
+        // ── The wiring tooth: icon-image rides the identical ParseSymbolString path as text-field ──────
+
+        [TestCase("text-field")]
+        [TestCase("icon-image")]
+        public void SharedPath_TokenResolvesWithFeatureKind_LegacyObjectIsNull(string property)
+        {
+            var layout = Layout("'{NAME}'", property);
+            StyleProperty<string> prop = property == "text-field" ? layout.TextField : layout.IconImage;
+            Assert.AreEqual("Aruba", prop.Evaluate(0.0, Aruba));
+            Assert.AreEqual(ExpressionKind.Feature, prop.Kind);
+
+            var legacy = Layout("{'stops':[[0,'a']]}", property);
+            StyleProperty<string> legacyProp = property == "text-field" ? legacy.TextField : legacy.IconImage;
+            Assert.IsNull(legacyProp, $"a legacy function object is never routed to the parser for {property}.");
         }
     }
 
@@ -3248,98 +3290,6 @@ namespace MapRenderer.Tests.Style
 
 
 
-
-    // ───────────────────────────────────────────────────────────────────────────────────
-    // IconImageResolverTests — Symbol.IconImageResolver.Resolve: token sugar + expression form → sprite name
-    // ───────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// <see cref="SymbolStyle.IconImageResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND expression
-    /// form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact sprite name; a missing property
-    /// SKIPS the icon (returns null), never an empty name. Mirrors <c>TextFieldResolverTests</c> for the
-    /// icon-image analogue. Engine-free; runs in both runners.
-    /// </summary>
-    [TestFixture]
-    public class IconImageResolverTests
-    {
-        // Author field JSON with single quotes, then swap to real quotes.
-        private static JsonValue Field(string json) => JsonParser.Parse(json.Replace('\'', '"'));
-
-        private static IFeature Feature(params (string key, string val)[] props)
-        {
-            var dict = new Dictionary<string, Value>();
-            foreach (var (key, val) in props) dict[key] = Value.String(val);
-            return new DictionaryFeature(dict, TileGeometryType.Point);
-        }
-
-        private static readonly IFeature Marker = Feature(("icon", "marker"));
-        private static readonly IFeature Star = Feature(("icon", "star"), ("kind", "poi"));
-
-        [Test]
-        public void Token_SingleProperty_Resolves()
-        {
-            Assert.AreEqual("marker", SymbolStyle.IconImageResolver.Resolve(Field("'{icon}'"), Marker, 0.0));
-        }
-
-        [Test]
-        public void Expression_Get_Resolves()
-        {
-            Assert.AreEqual("marker", SymbolStyle.IconImageResolver.Resolve(Field("['get','icon']"), Marker, 0.0));
-        }
-
-        [Test]
-        public void Expression_CoalesceFallback_Resolves()
-        {
-            // icon:2x absent → coalesce falls back to icon.
-            Assert.AreEqual("star",
-                SymbolStyle.IconImageResolver.Resolve(Field("['coalesce',['get','icon:2x'],['get','icon']]"), Star, 0.0));
-        }
-
-        [Test]
-        public void UnknownToken_SkipsWithNull()
-        {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("'{missing}'"), Marker, 0.0),
-                "an unknown token resolving to empty text must SKIP the icon (null), not emit an empty name");
-        }
-
-        [Test]
-        public void MissingProperty_Expression_SkipsWithNull()
-        {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("['get','missing']"), Marker, 0.0),
-                "a get on a missing property must SKIP the icon (null), not emit an empty name");
-        }
-
-        [Test]
-        public void LiteralNoTokens_PassesThrough()
-        {
-            Assert.AreEqual("pin", SymbolStyle.IconImageResolver.Resolve(Field("'pin'"), Marker, 0.0));
-        }
-
-        [Test]
-        public void AbsentField_Skips()
-        {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(null, Marker, 0.0));
-        }
-
-        [Test]
-        public void EmptyLiteral_Skips()
-        {
-            Assert.IsNull(SymbolStyle.IconImageResolver.Resolve(Field("''"), Marker, 0.0),
-                "an empty/whitespace resolution must skip, mirroring TextFieldResolver");
-        }
-
-        [Test]
-        public void Expression_ZoomStep_EvaluatesAtTheGivenZoom_NotZero()
-        {
-            JsonValue step = Field("['step',['zoom'],'low-icon',10,'high-icon']");
-            Assert.AreEqual("low-icon", SymbolStyle.IconImageResolver.Resolve(step, Marker, 0.0),
-                "below the first stop, zoom 0 reads the default output");
-            Assert.AreEqual("low-icon", SymbolStyle.IconImageResolver.Resolve(step, Marker, 5.0),
-                "below the first stop, zoom 5 reads the same default output as zoom 0");
-            Assert.AreEqual("high-icon", SymbolStyle.IconImageResolver.Resolve(step, Marker, 12.0),
-                "an icon-image zoom step must read the CALLER's zoom, not always zoom 0");
-        }
-    }
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // LightSkyTests — root light/sky blocks: parse, spec defaults, malformed input

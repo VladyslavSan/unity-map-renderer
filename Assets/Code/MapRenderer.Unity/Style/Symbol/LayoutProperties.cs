@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
@@ -10,14 +11,15 @@ namespace MapRenderer.Unity.Style.Symbol
     /// The parsed MapLibre symbol <b>layout</b> properties for a single symbol style layer. Zoom-capable numeric
     /// properties are <see cref="StyleProperty{T}"/>, re-evaluated per frame; <see cref="SymbolPlacement"/> is
     /// one too but is evaluated once at build zoom. Enum and flag knobs parse once into plain typed values, like
-    /// <c>Line.LayoutProperties</c>'s Join/Cap. <see cref="TextField"/> and <see cref="IconImage"/> stay raw
-    /// <see cref="JsonValue"/> because they resolve per feature (<see cref="TextFieldResolver"/>).
+    /// <c>Line.LayoutProperties</c>'s Join/Cap. <see cref="TextField"/> and <see cref="IconImage"/> are
+    /// <see cref="StyleProperty{T}"/> too, evaluated per feature (<c>SymbolFeatureExtractor</c>).
     /// </summary>
     public sealed class LayoutProperties
     {
-        /// <summary>text-field: the raw value (a <c>{token}</c> string or an expression array), or null when
-        /// absent. Resolved per feature by <see cref="TextFieldResolver.Resolve"/> — NOT a scalar here.</summary>
-        public JsonValue TextField { get; init; }
+        /// <summary>text-field: null when absent or malformed. A multi-section <c>["format", …]</c> value
+        /// is not supported — it degrades like any other unrecognized expression (see
+        /// <see cref="ParseSymbolString"/>).</summary>
+        public StyleProperty<string> TextField { get; init; }
 
         /// <summary>text-font: the font stack. Default <c>["Open Sans Regular", "Arial Unicode MS Regular"]</c>
         /// (spec). Zoom-capable (constant or zoom expression); a data-driven expression degrades to the
@@ -105,9 +107,10 @@ namespace MapRenderer.Unity.Style.Symbol
         /// it, laying out in world arc length under <c>map</c>; a map-pitched point symbol still billboards.</summary>
         public AlignmentMode TextPitchAlignment { get; init; }
 
-        /// <summary>icon-image: the raw value (a <c>{token}</c> string or an expression array), or null when
-        /// absent. Per-feature-resolved; NOT a scalar here — icon sprite resolution is a later stage.</summary>
-        public JsonValue IconImage { get; init; }
+        /// <summary>icon-image: evaluates to the sprite name for one feature; null when absent or
+        /// malformed. Icon sprite lookup against that name is a later stage. The spec's <c>image</c>
+        /// operator is not built (docs/maplibre-style-spec-support-matrix.md).</summary>
+        public StyleProperty<string> IconImage { get; init; }
 
         /// <summary>icon-size: scale factor applied to the sprite's logical size. Default 1. Zoom-capable.</summary>
         public StyleProperty<float> IconSize { get; init; }
@@ -181,7 +184,7 @@ namespace MapRenderer.Unity.Style.Symbol
 
             return new LayoutProperties
             {
-                TextField = layout?.Get(PropertyNames.TextField), // raw; resolved per feature
+                TextField = ParseSymbolString(layout?.Get(PropertyNames.TextField)),
 
                 TextFont = ParseFontStack(layout?.Get(PropertyNames.TextFont)),
 
@@ -238,7 +241,7 @@ namespace MapRenderer.Unity.Style.Symbol
                 TextPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.TextPitchAlignment)?.AsString(null)),
                 TextOffset = ParseOffset(layout?.Get(PropertyNames.TextOffset)),
 
-                IconImage = layout?.Get(PropertyNames.IconImage), // raw; resolved per feature
+                IconImage = ParseSymbolString(layout?.Get(PropertyNames.IconImage)),
 
                 IconSize = iconSizeJson != null
                     ? new StyleProperty<float>(iconSizeJson, 1f, v => (float)v.AsNumber())
@@ -264,6 +267,65 @@ namespace MapRenderer.Unity.Style.Symbol
                         ExpressionParser.WrapBareArrayLiterals(iconPaddingJson), 2f, ProjectIconPadding)
                     : new StyleProperty<float>(2f),
             };
+        }
+
+        /// <summary>Parses text-field/icon-image into a <see cref="StyleProperty{T}"/>, desugaring a
+        /// <c>{token}</c> template into <c>["concat", …]</c> first so Kind classification and per-feature
+        /// substitution come from the normal expression engine. A legacy function object is excluded: the
+        /// desugar only inspects the top-level value, so a <c>{NAME}</c> inside a stop's OUTPUT would never
+        /// expand. That, a malformed expression, or <c>["format", …]</c> (not supported) all degrade to null.
+        /// </summary>
+        private static StyleProperty<string> ParseSymbolString(JsonValue json)
+        {
+            if (json == null || json.Kind == JsonKind.Object) return null;
+            try
+            {
+                return new StyleProperty<string>(
+                    DesugarTokenTemplate(json), null, v => v.ToDisplayString(), interpolatable: false);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>Desugars a <c>{prop}</c> token template into <c>["concat", literal, ["get","prop"], …]</c>
+        /// JSON. A template with no <c>{</c> passes through unchanged, so a plain literal stays Constant-kind
+        /// (matching a text-field that names no property at all).</summary>
+        private static JsonValue DesugarTokenTemplate(JsonValue json)
+        {
+            if (json.Kind != JsonKind.String) return json;
+            string template = json.AsString(string.Empty);
+            if (string.IsNullOrEmpty(template) || template.IndexOf('{') < 0) return json;
+
+            var args = new List<JsonValue> { JsonValue.OfString("concat") };
+            var literal = new StringBuilder();
+            int i = 0;
+            while (i < template.Length)
+            {
+                char c = template[i];
+                if (c == '{')
+                {
+                    int close = template.IndexOf('}', i + 1);
+                    if (close < 0)
+                    {
+                        literal.Append(template, i, template.Length - i); // unterminated brace → literal tail
+                        break;
+                    }
+                    string key = template.Substring(i + 1, close - i - 1);
+                    if (literal.Length > 0) { args.Add(JsonValue.OfString(literal.ToString())); literal.Clear(); }
+                    args.Add(JsonValue.OfArray(new List<JsonValue> { JsonValue.OfString("get"), JsonValue.OfString(key) }));
+                    i = close + 1;
+                }
+                else
+                {
+                    literal.Append(c);
+                    i++;
+                }
+            }
+            if (literal.Length > 0) args.Add(JsonValue.OfString(literal.ToString()));
+
+            return JsonValue.OfArray(args);
         }
 
         // Spec default font stack when text-font is absent or malformed.

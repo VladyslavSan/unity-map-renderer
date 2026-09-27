@@ -34,7 +34,6 @@
     <Compile Include="Shim/**/*.cs" />
     <Compile Include="SphericalProjectionTests.cs" />
     <Compile Include="TileBufferClipTests.cs" />
-    <Compile Include="SymbolExpressionResolverMemoAllocationTests.cs" />
 
     <!-- Real production sources (single source of truth). Mostly MapRenderer.Core; the tile-decode seam
          lives in MapRenderer.Unity/Jobs and is not compiled here — same precedent as the engine-free
@@ -279,12 +278,11 @@
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Background/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Background/StyleLayer.cs" />
 
-    <!-- S105 Slice 1: Symbol style layer + text-field resolver (engine-free) -->
+    <!-- S105 Slice 1: Symbol style layer + text-field/icon-image parsing (engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/PropertyNames.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/LayoutProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/TextFieldResolver.cs" />
 
     <!-- Slice A: text layout-options wiring (LayoutProperties → TextLayoutOptions), engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/TextLayoutOptionsBuilder.cs" />
@@ -395,13 +393,10 @@
     <!-- I3: icon labels — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Sprites/SpriteAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolKind.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Unity/Style/Symbol/IconImageResolver.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/IconQuadLayout.cs" />
-    <!-- UMR-176 round B: StyleTests.cs — 12 formerly-separate fast-lane Style fixtures (TileJson/
-         StyleProperty/StyleLayerEagerParse/FillLayout/FillPattern/FillExtrusionPaint/LinePaint/
-         BackgroundPaint/SymbolStyleLayer/TextFieldResolver/LineDash/IconImageResolver)Tests.cs — packed
-         into one topic+lane file, each class kept verbatim. LineOffsetTests.cs stays separate (its own
-         entry above) — a using collision (see its file header). -->
+    <!-- UMR-176 round B: StyleTests.cs packs several fast-lane Style fixtures into one topic+lane file —
+         see the file's own Contents header for the current list. LineOffsetTests.cs stays separate (its
+         own entry above) — a using collision (see its file header). -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StyleTests.cs" />
     <!-- The skirt's carrier chain, extraction → builder → collision box (engine-free; shared verbatim). -->
     <!-- P2 REQUIRED-1: the Up carrier chain (Block A), driven through real extraction + build (engine-free). -->

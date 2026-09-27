@@ -67,9 +67,9 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - *The test:* does the member name a property the spec defines? Then type it. Does it name the original
     document? Then `Raw` is right, and say in one line who needs it unparsed.
   - `JsonValue` as a `Parse(...)` PARAMETER is correct and is not this rule.
-  - **Known live exceptions:** `LayoutProperties.TextField` and `LayoutProperties.IconImage` are still raw
-    `JsonValue` today — tracked as UMR-183. This is the rule new and touched code is held to, not a claim
-    that the codebase already keeps it everywhere.
+  - **Known live exceptions:** `StyleLayer.Filter` and `SourceDefinition.Data` are still raw `JsonValue`
+    today (`Data`'s own doc gives a reason: the key is either inline GeoJSON or a URL). This is the rule
+    new and touched code is held to, not a claim that the codebase already keeps it everywhere.
 
 - **Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`.**
   - Plain data carriers expose `init`-only auto-properties and are built with named members

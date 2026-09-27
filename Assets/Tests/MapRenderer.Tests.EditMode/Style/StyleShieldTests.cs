@@ -128,6 +128,21 @@ namespace MapRenderer.Tests.Style
                 "owner-immediately-then-rider — SymbolPairing's adjacency contract");
         }
 
+        // ══ A blank text-field/icon-image, alone, must SKIP the feature ═════════════════════════════════
+        // The icon-image row's atlas registers the whitespace name itself, so a skip failure there can
+        // only be the ResolveSymbolString gate, never a TryGetSprite miss reaching the same result.
+        [TestCase("text-field", "\"   \"", TestName = "BlankResolve_TextField_Whitespace_EmitsNoSymbol")]
+        [TestCase("icon-image", "\"   \"", TestName = "BlankResolve_IconImage_Whitespace_EmitsNoSymbol")]
+        [TestCase("text-field", "\"{missing}\"", TestName = "BlankResolve_TextField_MissingToken_EmitsNoSymbol")]
+        [TestCase("text-field", "[\"get\",\"missing\"]", TestName = "BlankResolve_TextField_MissingGet_EmitsNoSymbol")]
+        public void BlankResolve_EmitsNoSymbol(string property, string valueJson)
+        {
+            List<SymbolFeature> symbols = ExtractPoint(
+                "{\"" + property + "\":" + valueJson + "}", SyntheticAtlas("   "));
+            Assert.AreEqual(0, symbols.Count,
+                $"a {property} resolving to blank ({valueJson}) must skip the feature entirely.");
+        }
+
         // ══ A non-centred pair's two boxes land where each half's OWN baked bounds say ════════════════
         // Non-local invariant: anchor/offset are folded into each half's anchor-RELATIVE bounds upstream, so
         // StagePointPair places both halves at the OWNER's ScreenPx. Runs the REAL layout + staging chain.

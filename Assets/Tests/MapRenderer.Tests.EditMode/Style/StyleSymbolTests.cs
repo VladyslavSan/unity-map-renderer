@@ -297,7 +297,8 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>A <c>text-field</c> zoom <c>step</c> must extract using <see cref="Zoom"/> (8.0, past the
         /// step-5 threshold below), not a hardcoded zoom 0. RED-verify: hardcode <c>0.0</c> at the
-        /// <c>TextFieldResolver.Resolve</c> call site in <c>SymbolFeatureExtractor.Extract</c>.</summary>
+        /// <c>ResolveSymbolString(layout.TextField, zoom, feature)</c> call site in
+        /// <c>SymbolFeatureExtractor.Extract</c>.</summary>
         [Test]
         public void TextFieldZoomStep_Extracts_AtTheBuildZoom_NotZero()
         {

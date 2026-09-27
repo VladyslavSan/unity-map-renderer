@@ -113,8 +113,9 @@ namespace MapRenderer.Tests
         }
 
         /// <summary><c>text-field</c> as a property-reference token, e.g. <c>TextField("name")</c> emits
-        /// <c>"text-field":"{name}"</c> — the real <see cref="MapRenderer.Unity.Style.Symbol.TextFieldResolver"/>
-        /// token-expansion path, not a literal string. Default <c>"{name}"</c>.</summary>
+        /// <c>"text-field":"{name}"</c> — the real
+        /// <see cref="MapRenderer.Unity.Style.Symbol.LayoutProperties"/> token-desugar path, not a literal
+        /// string. Default <c>"{name}"</c>.</summary>
         public SymbolTextVisualLayer TextField(string prop)
         {
             _textFieldJson = $"\"{{{prop}}}\"";

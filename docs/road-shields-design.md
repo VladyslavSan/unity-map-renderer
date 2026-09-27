@@ -210,7 +210,7 @@ injected defects — lives with those tests, not here.
 Core: `Text/AlignmentMode` (+ `AlignmentResolution`),
 `Text/Placement/LineAnchorPlacement` / `LineAnchor`, `Text/Placement/SymbolCollision`,
 `Text/Placement/SymbolStagingMath`. Unity: `Style/Symbol/LayoutProperties` (`SymbolPlacement`,
-`ParsePlacement`, `ParseAlignment`), `Style/Symbol/IconImageResolver`,
+`ParsePlacement`, `ParseAlignment`, `ParseSymbolString`),
 `Text/SymbolFeatureExtractor` (the placement/geometry gate, the
 icon path, the line and point branches), `Text/SymbolSubsystem` (`TryBeginBuild`, `PumpBuilds`,
 `FetchSpriteSheetAsync` — D6), `Rendering/Tile/Processing/TileSymbolLayerProcessor` (the atlas is a ctor
