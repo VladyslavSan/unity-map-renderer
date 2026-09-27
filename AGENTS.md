@@ -74,8 +74,10 @@ in-Editor Test Runner if headless licensing is unavailable (see caveats).
 ```
 It is self-locating, drives `unity test` (which finds the Editor for this project's Unity version),
 refuses to run if the Editor is open (exit 3), runs the tests, then prints the per-test results, any `error CS` lines, and a
-**`VERDICT:` line last** — read that. **Run it in the background** (`run_in_background`): the first
-batch launch does a full asset import + compile and can take minutes; you'll be notified on completion.
+**`VERDICT:` line last** — read that. The first batch launch does a full asset import + compile and can take minutes.
+From the main session, run it in the background (`run_in_background`); you are notified on completion. A
+subagent runs it in the foreground with a 10-minute timeout: a background run's completion does not
+reliably wake a subagent.
 
 **A stage is done only against the unqualified command — both runners.** They run sequentially (one
 Unity at a time; the project lock is exclusive) and the script stops at the first platform that fails,
@@ -200,21 +202,22 @@ supervisor**; the design docs below are the only tracking.
    impl can't pass), and an **explicit "deferred" scope fence** so the developer can't over-reach. The plan
    is transient build scaffolding, not a repo doc — `docs/` holds only durable design. No production code.
 2. **Develop.** A developer executes the plan in order, honoring its compile checkpoints, and iterates
-   `./Tools/run-tests.sh` to green (Editor **closed**; verify NEW test names appear in the results XML — the
+   filtered runs (`./Tools/run-tests.sh EditMode '<regex>'`) to green — the unfiltered suite is the
+   orchestrator's, in step 3 (Editor **closed**; verify NEW test names appear in the results XML — the
    batch-Burst stale-XML hazard; **never re-bake a snapshot to go green** — a diff means behaviour changed).
    Regression tests for a fixed bug are **RED-verified** (confirm they fail against the un-fixed code, then
    pass). Does **not** commit.
 3. **Review.** A reviewer reads the working-tree diff and returns APPROVE or ranked actionable findings —
    stating an explicit verdict on each judgment call the change hinges on. Non-blocking findings are
-   **recorded** (in the design doc, for the merge step), not necessarily fixed in-stage.
+   **recorded** with the work item, not necessarily fixed in-stage.
    **Reviewers do not launch the gate.** The dev's word is not trusted either — the *orchestrator* re-runs
    `./Tools/run-tests.sh` itself, once, on the frozen post-review tree, and that run is the authority. The
    reason is mechanical: Unity's project lock is exclusive, so a second batch run exits 3, and a review arm
    that RED-verifies by injecting a defect is *mutating the tree the gate is compiling* — a gate that races
    an arm reads clean and means nothing.
-Then **commit one stage per revertible commit** on the feature branch (never fold stages; the merge step
-decides what to squash). The design doc is the running SSOT — decisions, the stage sequence, and open
-findings live there. The orchestrator (main session) hands each role its brief, relays results, and gates
+Then **commit the stage on the ticket's feature branch**; the finished ticket lands on `main` as ONE
+squash-merged commit. Design decisions go into the design doc; order, status and open findings live in Jira.
+The orchestrator (main session) hands each role its brief, relays results, and gates
 the commit; it does not do the role work itself.
 
 **Two rules every role brief must carry** — a subagent only knows what its brief points it at, and both of
