@@ -111,8 +111,14 @@ namespace MapRenderer.Tests.MapViews
 
                 // ── (a) THE PAN CASE ──
                 // A 1° pan stays inside the loaded z2 cover but dirties it; the full recompute must not allocate.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                double panLon = 0.0;
+                AllocationDiagnostics.AssertNotAllocating(() =>
+                {
+                    // Alternate so every call — warm-up and measured — genuinely dirties the cover, not just the first.
+                    panLon = panLon == 0.0 ? 1.0 : 0.0;
+                    view.Camera.Apply(new CameraPropertiesUpdate { Longitude = panLon, Latitude = 0.0 });
+                    view.LateUpdate();
+                },
                     "MapView.LateUpdate must not allocate during a within-cover pan (cover recompute path: " +
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
                     "A failure means a per-frame List/Task/closure/LINQ leaked into the hot path.");
@@ -121,19 +127,35 @@ namespace MapRenderer.Tests.MapViews
                     "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
 
                 // ── (b) the fully-static frame also early-outs allocation-free. ──
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(() => view.LateUpdate(),
                     "A static frame (cover clean, nothing pending) must early-out with zero allocation.");
 
                 // ── (c) a heading/tilt change still ticks alloc-free. ──
-                // Heading dirties the cover, but the whole-world z2 set stays the same, so nothing loads.
-                view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 });
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                // Heading/tilt dirty the cover; a heading of 45° or a tilt of 30° each measurably drop
+                // LoadedTileCount below 16 (the frustum genuinely excludes tiles there) — a SMALL nudge
+                // around the proven-safe heading=0/tilt=0 baseline (see (a)/(b) above) keeps the whole-world
+                // z2 set unchanged, so nothing loads.
+                Assert.AreEqual(16, view.LoadedTileCount(),
+                    "precondition: the whole-world z2 set must already be all 16 tiles before the heading/tilt nudge.");
+                double nudgeHeading = 0.0, nudgeTilt = 0.0;
+                AllocationDiagnostics.AssertNotAllocating(() =>
+                {
+                    // Alternate small nudges so every call — warm-up and measured — genuinely dirties the
+                    // cover via CoverKeyGate's exact-equality check, without leaving the whole-world set.
+                    nudgeHeading = nudgeHeading == 0.0 ? 0.2 : 0.0;
+                    nudgeTilt    = nudgeTilt    == 0.0 ? 0.5 : 0.0;
+                    view.Camera.Apply(new CameraPropertiesUpdate { Heading = nudgeHeading, Tilt = nudgeTilt });
+                    view.LateUpdate();
+                },
                     "A heading/tilt change must tick alloc-free (cover recompute over an unchanged whole-world set).");
+                Assert.AreEqual(16, view.LoadedTileCount(),
+                    "postcondition: the whole-world z2 set must stay unchanged across the heading/tilt nudge, or " +
+                    "this measured a real load/release diff instead of the alloc-free early set-rebuild claim.");
 
                 // ── (d) AT SCALE: zero-alloc must hold over MANY frames, not just one. ──
                 // Same N as the Entities verdict below, so a clean BRG shows the churn is Entities-specific.
                 const int N = 50;
-                Assert.That(() => { for (int i = 0; i < N; i++) view.LateUpdate(); }, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
                     $"BRG.Tick must not allocate across {N} steady-state frames — proving the zero-alloc " +
                     "contract holds at the scale where the Entities backend trips the recorder.");
             }
@@ -182,8 +204,7 @@ namespace MapRenderer.Tests.MapViews
                 string verdict;
                 try
                 {
-                    Assert.That(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
-                                Is.Not.AllocatingGCMemory());
+                    AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); });
                     verdict = $"NO GC allocation across {N} steady-state Ticks";
                 }
                 catch (AssertionException)

@@ -143,7 +143,7 @@ namespace MapRenderer.Tests.Tiles
                 // here, outside the measured region, so they cannot read as false positives.
                 for (int i = 0; i < 8; i++) RunBothLayers();
 
-                Assert.That(RunBothLayers, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(RunBothLayers,
                     "ProcessOnWorker must not allocate managed memory for feature selection once it appends " +
                     "into the pooled TileBuildBuffers instead of `new List<SelectedTileFeature>()`.");
             }

@@ -919,8 +919,11 @@ namespace MapRenderer.Tests.MapViews
             Assert.Less(Vector3.Angle(dayDirection, midDirection), span, "the sun must turn toward the new direction.");
             Assert.Less(Vector3.Angle(nightDirection, midDirection), span, "the sun must turn toward the new direction.");
 
-            Assert.That(() => Advance(Mid * 1.5), Is.Not.AllocatingGCMemory(),
-                "a mid-transition frame must not allocate.");
+            // Warm the EXACT measured delegate (JIT) outside the measured region — a one-shot lambda's own
+            // first invocation can itself register a false positive (gc-and-allocation-design.md § 6).
+            TestDelegate act = () => Advance(Mid * 1.5);
+            for (int w = 0; w < 50; w++) act();
+            AllocationDiagnostics.AssertNotAllocating(act, "a mid-transition frame must not allocate.");
         }
 
         [Test]

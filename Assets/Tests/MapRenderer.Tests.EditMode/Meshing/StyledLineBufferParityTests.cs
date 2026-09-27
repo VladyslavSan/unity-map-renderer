@@ -1218,14 +1218,16 @@ namespace MapRenderer.Tests.Meshing
                 Mesh.MeshDataArray measuredMda = Mesh.AllocateWritableMeshData(1);
                 try
                 {
-                    Assert.That(() =>
+                    // warmUp: false — measuredMda must stay a FRESH, never-SetVertexBufferParams'd MeshDataArray
+                    // (see the comment above): a helper warm-up would touch it 3x before the measured call.
+                    AllocationDiagnostics.AssertNotAllocating(() =>
                     {
                         SyncMeshWrite.Line(measuredMda[0], selection, geometry, paint, layout,
                             Zoom, origin, out int _, out Bounds _);
                     },
-                    Is.Not.AllocatingGCMemory(),
                     "WriteMeshData must not allocate managed memory for a constant-style, multi-ring build " +
-                    "once the three per-layer attribution columns are NativeArray<T> instead of T[]");
+                    "once the three per-layer attribution columns are NativeArray<T> instead of T[]",
+                    warmUp: false);
                 }
                 finally
                 {

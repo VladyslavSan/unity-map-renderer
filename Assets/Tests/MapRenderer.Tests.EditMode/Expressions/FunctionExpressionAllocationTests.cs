@@ -37,7 +37,7 @@ namespace MapRenderer.Tests.Expressions
             // still caught; only the one-time JIT leaves the window.
             TestDelegate act = () => expr.Evaluate(ctx);
             for (int w = 0; w < 50; w++) act();
-            Assert.That(act, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(act,
                 "a nested operator tree must evaluate without allocating: each FunctionExpression rents its " +
                 "argument buffer from the per-thread EvalArgBuffers free-list instead of `new Value[]`.");
         }
@@ -53,7 +53,7 @@ namespace MapRenderer.Tests.Expressions
 
             TestDelegate act = () => expr.Evaluate(ctx);
             for (int w = 0; w < 50; w++) act();
-            Assert.That(act, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(act,
                 "an 8-argument variadic must evaluate without allocating once its buffer is pooled.");
         }
     }

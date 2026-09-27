@@ -372,8 +372,7 @@ namespace MapRenderer.Tests.Style
             var applier = MixedApplier(out Material mat, retarget: true, now: 0.0, duration: 1.0);
             Track(mat);
             applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.1)); // warm up
-            Assert.That(() => applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.5)),
-                Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.5)),
                 "ApplyZoom mid-transition, mixed binding types, must not allocate.");
         }
 
@@ -383,9 +382,10 @@ namespace MapRenderer.Tests.Style
             var applier = MixedApplier(out Material mat, retarget: true, now: 0.0, duration: 1.0);
             Track(mat);
             applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.9)); // warm up, still transitioning
-            Assert.That(() => applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.0)), // t crosses 1 HERE
-                Is.Not.AllocatingGCMemory(),
-                "the frame that settles every binding (mutates each Origin to null) must not allocate.");
+            // warmUp: false — the measured call itself crosses t=1 and settles every binding (Origin -> null);
+            // a helper warm-up would settle it on the FIRST of its own calls and measure the post-settle case instead.
+            AllocationDiagnostics.AssertNotAllocating(() => applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.0)), // t crosses 1 HERE
+                "the frame that settles every binding (mutates each Origin to null) must not allocate.", warmUp: false);
         }
 
         [Test]
@@ -394,8 +394,7 @@ namespace MapRenderer.Tests.Style
             var applier = MixedApplier(out Material mat, retarget: true, now: 0.0, duration: 1.0);
             Track(mat);
             applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 10.0)); // settle
-            Assert.That(() => applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 11.0)),
-                Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 11.0)),
                 "post-settle, non-empty binding lists, must not allocate.");
         }
 
@@ -692,13 +691,13 @@ namespace MapRenderer.Tests.Style
 
                 // ── Measure: swept zoom, must be alloc-free. ──
                 double sweepZoom = 5.0;
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     // Use a closure-captured local that changes each call so the sweep is genuinely variable.
                     sweepZoom += 0.1;
                     if (sweepZoom > 15.0) sweepZoom = 5.0;
                     applier.ApplyZoom(new StyleFrameInputs(sweepZoom, 1.0, 0.0));
-                }, Is.Not.AllocatingGCMemory(),
+                },
                     "ZoomStyleApplier.ApplyZoom (float binding, sweeping zoom) must not allocate GC memory. " +
                     "A failure indicates a Value[], boxing, or per-frame allocation escaped the hot path.");
             }
@@ -726,12 +725,12 @@ namespace MapRenderer.Tests.Style
                     applier.ApplyZoom(new StyleFrameInputs(5.0 + (w % 10) * 1.0, 1.0, 0.0));
 
                 double sweepZoom = 5.0;
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     sweepZoom += 0.1;
                     if (sweepZoom > 15.0) sweepZoom = 5.0;
                     applier.ApplyZoom(new StyleFrameInputs(sweepZoom, 1.0, 0.0));
-                }, Is.Not.AllocatingGCMemory(),
+                },
                     "ZoomStyleApplier.ApplyZoom (color binding, sweeping zoom) must not allocate GC memory. " +
                     "A failure means rgb() stop outputs were not constant-folded to LiteralExpression.");
             }
@@ -758,12 +757,12 @@ namespace MapRenderer.Tests.Style
                     applier.ApplyZoom(new StyleFrameInputs(5.0 + (w % 10) * 1.0, 1.0, 0.0));
 
                 double sweepZoom = 5.0;
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     sweepZoom += 0.1;
                     if (sweepZoom > 15.0) sweepZoom = 5.0;
                     applier.ApplyZoom(new StyleFrameInputs(sweepZoom, 1.0, 0.0));
-                }, Is.Not.AllocatingGCMemory(),
+                },
                     "MaterialFactory.BindFillPaintToApplier's fill-color binding must not allocate GC memory " +
                     "on the swept-zoom ApplyZoom path.");
             }
@@ -958,17 +957,16 @@ namespace MapRenderer.Tests.Style
                     "precondition: MapMaterialSetTestUtil must assign SymbolTextWorld — otherwise every " +
                     "ApplyZoom below is a `_applier?.` no-op and this tooth measures nothing.");
 
-                // Warm-up: JIT compilation and shader reflection must not count against the measurement.
-                for (int w = 0; w < 64; w++)
-                    set.ApplyZoom(new StyleFrameInputs(8.0 + (w % 8), 1.0, 0.0));
-
+                // AllocationDiagnostics warms this exact delegate itself (gc-and-allocation-design.md § 6).
                 double zoom = 8.0;
-                Assert.That(() =>
+                TestDelegate act = () =>
                 {
                     zoom += 0.1;
                     if (zoom > 16.0) zoom = 8.0;
                     set.ApplyZoom(new StyleFrameInputs(zoom, 1.0, 0.0));
-                }, Is.Not.AllocatingGCMemory(),
+                };
+
+                AllocationDiagnostics.AssertNotAllocating(act,
                     "RenderLayerSet.ApplyZoom over three symbol layers must not allocate GC memory.");
         }
     }

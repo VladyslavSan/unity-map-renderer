@@ -82,10 +82,10 @@ namespace MapRenderer.Tests.Projection
                 src[4] = new GeoCoordinate3D { Longitude = 0.0,   Latitude = 85.0,  Altitude = 0.0 };
 
                 // The GC-alloc recorder constraint asserts 0 bytes allocated during the delegate.
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     WebMercator.Forward(src.AsReadOnlySpan(), dst.AsSpan());
-                }, Is.Not.AllocatingGCMemory());
+                });
             }
             finally
             {
@@ -111,10 +111,10 @@ namespace MapRenderer.Tests.Projection
                 src[3] = new GeoCoordinate3D { Longitude = 180.0, Latitude = 0.0,   Altitude = 0.0 }; // antipodal
                 src[4] = new GeoCoordinate3D { Longitude = -45.0, Latitude = -60.0, Altitude = 500.0 };
 
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     Ecef.Forward(src.AsReadOnlySpan(), dst.AsSpan());
-                }, Is.Not.AllocatingGCMemory());
+                });
             }
             finally
             {

@@ -64,8 +64,9 @@ namespace MapRenderer.Tests.Cameras
         // ── Instant Apply path allocates zero GC ────────────────────────────────────────────────────
 
         /// <summary>
-        /// <see cref="MapCamera.Apply"/> merges a struct patch over the readonly-struct camera state and
-        /// re-drives the transform (native calls, no managed allocation) — it must allocate ZERO heap bytes.
+        /// <see cref="MapCamera.Apply"/> merges a struct patch over the readonly-struct camera state — pure
+        /// engine-free struct arithmetic, no native calls (the Unity camera transform is a separate,
+        /// once-per-frame <see cref="MapCamera.SyncToCamera"/>) — it must allocate ZERO heap bytes.
         /// </summary>
         [Test]
         public void InstantApply_DoesNotAllocateGCMemory()
@@ -74,12 +75,16 @@ namespace MapRenderer.Tests.Cameras
             var (_, mapCam, _, rootGo, camGo) = CreateCameraRig(initial);
             Track(rootGo);
             Track(camGo);
-                // Warm the path once (JIT, first-call setup) outside the measured region.
-                mapCam.Apply(new CameraPropertiesUpdate { Zoom = 6.0 });
+                // AllocationDiagnostics warms this exact delegate itself (gc-and-allocation-design.md § 6).
+                double zoom = 6.0;
+                TestDelegate act = () =>
+                {
+                    zoom += 0.1;
+                    mapCam.Apply(new CameraPropertiesUpdate { Zoom = zoom, Heading = 10.0 });
+                };
 
-                Assert.That(() => mapCam.Apply(new CameraPropertiesUpdate { Zoom = 7.0, Heading = 10.0 }),
-                    Is.Not.AllocatingGCMemory(),
-                    "Apply must not allocate (struct patch over readonly-struct state; native transform writes).");
+                AllocationDiagnostics.AssertNotAllocating(act,
+                    "Apply must not allocate (struct patch over readonly-struct state; no native calls).");
         }
 
         // ── Pose ────────────────────────────────────────────────────────────────────────────────────

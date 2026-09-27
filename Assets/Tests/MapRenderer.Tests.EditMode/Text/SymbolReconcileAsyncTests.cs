@@ -90,7 +90,7 @@ namespace MapRenderer.Tests.Text
 
             // Block-bodied lambda: Append returns a value, so an expression lambda binds to the wrong
             // Assert.That overload and fails with "actual value must be a TestDelegate".
-            Assert.That(() => { atlas.Append(glyph, 0); }, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => { atlas.Append(glyph, 0); },
                 "re-appending an already-decoded glyph (same codepoint, same cell height, same open shelf) " +
                 "must not allocate: GrowToFit no-ops once the shelf's used height stops increasing, and " +
                 "Dictionary[key]= on an EXISTING key overwrites in place without growing capacity.");
@@ -126,7 +126,7 @@ namespace MapRenderer.Tests.Text
             // Warm-up: stabilizes `output`'s backing array capacity.
             shaper.Shape(in request, output);
 
-            Assert.That(() => { shaper.Shape(in request, output); }, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => { shaper.Shape(in request, output); },
                 "Shape(in request, output) must not allocate on the steady LTR path once the caller " +
                 "buffer's capacity has stabilized from the warm-up call.");
         }

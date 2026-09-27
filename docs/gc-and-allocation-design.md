@@ -136,3 +136,18 @@ one-line takeaways so a doc reader here does not repeat the discovery:
   yes/no*, not a byte count; **warm the exact measured delegate** first (a one-shot lambda's JIT can
   register a false positive); and a **single** call can be alloc-free while a **run of N** trips it, so
   measure over a loop. Always **canary** any GC meter against a known allocation before trusting a `0`.
+- **For a numeric ceiling (not just yes/no), read the same recorder directly:** `Recorder.Get("GC.Alloc")`,
+  filtered to the current thread, `sampleBlockCount` after N calls — counts allocation events on that
+  thread only, proportional, immune to another thread's heap traffic. A zero-sample window can report the
+  PREVIOUS window's value instead of a fresh zero, so never trust a single zero reading alone.
+- **A subject's first-ever call in a process can pay a one-time engine/JIT cost unrelated to its
+  steady-state allocation** — a `NativeArray`'s first `AsSpan`/`AsReadOnlySpan`, a first-use static —
+  and that cost is ORDER-DEPENDENT: it lands on whichever test calls that code path first. A full suite
+  usually absorbs it in an earlier, unrelated test; an isolated run, a filtered run, or a reordered suite
+  can instead land it on a zero-alloc assertion, which then fails with no load and no logic change.
+  `MapRenderer.Tests.AllocationDiagnostics.AssertNotAllocating` is the wrapper every zero-alloc assertion in
+  this codebase uses in place of `Is.Not.AllocatingGCMemory()` directly: it warms the measured delegate
+  itself, so an isolated run pays the first-use cost outside the window, and prints forensic context (the
+  recorder's count, `GC.CollectionCount(0)`, the frame count, pending ThreadPool work) on a failure. Pass
+  `warmUp: false` when the FIRST call is itself the state under test — a fresh buffer never touched before,
+  or a transition's settling frame — since the helper's own warm-up would then consume that first call.

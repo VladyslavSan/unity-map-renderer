@@ -613,16 +613,16 @@ namespace MapRenderer.Tests.Visual
 
                 const int N = 50;
 
-                // Non-obvious why: this constraint counts GC.Alloc sampler calls, not bytes, and is immune to GC
-                // timing. GC.GetTotalMemory depends on GC timing, and GetAllocatedBytesForCurrentThread returns 0
-                // on this Unity Mono build. Constructing it directly avoids a second, colliding `Is` import.
-                // Rebuild ticks the EG system groups synchronously on the calling thread, so this measures them.
-                var allocates = new UnityEngine.TestTools.Constraints.AllocatingGCMemoryConstraint();
+                // Non-obvious why: this counts GC.Alloc sampler calls, not bytes, and is immune to GC timing.
+                // GC.GetTotalMemory depends on GC timing, and GetAllocatedBytesForCurrentThread returns 0 on
+                // this Unity Mono build. Rebuild ticks the EG system groups synchronously on the calling
+                // thread, so this measures them.
                 string verdict;
                 try
                 {
-                    Assert.That(() => { for (int i = 0; i < N; i++) r.Rebuild(SceneFrame.Mercator(o)); },
-                                new NUnit.Framework.Constraints.NotConstraint(allocates));
+                    AllocationDiagnostics.AssertNotAllocating(
+                        () => { for (int i = 0; i < N; i++) r.Rebuild(SceneFrame.Mercator(o)); },
+                        $"EntitiesTileRenderer.Rebuild must not allocate over {N} steady-state Rebuilds.");
                     verdict = $"NO GC allocation over {N} Rebuilds";
                 }
                 catch (AssertionException)

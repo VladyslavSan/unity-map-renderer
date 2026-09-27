@@ -66,7 +66,7 @@ namespace MapRenderer.Tests.Meshing
                     holeRIs.GetSubArray(0, 3).Sort(comparer);
                 };
                 for (int w = 0; w < 50; w++) act();
-                Assert.That(act, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(act,
                     "sorting the reused NativeArray through the struct comparer must allocate no managed memory " +
                     "(no per-polygon int[], no boxed comparer).");
             }

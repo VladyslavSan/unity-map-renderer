@@ -839,7 +839,7 @@ namespace MapRenderer.Tests.Tiles
 
             // Block-bodied lambda: Request returns a value, so an expression lambda binds to the wrong
             // Assert.That overload and fails with "actual value must be a TestDelegate".
-            Assert.That(() => { scheduler.Request(id); }, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => { scheduler.Request(id); },
                 "Cache-hit Request must not allocate — UniTask.FromResult(cached) must return the memoized " +
                 "value directly, never re-wrap it or re-fetch from the source.");
         }
@@ -867,7 +867,7 @@ namespace MapRenderer.Tests.Tiles
                 "warm-up call must genuinely be in-flight (source gated) for this tooth to have teeth.");
 
             // Block-bodied lambda — see the cache-hit tooth above for why (Request returns a value).
-            Assert.That(() => { scheduler.Request(tileId); }, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => { scheduler.Request(tileId); },
                 "In-flight-share Request must return the existing preserved UniTask with zero new allocation.");
 
             // Cleanup: settle the gate so nothing dangles (no exception — no unobserved-exception concern).
@@ -933,9 +933,15 @@ namespace MapRenderer.Tests.Tiles
 
                 // Sub-tile nudge (~10 cm, far below the z14 tile size): the same tile set stays selected, but
                 // CoverKeyGate's exact-equality check still trips it dirty.
-                view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + 1e-6, Longitude = 13.405 - 1e-6 });
-
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                double nudge = 1e-6;
+                AllocationDiagnostics.AssertNotAllocating(() =>
+                {
+                    // Alternate the nudge direction so every call — warm-up and measured — genuinely dirties
+                    // CoverKeyGate's exact-equality check, not just the first.
+                    nudge = -nudge;
+                    view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + nudge, Longitude = 13.405 - nudge });
+                    view.LateUpdate();
+                },
                     "MapView.LateUpdate must not allocate during a sub-tile nudge over a deep (z12+), mixed-zoom, " +
                     "large ScreenSpaceLod cover — the recompute path (quadtree descent + request/release " +
                     "diff) at STALL SCALE, not the shallow z2 case. A failure means the descent boxes a LOD " +
@@ -2373,7 +2379,7 @@ namespace MapRenderer.Tests.Tiles
                     "the sort/admit-attempt path to actually run every Tick.");
 
                 const int N = 30;
-                Assert.That(() => { for (int i = 0; i < N; i++) view.LateUpdate(); }, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
                     $"AdmitFromDesired's priority sort + admit-attempt must not allocate across {N} Ticks " +
                     "of sustained desired-list churn (capped, nothing completing).");
             }
@@ -2658,7 +2664,7 @@ namespace MapRenderer.Tests.Tiles
             var sorter = new TilePrioritySorter();
             sorter.Sort(list, in Zero); // warm-up — grows the scratch buffer past 64
 
-            Assert.That(() => sorter.Sort(list, in Zero), Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => sorter.Sort(list, in Zero),
                 "TilePrioritySorter.Sort must not allocate once its scratch buffer has grown to steady size.");
         }
     }

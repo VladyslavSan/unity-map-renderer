@@ -131,7 +131,7 @@ namespace MapRenderer.Tests.Tiles
                 // happen here, outside the measured region.
                 for (int i = 0; i < 8; i++) RunCycle();
 
-                Assert.That(RunCycle, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(RunCycle,
                     "a warmed repeat of AllocateForKick + ProcessOnWorker + Release must not allocate managed " +
                     "memory once TileMeshLayerProcessor is pool-rented instead of constructed fresh per layer " +
                     "per tile-build.");

@@ -119,7 +119,7 @@ namespace MapRenderer.Tests.Mvt
             // (Is.Not.AllocatingGCMemory's one-shot-lambda false positive); a per-call allocation still fails.
             TestDelegate act = () => feature.TryGetProperty("NAME", out Value _);
             for (int w = 0; w < 50; w++) act();
-            Assert.That(act, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(act,
                 "Dense TryGetProperty on an existing key must not allocate: name→keyIndex is a Dictionary " +
                 "lookup (int index, no boxing), the per-feature scan walks an already-decoded uint[], and " +
                 "Value is a readonly struct.");
@@ -134,7 +134,7 @@ namespace MapRenderer.Tests.Mvt
 
             TestDelegate act = () => feature.TryGetProperty("NoSuchKeyXYZ123", out Value _);
             for (int w = 0; w < 50; w++) act(); // warm the exact measured delegate (JIT its body)
-            Assert.That(act, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(act,
                 "the missing-key path (hit constantly by !has filters) must also not allocate: a failed " +
                 "name→keyIndex lookup returns false without ever touching the per-feature tag array.");
         }
@@ -240,7 +240,7 @@ namespace MapRenderer.Tests.Mvt
                 };
                 for (int w = 0; w < 50; w++) act(); // warm the exact measured delegate (JIT its body)
 
-                Assert.That(act, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(act,
                     "DensePropertyStore.TryGet must not allocate when reconstituting MvtValueNative.ToValue() " +
                     "for string, number or bool — all three are struct-field copies plus a string-table index.");
             }

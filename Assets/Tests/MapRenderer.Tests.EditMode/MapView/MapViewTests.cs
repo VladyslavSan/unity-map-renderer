@@ -235,7 +235,7 @@ namespace MapRenderer.Tests.MapViews
                 view.LateUpdate();
                 view.CaptureTelemetry();
 
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     for (int i = 0; i < 64; i++)
                     {
@@ -243,7 +243,6 @@ namespace MapRenderer.Tests.MapViews
                         view.CaptureTelemetry();
                     }
                 },
-                Is.Not.AllocatingGCMemory(),
                 "CaptureTelemetry (TileCoverStats' scratch reuse + the Pending/ConsumeBacklog pass) must not " +
                 "allocate across a RUN of Ticks — a single call can read clean while a loop of N trips the " +
                 "recorder. A LINQ-based impl, or one that news a List/HashSet per " +
@@ -289,11 +288,10 @@ namespace MapRenderer.Tests.MapViews
                 panel.Pull();
                 Assert.Greater(panel.VisibleTileCount, 0, "positive control: the panel must be reading real levels.");
 
-                Assert.That(() =>
+                AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     for (int i = 0; i < 64; i++) { view.LateUpdate(); panel.Pull(); }
                 },
-                Is.Not.AllocatingGCMemory(),
                 "each provider's refresh + the ref-return read + the panel's field writes must not allocate per " +
                 "frame. A by-value accessor, a boxed snapshot (erased to object / a non-generic interface), or a " +
                 "per-frame closure fails this.");

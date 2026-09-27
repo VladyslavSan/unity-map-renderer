@@ -233,8 +233,7 @@ namespace MapRenderer.Tests.Text
             // Warm up once, then measure the steady call. The lambda needs a block body: an expression lambda binds
             // NUnit's `Assert.That<T>(Func<T>)` overload and throws "the actual value must be a TestDelegate".
             _subsystem.CurrentBatch(frame, keepAllButRunFilter);
-            Assert.That(() => { _subsystem.CurrentBatch(frame, keepAllButRunFilter); },
-                Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => { _subsystem.CurrentBatch(frame, keepAllButRunFilter); },
                 "a steady-state CurrentBatch (coverage cull + native winner-plan build) must allocate ZERO managed garbage");
         }
 
@@ -304,8 +303,8 @@ namespace MapRenderer.Tests.Text
             _subsystem.ReconcileLoadedTiles(loaded);
             _subsystem.PumpBuilds();
             _subsystem.CurrentBatch(default, 0.0);
-            Assert.That(() => { _subsystem.ReconcileLoadedTiles(loaded); _subsystem.PumpBuilds(); _subsystem.CurrentBatch(default, 0.0); },
-                Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(
+                () => { _subsystem.ReconcileLoadedTiles(loaded); _subsystem.PumpBuilds(); _subsystem.CurrentBatch(default, 0.0); },
                 "a steady clean-frame reuse loop (reconcile + pump + CurrentBatch, no recompute) must allocate ZERO managed garbage");
         }
 
@@ -2057,7 +2056,7 @@ namespace MapRenderer.Tests.Text
 
             // Block-bodied lambda (not an expression lambda): the overload returns a value
             // (TextLayoutBounds), and Assert.That needs a void TestDelegate here.
-            Assert.That(() => { TextQuadLayout.Layout(run, atlas, in options, output); }, Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => { TextQuadLayout.Layout(run, atlas, in options, output); },
                 "Layout(..., output) must not allocate on the steady no-wrap path once `output`'s capacity " +
                 "has stabilized from the warm-up call -- no whitespace glyph in this run means the word-wrap " +
                 "lookahead branch (MeasureRange) is never entered at all.");

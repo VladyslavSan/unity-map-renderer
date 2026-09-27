@@ -467,8 +467,7 @@ namespace MapRenderer.Tests.Text.Placement
                 system.Tick(in frame, builtPlan, atlasTexture);
             }
 
-            Assert.That(() => system.Tick(in frame, builtPlan, atlasTexture),
-                Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => system.Tick(in frame, builtPlan, atlasTexture),
                 "a steady-state Tick (same label count/shape as the warm-up) must allocate ZERO managed garbage");
         }
 
@@ -535,11 +534,10 @@ namespace MapRenderer.Tests.Text.Placement
 
             // 65 > IdleReclaimFrames (60): a system that rebuilt the never-presentable icon slot would churn
             // a Mesh/GameObject/3x NativeList every 60th Tick.
-            Assert.That(() =>
+            AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
                 },
-                Is.Not.AllocatingGCMemory(),
                 "65 steady-state Ticks (crossing the K=60 idle-reclaim boundary) with a real world-built+presented " +
                 "TEXT slot AND an emitted-but-unrenderable ICON slot must allocate ZERO managed garbage.");
         }
@@ -601,11 +599,10 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, system.LastQuadCount, "the curved label's single glyph must place (precondition).");
             Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world TEXT slot must be built+presented (curved text routes there).");
 
-            Assert.That(() =>
+            AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     for (int i = 0; i < 5; i++) system.Tick(in frame, builtPlan, atlasTexture);
                 },
-                Is.Not.AllocatingGCMemory(),
                 "steady-state Ticks over a curved-emitting scene must allocate ZERO managed garbage — the " +
                 "curved arm of WorldSymbolRenderer.Emit reuses the slot's NativeLists exactly like point.");
         }
@@ -682,11 +679,10 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Icon), "precondition: the icon presenter must show.");
             Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "precondition: the text presenter must show.");
 
-            Assert.That(() =>
+            AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
                 },
-                Is.Not.AllocatingGCMemory(),
                 "65 steady-state Ticks over a centred icon+text pair (crossing the K=60 idle-reclaim boundary) " +
                 "must allocate ZERO managed garbage.");
         }
@@ -786,11 +782,10 @@ namespace MapRenderer.Tests.Text.Placement
                 "precondition: the blocker's quad and the pair's ICON quad — the text half must be dropped, " +
                 "or this measures the ordinary all-or-nothing path rather than the optional-half one.");
 
-            Assert.That(() =>
+            AllocationDiagnostics.AssertNotAllocating(() =>
                 {
                     for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
                 },
-                Is.Not.AllocatingGCMemory(),
                 "65 steady-state Ticks over a text-optional pair placing WITHOUT its text must allocate ZERO " +
                 "managed garbage.");
         }
@@ -822,8 +817,7 @@ namespace MapRenderer.Tests.Text.Placement
             const double q = 50.0;
             store.CollectInto(blockId, localIndex, isDeparting, q, out _); // warm: grow _dedup + list capacity once (allowed to allocate)
 
-            Assert.That(() => store.CollectInto(blockId, localIndex, isDeparting, q, out _),
-                Is.Not.AllocatingGCMemory(),
+            AllocationDiagnostics.AssertNotAllocating(() => store.CollectInto(blockId, localIndex, isDeparting, q, out _),
                 "a warm per-frame dedup must allocate ZERO — interning happened once at CompleteBuild and the " +
                 "integer DedupKey does not box in the reused _dedup dictionary.");
             store.Clear(); // CollectInto already released its own pins — nothing pinned, just the committed block

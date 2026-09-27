@@ -2249,7 +2249,7 @@ namespace MapRenderer.Tests.Text.Placement
                 harness.Lps.GatherIntoMirror(plan); // extra warm-up memo hit (same version — no rebuild expected)
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the measured call below must be a memo hit");
 
-                Assert.That(() => { harness.Lps.GatherIntoMirror(plan); }, Is.Not.AllocatingGCMemory(),
+                AllocationDiagnostics.AssertNotAllocating(() => { harness.Lps.GatherIntoMirror(plan); },
                     "a memo-hit GatherIntoMirror must allocate ZERO managed garbage — three NativeArray memcpys + a subtraction");
             }
             finally { plan.Dispose(); store.Clear(); }
@@ -2640,12 +2640,25 @@ namespace MapRenderer.Tests.Text.Placement
                     out _, out _, out _);
                 harness.Lps.GatherIntoMirror(plan); // extra warm-up (first-touch native growth already done above)
 
-                plan.WinnerSetVersion++; // force the measured call to take the heavy (rebuild) path, not a memo hit
+                // Warm the EXACT measured delegate (JIT) outside the measured region — a one-shot lambda's own
+                // first invocation can itself register a false positive (gc-and-allocation-design.md § 6). Each
+                // warm-up call also bumps WinnerSetVersion first, so it takes the same heavy rebuild path as
+                // the measured call, not a memo hit.
+                TestDelegate act = () =>
+                {
+                    plan.WinnerSetVersion++;
+                    harness.Lps.GatherIntoMirror(plan);
+                };
+                for (int w = 0; w < 50; w++) act();
+
                 // The MirrorRebuildCount delta below proves the version bump engaged, so this test never silently
                 // measures a memo hit.
                 int rebuildsBefore = harness.Lps.MirrorRebuildCount;
-                Assert.That(() => { harness.Lps.GatherIntoMirror(plan); }, Is.Not.AllocatingGCMemory(),
-                    "a warm GatherIntoMirror must allocate ZERO managed garbage — native lists + plan are reused");
+                // warmUp: false — act already bumps WinnerSetVersion and was warmed 50x above; the helper's own
+                // extra warm-up calls would ALSO bump the version and rebuild, breaking the "+1 rebuild" check below.
+                AllocationDiagnostics.AssertNotAllocating(act,
+                    "a warm GatherIntoMirror must allocate ZERO managed garbage — native lists + plan are reused",
+                    warmUp: false);
                 Assert.AreEqual(rebuildsBefore + 1, harness.Lps.MirrorRebuildCount,
                     "precondition: the measured call must take the heavy rebuild path (WinnerSetVersion bump), not a memo hit");
             }
