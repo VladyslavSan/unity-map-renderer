@@ -1473,6 +1473,196 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1, symbols.Count, "the ABBREV=='Afg.' filter selects exactly one feature");
             Assert.AreEqual("Afghanistan", symbols[0].Text);
         }
+
+        // ── symbol-placement line/line-center on Polygon geometry ──────────────────────────────────────
+
+        /// <summary>Hand-encodes a Polygon MVT geometry command stream: each ring is MoveTo(1) + LineTo(n-1) +
+        /// ClosePath, zigzag deltas against a cursor that carries across rings (mirrors
+        /// <see cref="MvtGeometry.Decode"/>). A ring's vertex order sets its shoelace sign — the call sites
+        /// author an exterior-signed ring and, where needed, an opposite-signed hole.</summary>
+        private static uint[] PolygonGeometry(params double2[][] rings)
+        {
+            var stream = new List<uint>();
+            long cursorX = 0, cursorY = 0;
+            foreach (double2[] ring in rings)
+            {
+                stream.Add((1u << 3) | 1u); // MoveTo, count=1
+                long x0 = (long)ring[0].x, y0 = (long)ring[0].y;
+                stream.Add(ZigZagEncode(x0 - cursorX));
+                stream.Add(ZigZagEncode(y0 - cursorY));
+                cursorX = x0; cursorY = y0;
+
+                stream.Add(((uint)(ring.Length - 1) << 3) | 2u); // LineTo, count=n-1
+                for (int i = 1; i < ring.Length; i++)
+                {
+                    long x = (long)ring[i].x, y = (long)ring[i].y;
+                    stream.Add(ZigZagEncode(x - cursorX));
+                    stream.Add(ZigZagEncode(y - cursorY));
+                    cursorX = x; cursorY = y;
+                }
+
+                stream.Add((1u << 3) | 7u); // ClosePath, count=1
+            }
+            return stream.ToArray();
+        }
+
+        // A square whose vertex order gives a POSITIVE shoelace area — the MVT exterior convention
+        // (RingExteriorClassifier.SignedArea2's doc: positive == MVT exterior).
+        private static readonly double2[] ExteriorSquare =
+        {
+            new double2(500, 500), new double2(2500, 500), new double2(2500, 2500), new double2(500, 2500),
+        };
+
+        // A smaller square wholly inside ExteriorSquare, vertex order reversed — NEGATIVE shoelace area, so
+        // it classifies as a candidate hole (and IS contained) rather than a second exterior island.
+        private static readonly double2[] HoleSquare =
+        {
+            new double2(1000, 1000), new double2(1000, 1500), new double2(1500, 1500), new double2(1500, 1000),
+        };
+
+        // ExteriorSquare's vertices in reverse order — NEGATIVE shoelace area, the opposite of ExteriorSquare's.
+        private static readonly double2[] ReversedExteriorSquare =
+        {
+            new double2(500, 2500), new double2(2500, 2500), new double2(2500, 500), new double2(500, 500),
+        };
+
+        // HoleSquare's vertices in reverse order — POSITIVE shoelace area, the opposite of HoleSquare's.
+        private static readonly double2[] ReversedHoleSquare =
+        {
+            new double2(1500, 1000), new double2(1500, 1500), new double2(1000, 1500), new double2(1000, 1000),
+        };
+
+        private static SymbolStyle.StyleLayer PolygonLineLayer(string placement = "line-center")
+            => new SymbolStyle.StyleLayer
+            {
+                Id = "polys",
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
+                SourceLayer = "polys",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"" + placement + "\"}"),
+            };
+
+        /// <summary>Line placement closes a Polygon's exterior ring at its start vertex, so the emitted
+        /// path carries the 4 authored vertices plus a repeated first one. RED against an extractor that
+        /// copies the ring open (4 vertices, no repeat).</summary>
+        [Test]
+        public void Extract_LineCenterPlacement_Polygon_ClosesExteriorRingAtStartVertex()
+        {
+            const uint extent = 4096;
+            var feature = new DictionaryFeature(properties: null, geometryType: MapRenderer.Core.Tiles.TileGeometryType.Polygon,
+                hasId: false, geometry: PolygonGeometry(ExteriorSquare));
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("polys", tileId, new List<IFeature> { feature }, extent);
+            var projection = new WebMercatorProjection(); // MaxRefineAngleRad == +infinity, no subdivision
+
+            var symbols = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(PolygonLineLayer(), tile, tileId, 0.0, projection, symbols);
+
+            Assert.AreEqual(1, symbols.Count, "one symbol for the Polygon's single exterior ring");
+            SymbolFeature symbol = symbols[0];
+            Assert.AreEqual(5, symbol.PathRender.Length,
+                "the exterior ring is closed at its start vertex — 4 authored vertices plus the repeated first");
+            Assert.AreEqual(symbol.PathRender[0].x, symbol.PathRender[4].x, 1e-9, "closing vertex matches the start, x");
+            Assert.AreEqual(symbol.PathRender[0].y, symbol.PathRender[4].y, 1e-9, "closing vertex matches the start, y");
+            Assert.AreEqual(symbol.PathRender[0].z, symbol.PathRender[4].z, 1e-9, "closing vertex matches the start, z");
+        }
+
+        /// <summary>Two same-signed rings are two multipolygon islands, both exterior — line-center places
+        /// one symbol per ring, not one per feature.</summary>
+        [Test]
+        public void Extract_LineCenterPlacement_Polygon_OneSymbolPerExteriorRing()
+        {
+            const uint extent = 4096;
+            double2[] islandA = { new double2(200, 200), new double2(700, 200), new double2(700, 700), new double2(200, 700) };
+            double2[] islandB = { new double2(1200, 1200), new double2(1700, 1200), new double2(1700, 1700), new double2(1200, 1700) };
+            var feature = new DictionaryFeature(properties: null, geometryType: MapRenderer.Core.Tiles.TileGeometryType.Polygon,
+                hasId: false, geometry: PolygonGeometry(islandA, islandB));
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("polys", tileId, new List<IFeature> { feature }, extent);
+            var projection = new WebMercatorProjection();
+
+            var symbols = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(PolygonLineLayer(), tile, tileId, 0.0, projection, symbols);
+
+            Assert.AreEqual(2, symbols.Count,
+                "two same-signed rings are two multipolygon islands, both exterior — one symbol each");
+        }
+
+        /// <summary>A polygon with one hole gives exactly ONE symbol — the exterior ring's — never the
+        /// hole's, even though the hole is a real, non-degenerate, contained ring: line placement takes
+        /// exterior rings only.</summary>
+        [Test]
+        public void Extract_LineCenterPlacement_PolygonWithHole_HoleGetsNoSymbol()
+        {
+            const uint extent = 4096;
+            var feature = new DictionaryFeature(properties: null, geometryType: MapRenderer.Core.Tiles.TileGeometryType.Polygon,
+                hasId: false, geometry: PolygonGeometry(ExteriorSquare, HoleSquare));
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("polys", tileId, new List<IFeature> { feature }, extent);
+            var projection = new WebMercatorProjection();
+
+            var symbols = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(PolygonLineLayer(), tile, tileId, 0.0, projection, symbols);
+
+            Assert.AreEqual(1, symbols.Count,
+                "exterior rings only — the hole ring gets no symbol");
+        }
+
+        /// <summary>The classifier uses the RELATIVE sign between a feature's rings, not an absolute
+        /// "positive area is exterior" rule: reversing BOTH rings' vertex order flips both signs together, so
+        /// the first ring is still the exterior and the second is still its contained hole — still exactly one
+        /// symbol, from the exterior. RED against an absolute check (<c>SignedArea2(...) &gt; 0</c>), which
+        /// drops the true exterior (now negative) and picks up the hole (now positive) instead.</summary>
+        [Test]
+        public void Extract_LineCenterPlacement_PolygonWithHole_ReversedWinding_StillOneSymbolFromExterior()
+        {
+            const uint extent = 4096;
+            var feature = new DictionaryFeature(properties: null, geometryType: MapRenderer.Core.Tiles.TileGeometryType.Polygon,
+                hasId: false, geometry: PolygonGeometry(ReversedExteriorSquare, ReversedHoleSquare));
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("polys", tileId, new List<IFeature> { feature }, extent);
+            var projection = new WebMercatorProjection();
+
+            var symbols = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(PolygonLineLayer(), tile, tileId, 0.0, projection, symbols);
+
+            Assert.AreEqual(1, symbols.Count, "reversed winding still yields exactly one symbol");
+
+            double2 expectedFirst = ReversedExteriorSquare[0];
+            double2 lonLat = tileId.ToLonLat(expectedFirst.x, expectedFirst.y, extent);
+            double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+            Assert.AreEqual(expected.x, symbols[0].PathRender[0].x, 1e-6, "the symbol must come from the exterior ring (first authored), not the hole");
+            Assert.AreEqual(expected.y, symbols[0].PathRender[0].y, 1e-6, "the symbol must come from the exterior ring (first authored), not the hole");
+            Assert.AreEqual(expected.z, symbols[0].PathRender[0].z, 1e-6, "the symbol must come from the exterior ring (first authored), not the hole");
+        }
+
+        /// <summary>The fence — the very same exterior+hole polygon still emits nothing under point
+        /// placement (never accepted there, whatever the ring role).</summary>
+        [Test]
+        public void Extract_PointPlacement_PolygonWithHole_StillEmitsNothing()
+        {
+            const uint extent = 4096;
+            var feature = new DictionaryFeature(properties: null, geometryType: MapRenderer.Core.Tiles.TileGeometryType.Polygon,
+                hasId: false, geometry: PolygonGeometry(ExteriorSquare, HoleSquare));
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("polys", tileId, new List<IFeature> { feature }, extent);
+            var projection = new WebMercatorProjection();
+
+            var pointLayer = new SymbolStyle.StyleLayer
+            {
+                Id = "polys",
+                LayerType = MapRenderer.Unity.Style.StyleLayerType.Symbol,
+                SourceLayer = "polys",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\"}"), // symbol-placement defaults to point
+            };
+
+            var symbols = new List<SymbolFeature>();
+            SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, symbols);
+
+            Assert.AreEqual(0, symbols.Count,
+                "Polygon is never accepted under point placement, exterior or hole (the fence)");
+        }
     }
 
 

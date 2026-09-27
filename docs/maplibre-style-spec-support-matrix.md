@@ -224,7 +224,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 
 | Property | Status | Note |
 |---|---|---|
-| `symbol-placement` | `partial` | `point` places Point and LineString features. `line` and `line-center` place LineString features only. A Polygon feature gets no symbol. |
+| `symbol-placement` | `partial` | `point` places Point and LineString features. `line` and `line-center` also place a Polygon feature's exterior rings, closed at the ring seam; holes get no symbol. |
 | `symbol-spacing` | `supported` | |
 | `symbol-avoid-edges` | `not supported` | Not built. |
 | `symbol-sort-key` | `supported` | |

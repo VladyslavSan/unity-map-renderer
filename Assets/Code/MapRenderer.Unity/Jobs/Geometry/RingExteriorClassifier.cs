@@ -6,7 +6,8 @@ namespace MapRenderer.Unity.Jobs.Geometry
     /// <summary>
     /// The one exterior/hole predicate for a Polygon feature's rings. <c>RingAssemblyJob</c> (fill) and
     /// <c>SymbolFeatureExtractor</c> (symbol-placement line/line-center) both classify through
-    /// <see cref="State.Classify"/>, so the two can never disagree about the same polygon.
+    /// <see cref="State.Classify"/>, so fill and symbol classify by the same rule — fill classifies clipped
+    /// rings, symbol classifies raw ones.
     /// </summary>
     internal static class RingExteriorClassifier
     {

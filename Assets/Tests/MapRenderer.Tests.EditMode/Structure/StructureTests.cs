@@ -621,9 +621,10 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Structural teeth on the symbol consumer of the shared geometry. Symbol has no polygon, hole or area
-    /// concept, so no fill-assembly stage (<c>RingAssemblyJob</c>) may run for it. <c>Extract</c> BORROWS
-    /// <c>tileLayer.Geometry</c>, which the decoded layer owns, so it mints and disposes <b>zero</b> buffers.
+    /// Structural teeth on the symbol consumer of the shared geometry. A Polygon feature's exterior rings are
+    /// classified through the shared <c>RingExteriorClassifier</c>, so no fill-assembly stage
+    /// (<c>RingAssemblyJob</c>) may run for symbol. <c>Extract</c> BORROWS <c>tileLayer.Geometry</c>, which the
+    /// decoded layer owns, so it mints and disposes <b>zero</b> buffers.
     /// Limitation: the assertions are comment-stripped greps over call forms, not a C# parser.
     /// </summary>
     [TestFixture]
@@ -646,7 +647,7 @@ namespace MapRenderer.Tests.Structure
         private static readonly string[] RequiredTokens =
         {
             "TileGeometryBuffers", "tileLayer.Geometry", "RingFeatureIdx", "RingOffsets",
-            "LineAnchorPlacement", "EmitAtAnchor",
+            "LineAnchorPlacement", "EmitAtAnchor", "RingExteriorClassifier",
         };
 
         // ── the ownership contract ──────────────────────────────────────────────────────────────────
@@ -710,7 +711,8 @@ namespace MapRenderer.Tests.Structure
             {
                 Assert.AreEqual(0, CountOccurrences(code, token),
                     $"SymbolFeatureExtractor must reference ZERO fill-assembly symbols — '{token}' found. " +
-                    "Symbol has no polygon, hole or area concept: it rejects Polygon outright, a Point " +
+                    "A Polygon feature's rings route through the shared RingExteriorClassifier (also used " +
+                    "by RingAssemblyJob), never a fill job or a locally duplicated area constant; a Point " +
                     "feature's 1-point path has no area at all, and a straight road has exactly zero.");
             }
 
