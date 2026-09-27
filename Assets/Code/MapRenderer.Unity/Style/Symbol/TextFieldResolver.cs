@@ -103,6 +103,6 @@ namespace MapRenderer.Unity.Style.Symbol
 
         // Hoisted so the lookup allocates no delegate per call.
         private static readonly ConditionalWeakTable<JsonValue, Expression>.CreateValueCallback ParseCallback =
-            json => ExpressionParser.Parse(json);
+            json => ExpressionParser.Parse(json, interpolatable: false);
     }
 }

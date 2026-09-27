@@ -137,7 +137,7 @@ namespace MapRenderer.Unity.Style.FillExtrusion
                 try
                 {
                     var candidate = new StyleProperty<float>(
-                        verticalGradientJson, 1f, v => v.AsBool() ? 1f : 0f);
+                        verticalGradientJson, 1f, v => v.AsBool() ? 1f : 0f, interpolatable: false);
                     // fill-extrusion-vertical-gradient must not be data-driven (Feature/Composite → default true)
                     verticalGradient = candidate.DependsOnFeature
                         ? new StyleProperty<float>(1f)

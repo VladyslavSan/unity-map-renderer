@@ -732,6 +732,21 @@ namespace MapRenderer.Tests.Style
                 "would accept and every tile would keep the previous style's baked colour forever.");
         }
 
+        [Test]
+        public void LegacyCategoricalPaintChange_TakesTheRebuildPath()
+        {
+            // Numeric labels: an ascending-numeric-key stops object also matches the legacy ZOOM-function
+            // shape, so this pins the "property" wins the dispatch, same as DataDrivenPaintChange above.
+            var oldStyle = FillStyle(
+                @"""fill-color"": {""property"":""class"",""type"":""categorical"",""stops"":[[1,""#ff0000""],[2,""#00ff00""]]}");
+            var newStyle = FillStyle(
+                @"""fill-color"": {""property"":""class"",""type"":""categorical"",""stops"":[[1,""#0000ff""],[2,""#ffff00""]]}");
+
+            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
+                "a legacy categorical function is data-driven (Feature kind) once \"property\" is honoured, " +
+                "so two different mappings must refuse the gate, exactly like a modern [\"get\",...] pair.");
+        }
+
         // ── Symbol layers survive and ease across a restyle ──────────────────────────────────
 
         private const string SymbolTemplate = @"{{

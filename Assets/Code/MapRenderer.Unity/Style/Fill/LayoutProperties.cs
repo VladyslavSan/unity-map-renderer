@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Style.Fill
             {
                 SortKeyIsDefault = (sortKeyJson == null),
                 SortKey = sortKeyJson != null
-                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
+                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber(), interpolatable: false)
                     : new StyleProperty<float>(0f),
             };
         }

@@ -82,7 +82,7 @@ namespace MapRenderer.Unity.Style.Line
         {
             JsonValue toParse = ExpressionParser.WrapBareArrayLiterals(json);
             if (toParse == null) return null;
-            try { return ExpressionParser.Parse(toParse); }
+            try { return ExpressionParser.Parse(toParse, interpolatable: false); }
             catch (ExpressionParseException) { return null; }
         }
 

@@ -146,7 +146,7 @@ namespace MapRenderer.Unity.Style.Fill
                 {
                     // fill-antialias is a JSON boolean: an AsNumber() projection would throw into the catch
                     // below and turn `false` into the default.
-                    var candidate = new StyleProperty<bool>(antialiasJson, antialiasDefault, v => v.AsBool());
+                    var candidate = new StyleProperty<bool>(antialiasJson, antialiasDefault, v => v.AsBool(), interpolatable: false);
                     // fill-antialias must not be data-driven (Feature/Composite → the project default)
                     antialias = candidate.DependsOnFeature
                         ? new StyleProperty<bool>(antialiasDefault)

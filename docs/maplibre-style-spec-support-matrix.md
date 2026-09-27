@@ -237,7 +237,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `icon-size` | `supported` | |
 | `icon-text-fit` | `not supported` | Not built. |
 | `icon-text-fit-padding` | `not supported` | Not built. |
-| `icon-image` | `partial` | The `image` operator is not built. |
+| `icon-image` | `partial` | The `image` operator is not built. A legacy function object is never routed to the parser (only an expression array is), so it resolves to no icon, the same as an unrecognised value. |
 | `icon-rotate` | `supported` | |
 | `icon-padding` | `partial` | A number, or the spec's `[top,right,bottom,left]` array (1-4 entries), parse and evaluate. Collision applies one isotropic value: the largest entry. It does not apply a value per side. A zoom expression with mismatched stop lengths falls back to the spec default (2px) for that feature, instead of failing the tile's whole label build. |
 | `icon-keep-upright` | `not supported` | Always `false`, the spec default. |
@@ -246,8 +246,8 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `icon-pitch-alignment` | `partial` | Constant only. Used only for icons that follow a line. Point icons always stand upright (`viewport`). |
 | `text-pitch-alignment` | `partial` | Constant only. Used only for curved line text. Point text always stands upright (`viewport`). |
 | `text-rotation-alignment` | `partial` | Constant only. `viewport-glyph` is not built and reads as `auto`. Under line placement, `viewport` gives upright text at each anchor instead of curved text: [`road-shields-design.md`](road-shields-design.md) § 3 (D4). |
-| `text-field` | `partial` | `format` is not built, so that feature gets no text. |
-| `text-font` | `partial` | Constant and zoom expressions evaluate correctly. In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there fails the style parse. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
+| `text-field` | `partial` | `format` is not built, so that feature gets no text. A legacy function object is never routed to the parser (only an expression array is): a `{token}` string still expands, but a `{"stops": …}` object resolves to no text. |
+| `text-font` | `partial` | Constant and zoom expressions evaluate correctly, including a legacy `{"stops": …}` function (it steps, not ramps: `text-font` has no "interpolate" marker). In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there fails the style parse. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
 | `text-size` | `supported` | |
 | `text-max-width` | `supported` | |
 | `text-line-height` | `supported` | |
@@ -363,7 +363,7 @@ an unsupported expression does" at the top says what that does to a style.
 
 | Form | Status | Note |
 |---|---|---|
-| Legacy zoom function (`{"stops": …, "base": …}`) | `partial` | Always read as a zoom interpolation. `type` (`interval`, `categorical`, `identity`) and `property` (data functions) are ignored. |
+| Legacy function (`{"stops": …}`, or a bare `"type":"identity"`) | `partial` | `type` (`exponential`/`interval`/`categorical`/`identity`), `property`, `default`, `colorSpace` and zoom-and-property stops are honoured. An `identity` function's `default` covers a MISSING property only, not a value of the wrong type. `text-field` and `icon-image` never see this form: both route only an EXPRESSION ARRAY to the parser, so an object resolves to no text / no icon (see those rows). |
 | Color strings | `partial` | Hex, `rgb()`/`rgba()`, `hsl()`/`hsla()` and `transparent`. Only a subset of the CSS named colours. |
 
 **Filters**

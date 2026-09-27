@@ -829,6 +829,19 @@ namespace MapRenderer.Tests.Style
                 () => ColProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,[\"get\",\"w\"],10,\"#ff0000\"]"),
                 "Composite-kind must not throw at construction.");
         }
+
+        // ── Legacy categorical function: no "default" degrades to the STYLE PROPERTY's default ──────
+
+        [Test]
+        public void Categorical_NoDefault_UnmatchedKey_TryEvaluateFailsToPropertyDefault()
+        {
+            // No "default": the fallback is null, which a numeric project cannot read — TryEvaluate must
+            // catch that and hand back NumProp's own default (0), not throw out of the bake path.
+            var prop = NumProp("{\"property\":\"class\",\"type\":\"categorical\",\"stops\":[[\"motorway\",8]]}");
+            bool ok = prop.TryEvaluate(0.0, MakeFeature(("class", "primary")), out float value);
+            Assert.IsFalse(ok, "an unmatched category with no default is a spec error, not a value");
+            Assert.AreEqual(0f, value);
+        }
     }
 
 
@@ -887,6 +900,16 @@ namespace MapRenderer.Tests.Style
             var fill = (Fill.StyleLayer)doc.Layers[0];
             Assert.IsTrue(fill.Paint.Antialias.Evaluate(0.0),
                 "an explicit layer value must win over the host default, whichever it is.");
+        }
+
+        [Test]
+        public void FillAntialias_LegacyZoomFunction_StepsBetweenBooleans()
+        {
+            // fill-antialias has no "interpolate" marker (and is a bool, not a number): an absent "type"
+            // steps between the literal bool outputs.
+            var paint = TestStyle.FillPaint(@"{""fill-antialias"": {""stops"": [[10, true], [14, false]]}}");
+            Assert.IsTrue(paint.Antialias.Evaluate(12.0), "z12 is below the second stop (14)");
+            Assert.IsFalse(paint.Antialias.Evaluate(15.0));
         }
 
         // ── the laziness cannot come back (reflection, never text) ─────────────────────────────────
@@ -1105,6 +1128,32 @@ namespace MapRenderer.Tests.Style
             var fillLayer = (Fill.StyleLayer)style.Layers[0];
             Assert.IsFalse(fillLayer.Layout.SortKeyIsDefault, "the parser must route layout onto the typed layer");
             Assert.AreEqual(3f, fillLayer.Layout.SortKey.Evaluate(0.0), 1e-9);
+        }
+
+        [Test]
+        public void SortKey_LegacyZoomFunction_DefaultsToInterval_NotRamp()
+        {
+            // fill-sort-key has no "interpolate" marker: an absent "type" steps (interval), it does not ramp.
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": {""stops"": [[10, 1], [14, 5]]}}");
+
+            Assert.AreEqual(1f, layout.SortKey.Evaluate(12.0), 1e-9, "z12 is below the second stop (14)");
+            Assert.AreEqual(5f, layout.SortKey.Evaluate(15.0), 1e-9);
+        }
+
+        [Test]
+        public void SortKey_ZoomAndPropertyCategorical_OuterAxisSteps()
+        {
+            // fill-sort-key is non-interpolatable, so the OUTER zoom axis of a zoom-and-property function
+            // steps between its inner (categorical) groups, instead of ramping between them.
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": {""property"":""cls"",""type"":""categorical"",
+                ""stops"":[[{""zoom"":10,""value"":""a""},1],[{""zoom"":10,""value"":""b""},2],
+                           [{""zoom"":14,""value"":""a""},3],[{""zoom"":14,""value"":""b""},4]]}}");
+
+            var b = new DictionaryFeature(new System.Collections.Generic.Dictionary<string, Value>
+                { ["cls"] = Value.String("b") });
+
+            Assert.AreEqual(2f, layout.SortKey.Evaluate(12.0, b), 1e-9, "z12 is below the second zoom group (14)");
+            Assert.AreEqual(4f, layout.SortKey.Evaluate(15.0, b), 1e-9);
         }
     }
 
@@ -2435,6 +2484,18 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
+        public void SymbolLayer_SymbolSortKey_LegacyStopsFunction_DefaultsToInterval_NotRamp()
+        {
+            // symbol-sort-key has no "interpolate" marker: an absent "type" steps, it does not ramp.
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'symbol-sort-key':{'stops':[[10,1],[14,5]]} } } ] }").Layers[0];
+
+            Assert.AreEqual(1f, sym.Layout.SymbolSortKey.Evaluate(12.0), 1e-6, "z12 is below the second stop (14)");
+            Assert.AreEqual(5f, sym.Layout.SymbolSortKey.Evaluate(15.0), 1e-6);
+        }
+
+        [Test]
         public void SymbolLayer_IconProperties_Parse()
         {
             var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
@@ -2643,6 +2704,18 @@ namespace MapRenderer.Tests.Style
                 .Layers[0];
             CollectionAssert.AreEqual(new[] { "Low Font" }, zoomed.Layout.TextFont.Evaluate(0.0));
             CollectionAssert.AreEqual(new[] { "High Font" }, zoomed.Layout.TextFont.Evaluate(12.0));
+        }
+
+        [Test]
+        public void SymbolLayer_TextFont_LegacyStopsFunction_StepsNotRamps()
+        {
+            // text-font has no "interpolate" marker, so a legacy stops function steps between stacks
+            // instead of ramping.
+            var stepped = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-font':{'stops':[[10,['Low Font']],[14,['High Font']]]} } } ] }").Layers[0];
+            CollectionAssert.AreEqual(new[] { "Low Font" }, stepped.Layout.TextFont.Evaluate(0.0));
+            CollectionAssert.AreEqual(new[] { "High Font" }, stepped.Layout.TextFont.Evaluate(14.0));
         }
 
         [Test]
@@ -3107,6 +3180,22 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
+        public void ParseDashArray_LegacyStopsFunction_DefaultsToInterval_NotRamp()
+        {
+            // line-dasharray has no "interpolate" marker, so an absent "type" steps; each stop output is an
+            // array, wrapped as a literal (the spec's stop-output rule) rather than parsed as an operator call.
+            var expr = DashExpr("{\"stops\":[[10,[2,1]],[14,[4,2]]]}");
+
+            Line.LineDash.TryEvaluatePattern(expr, 13.0, out float4 p13, out int c13);
+            Assert.AreEqual(new float4(2, 1, 0, 0), p13);
+            Assert.AreEqual(2, c13);
+
+            Line.LineDash.TryEvaluatePattern(expr, 15.0, out float4 p15, out int c15);
+            Assert.AreEqual(new float4(4, 2, 0, 0), p15);
+            Assert.AreEqual(2, c15);
+        }
+
+        [Test]
         public void ParseDashArray_ZoomInterpolate_LerpsElementwise_NotColorCoerced()
         {
             // A 4-entry dash pattern also looks like an rgb()/rgba() colour; Ramps.Lerp must take the
@@ -3418,8 +3507,8 @@ namespace MapRenderer.Tests.Style
 
     /// <summary>
     /// <see cref="StyleLight.Parse"/> and <see cref="StyleSky.Parse"/>: spec defaults when the block or a key is
-    /// absent, explicit values parse, and malformed values fall back rather than throw (except a
-    /// malformed color/number expression, which throws at eager parse like every other paint property).
+    /// absent, explicit values parse, and malformed values fall back rather than throw (except a malformed
+    /// or data-driven color/number expression, which throws at eager parse like every other paint property).
     /// </summary>
     [TestFixture]
     public class LightSkyTests
@@ -3518,6 +3607,31 @@ namespace MapRenderer.Tests.Style
             Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
         }
 
+        [Test]
+        public void Light_LegacyPropertyFunctionColor_FailsParse()
+        {
+            // A legacy identity function on a feature property is data-driven (Feature kind): SunLight has
+            // no feature to evaluate against, so the parse must fail rather than defer to a throw at apply.
+            var root = Root("{\"light\":{\"color\":{\"type\":\"identity\",\"property\":\"c\"}}}");
+            Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
+        }
+
+        [Test]
+        public void Light_ModernGetColor_FailsParse()
+        {
+            // A modern ["get",...] color is data-driven too, and the guard covers it the same as identity.
+            var root = Root("{\"light\":{\"color\":[\"get\",\"c\"]}}");
+            Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
+        }
+
+        [Test]
+        public void Light_DataDrivenIntensity_FailsParse()
+        {
+            // Intensity gets its own guard call, independent of color's.
+            var root = Root("{\"light\":{\"intensity\":[\"get\",\"i\"]}}");
+            Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
+        }
+
         // ── sky: defaults ─────────────────────────────────────────────────────────
 
         [Test]
@@ -3587,6 +3701,15 @@ namespace MapRenderer.Tests.Style
             var sky = StyleSky.Parse(root.Get("sky"));
 
             Assert.AreEqual(ExpressionKind.Zoom, sky.FogColor.Kind);
+        }
+
+        [Test]
+        public void Sky_LegacyPropertyFunctionFogColor_FailsParse()
+        {
+            // SkyGradient/DistanceHaze evaluate sky colors with no feature — a data-driven value must fail
+            // the parse, the same guard as light.color.
+            var root = Root("{\"sky\":{\"fog-color\":{\"type\":\"identity\",\"property\":\"c\"}}}");
+            Assert.Throws<ExpressionEvaluationException>(() => StyleSky.Parse(root.Get("sky")));
         }
 
         // ── StyleParser integration ──────────────────────────────────────────────

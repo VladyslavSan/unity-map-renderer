@@ -1228,5 +1228,44 @@ namespace MapRenderer.Tests.Meshing
                     MvtCommandStream.Ring(400, 2000, 1600, 2000),
                     MvtCommandStream.Ring(700, 2500, 2400, 2500))),
         };
+
+        /// <summary>
+        /// A legacy identity function on line-width classifies as Feature-kind (data-driven), so
+        /// BuildLayerInput must bake the feature's own value into the width column — the same route a
+        /// modern <c>["get","w"]</c> already takes.
+        /// </summary>
+        [Test]
+        public void WidthColumn_LegacyIdentityFunction_BakesTheFeatureValue()
+        {
+            var feature = new DictionaryFeature(
+                properties:   new Dictionary<string, Value> { ["w"] = Value.Number(7.0) },
+                geometryType: TileGeometryType.LineString,
+                geometry:     MvtCommandStream.Feature(MvtCommandStream.Ring(400, 500, 1200, 500)));
+            var features = new List<IFeature> { feature };
+
+            var paint = TestStyle.LinePaint(@"{""line-width"": {""type"":""identity"",""property"":""w""}}");
+            Assert.IsTrue(paint.Width.DependsOnFeature, "precondition: an identity function is data-driven");
+
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, Tile, Extent);
+            try
+            {
+                LayerInput input = StyledLineTileBuilder.BuildLayerInput(
+                    TestTileMeshBuilder.Selection(features), geometry, paint, TestStyle.LineLayout(),
+                    Zoom, double3.zero, out NativeArray<Vector4> _, out NativeArray<float> featureWidths);
+                try
+                {
+                    Assert.AreEqual(7f, featureWidths[0], 1e-6f);
+                }
+                finally
+                {
+                    if (featureWidths.IsCreated) featureWidths.Dispose();
+                    if (input.FeatureSelected.IsCreated) input.FeatureSelected.Dispose();
+                }
+            }
+            finally
+            {
+                geometry.Dispose();
+            }
+        }
     }
 }

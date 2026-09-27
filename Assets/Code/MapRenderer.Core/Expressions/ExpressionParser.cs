@@ -10,9 +10,10 @@ namespace MapRenderer.Core.Expressions
     /// Parses a MapLibre expression (a <see cref="JsonValue"/>: a bare literal, or an array
     /// <c>[operator, ...args]</c>) into a typed <see cref="Expression"/> tree, evaluable many times.
     /// Classification (Constant/Zoom/Feature/Composite) is computed by the nodes as the tree is built.
+    /// A legacy function object (<c>{"stops": …}</c>, or <c>"type":"identity"</c>) also parses here.
     ///
     /// Clean-room: operators, arities, and semantics are taken from the public MapLibre Style Spec
-    /// "Expressions" page only.
+    /// "Expressions" page and its deprecations page (legacy <c>stops</c> functions) only.
     /// </summary>
     public sealed class ExpressionParser
     {
@@ -36,11 +37,19 @@ namespace MapRenderer.Core.Expressions
         // Only Parse(JsonValue, out) returns it; other overloads' nodes get no binding (string path).
         private readonly List<string> _keyLayout = new List<string>();
 
+        // The Style Spec "interpolate" marker for the property being parsed: a legacy function with no
+        // "type" ramps (exponential) when true, steps (interval) when false. Defaults true.
+        private bool _interpolatable = true;
+
         /// <summary>Parse from a JSON string (a single expression).</summary>
         public static Expression Parse(string json) => Parse(JsonParser.Parse(json));
 
         /// <summary>Parse a JSON DOM node as an expression.</summary>
         public static Expression Parse(JsonValue json) => Parse(json, out _);
+
+        /// <summary>Parse a JSON DOM node, naming the property's Style Spec "interpolate" marker: a legacy
+        /// function with no explicit "type" ramps when true, steps when false.</summary>
+        public static Expression Parse(JsonValue json, bool interpolatable) => Parse(json, interpolatable, out _);
 
         /// <summary>
         /// Parse a JSON DOM node as an expression, also yielding its constant-key <c>get</c>/<c>has</c>
@@ -49,8 +58,12 @@ namespace MapRenderer.Core.Expressions
         /// Empty when the expression has no constant-key <c>get</c>/<c>has</c> node.
         /// </summary>
         public static Expression Parse(JsonValue json, out IReadOnlyList<string> keyLayout)
+            => Parse(json, interpolatable: true, out keyLayout);
+
+        /// <summary>The <c>interpolatable</c> + key-layout overload every other <c>Parse</c> calls into.</summary>
+        public static Expression Parse(JsonValue json, bool interpolatable, out IReadOnlyList<string> keyLayout)
         {
-            var parser = new ExpressionParser();
+            var parser = new ExpressionParser { _interpolatable = interpolatable };
             var expr = parser.ParseNode(json, new Scope(null), zoomAllowed: false);
             keyLayout = parser._keyLayout;
             return expr;
@@ -73,11 +86,12 @@ namespace MapRenderer.Core.Expressions
                 case JsonKind.String:
                     return new LiteralExpression(Value.String(node.AsString()));
                 case JsonKind.Object:
-                    // Style Spec v7 legacy stops { "stops": [[z0,v0],...], "base": b } convert to a zoom
-                    // interpolate, so the kind is Zoom.
-                    if (node.TryGet("stops", out var stopsNode) && stopsNode.IsArray && stopsNode.Items.Count >= 2)
-                        return ParseLegacyStopsObject(node, stopsNode, scope);
-                    // A bare object without "stops" is a literal object value.
+                    // A legacy function: "stops" (>=1 entry, except identity needs none), or "type":"identity".
+                    // Anything else is a literal object value.
+                    bool hasStops = node.TryGet("stops", out var stopsNode) && stopsNode.IsArray && stopsNode.Items.Count >= 1;
+                    bool isIdentity = node.GetString("type", null) == "identity";
+                    if (hasStops || isIdentity)
+                        return ParseLegacyFunction(node, stopsNode, scope);
                     return new LiteralExpression(JsonToValue(node));
                 case JsonKind.Array:
                     return ParseArray(node, scope, zoomAllowed);
@@ -647,52 +661,211 @@ namespace MapRenderer.Core.Expressions
             }
         }
 
-        // ---- legacy stops-object format (MapLibre Style Spec v7 compatibility) --------------------
+        // ---- legacy function format (MapLibre Style Spec deprecations page) ------------------------
+        //
+        // A legacy function is synthesised as the equivalent modern expression, as JSON, then re-parsed —
+        // reusing ParseStep/ParseInterpolate/ParseCase/CoalesceExpression unchanged.
+
+        private static readonly JsonValue NullLiteral = Op("literal", JsonValue.Null);
+
+        private static JsonValue Op(string op, params JsonValue[] args)
+        {
+            var list = new List<JsonValue>(args.Length + 1) { JsonValue.OfString(op) };
+            list.AddRange(args);
+            return JsonValue.OfArray(list);
+        }
+
+        // Also wraps a stop OUTPUT: the spec says stop outputs are literals.
+        private static JsonValue Lit(JsonValue raw) => Op("literal", raw);
+        private static JsonValue Get(string property) => Op("get", JsonValue.OfString(property));
+
+        private static JsonValue DefaultOrNull(bool hasDefault, JsonValue defaultNode)
+            => hasDefault ? Lit(defaultNode) : NullLiteral;
+
+        // "colorSpace" (rgb/lab/hcl) selects the interpolate variant; rgb (the default) is plain "interpolate".
+        private static string InterpolateOp(string colorSpace)
+            => colorSpace == "lab" ? "interpolate-lab" : colorSpace == "hcl" ? "interpolate-hcl" : "interpolate";
 
         /// <summary>
-        /// Parses a MapLibre v7 legacy stops object <c>{ "stops": [[z0,v0],[z1,v1],...], "base": b }</c>
-        /// as a modern <c>interpolate</c> / <c>step</c> expression with a <c>["zoom"]</c> input. Each stop is
-        /// a [zoom, value] array; "base" (default 1.0) is the exponential base, and 1.0 is linear. Outputs
-        /// parse with zoom disallowed. Invalid stops (non-number zoom, unsorted, &lt;2) give constant null.
+        /// Parses a legacy function object: <c>{"stops":[...], "type", "property", "default", "colorSpace",
+        /// "base"}</c>, or a bare <c>"type":"identity"</c> (no stops needed). Dispatches on "type" to
+        /// identity/categorical/exponential-or-interval, per the deprecations page. Malformed input (a
+        /// missing property where one is required, or a non-numeric/non-ascending stop) gives constant null.
         /// </summary>
-        private Expression ParseLegacyStopsObject(JsonValue node, JsonValue stopsArr, Scope scope)
+        private Expression ParseLegacyFunction(JsonValue node, JsonValue stopsNode, Scope scope)
         {
+            string type = node.GetString("type", null);
+            string property = node.GetString("property", null);
+            bool hasDefault = node.TryGet("default", out JsonValue defaultNode);
+            string colorSpace = node.GetString("colorSpace", null);
             double baseVal = node.GetDouble("base", 1.0);
 
-            // Parse each [zoom, value] pair.
-            var items = stopsArr.Items;
-            int n = items.Count;
+            if (type == "identity")
+                return property == null
+                    ? (Expression)new LiteralExpression(Value.Null)
+                    : ParseNode(Op("coalesce", Get(property), DefaultOrNull(hasDefault, defaultNode)), scope, zoomAllowed: false);
 
-            var stopZooms  = new double[n];
-            var stopOuts   = new Expression[n];
+            IReadOnlyList<JsonValue> stops = stopsNode != null ? stopsNode.Items : System.Array.Empty<JsonValue>();
+            if (stops.Count == 0)
+                return new LiteralExpression(Value.Null); // no stops, and not identity: malformed
+            foreach (var stop in stops)
+                if (!stop.IsArray || stop.Items.Count < 2)
+                    return new LiteralExpression(Value.Null); // every stop must be [input, output]
+
+            // Zoom-and-property: the first stop's input is a {"zoom":z,"value":v} object, not a number or
+            // label — checked BEFORE the "type" dispatch below, which a zoom-and-property categorical also matches.
+            if (stops[0].Items[0].IsObject)
+                return ParseZoomAndProperty(stops, type, property, hasDefault, defaultNode, colorSpace, baseVal, scope);
+
+            if (type == "categorical")
+                return property == null
+                    ? (Expression)new LiteralExpression(Value.Null)
+                    : ParseNode(BuildCategoricalNode(property, stops, hasDefault, defaultNode), scope, zoomAllowed: false);
+
+            JsonValue synth = BuildRampNode(type, property, stops, hasDefault, defaultNode, colorSpace, baseVal, out bool malformed);
+            return malformed ? new LiteralExpression(Value.Null) : ParseNode(synth, scope, zoomAllowed: false);
+        }
+
+        /// <summary>
+        /// <c>["case", ["==", ["get",p], s0], out0, ..., F]</c> — spec "categorical". Labels compare by
+        /// <c>==</c>, so a number/string/bool label needs no wrapping.
+        /// </summary>
+        private static JsonValue BuildCategoricalNode(
+            string property, IReadOnlyList<JsonValue> stops, bool hasDefault, JsonValue defaultNode)
+        {
+            JsonValue input = Get(property);
+            var args = new List<JsonValue> { JsonValue.OfString("case") };
+            foreach (var stop in stops)
+            {
+                args.Add(Op("==", input, stop.Items[0]));
+                args.Add(Lit(stop.Items[1]));
+            }
+            args.Add(DefaultOrNull(hasDefault, defaultNode));
+            return JsonValue.OfArray(args);
+        }
+
+        /// <summary>
+        /// Builds an exponential/interval ramp over <paramref name="property"/> (or <c>["zoom"]</c> when
+        /// null): a single stop collapses to its literal output; otherwise <c>interpolate</c> (exponential,
+        /// the "type" default when <see cref="_interpolatable"/>) or <c>step</c> (interval). A property ramp
+        /// is wrapped <c>["case", ["==", ["typeof",I], "number"], ramp, F]</c>, so a non-numeric feature
+        /// value takes the default instead of throwing inside interpolate/step.
+        /// </summary>
+        private JsonValue BuildRampNode(string type, string property, IReadOnlyList<JsonValue> stops,
+            bool hasDefault, JsonValue defaultNode, string colorSpace, double baseVal, out bool malformed)
+        {
+            malformed = false;
+            int n = stops.Count;
+            var inputs = new double[n];
             double prev = double.NegativeInfinity;
-
             for (int i = 0; i < n; i++)
             {
-                var pair = items[i];
-                if (!pair.IsArray || pair.Items.Count < 2)
-                    return new LiteralExpression(Value.Null); // malformed stop
-                var zoomNode = pair.Items[0];
-                if (zoomNode.Kind != JsonKind.Number)
-                    return new LiteralExpression(Value.Null); // non-numeric zoom key
-                double z = zoomNode.AsDouble();
-                if (z <= prev)
-                    return new LiteralExpression(Value.Null); // non-ascending
-                prev = z;
-                stopZooms[i] = z;
-                stopOuts[i]  = FoldConstant(ParseNode(pair.Items[1], scope, zoomAllowed: false));
+                JsonValue inputNode = stops[i].Items[0];
+                if (inputNode.Kind != JsonKind.Number || inputNode.AsDouble() <= prev) { malformed = true; return null; }
+                prev = inputs[i] = inputNode.AsDouble();
             }
 
-            var zoom = new ZoomExpression();
-            var curve = (baseVal != 1.0)
-                ? InterpolationKind.Exponential
-                : InterpolationKind.Linear;
+            if (n == 1) return Lit(stops[0].Items[1]); // one stop: constant, regardless of input
 
-            return new InterpolateExpression(
-                curve, InterpolationSpace.Default,
-                baseVal,
-                0.0, 0.0, 0.0, 0.0,   // cubic-bezier control points (unused for linear/exponential)
-                zoom, stopZooms, stopOuts);
+            JsonValue input = property != null ? Get(property) : Op("zoom");
+            bool exponential = type == "exponential" || (type != "interval" && _interpolatable);
+            JsonValue ramp = exponential
+                ? BuildInterpolate(colorSpace, baseVal, input, stops, inputs)
+                : BuildStep(input, stops, inputs);
+
+            if (property == null) return ramp;
+            JsonValue guard = Op("==", Op("typeof", input), JsonValue.OfString("number"));
+            return Op("case", guard, ramp, DefaultOrNull(hasDefault, defaultNode));
+        }
+
+        private static JsonValue BuildInterpolate(
+            string colorSpace, double baseVal, JsonValue input, IReadOnlyList<JsonValue> stops, double[] inputs)
+        {
+            string op = InterpolateOp(colorSpace);
+            JsonValue curve = baseVal == 1.0
+                ? Op("linear")
+                : Op("exponential", JsonValue.OfNumber(baseVal));
+            var args = new List<JsonValue> { JsonValue.OfString(op), curve, input };
+            for (int i = 0; i < inputs.Length; i++)
+            {
+                args.Add(JsonValue.OfNumber(inputs[i]));
+                args.Add(Lit(stops[i].Items[1]));
+            }
+            return JsonValue.OfArray(args);
+        }
+
+        // ["step", I, out0, s1, out1, ...]: below the first re-mapped stop input, out0 (the first legacy
+        // stop's output) is the default — "returns the stop just less than the input" (deprecations page).
+        private static JsonValue BuildStep(JsonValue input, IReadOnlyList<JsonValue> stops, double[] inputs)
+        {
+            var args = new List<JsonValue> { JsonValue.OfString("step"), input, Lit(stops[0].Items[1]) };
+            for (int i = 1; i < inputs.Length; i++)
+            {
+                args.Add(JsonValue.OfNumber(inputs[i]));
+                args.Add(Lit(stops[i].Items[1]));
+            }
+            return JsonValue.OfArray(args);
+        }
+
+        /// <summary>
+        /// Zoom-and-property: groups stops by their <c>{"zoom":z,"value":v}</c> input, ascending, and builds
+        /// each group as the property function above (categorical, or exponential/interval). The outer axis
+        /// interpolates (or steps, when not <see cref="_interpolatable"/>) those results over <c>["zoom"]</c>,
+        /// assuming the SAME base/colorSpace as the inner ramps — the spec does not say otherwise.
+        /// </summary>
+        private Expression ParseZoomAndProperty(IReadOnlyList<JsonValue> stops, string type, string property,
+            bool hasDefault, JsonValue defaultNode, string colorSpace, double baseVal, Scope scope)
+        {
+            if (property == null) return new LiteralExpression(Value.Null);
+
+            var groups = new SortedDictionary<double, List<JsonValue>>();
+            foreach (var stop in stops)
+            {
+                JsonValue zoomValue = stop.Items[0];
+                if (!zoomValue.IsObject) return new LiteralExpression(Value.Null);
+                JsonValue zoomNode = zoomValue.Get("zoom");
+                JsonValue valueNode = zoomValue.Get("value");
+                if (zoomNode == null || zoomNode.Kind != JsonKind.Number || valueNode == null)
+                    return new LiteralExpression(Value.Null);
+                if (!groups.TryGetValue(zoomNode.AsDouble(), out var list))
+                    groups[zoomNode.AsDouble()] = list = new List<JsonValue>();
+                list.Add(JsonValue.OfArray(new List<JsonValue> { valueNode, stop.Items[1] }));
+            }
+
+            var zooms = new double[groups.Count];
+            var inner = new JsonValue[groups.Count];
+            int i = 0;
+            foreach (var group in groups)
+            {
+                zooms[i] = group.Key;
+                if (type == "categorical")
+                    inner[i] = BuildCategoricalNode(property, group.Value, hasDefault, defaultNode);
+                else
+                {
+                    inner[i] = BuildRampNode(type, property, group.Value, hasDefault, defaultNode, colorSpace, baseVal, out bool bad);
+                    if (bad) return new LiteralExpression(Value.Null);
+                }
+                i++;
+            }
+
+            if (zooms.Length == 1) return ParseNode(inner[0], scope, zoomAllowed: false);
+
+            string outerOp = InterpolateOp(colorSpace);
+            var args = _interpolatable
+                ? new List<JsonValue>
+                {
+                    JsonValue.OfString(outerOp),
+                    baseVal == 1.0 ? Op("linear") : Op("exponential", JsonValue.OfNumber(baseVal)),
+                    Op("zoom"),
+                }
+                : new List<JsonValue> { JsonValue.OfString("step"), Op("zoom"), inner[0] };
+            int start = _interpolatable ? 0 : 1;
+            for (int g = start; g < zooms.Length; g++)
+            {
+                args.Add(JsonValue.OfNumber(zooms[g]));
+                args.Add(inner[g]);
+            }
+            return ParseNode(JsonValue.OfArray(args), scope, zoomAllowed: false);
         }
 
         // ---- constant-folding helper (used by step/interpolate for stop outputs) -----------------

@@ -20,6 +20,9 @@
 //   FeatureKeyExpressionTests              — the int-keyed IIndexedFeature path fires only with a binding
 //                                             AND an indexed feature; otherwise the string path fires.
 //   LiteralTypeTests                       — literal values, typeof, and the to-* coercions.
+//   LegacyFunctionTests                    — the deprecations-page legacy stops object: type/property/
+//                                             default/colorSpace, single-stop, categorical, identity,
+//                                             zoom-and-property.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -650,6 +653,148 @@ namespace MapRenderer.Tests.Expressions
         {
             Assert.AreEqual(ValueType.Color, colorValue.Type, "expected a color result");
             return colorValue.AsColor().ToRgbaArray();
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // LegacyFunctionTests — the deprecations-page legacy stops object: type/property/default/colorSpace,
+    // single-stop, categorical, identity, zoom-and-property
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A legacy function object (<c>{"stops":…}</c>, or a bare <c>"type":"identity"</c>) synthesises the
+    /// equivalent modern expression and re-parses it. Each tooth also states one hand-computed value, so an
+    /// implementation wrong in both the synthesis and the check cannot pass.
+    /// </summary>
+    [TestFixture]
+    public class LegacyFunctionTests
+    {
+        [Test]
+        public void Interval_ZoomFunction_StepsAtTheSecondStop()
+        {
+            // interval steps: below the second stop the first stop's output holds, unlike a ramp.
+            string json = "{\"type\":\"interval\",\"stops\":[[10,1],[14,5]]}";
+            Assert.AreEqual(1.0, Expr.Eval(json, zoom: 13.9).AsNumber());
+            Assert.AreEqual(5.0, Expr.Eval(json, zoom: 14.1).AsNumber());
+        }
+
+        [Test]
+        public void Categorical_MatchesLabelOrFallsToDefault()
+        {
+            string json = "{\"property\":\"class\",\"type\":\"categorical\"," +
+                          "\"stops\":[[\"motorway\",8],[\"trunk\",5]],\"default\":1}";
+            var expr = Expr.Parse(json);
+            Assert.AreEqual(ExpressionKind.Feature, expr.Kind);
+
+            var trunk = Expr.Feature(Expr.Props(("class", Value.String("trunk"))));
+            Assert.AreEqual(5.0, expr.Evaluate(new EvaluationContext(0.0, trunk)).AsNumber());
+
+            var primary = Expr.Feature(Expr.Props(("class", Value.String("primary"))));
+            Assert.AreEqual(1.0, expr.Evaluate(new EvaluationContext(0.0, primary)).AsNumber(), "an unmatched label takes \"default\"");
+
+            var missing = Expr.Feature();
+            Assert.AreEqual(1.0, expr.Evaluate(new EvaluationContext(0.0, missing)).AsNumber(), "a missing property also takes \"default\"");
+        }
+
+        [Test]
+        public void Categorical_BooleanDomain_MatchesByEquality()
+        {
+            string json = "{\"property\":\"oneway\",\"type\":\"categorical\",\"stops\":[[true,3],[false,1]]}";
+            var expr = Expr.Parse(json);
+            var f = Expr.Feature(Expr.Props(("oneway", Value.Bool(false))));
+            Assert.AreEqual(1.0, expr.Evaluate(new EvaluationContext(0.0, f)).AsNumber());
+        }
+
+        [Test]
+        public void Identity_ReadsThePropertyVerbatim()
+        {
+            // "identity" needs no "stops" key at all.
+            string json = "{\"type\":\"identity\",\"property\":\"w\"}";
+            var expr = Expr.Parse(json);
+            var f = Expr.Feature(Expr.Props(("w", Value.Number(7.0))));
+            Assert.AreEqual(7.0, expr.Evaluate(new EvaluationContext(0.0, f)).AsNumber());
+        }
+
+        [Test]
+        public void ExponentialProperty_RampsNumericFeatureValue_FallsToDefaultOtherwise()
+        {
+            string json = "{\"property\":\"pop\",\"base\":2,\"stops\":[[0,1],[10,11]],\"default\":4}";
+            var expr = Expr.Parse(json);
+
+            var numeric = Expr.Feature(Expr.Props(("pop", Value.Number(5.0))));
+            // t = (2^5-1)/(2^10-1) = 31/1023; value = 1 + 10*t.
+            Assert.AreEqual(1.0 + 10.0 * 31.0 / 1023.0, expr.Evaluate(new EvaluationContext(0.0, numeric)).AsNumber(), 1e-4);
+
+            var nonNumeric = Expr.Feature(Expr.Props(("pop", Value.String("n/a"))));
+            Assert.AreEqual(4.0, expr.Evaluate(new EvaluationContext(0.0, nonNumeric)).AsNumber(),
+                "a non-numeric feature value takes \"default\" instead of throwing inside interpolate");
+        }
+
+        [Test]
+        public void ZoomAndProperty_InterpolatesBothAxes()
+        {
+            // z10: rank 1->2, 5->6. z14: rank 1->4, 5->12. At rank=3, z10 gives 4 and z14 gives 8;
+            // interpolating those over zoom at z12 (halfway) gives 6.
+            string json = "{\"property\":\"rank\",\"stops\":[" +
+                          "[{\"zoom\":10,\"value\":1},2],[{\"zoom\":10,\"value\":5},6]," +
+                          "[{\"zoom\":14,\"value\":1},4],[{\"zoom\":14,\"value\":5},12]]}";
+            var expr = Expr.Parse(json);
+            Assert.AreEqual(ExpressionKind.Composite, expr.Kind);
+
+            var rank3 = Expr.Feature(Expr.Props(("rank", Value.Number(3.0))));
+            Assert.AreEqual(6.0, expr.Evaluate(new EvaluationContext(12.0, rank3)).AsNumber(), 1e-6);
+        }
+
+        [Test]
+        public void ColorSpace_Lab_MatchesTheModernInterpolateLabForm()
+        {
+            string legacy = "{\"colorSpace\":\"lab\",\"stops\":[[0,\"#ff0000\"],[10,\"#0000ff\"]]}";
+            string modern = "[\"interpolate-lab\",[\"linear\"],[\"zoom\"],0,\"#ff0000\",10,\"#0000ff\"]";
+            var legacyResult = Expr.Eval(legacy, zoom: 5.0).AsColor().ToRgbaArray();
+            var modernResult = Expr.Eval(modern, zoom: 5.0).AsColor().ToRgbaArray();
+            CollectionAssert.AreEqual(modernResult, legacyResult);
+
+            string rgb = "{\"stops\":[[0,\"#ff0000\"],[10,\"#0000ff\"]]}"; // default colorSpace: rgb
+            var rgbResult = Expr.Eval(rgb, zoom: 5.0).AsColor().ToRgbaArray();
+            CollectionAssert.AreNotEqual(rgbResult, legacyResult, "lab and rgb must blend differently");
+        }
+
+        [Test]
+        public void ColorSpace_Hcl_MatchesTheModernInterpolateHclForm()
+        {
+            string legacy = "{\"colorSpace\":\"hcl\",\"stops\":[[0,\"#ff0000\"],[10,\"#0000ff\"]]}";
+            string modern = "[\"interpolate-hcl\",[\"linear\"],[\"zoom\"],0,\"#ff0000\",10,\"#0000ff\"]";
+            var legacyResult = Expr.Eval(legacy, zoom: 5.0).AsColor().ToRgbaArray();
+            var modernResult = Expr.Eval(modern, zoom: 5.0).AsColor().ToRgbaArray();
+            CollectionAssert.AreEqual(modernResult, legacyResult);
+        }
+
+        [Test]
+        public void Identity_WithDefault_MissingPropertyTakesIt()
+        {
+            string json = "{\"type\":\"identity\",\"property\":\"w\",\"default\":9}";
+            var expr = Expr.Parse(json);
+            Assert.AreEqual(9.0, expr.Evaluate(new EvaluationContext(0.0, Expr.Feature())).AsNumber());
+        }
+
+        [Test]
+        public void SingleStop_IsConstant_RegardlessOfInput()
+        {
+            // A single-stop function returns that one output at every input.
+            string json = "{\"stops\":[[5,3]]}";
+            Assert.AreEqual(3.0, Expr.Eval(json, zoom: 0.0).AsNumber());
+            Assert.AreEqual(3.0, Expr.Eval(json, zoom: 20.0).AsNumber());
+        }
+
+        [Test]
+        public void ZoomFunction_Base1_StaysZoomKind_AndInterpolatesLinearly()
+        {
+            // Byte-identity regression: a plain zoom function (no type/property) keeps producing a Zoom-kind
+            // InterpolateExpression, the same Zoom-kind InterpolateExpression as a modern
+            // ["interpolate",["linear"],["zoom"],…].
+            var expr = Expr.Parse("{\"stops\":[[0,0],[10,100]],\"base\":1}");
+            Assert.AreEqual(ExpressionKind.Zoom, expr.Kind);
+            Assert.AreEqual(50.0, expr.Evaluate(new EvaluationContext(5.0)).AsNumber(), 1e-9);
         }
     }
 

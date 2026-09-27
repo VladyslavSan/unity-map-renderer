@@ -41,12 +41,14 @@ namespace MapRenderer.Unity.Style
         /// <param name="json">The JSON value of the paint/layout property.</param>
         /// <param name="defaultValue">The typed default to return when the property is absent.</param>
         /// <param name="project">Maps a runtime <see cref="Value"/> to <typeparamref name="T"/>.</param>
+        /// <param name="interpolatable">The Style Spec "interpolate" marker for this property: a legacy
+        /// function with no "type" steps when false, instead of the usual exponential ramp.</param>
         /// <exception cref="ExpressionParseException">If <paramref name="json"/> is not a valid expression.</exception>
-        public StyleProperty(JsonValue json, T defaultValue, Func<Value, T> project)
+        public StyleProperty(JsonValue json, T defaultValue, Func<Value, T> project, bool interpolatable = true)
         {
             DefaultValue = defaultValue;
             _project = project;
-            _expr = ExpressionParser.Parse(json);
+            _expr = ExpressionParser.Parse(json, interpolatable);
             _isConstant = (_expr.Kind == ExpressionKind.Constant);
             if (_isConstant)
                 _cached = EvalProjected(0.0, null);
