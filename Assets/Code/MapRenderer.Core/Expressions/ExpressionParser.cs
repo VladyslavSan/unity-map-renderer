@@ -48,8 +48,11 @@ namespace MapRenderer.Core.Expressions
         public static Expression Parse(JsonValue json) => Parse(json, out _);
 
         /// <summary>Parse a JSON DOM node, naming the property's Style Spec "interpolate" marker: a legacy
-        /// function with no explicit "type" ramps when true, steps when false.</summary>
-        public static Expression Parse(JsonValue json, bool interpolatable) => Parse(json, interpolatable, out _);
+        /// function with no explicit "type" ramps when true, steps when false. With
+        /// <paramref name="colorOutput"/>, a CSS colour string at an output position becomes a colour literal
+        /// at parse time, so evaluation never re-parses it. A string that is not a colour stays a string.</summary>
+        public static Expression Parse(JsonValue json, bool interpolatable, bool colorOutput = false)
+            => Parse(json, interpolatable, out _, colorOutput);
 
         /// <summary>
         /// Parse a JSON DOM node as an expression, also yielding its constant-key <c>get</c>/<c>has</c>
@@ -61,17 +64,18 @@ namespace MapRenderer.Core.Expressions
             => Parse(json, interpolatable: true, out keyLayout);
 
         /// <summary>The <c>interpolatable</c> + key-layout overload every other <c>Parse</c> calls into.</summary>
-        public static Expression Parse(JsonValue json, bool interpolatable, out IReadOnlyList<string> keyLayout)
+        public static Expression Parse(JsonValue json, bool interpolatable, out IReadOnlyList<string> keyLayout,
+            bool colorOutput = false)
         {
             var parser = new ExpressionParser { _interpolatable = interpolatable };
-            var expr = parser.ParseNode(json, new Scope(null), zoomAllowed: false);
+            var expr = parser.ParseNode(json, new Scope(null), zoomAllowed: false, colorOut: colorOutput);
             keyLayout = parser._keyLayout;
             return expr;
         }
 
         // --------------------------------------------------------------------------------------------
 
-        private Expression ParseNode(JsonValue node, Scope scope, bool zoomAllowed)
+        private Expression ParseNode(JsonValue node, Scope scope, bool zoomAllowed, bool colorOut = false)
         {
             if (node == null) return new LiteralExpression(Value.Null);
 
@@ -84,23 +88,23 @@ namespace MapRenderer.Core.Expressions
                 case JsonKind.Number:
                     return new LiteralExpression(Value.Number(node.AsDouble()));
                 case JsonKind.String:
-                    return new LiteralExpression(Value.String(node.AsString()));
+                    return StringLiteral(node.AsString(), colorOut);
                 case JsonKind.Object:
                     // A legacy function: "stops" (>=1 entry, except identity needs none), or "type":"identity".
                     // Anything else is a literal object value.
                     bool hasStops = node.TryGet("stops", out var stopsNode) && stopsNode.IsArray && stopsNode.Items.Count >= 1;
                     bool isIdentity = node.GetString("type", null) == "identity";
                     if (hasStops || isIdentity)
-                        return ParseLegacyFunction(node, stopsNode, scope);
+                        return ParseLegacyFunction(node, stopsNode, scope, colorOut);
                     return new LiteralExpression(JsonToValue(node));
                 case JsonKind.Array:
-                    return ParseArray(node, scope, zoomAllowed);
+                    return ParseArray(node, scope, zoomAllowed, colorOut);
                 default:
                     return new LiteralExpression(Value.Null);
             }
         }
 
-        private Expression ParseArray(JsonValue node, Scope scope, bool zoomAllowed)
+        private Expression ParseArray(JsonValue node, Scope scope, bool zoomAllowed, bool colorOut)
         {
             var items = node.Items;
             if (items.Count == 0)
@@ -115,22 +119,22 @@ namespace MapRenderer.Core.Expressions
             var args = new List<JsonValue>(items.Count - 1);
             for (int i = 1; i < items.Count; i++) args.Add(items[i]);
 
-            return Dispatch(op, args, scope, zoomAllowed);
+            return Dispatch(op, args, scope, zoomAllowed, colorOut);
         }
 
         // --------------------------------------------------------------------------------------------
 
-        private Expression Dispatch(string op, List<JsonValue> args, Scope scope, bool zoomAllowed)
+        private Expression Dispatch(string op, List<JsonValue> args, Scope scope, bool zoomAllowed, bool colorOut)
         {
             switch (op)
             {
                 // ---- literal / type ------------------------------------------------------------------
-                case "literal": return ParseLiteral(args);
+                case "literal": return ParseLiteral(args, colorOut);
                 case "typeof": return Literals.TypeOf(One(op, args, scope));
                 case "to-number": return Literals.ToNumber(Many(op, args, scope, 1));
                 case "to-string": return Literals.ToString(One(op, args, scope));
                 case "to-boolean": return Literals.ToBoolean(One(op, args, scope));
-                case "to-color": return Literals.ToColor(Many(op, args, scope, 1));
+                case "to-color": return Literals.ToColor(Many(op, args, scope, 1, colorOut: true));
                 case "to-rgba": return Literals.ToRgba(One(op, args, scope));
 
                 // ---- lookup --------------------------------------------------------------------------
@@ -141,9 +145,9 @@ namespace MapRenderer.Core.Expressions
                 case "length": return Lookup.Length(One(op, args, scope));
 
                 // ---- decision ------------------------------------------------------------------------
-                case "case": return ParseCase(args, scope, zoomAllowed);
-                case "match": return ParseMatch(args, scope, zoomAllowed);
-                case "coalesce": return new CoalesceExpression(ParseAll(args, scope, zoomAllowed));
+                case "case": return ParseCase(args, scope, zoomAllowed, colorOut);
+                case "match": return ParseMatch(args, scope, zoomAllowed, colorOut);
+                case "coalesce": return new CoalesceExpression(ParseAll(args, scope, zoomAllowed, colorOut));
                 case "==": return Decision.Eq(Two(op, args, scope), false);
                 case "!=": return Decision.Eq(Two(op, args, scope), true);
                 case "<": return Decision.Compare(op, Two(op, args, scope));
@@ -155,10 +159,10 @@ namespace MapRenderer.Core.Expressions
                 case "!": return Decision.Not(One(op, args, scope));
 
                 // ---- ramps / curves ------------------------------------------------------------------
-                case "step": return ParseStep(args, scope);
-                case "interpolate": return ParseInterpolate(InterpolationSpace.Default, args, scope);
-                case "interpolate-lab": return ParseInterpolate(InterpolationSpace.Lab, args, scope);
-                case "interpolate-hcl": return ParseInterpolate(InterpolationSpace.Hcl, args, scope);
+                case "step": return ParseStep(args, scope, colorOut);
+                case "interpolate": return ParseInterpolate(InterpolationSpace.Default, args, scope, colorOut);
+                case "interpolate-lab": return ParseInterpolate(InterpolationSpace.Lab, args, scope, colorOut);
+                case "interpolate-hcl": return ParseInterpolate(InterpolationSpace.Hcl, args, scope, colorOut);
 
                 // ---- math ----------------------------------------------------------------------------
                 case "+": case "*": return MathOps.Variadic(op, ParseAll(args, scope, zoomAllowed));
@@ -201,7 +205,7 @@ namespace MapRenderer.Core.Expressions
                 case "downcase": return Strings.Downcase(One(op, args, scope));
 
                 // ---- variable binding ----------------------------------------------------------------
-                case "let": return ParseLet(args, scope, zoomAllowed);
+                case "let": return ParseLet(args, scope, zoomAllowed, colorOut);
                 case "var": return ParseVar(args, scope);
 
                 default:
@@ -211,11 +215,11 @@ namespace MapRenderer.Core.Expressions
 
         // ---- argument helpers ----------------------------------------------------------------------
 
-        private Expression[] ParseAll(List<JsonValue> args, Scope scope, bool zoomAllowed)
+        private Expression[] ParseAll(List<JsonValue> args, Scope scope, bool zoomAllowed, bool colorOut = false)
         {
             var result = new Expression[args.Count];
             for (int i = 0; i < args.Count; i++)
-                result[i] = ParseNode(args[i], scope, zoomAllowed: false);
+                result[i] = ParseNode(args[i], scope, zoomAllowed: false, colorOut: colorOut);
             return result;
         }
 
@@ -237,25 +241,35 @@ namespace MapRenderer.Core.Expressions
             };
         }
 
-        private Expression[] Many(string op, List<JsonValue> args, Scope scope, int min, int max = int.MaxValue)
+        private Expression[] Many(string op, List<JsonValue> args, Scope scope, int min, int max = int.MaxValue,
+            bool colorOut = false)
         {
             if (args.Count < min || args.Count > max)
                 throw new ExpressionParseException(
                     $"\"{op}\" expects {(max == int.MaxValue ? $"at least {min}" : $"{min}..{max}")} arguments, got {args.Count}.");
             var result = new Expression[args.Count];
             for (int i = 0; i < args.Count; i++)
-                result[i] = ParseNode(args[i], scope, zoomAllowed: false);
+                result[i] = ParseNode(args[i], scope, zoomAllowed: false, colorOut: colorOut);
             return result;
         }
 
         // ---- literal / get / has -------------------------------------------------------------------
 
-        private Expression ParseLiteral(List<JsonValue> args)
+        private Expression ParseLiteral(List<JsonValue> args, bool colorOut)
         {
             if (args.Count != 1)
                 throw new ExpressionParseException($"\"literal\" expects 1 argument, got {args.Count}.");
-            return new LiteralExpression(JsonToValue(args[0]));
+            return args[0].Kind == JsonKind.String
+                ? StringLiteral(args[0].AsString(), colorOut)
+                : new LiteralExpression(JsonToValue(args[0]));
         }
+
+        /// <summary>A string literal. At a colour output position a CSS colour string becomes a colour literal,
+        /// so evaluation never re-parses it; any other string stays a string.</summary>
+        private static Expression StringLiteral(string text, bool colorOut)
+            => colorOut && ColorParser.TryParse(text, out Color parsed)
+                ? new LiteralExpression(Value.OfColor(parsed))
+                : new LiteralExpression(Value.String(text));
 
         private Expression ParseGet(List<JsonValue> args, Scope scope)
         {
@@ -332,7 +346,7 @@ namespace MapRenderer.Core.Expressions
 
         // ---- case / match --------------------------------------------------------------------------
 
-        private Expression ParseCase(List<JsonValue> args, Scope scope, bool zoomAllowed)
+        private Expression ParseCase(List<JsonValue> args, Scope scope, bool zoomAllowed, bool colorOut)
         {
             // case: (cond, output)+ , fallback  -> odd count >= 3
             if (args.Count < 3 || args.Count % 2 == 0)
@@ -344,13 +358,13 @@ namespace MapRenderer.Core.Expressions
             for (int i = 0; i < pairs; i++)
             {
                 conds[i] = ParseNode(args[2 * i], scope, zoomAllowed: false);
-                outs[i] = ParseNode(args[2 * i + 1], scope, zoomAllowed: false);
+                outs[i] = ParseNode(args[2 * i + 1], scope, zoomAllowed: false, colorOut: colorOut);
             }
-            var fallback = ParseNode(args[args.Count - 1], scope, zoomAllowed: false);
+            var fallback = ParseNode(args[args.Count - 1], scope, zoomAllowed: false, colorOut: colorOut);
             return new CaseExpression(conds, outs, fallback);
         }
 
-        private Expression ParseMatch(List<JsonValue> args, Scope scope, bool zoomAllowed)
+        private Expression ParseMatch(List<JsonValue> args, Scope scope, bool zoomAllowed, bool colorOut)
         {
             // match: input, (label, output)+ , default  -> count even and >= 4
             if (args.Count < 4 || args.Count % 2 != 0)
@@ -372,10 +386,10 @@ namespace MapRenderer.Core.Expressions
                 {
                     labels = new[] { LiteralLabel(labelNode) };
                 }
-                var output = ParseNode(args[i + 1], scope, zoomAllowed: false);
+                var output = ParseNode(args[i + 1], scope, zoomAllowed: false, colorOut: colorOut);
                 cases.Add((labels, output));
             }
-            var def = ParseNode(args[args.Count - 1], scope, zoomAllowed: false);
+            var def = ParseNode(args[args.Count - 1], scope, zoomAllowed: false, colorOut: colorOut);
             return new MatchExpression(input, cases, def);
         }
 
@@ -392,14 +406,14 @@ namespace MapRenderer.Core.Expressions
 
         // ---- step / interpolate --------------------------------------------------------------------
 
-        private Expression ParseStep(List<JsonValue> args, Scope scope)
+        private Expression ParseStep(List<JsonValue> args, Scope scope, bool colorOut)
         {
             // step: input, default-output, (stop-input, stop-output)+
             if (args.Count < 4 || args.Count % 2 != 0)
                 throw new ExpressionParseException(
                     $"\"step\" expects input, default, and stop pairs (even count >=4), got {args.Count}.");
             var input = ParseInputAllowingZoom(args[0], scope);
-            var def = FoldConstant(ParseNode(args[1], scope, zoomAllowed: false));
+            var def = FoldConstant(ParseNode(args[1], scope, zoomAllowed: false, colorOut: colorOut));
             int n = (args.Count - 2) / 2;
             var stops = new double[n];
             var outs = new Expression[n];
@@ -414,12 +428,12 @@ namespace MapRenderer.Core.Expressions
                     throw new ExpressionParseException("\"step\" stop inputs must be strictly ascending.");
                 prev = stop;
                 stops[i] = stop;
-                outs[i] = FoldConstant(ParseNode(args[2 + 2 * i + 1], scope, zoomAllowed: false));
+                outs[i] = FoldConstant(ParseNode(args[2 + 2 * i + 1], scope, zoomAllowed: false, colorOut: colorOut));
             }
             return new StepExpression(input, def, stops, outs);
         }
 
-        private Expression ParseInterpolate(InterpolationSpace space, List<JsonValue> args, Scope scope)
+        private Expression ParseInterpolate(InterpolationSpace space, List<JsonValue> args, Scope scope, bool colorOut)
         {
             // interpolate args (operator excluded): interpolation, input, (stop, output)+
             // => even count >= 6 (interpolation + input + at least two stop/output pairs).
@@ -444,7 +458,7 @@ namespace MapRenderer.Core.Expressions
                     throw new ExpressionParseException("\"interpolate\" stop inputs must be strictly ascending.");
                 prev = stop;
                 stops[i] = stop;
-                outs[i] = FoldConstant(ParseNode(args[2 + 2 * i + 1], scope, zoomAllowed: false));
+                outs[i] = FoldConstant(ParseNode(args[2 + 2 * i + 1], scope, zoomAllowed: false, colorOut: colorOut));
             }
             return new InterpolateExpression(curve, space, baseV, p1x, p1y, p2x, p2y, input, stops, outs);
         }
@@ -491,7 +505,7 @@ namespace MapRenderer.Core.Expressions
 
         // ---- let / var -----------------------------------------------------------------------------
 
-        private Expression ParseLet(List<JsonValue> args, Scope scope, bool zoomAllowed)
+        private Expression ParseLet(List<JsonValue> args, Scope scope, bool zoomAllowed, bool colorOut)
         {
             // let: (name, value)+ , body  -> odd count >= 3
             if (args.Count < 3 || args.Count % 2 == 0)
@@ -511,7 +525,7 @@ namespace MapRenderer.Core.Expressions
                 child.Bindings[name] = valueExpr;
                 bindings[i] = (name, valueExpr);
             }
-            var body = ParseNode(args[args.Count - 1], child, zoomAllowed: false);
+            var body = ParseNode(args[args.Count - 1], child, zoomAllowed: false, colorOut: colorOut);
             return new LetExpression(bindings, body);
         }
 
@@ -692,7 +706,7 @@ namespace MapRenderer.Core.Expressions
         /// identity/categorical/exponential-or-interval, per the deprecations page. Malformed input (a
         /// missing property where one is required, or a non-numeric/non-ascending stop) gives constant null.
         /// </summary>
-        private Expression ParseLegacyFunction(JsonValue node, JsonValue stopsNode, Scope scope)
+        private Expression ParseLegacyFunction(JsonValue node, JsonValue stopsNode, Scope scope, bool colorOut)
         {
             string type = node.GetString("type", null);
             string property = node.GetString("property", null);
@@ -703,7 +717,8 @@ namespace MapRenderer.Core.Expressions
             if (type == "identity")
                 return property == null
                     ? (Expression)new LiteralExpression(Value.Null)
-                    : ParseNode(Op("coalesce", Get(property), DefaultOrNull(hasDefault, defaultNode)), scope, zoomAllowed: false);
+                    : ParseNode(Op("coalesce", Get(property), DefaultOrNull(hasDefault, defaultNode)), scope, zoomAllowed: false,
+                        colorOut: colorOut);
 
             IReadOnlyList<JsonValue> stops = stopsNode != null ? stopsNode.Items : System.Array.Empty<JsonValue>();
             if (stops.Count == 0)
@@ -715,15 +730,15 @@ namespace MapRenderer.Core.Expressions
             // Zoom-and-property: the first stop's input is a {"zoom":z,"value":v} object, not a number or
             // label — checked BEFORE the "type" dispatch below, which a zoom-and-property categorical also matches.
             if (stops[0].Items[0].IsObject)
-                return ParseZoomAndProperty(stops, type, property, hasDefault, defaultNode, colorSpace, baseVal, scope);
+                return ParseZoomAndProperty(stops, type, property, hasDefault, defaultNode, colorSpace, baseVal, scope, colorOut);
 
             if (type == "categorical")
                 return property == null
                     ? (Expression)new LiteralExpression(Value.Null)
-                    : ParseNode(BuildCategoricalNode(property, stops, hasDefault, defaultNode), scope, zoomAllowed: false);
+                    : ParseNode(BuildCategoricalNode(property, stops, hasDefault, defaultNode), scope, zoomAllowed: false, colorOut: colorOut);
 
             JsonValue synth = BuildRampNode(type, property, stops, hasDefault, defaultNode, colorSpace, baseVal, out bool malformed);
-            return malformed ? new LiteralExpression(Value.Null) : ParseNode(synth, scope, zoomAllowed: false);
+            return malformed ? new LiteralExpression(Value.Null) : ParseNode(synth, scope, zoomAllowed: false, colorOut: colorOut);
         }
 
         /// <summary>
@@ -814,7 +829,7 @@ namespace MapRenderer.Core.Expressions
         /// assuming the SAME base/colorSpace as the inner ramps — the spec does not say otherwise.
         /// </summary>
         private Expression ParseZoomAndProperty(IReadOnlyList<JsonValue> stops, string type, string property,
-            bool hasDefault, JsonValue defaultNode, string colorSpace, double baseVal, Scope scope)
+            bool hasDefault, JsonValue defaultNode, string colorSpace, double baseVal, Scope scope, bool colorOut)
         {
             if (property == null) return new LiteralExpression(Value.Null);
 
@@ -848,7 +863,7 @@ namespace MapRenderer.Core.Expressions
                 i++;
             }
 
-            if (zooms.Length == 1) return ParseNode(inner[0], scope, zoomAllowed: false);
+            if (zooms.Length == 1) return ParseNode(inner[0], scope, zoomAllowed: false, colorOut: colorOut);
 
             string outerOp = InterpolateOp(colorSpace);
             var args = _interpolatable
@@ -865,7 +880,7 @@ namespace MapRenderer.Core.Expressions
                 args.Add(JsonValue.OfNumber(zooms[g]));
                 args.Add(inner[g]);
             }
-            return ParseNode(JsonValue.OfArray(args), scope, zoomAllowed: false);
+            return ParseNode(JsonValue.OfArray(args), scope, zoomAllowed: false, colorOut: colorOut);
         }
 
         // ---- constant-folding helper (used by step/interpolate for stop outputs) -----------------

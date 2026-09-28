@@ -20,6 +20,7 @@ namespace MapRenderer.Core.Expressions
             color = default;
             if (string.IsNullOrEmpty(text)) return false;
             string s = text.Trim();
+            if (s.Length == 0) return false;
 
             if (s[0] == '#') return TryParseHex(s, out color);
 

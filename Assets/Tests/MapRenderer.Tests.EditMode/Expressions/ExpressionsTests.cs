@@ -1438,6 +1438,8 @@ namespace MapRenderer.Tests.Expressions
         {
             bool ok = Expr.TryEval("[\"to-color\", \"not a color\"]", out _, out _);
             Assert.IsFalse(ok);
+            // A whitespace-only string is no colour either, and must fail cleanly rather than throw.
+            Assert.IsFalse(Expr.TryEval("[\"to-color\", \" \"]", out _, out _));
         }
 
         [Test]

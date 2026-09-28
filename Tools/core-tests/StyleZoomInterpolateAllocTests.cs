@@ -12,8 +12,8 @@ using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Style
 {
-    /// <summary>StyleProperty&lt;T&gt;'s zoom-interpolate evaluation path, swept over many zoom values, must
-    /// not allocate GC heap memory per call.</summary>
+    /// <summary>StyleProperty&lt;T&gt;'s zoom-dependent evaluation path, swept over many zoom values, must
+    /// not allocate GC heap memory per call. Colour strings parse once at load, not per evaluation.</summary>
     [TestFixture]
     public class StyleZoomInterpolateAllocTests
     {
@@ -49,20 +49,36 @@ namespace MapRenderer.Tests.Style
             var prop = ColProp(
                 "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                 "5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]");
+            // Colour STRINGS at output positions: parsed once at load, so a per-frame evaluation parses nothing.
+            // Functional notation on purpose — a hex literal no longer allocates when parsed.
+            var stringInterpolate = ColProp(
+                "[\"interpolate\",[\"linear\"],[\"zoom\"],5,\"rgba(255,0,0,1)\",15,\"hsl(240,100%,50%)\"]");
+            var stringStep = ColProp(
+                "[\"step\",[\"zoom\"],\"rgba(255,0,0,1)\",10,\"hsl(240,100%,50%)\"]");
 
             for (int w = 0; w < 50; w++)
-                prop.Evaluate(5.0 + (w % 10) * 1.0);
+            {
+                double warm = 5.0 + (w % 10) * 1.0;
+                prop.Evaluate(warm);
+                stringInterpolate.Evaluate(warm);
+                stringStep.Evaluate(warm);
+            }
 
             long before = GC.GetAllocatedBytesForCurrentThread();
             for (int i = 0; i < 1000; i++)
             {
                 double zoom = 5.0 + (i % 100) * 0.1;
                 prop.Evaluate(zoom);
+                stringInterpolate.Evaluate(zoom);
+                stringStep.Evaluate(zoom);
             }
             long after = GC.GetAllocatedBytesForCurrentThread();
 
             Assert.AreEqual(0L, after - before,
-                "Zoom color interpolation must not allocate any GC heap memory per call.");
+                "Zoom-dependent colour evaluation must not allocate any GC heap memory per call.");
+            Assert.IsTrue(ColorParser.TryParse("rgba(255,0,0,1)", out Color red));
+            Assert.AreEqual(red, stringInterpolate.Evaluate(5.0), "a string stop evaluates to the parsed colour.");
+            Assert.AreEqual(red, stringStep.Evaluate(5.0));
         }
 
         [Test]

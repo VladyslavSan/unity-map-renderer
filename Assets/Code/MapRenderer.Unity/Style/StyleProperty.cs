@@ -63,7 +63,7 @@ namespace MapRenderer.Unity.Style
             DefaultValue = defaultValue;
             _project = project;
             _projectSpan = projectSpan;
-            _expr = ExpressionParser.Parse(json, interpolatable);
+            _expr = ExpressionParser.Parse(json, interpolatable, colorOutput: typeof(T) == typeof(Color));
             _isConstant = (_expr.Kind == ExpressionKind.Constant);
             if (_isConstant)
                 _cached = EvalProjected(0.0, null);
