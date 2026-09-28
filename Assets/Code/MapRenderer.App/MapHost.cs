@@ -117,12 +117,12 @@ namespace MapRenderer.App
             }
 
             // 4. SetStyle is async (style doc + any TileJSON) and fire-and-forget; tiles stream in as it completes.
-            if (mapView != null)
+            if (mapView != null && mapView.Config.DevicePixelRatioMode == DevicePixelRatioMode.Auto)
             {
-                // dpr = Screen.dpi / 160 (the Android mdpi baseline, an open choice: docs/device-pixel-ratio-design.md).
-                // Limitation: in Play Mode, Screen.dpi reports the Editor monitor's density (observed, not documented).
+                // Device.* is the simulator-aware Screen and Application.
                 // Tests drive Wire and keep the serialized ratio.
-                mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi);
+                mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFor(
+                    DensityConventionFor(UnityEngine.Device.Application.platform), UnityEngine.Device.Screen.dpi);
             }
             string styleUri = ResolveStyleUri(StyleUri);
             if (mapView != null)
@@ -168,6 +168,20 @@ namespace MapRenderer.App
 
             var telemetry = Object.FindAnyObjectByType<MapTelemetryPanel>(FindObjectsInactive.Include);
             if (telemetry != null && telemetry.Map == null) telemetry.Map = mapView;
+        }
+
+        /// <summary>The density convention of <paramref name="platform"/>. Every platform but Android, iOS
+        /// and macOS is desktop-like.</summary>
+        private static DensityConvention DensityConventionFor(RuntimePlatform platform)
+        {
+            switch (platform)
+            {
+                case RuntimePlatform.Android: return DensityConvention.Android;
+                case RuntimePlatform.IPhonePlayer: return DensityConvention.iOS;
+                case RuntimePlatform.OSXPlayer:
+                case RuntimePlatform.OSXEditor: return DensityConvention.MacOS;
+                default: return DensityConvention.Desktop;
+            }
         }
 
         /// <summary>

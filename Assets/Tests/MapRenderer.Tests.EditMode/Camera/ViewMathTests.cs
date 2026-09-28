@@ -339,13 +339,28 @@ namespace MapRenderer.Tests.Cameras
         public void DeviceScaling_DerivesDprFromDpi()
         {
             Assert.AreEqual(160.0, DeviceScaling.ReferenceDpi, 0.0, "mdpi golden standard.");
-            // dpr = dpi / 160 (screenDpi is a precondition-positive measured density).
-            Assert.AreEqual(1.0, DeviceScaling.DevicePixelRatioFromDpi(160.0), 1e-12,
-                "160 dpi ⇒ dpr 1 (the reference density).");
-            Assert.AreEqual(2.0, DeviceScaling.DevicePixelRatioFromDpi(320.0), 1e-12,
-                "320 dpi ⇒ dpr 2 (a 2× panel).");
-            Assert.AreEqual(2.75, DeviceScaling.DevicePixelRatioFromDpi(440.0), 1e-12,
-                "arbitrary dpi divides by 160.");
+            // iOS 400 dpi is 2.5, which rounds half-to-even to 2: a recorded heuristic, not a measured fact.
+            // iOS 60 dpi is 0.375, which rounds to 0: the floor of 1 lifts it.
+            var rows = new (DensityConvention Convention, double Dpi, double Expected)[]
+            {
+                (DensityConvention.Android, 160.0, 1.0), (DensityConvention.Android, 320.0, 2.0),
+                (DensityConvention.Android, 440.0, 2.75), (DensityConvention.Android, 120.0, 0.75),
+                (DensityConvention.iOS, 326.0, 2.0), (DensityConvention.iOS, 460.0, 3.0),
+                (DensityConvention.iOS, 264.0, 2.0), (DensityConvention.iOS, 401.0, 3.0),
+                (DensityConvention.iOS, 400.0, 2.0), (DensityConvention.iOS, 60.0, 1.0),
+                (DensityConvention.Desktop, 254.0, 1.0), (DensityConvention.Desktop, 96.0, 1.0),
+                (DensityConvention.MacOS, 254.0, 2.0), (DensityConvention.MacOS, 218.0, 2.0),
+                (DensityConvention.MacOS, 109.0, 1.0), (DensityConvention.MacOS, 150.0, 2.0),
+                (DensityConvention.MacOS, 149.0, 1.0),
+            };
+            foreach (var row in rows)
+                Assert.AreEqual(row.Expected, DeviceScaling.DevicePixelRatioFor(row.Convention, row.Dpi), 0.0,
+                    $"{row.Convention} at {row.Dpi} dpi.");
+
+            foreach (DensityConvention convention in System.Enum.GetValues(typeof(DensityConvention)))
+                foreach (double unreported in new[] { 0.0, double.NaN })
+                    Assert.AreEqual(1.0, DeviceScaling.DevicePixelRatioFor(convention, unreported), 0.0,
+                        $"{convention}: an unreported density ({unreported}) gives 1.");
         }
 
         // ── The px→consumer-space conversion ───────────────────────────────────────────────────
@@ -416,10 +431,9 @@ namespace MapRenderer.Tests.Cameras
                 Assert.AreEqual(1080.0, vp.y, 0.0, $"y falls back to 1 component-wise at {dpr}.");
             }
 
-            // MapHost.Start's SafeRatio(DevicePixelRatioFromDpi(dpi)): an absurd density cannot escape the band.
-            // Only the large end is testable, because dpi 0 trips DevicePixelRatioFromDpi's precondition.
-            Assert.AreEqual(1080.0,
-                DeviceScaling.DeviceToLogicalPx(1080.0, DeviceScaling.DevicePixelRatioFromDpi(1e9)), 0.0,
+            // MapHost.Start's SafeRatio(DevicePixelRatioFor(...)): an absurd density cannot escape the band.
+            double absurdRatio = DeviceScaling.DevicePixelRatioFor(DensityConvention.Android, 1e9);
+            Assert.AreEqual(1080.0, DeviceScaling.DeviceToLogicalPx(1080.0, absurdRatio), 0.0,
                 "an absurd panel density must land outside the band and degrade to 1, not divide the " +
                 "framing viewport by 6.25 million.");
         }

@@ -1,9 +1,8 @@
 # Device-pixel ratio — one logical-pixel convention for the whole map (design / SSOT)
 
-**Status:** the model below ships, with one part open — where the ratio comes from (§ "Open — where the
-ratio comes from" below). This doc is the *why*. The *contract* — the standing requirements a conforming
-implementation must hold — is the normative [`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md),
-and is not restated here.
+**Status:** the model below ships, including where the ratio comes from (§ 7). This doc is the *why*.
+The *contract* — the standing requirements a conforming implementation must hold — is the normative
+[`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md), and is not restated here.
 
 **Read with:** `docs/line-rendering-design.md` § "The width model" (the frame-constant ruler the line width family rides),
 `docs/coordinates-and-projections.md` (the logical-pixel tile definition `WebMercator.TilePixelSize` sets),
@@ -298,17 +297,14 @@ row per property. A new px-valued property is added to the table, and the table 
   would otherwise draw them once at a seeded ratio of 1, and the symbol halo has no seed at all. A
   doc-comment would not have closed that window.
 
-## 7. Open — where the ratio comes from (UMR-71)
+## 7. Where the ratio comes from
 
-`MapHost.Start` derives the ratio as `DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi)`, which is
-`Screen.dpi / 160` against the Android **mdpi** baseline. **Whether that derivation is right is an open
-maintainer decision**, and it is a policy call rather than a mechanical edit.
+`MapHost.Start` derives the ratio with `DeviceScaling.DevicePixelRatioFor(convention, Screen.dpi)`. The
+convention comes from the platform, so the choice is a policy that one pure function holds, not a formula.
 
 The plumbing (§ "The mechanism — two named conversions, one fallback" and § "The px-valued surface"
-above) is independent of the value, and it must hold before the value changes. Otherwise a value change
-silently rescales the map with nothing pinning what "correct" means — and a green gate after a formula
-change carries **zero** information about the formula, because `MapHost.Start` never runs under the test
-runner and every fixture holds the serialized default.
+above) is independent of the value. No test drives `MapHost.Start`, so the gate cannot see the platform
+switch or the mode branch. The table-driven test on `DevicePixelRatioFor` pins the policy itself.
 
 ### 7.1 The finding that makes it a policy call
 
@@ -338,60 +334,74 @@ not scale**.
 |---|---|---|
 | **Android** | `DisplayMetrics.densityDpi` | **Yes, exactly.** Android defines `density` as a scaling factor that is 1 at 160 dpi and 0.75 at 120 dpi, so `Screen.dpi / 160 == DisplayMetrics.density`. |
 | **iOS** | a hardware-id → PPI table Unity ships (no public iOS API reports physical PPI) | approximates `nativeScale` without equalling it: 326/160 = 2.04 against 2; 460/160 = 2.875 against 3 |
-| **macOS** | the panel's physical density | **No, and no divisor fixes it.** The backing scale is two-valued (1 or 2), so `÷160` would need a 320-dpi reading to reach 2.0. A 254-ppi panel yields 1.5875, a map ~21 % thinner than a browser renders the same style at `window.devicePixelRatio` 2.0. |
+| **macOS** | the panel's physical density | **No, and no divisor fixes it.** The backing scale is two-valued (1 or 2), so `÷160` would need a 320-dpi reading to reach 2.0. A 254-ppi panel yields 1.5875, a map ~21 % thinner than a browser renders the same style at `window.devicePixelRatio` 2.0. A threshold does recover it (§ 7.3). |
 | **Windows** | not established from a primary source — either the EDID physical density (then `÷160` ignores the user's 125/150/175 % setting) or the effective system DPI `96 × scale` (then `÷160` yields **0.6 at 100 %**). **Both wrong, in opposite directions.** |
 | **WebGL** | the browser's ratio **is** in the process natively, but no managed API surfaces it, and the web's reference density is **96**, not 160 |
 
-The mismatch on desktop is **structural, not a bad constant**: no divisor makes a physical density track a
-two-valued OS scale.
+The mismatch is **structural, not a bad constant**: no divisor makes a physical density track a two-valued OS
+scale. A threshold can, on Apple screens only, because their two density classes are far apart.
 
-### 7.3 A live consequence of the current derivation
+### 7.3 The policy
 
-`MapHost.Start` overwrites the ratio from `Screen.dpi` unconditionally, and `Start` runs in Play mode — so an
-in-Editor Play session takes its ratio from whichever monitor the Editor window sits on. When the build
-target is Android or iOS — the platforms where `dpi/160` is *correct* — Play mode feeds it the workstation's
-density instead of the device's. `Screen.dpi`'s Editor behaviour is undocumented (Unity documents the Editor
-divergence for `Screen.width`/`height` and says nothing for `dpi`), so this is an observation, not a
-contract.
+| convention | platforms | ratio |
+|---|---|---|
+| Android | Android | `dpi / 160`. Android defines its density the same way (§ 7.2). |
+| iOS | iPhone, iPad | `max(1, round(dpi / 160))`. |
+| MacOS | macOS players and the macOS Editor | `2.0` when `dpi >= 150`, else `1.0`. |
+| Desktop | Windows and Linux players and Editors, WebGL, tvOS, visionOS | `1.0`. |
 
-### 7.4 The options, and what must be decided
+A density that is not positive (`Screen.dpi` is `0` when undeterminable) gives `1.0` for every convention.
+`SafeRatio` is the only other fallback (§ 3.2).
 
-| # | option | what it does | consequence |
-|---|---|---|---|
-| **B1** | **Per-platform policy as a pure function** | a `(convention, screenDpi) → ratio` function in engine-free code; the Unity boundary picks the convention from `Application.platform`. Android → `dpi/160`; desktop → `1.0`; iOS → `dpi/160`, optionally **rounded to the nearest integer ≥ 1**, which recovers the true `nativeScale` for current devices (326→2, 460→3, iPad 264→2) | one enum, one function, one `switch`, **table-testable** in the fast loop. The iOS rounding is a heuristic — a 401-ppi panel whose `nativeScale` is 2.608 sits at 2.5 and rounds ambiguously |
-| **B2** | **Desktop → 1.0, everything else unchanged** | one platform test at the derivation site | smallest possible; leaves iOS on the approximation and hard-codes policy at a Unity boundary no test reaches |
-| **B3** | **Explicit override plus auto** | a `{Auto, Manual}` mode on `MapViewConfig`; `Auto` runs B1/B2, `Manual` honours the serialized value | one serialized enum, one branch. Today the derivation overwrites the field unconditionally, so there is **no supported way to set a ratio by hand on a device**, and the eyeball workflow — sliding the value live — depends on that being possible |
-| **B4** | **Editor-only truth** | read `EditorGUIUtility.pixelsPerPoint` under `UNITY_EDITOR`; the player falls back to B1/B2 | ~3 lines, but **wrong as the shipping mechanism**: Editor and player would disagree, so the eyeball would validate behaviour the build lacks. Useful as a *measurement* |
-| **B5** | **Native plugin** | `NSScreen.backingScaleFactor` / `GetDpiForWindow` per desktop platform | two small native plugins plus per-platform build config and maintenance. **The only way to get the real factor in a player**, and out of proportion until desktop DPR matters |
-| **B6** | **`UnityEngine.Device.Screen.dpi`** | a one-token change at the derivation site. The Device-Simulator shim yields the *simulated device's* values in the Editor and forwards to `UnityEngine.Screen` in a player | removes most of the harm of § "A live consequence of the current derivation" **with no policy attached**, and composes with B1/B3. Does not answer the desktop question at all |
+The iOS rounding is a heuristic. It recovers the true `nativeScale` for current devices (326 → 2, 460 → 3,
+iPad 264 → 2). A 401-ppi panel with a `nativeScale` of 2.608 gives 2.506 and rounds to 3. At exactly 2.5 the
+round is half-to-even, so 400 dpi gives 2.
 
-A standalone `Application.isEditor` gate is **assessed and rejected**: it adds a third policy branch that
-B1+B3 then has to reconcile, and B6 is a strictly better version of the same intent.
+The macOS backing scale is 1 or 2. Apple non-Retina panels are at most about 110 ppi and Retina panels at
+least about 218 ppi, so a threshold of 150 recovers the scale. **Limitation:** a third-party monitor near
+150 dpi sits on the edge of the threshold, and `Manual` mode is the answer there.
 
-**Three questions must be decided before any code.** A developer must not pick these.
+Desktop is `1.0` because no divisor recovers a two-valued OS scale from a physical density (§ 7.2), and no
+threshold separates the density classes of Windows and Linux monitors. In the Editor, `Screen.dpi` reports
+the density of the monitor under the Editor window, not the target device's (observed, not documented by
+Unity). The macOS Editor therefore gets the macOS convention, and the Windows and Linux Editors get the
+desktop convention. The host reads `UnityEngine.Device.Screen` and `UnityEngine.Device.Application`: the Device
+Simulator reports the simulated platform and device, and in a player they forward to the real classes.
+**Limitation:** WebGL gets `1.0`, because the browser ratio is in the process natively but no managed API
+surfaces it.
 
-* **(a)** the desktop default — `1.0`, or `2.0`-on-Retina via B4/B5;
-* **(b)** whether iOS keeps `dpi/160`, rounds, or gets its own convention;
-* **(c)** whether B3's override ships with B1.
+### 7.4 Auto and Manual
 
-**(a) is settleable in-process, without a browser.** `ProjectSettings.asset` has `macRetinaSupport: 1`, so a
-standalone macOS build allocates a full-resolution backing store. Log `Screen.width` once in that build:
-**3456 ⇒ the framebuffer is device pixels ⇒ a ratio of 2.0 is owed; 1728 ⇒ it is points ⇒ 1.0.** That does
-not make a *constant* 2.0 correct — drag the window to a 1× monitor and it is wrong again, which is why B5
-remains the only fully correct mechanism.
+`MapViewConfig.DevicePixelRatioMode` is `Auto` or `Manual`. `Auto` runs the policy once in `Start` and
+overwrites the serialized ratio. `Manual` keeps the serialized value. Manual is the way to a value the
+policy does not give, such as `2.0` on a Windows or Linux HiDPI monitor. On macOS, log `Screen.width` once in
+a standalone build to check the policy: `ProjectSettings.asset` has `macRetinaSupport: 1`, so 3456 means the
+framebuffer is device pixels and 2.0 is owed, and 1728 means it is points and 1.0 is right. A constant 2.0 is
+still wrong on a 1x monitor.
 
-**What nothing in-process can judge** is whether the chosen number matches what the OS intends. That oracle
-is not in the process; it *is* the finding of § "The finding that makes it a policy call" above.
+**Limitation:** the platform switch and the mode branch run only in `Start`, and no test drives them.
+
+### 7.5 Rejected alternatives
+
+* **Desktop → 1.0 on macOS too:** makes the whole map half size on a Retina Mac, the default Apple screen.
+* **Editor-only truth (`EditorGUIUtility.pixelsPerPoint`):** the Editor and the player would disagree, so
+  the eyeball would validate behaviour the build lacks.
+* **A native plugin (`backingScaleFactor`, `GetDpiForWindow`):** the only way to the real desktop factor
+  in a player. It costs per-platform plugins and build config, and is out of proportion until desktop
+  ratio matters.
+* **A standalone `Application.isEditor` gate:** adds a third policy branch, and the `Device` classes give
+  the same effect with no policy attached.
 
 ## 8. Grounding (file:symbol touch points)
 
-`MapRenderer.Unity/View/`: `DeviceScaling` (both conversions, `PixelSpace`, the plausibility band and its
-single fallback), `FrustumTileSelector` (the selection zoom offset the `TilePixelSize` fold would move).
+`MapRenderer.Unity/View/`: `DeviceScaling` (both conversions, `DevicePixelRatioFor` and `DensityConvention`,
+`PixelSpace`, the plausibility band and its single fallback), `FrustumTileSelector` (the selection zoom
+offset the `TilePixelSize` fold would move).
 `MapRenderer.Unity/Rendering/Map/`: `MapCamera.ViewportLogicalPx` (the logical-viewport definition),
 `MapCamera.MetresPerDevicePixel` / `SyncToCamera` (the frame-constant ruler and its push),
 `MapCamera.CurrentAltitudeMetres` (where the ratio enters the framing, once),
 `MapView.BuildTileSelectionConfig` (the cover framing), `MapView.SetStyle` (the post-build re-apply),
-`MapViewConfig.DevicePixelRatio` (the serialized ratio, unclamped at the field).
+`MapViewConfig.DevicePixelRatio` (the serialized ratio, unclamped at the field), `MapViewConfig.DevicePixelRatioMode`.
 `MapRenderer.Unity/Rendering/Layers/`: `ZoomStyleApplier.BindDevicePixelFloat` / `BindDevicePixelVector` (the
 material-bound seam), `SymbolRenderLayer` (colour tints only — the halo is not bound here).
 `MapRenderer.Unity/Rendering/Materials/MaterialFactory` — the device-px binding call sites.
@@ -407,5 +417,5 @@ straddle pad, the hairline floor, `_Blur`), `Fill/Fill_VertexModify.hlsl` and `P
 `MapRenderer.Core/`: `Coordinates/WebMercator.TilePixelSize` / `GroundResolution` (the logical-pixel
 definition), `Coordinates/WebMercatorProjection` (the pixel↔ground service),
 `Text/Placement/SymbolStagingMath` / `SymbolBox` / `SymbolViewTransform` (the collision space).
-`MapRenderer.App/`: `MapHost.Start` (the open derivation, § "Open — where the ratio comes from"),
+`MapRenderer.App/`: `MapHost.Start` (the derivation, § 7),
 `Controller` / `TouchController` (the interaction seams).

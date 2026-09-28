@@ -1,7 +1,6 @@
 // Engine-free: compiled by both the Unity EditMode runner and the fast dotnet core-tests project.
-// No UnityEngine references. The Unity layer reads Screen.dpi and passes it in as a plain double.
+// No UnityEngine references. The Unity layer reads Screen.dpi and the platform, and passes them in as plain values.
 
-using System.Diagnostics;
 using Unity.Mathematics;
 
 namespace MapRenderer.Unity.View
@@ -22,6 +21,25 @@ namespace MapRenderer.Unity.View
         Device,
     }
 
+    /// <summary>How a platform turns its reported screen density into a device-pixel ratio.</summary>
+    public enum DensityConvention
+    {
+        /// <summary>No divisor recovers the OS scale from the density, so the ratio is 1.</summary>
+        Desktop,
+
+        /// <summary>The OS scale is 1 or 2: ratio = 2 when the density is at least
+        /// <see cref="DeviceScaling.RetinaMinDpi"/>, else 1.</summary>
+        MacOS,
+
+        /// <summary>The density is the OS density bucket: ratio = density /
+        /// <see cref="DeviceScaling.ReferenceDpi"/>.</summary>
+        Android,
+
+        /// <summary>The density is a physical panel value: ratio = the whole-number scale nearest
+        /// density / <see cref="DeviceScaling.ReferenceDpi"/>, at least 1.</summary>
+        iOS,
+    }
+
     /// <summary>
     /// Device-density ↔ logical-pixel scaling: <see cref="LogicalToDevicePx"/> takes a style's px value out
     /// to its consumer's space, <see cref="DeviceToLogicalPx(double,double)"/> takes a physical measurement
@@ -32,17 +50,26 @@ namespace MapRenderer.Unity.View
     public static class DeviceScaling
     {
         /// <summary>The golden-standard display density (Android <c>mdpi</c> baseline) at which a selection
-        /// tile's on-screen size is defined. <c>dpr = actualDpi / ReferenceDpi</c>, so a 320-dpi panel ⇒
+        /// tile's on-screen size is defined. On Android <c>dpr = density / ReferenceDpi</c>, so 320 dpi ⇒
         /// <c>dpr = 2</c>.</summary>
         public const double ReferenceDpi = 160.0;
 
-        /// <summary>The device-pixel ratio for a real display density: <c>screenDpi / ReferenceDpi</c>.
-        /// <paramref name="screenDpi"/> must be positive (a measured panel density) — the caller derives this
-        /// only when the platform reports one.</summary>
-        public static double DevicePixelRatioFromDpi(double screenDpi)
+        /// <summary>The density from which a macOS panel counts as Retina. Apple non-Retina panels are at
+        /// most about 110 ppi and Retina panels at least about 218 ppi, so any value between separates them.</summary>
+        public const double RetinaMinDpi = 150.0;
+
+        /// <summary>The device-pixel ratio the platform <paramref name="convention"/> derives from
+        /// <paramref name="screenDpi"/>. A density that is not positive (unreported) gives 1.</summary>
+        public static double DevicePixelRatioFor(DensityConvention convention, double screenDpi)
         {
-            Debug.Assert(screenDpi > 0.0, "screenDpi must be a positive display density.");
-            return screenDpi / ReferenceDpi;
+            if (!(screenDpi > 0.0)) return 1.0;
+            switch (convention)
+            {
+                case DensityConvention.Android: return screenDpi / ReferenceDpi;
+                case DensityConvention.iOS: return math.max(1.0, math.round(screenDpi / ReferenceDpi));
+                case DensityConvention.MacOS: return screenDpi >= RetinaMinDpi ? 2.0 : 1.0;
+                default: return 1.0;
+            }
         }
 
         /// <summary>

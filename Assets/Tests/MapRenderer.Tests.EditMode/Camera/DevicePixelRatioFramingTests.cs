@@ -104,7 +104,7 @@ namespace MapRenderer.Tests.Cameras
         /// </summary>
         /// <remarks>
         /// Non-obvious why: the operator must be ADJACENT to the name: a span-to-semicolon form matches the unrelated
-        /// <c>Debug.Assert(screenDpi &gt; 0.0)</c> under <c>DevicePixelRatioFromDpi</c> and passes with the
+        /// <c>!(screenDpi &gt; 0.0)</c> guard in <c>DevicePixelRatioFor</c> and passes with the
         /// guard deleted. <c>IgnoreCase</c> is absent because the <c>[0-9A-Z]</c> tail would then match the
         /// <c>s</c> of a following <c>&lt;see cref=…</c>.
         /// </remarks>

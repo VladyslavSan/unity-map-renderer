@@ -158,11 +158,10 @@ collided/consumed against the logical viewport (`MapCamera.ViewportLogicalPx`, v
 
 ## 9. Unspecified
 
-- **The derivation of `dpr` from the platform is unspecified** and awaits a maintainer decision
-  (design § "Open — where the ratio comes from"). Unity exposes no backing-scale factor to managed player
-  code, so `Screen.dpi / 160` is correct on Android, an approximation on iOS, and structurally wrong on desktop (the OS scale factor is
-  two-valued; no divisor recovers it). Consequently the reference density (`160`) and the
-  `dpi → ratio` formula are **not** part of this contract; a conforming renderer MAY derive `dpr` by any
+- **The derivation of `dpr` from the platform is unspecified** (design § 7 states the current policy).
+  Unity exposes no backing-scale factor to managed player code, so no `dpi → ratio` formula is correct on
+  every platform. Consequently the reference density (`160`) and the `dpi → ratio` formula are **not**
+  part of this contract; a conforming renderer MAY derive `dpr` by any
   means and this spec governs only what it does with the result.
 
 ---

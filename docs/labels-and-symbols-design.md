@@ -787,10 +787,10 @@ The sheet binds **`FilterMode.Bilinear`**, and `SpriteSheet` **repacks it at dec
 gets a one-texel transparent border**. The two are one decision and neither is correct alone.
 
 **Why not nearest-neighbour.** An icon's magnification is `icon-size × dpr / pixelRatio`. The sheet is
-fetched @1x and `dpr` is `Screen.dpi / 160`, so the product is essentially never an integer — and
-nearest-neighbour is exact *only* at integer magnification. Off it, each source texel covers `N` or `N+1`
-device pixels and **which** depends on the quad's sub-pixel phase, so panning re-quantises an icon's
-interior every frame: the pixels inside the icon warp while zooming or panning.
+fetched @1x. The product is in general not an integer: Android's `dpr` and a style-driven `icon-size` are
+fractional. And nearest-neighbour is exact *only* at integer magnification. Off it, each source texel covers `N` or
+`N+1` device pixels and **which** depends on the quad's sub-pixel phase, so panning re-quantises an icon's interior
+every frame: the pixels inside the icon warp while zooming or panning.
 
 It is resampling, not geometry, because of one structural fact: `BillboardMath.BuildWorldQuad` gives all
 four corners the **same bitwise `anchorLocal`** plus static per-corner `OffsetPx`, so a quad is **rigid** in

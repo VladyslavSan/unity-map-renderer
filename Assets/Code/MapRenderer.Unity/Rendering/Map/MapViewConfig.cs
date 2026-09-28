@@ -4,6 +4,16 @@ using MapRenderer.Unity.View;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
+    /// <summary>Who owns <see cref="MapViewConfig.DevicePixelRatio"/> at startup.</summary>
+    public enum DevicePixelRatioMode
+    {
+        /// <summary>The host derives the ratio from the platform policy.</summary>
+        Auto,
+
+        /// <summary>The host keeps the serialized ratio.</summary>
+        Manual,
+    }
+
     /// <summary>
     /// The Inspector-tunable knobs for a <see cref="MapView"/>. A plain <c>[Serializable]</c> bundle so the
     /// config can be <c>[SerializeField]</c>'d on <see cref="MapViewComponent"/> (only a MonoBehaviour can
@@ -19,15 +29,15 @@ namespace MapRenderer.Unity.Rendering.Map
         public TileSelectionSettings TileSelection = new TileSelectionSettings();
 
         [Header("Display Scaling")]
+        [Tooltip("Auto: the host sets the ratio at startup from the platform policy. " +
+                 "Manual: the host keeps the value below (e.g. to force a value on a non-Apple HiDPI monitor).")]
+        public DevicePixelRatioMode DevicePixelRatioMode = DevicePixelRatioMode.Auto;
+
         [Tooltip("Device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
                  "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +
-                 "same PHYSICAL size across panel densities. the host overwrites this at startup with " +
-                 "Screen.dpi / DeviceScaling.ReferenceDpi (160, Android mdpi) — including in Play mode, " +
-                 "where Screen.dpi has been OBSERVED to report the density of whichever monitor the Editor " +
-                 "window is on rather than the target device's (its Editor behaviour is undocumented, so " +
-                 "that is an observation, not a contract). Whether that derivation is the right one is " +
-                 "an open question (docs/device-pixel-ratio-design.md). This serialized value is " +
-                 "the deterministic one used in tests/headless (which drive Wire, not Start). A value " +
+                 "same PHYSICAL size across panel densities. In Auto mode the host overwrites this at startup " +
+                 "from the platform policy (docs/device-pixel-ratio-design.md). In Manual mode, and in " +
+                 "tests/headless (which drive Wire, not Start), this value is used as set. A value " +
                  "outside the plausible band (roughly a quarter to eight) degrades to 1 at the conversion. " +
                  "Default 1.")]
         public double DevicePixelRatio = 1.0;
