@@ -9,7 +9,9 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Checks, in flat tile space, that a triangulation reproduces its source polygon-with-holes: ForceClips,
     /// WindingFlips, AreaRelError, and a rasterised coverage diff (a folded sliver has ~zero area but is
-    /// visible). See docs/mesh-triangulation-robustness-design.md § "Validation instruments".
+    /// visible). Blind below one raster cell (extent / rasterN): a sliver or gap narrower than that can pass.
+    /// <c>Passes()</c> also tolerates <c>mismatchEps</c> percent of cells.
+    /// See docs/mesh-triangulation-robustness-design.md § "Validation instruments".
     /// </summary>
     public static class MeshCoverageValidator
     {
@@ -28,10 +30,12 @@ namespace MapRenderer.Tests
             public readonly int ExtraCells;
             public readonly double MismatchPct;
             public readonly string AsciiMap;
+            public readonly int RasterN;
+            public readonly double RasterCellSize;
 
             public Report(int polygons, int triangles, int forceClips, int windingFlips,
                           double areaExpected, double areaActual,
-                          int polyCells, int missingCells, int extraCells, string asciiMap)
+                          int polyCells, int missingCells, int extraCells, string asciiMap, int rasterN, int extent)
             {
                 Polygons = polygons; Triangles = triangles; ForceClips = forceClips; WindingFlips = windingFlips;
                 AreaExpected = areaExpected; AreaActual = areaActual;
@@ -39,6 +43,7 @@ namespace MapRenderer.Tests
                 PolyCells = polyCells; MissingCells = missingCells; ExtraCells = extraCells;
                 MismatchPct = polyCells > 0 ? 100.0 * (missingCells + extraCells) / polyCells : 0.0;
                 AsciiMap = asciiMap;
+                RasterN = rasterN; RasterCellSize = (double)extent / rasterN;
             }
 
             /// <summary>The triangulation faithfully reproduces the source polygons.</summary>
@@ -48,7 +53,8 @@ namespace MapRenderer.Tests
             public string Summary =>
                 $"polys={Polygons} tris={Triangles} forceClips={ForceClips} windingFlips={WindingFlips} " +
                 $"areaRel={AreaRelError:P2} coverageMismatch={MismatchPct:F2}% " +
-                $"(missing={MissingCells} extra={ExtraCells} of {PolyCells})";
+                $"(missing={MissingCells} extra={ExtraCells} of {PolyCells}) " +
+                $"blindBelow={RasterCellSize:G3} units (rasterN={RasterN})";
         }
 
         /// <summary>
@@ -91,7 +97,7 @@ namespace MapRenderer.Tests
 
             var (missing, extra, polyCells, ascii) = CoverageDiff(rings, tris, extent, rasterN);
             return new Report(groundTruthPolys.Count, tris.Count, forceClips, windingFlips,
-                               expected, actual, polyCells, missing, extra, ascii);
+                               expected, actual, polyCells, missing, extra, ascii, rasterN, extent);
         }
 
         // Ground truth: even-odd fill over ALL rings (outer+holes) — nesting-agnostic, so it is the true
