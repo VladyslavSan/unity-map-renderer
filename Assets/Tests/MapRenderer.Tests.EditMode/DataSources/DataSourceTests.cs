@@ -379,12 +379,12 @@ namespace MapRenderer.Tests.DataSources
                 yield return null; // let the request actually get sent before cancelling
                 cts.Cancel();
 
-                int frames = 0;
-                while (!task.Status.IsCompleted() && frames++ < 300) yield return null;
+                for (var settle = SettleTimeout.Start();
+                     !task.Status.IsCompleted() && settle.Running; ) yield return null;
             }
             finally { try { listener.Stop(); } catch { } try { listener.Close(); } catch { } }
 
-            Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the frame bound.");
+            Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the settle timeout.");
 
             Exception caught = null;
             try { task.GetAwaiter().GetResult(); }
@@ -679,12 +679,12 @@ namespace MapRenderer.Tests.DataSources
                 yield return null; // let the request actually get sent before cancelling
                 cts.Cancel();
 
-                int frames = 0;
-                while (!task.Status.IsCompleted() && frames++ < 300) yield return null;
+                for (var settle = SettleTimeout.Start();
+                     !task.Status.IsCompleted() && settle.Running; ) yield return null;
             }
             finally { try { hl.Stop(); } catch { } try { hl.Close(); } catch { } }
 
-            Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the frame bound.");
+            Assert.IsTrue(task.Status.IsCompleted(), "the fetch must complete (with cancellation) within the settle timeout.");
 
             Exception caught = null;
             try { task.GetAwaiter().GetResult(); }

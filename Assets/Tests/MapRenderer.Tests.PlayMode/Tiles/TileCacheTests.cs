@@ -58,9 +58,9 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2000)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
@@ -359,9 +359,9 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         /// <summary>Pumps the MapView across real frames until its cover has settled, yielding a frame each
         /// iteration so the ThreadPool mesh build lands (never Thread.Sleep — a blocked thread does not
         /// advance the player loop). Callers are <c>[UnityTest]</c> coroutines: <c>yield return</c> this.</summary>
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 3000)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;

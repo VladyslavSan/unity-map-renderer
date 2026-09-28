@@ -126,7 +126,7 @@ namespace MapRenderer.Tests.Tiles
 
                 // "main" parks at write-complete-unconsumed; each build step takes its own tick, so pump until
                 // ConsumeBacklog sees it. "stuck" admits on the first tick and its fetch never resolves.
-                for (int f = 0; f < 20 && view.CaptureTelemetry().ConsumeBacklog < 1; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().ConsumeBacklog < 1; )
                     view.LateUpdate();
 
                 Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, 1,
@@ -1296,9 +1296,9 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>Pumps the MapView across editor frames until its cover has settled, yielding a frame
         /// each iteration (never Thread.Sleep — a blocked thread does not advance the player loop and races
         /// the async decode/mesh-build). Callers are <c>[UnityTest]</c> coroutines: <c>yield return</c> this.</summary>
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
@@ -1386,7 +1386,7 @@ namespace MapRenderer.Tests.Tiles
 
                 int kickTick = -1;
                 int tick = 0;
-                for (; tick < 10000 && kickTick < 0; tick++)
+                for (var settle = SettleTimeout.Start(); settle.Running && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
                     if (view.TileBuildsStartedLastTick() > 0) kickTick = tick;
@@ -1412,7 +1412,7 @@ namespace MapRenderer.Tests.Tiles
                 int allocTick = -1;
                 int consumeTick = -1;
                 int settleTick = -1;
-                for (; tick < 10000 && settleTick < 0; tick++)
+                for (var settle = SettleTimeout.Start(); settle.Running && settleTick < 0; tick++)
                 {
                     view.LateUpdate();
                     if (allocTick   < 0 && view.MeshDataArraysAllocatedLastKick() > 0) allocTick   = tick;
@@ -1499,7 +1499,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(null, Cam(0, 0, 2), StyleParser.Parse(BackgroundOnlyStyle()));
 
                 int kicked = 0;
-                for (int f = 0; f < 2000 && kicked == 0; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && kicked == 0; )
                 {
                     view.LateUpdate();
                     kicked += view.TileBuildsStartedLastTick();
@@ -1536,8 +1536,7 @@ namespace MapRenderer.Tests.Tiles
 
                 // Release the gate and pump until the pen drains.
                 gate[0] = 1;
-                int guard = 0;
-                while (TileBuildGraph.DebugLiveCount > baselineGraphs && guard++ < 2000)
+                for (var settle = SettleTimeout.Start(); settle.Running && TileBuildGraph.DebugLiveCount > baselineGraphs; )
                 {
                     view.LateUpdate();
                     yield return null;
@@ -1597,7 +1596,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(null, Cam(0, 0, 0), StyleParser.Parse(BackgroundOnlyStyle()));
 
                 int kicked = 0;
-                for (int f = 0; f < 2000 && kicked == 0; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && kicked == 0; )
                 {
                     view.LateUpdate();
                     kicked += view.TileBuildsStartedLastTick();
@@ -1690,7 +1689,7 @@ namespace MapRenderer.Tests.Tiles
                 // and kicked before relying on it.
                 int kickTick = -1;
                 int tick = 0;
-                for (; tick < 2000 && kickTick < 0; tick++)
+                for (var settle = SettleTimeout.Start(); settle.Running && kickTick < 0; tick++)
                 {
                     view.LateUpdate();
                     if (view.TileBuildsStartedLastTick() > 0) kickTick = tick;
@@ -1704,7 +1703,7 @@ namespace MapRenderer.Tests.Tiles
                 // BOTH background layers must be dense and allocate a write array on the SAME tick, or there
                 // is one payload and the partial-consume path is unreachable.
                 long allocated = 0;
-                for (; tick < 2000 && allocated == 0; tick++)
+                for (var settle = SettleTimeout.Start(); settle.Running && allocated == 0; tick++)
                 {
                     view.LateUpdate();
                     allocated += view.MeshDataArraysAllocatedLastKick();
@@ -1715,8 +1714,7 @@ namespace MapRenderer.Tests.Tiles
                     "allocate a write array together — the partial-consume path is unreachable otherwise.");
 
                 // Now drive to settle across the partial-consume ticks the budget forces.
-                int guard = 0;
-                while (!view.AllTilesSettled() && guard++ < 200)
+                for (var settle = SettleTimeout.Start(); settle.Running && !view.AllTilesSettled(); )
                 {
                     view.LateUpdate();
                     yield return null;
@@ -1785,8 +1783,7 @@ namespace MapRenderer.Tests.Tiles
                     "at most MaxMeshBuildsPerTick source-less tiles may be started on the cover-recompute " +
                     "tick, same as any other tick — the cap binds even on tick 1.");
 
-                int guard = 0;
-                while (!view.AllTilesSettled() && guard++ < 10000)
+                for (var settle = SettleTimeout.Start(); settle.Running && !view.AllTilesSettled(); )
                 {
                     view.LateUpdate();
                     Assert.LessOrEqual(view.TileBuildsStartedLastTick(), 1,

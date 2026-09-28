@@ -235,9 +235,9 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         /// <summary>Pumps across real frames until the cover settles, yielding a frame each iteration so the
         /// off-main decode lands and the next LateUpdate's PumpPending fires the symbol kick.</summary>
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;

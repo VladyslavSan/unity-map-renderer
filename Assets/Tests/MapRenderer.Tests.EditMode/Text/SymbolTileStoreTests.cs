@@ -167,7 +167,7 @@ namespace MapRenderer.Tests.Text
         //    TileSymbolKickTests. This subsystem owns no build-start queue to bound.
 
         // ── The atlas-upload, off-main-extract, cancellation and departing-flag teeth live in the PlayMode
-        //    SymbolSubsystemPumpTests: each waits on off-main work, and an EditMode yield is instantaneous.
+        //    SymbolSubsystemPumpTests: each pins behaviour that needs the player loop's real frames.
 
         // ── Stale-drop before build start cannot occur here: TileManager's _releaseQueued check stops the kick
         //    for a departed tile ahead of TryBeginBuild. TileSymbolKickTests pins that no TryBeginBuild runs.
@@ -216,7 +216,7 @@ namespace MapRenderer.Tests.Text
             // for 2 frames): a dirty frame legitimately allocates when it captures and kicks a worker.
             SymbolGatherPlan plan = null;
             bool quiesced = false; int stable = 0; int lastRecompute = -1;
-            for (int f = 0; f < 400; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -255,7 +255,7 @@ namespace MapRenderer.Tests.Text
             DriveTileBytesReady(tile);
             SymbolGatherPlan plan = null;
             bool quiesced = false; int stable = 0; int lastRecompute = -1;
-            for (int f = 0; f < 400; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();

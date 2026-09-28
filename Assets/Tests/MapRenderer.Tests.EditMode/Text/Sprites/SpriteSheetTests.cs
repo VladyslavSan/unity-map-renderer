@@ -90,7 +90,7 @@ namespace MapRenderer.Tests.Text.Sprites
 
                 // The fixture source completes synchronously, but the decode hops to the main thread — pump a
                 // few frames so the sheet actually lands rather than asserting on the in-flight state.
-                for (int i = 0; i < 8 && subsystem.SpriteAtlas == null; i++) yield return null;
+                for (var settle = SettleTimeout.Start(); settle.Running && subsystem.SpriteAtlas == null; ) yield return null;
 
                 Assert.IsNotNull(subsystem.SpriteAtlas,
                     "the fetched sheet must reach SpriteAtlas — that is what RenderLayerSet.SetSprites pushes " +
@@ -175,7 +175,7 @@ namespace MapRenderer.Tests.Text.Sprites
             var style = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
             subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
 
-            for (int i = 0; i < 8 && subsystem.SpriteAtlas == null; i++) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && subsystem.SpriteAtlas == null; ) yield return null;
 
             Assert.IsNotNull(subsystem.SpriteAtlas,
                 "the surviving sheet must still reach SpriteAtlas even though the other sheet was missing");
@@ -202,7 +202,7 @@ namespace MapRenderer.Tests.Text.Sprites
             var style = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
             subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
 
-            for (int i = 0; i < 8 && subsystem.SpriteAtlas == null; i++) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && subsystem.SpriteAtlas == null; ) yield return null;
 
             Assert.IsNotNull(subsystem.SpriteAtlas,
                 "the surviving sheet must still reach SpriteAtlas even though the other sheet's fetch threw");

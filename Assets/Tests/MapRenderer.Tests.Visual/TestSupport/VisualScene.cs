@@ -37,12 +37,6 @@ namespace MapRenderer.Tests
         /// is already renderable.</summary>
         private const int WarmupFrames = 10;
 
-        /// <summary>Bounded ceiling for <see cref="SpinUntilSymbolsReady"/>: the symbol kick crosses a thread
-        /// pool, so a fixed pump count is a flake generator — this bounds the spin instead of guessing a
-        /// frame count. 300 is <c>SymbolProcessorParityTests.DriveProductionBuild</c>'s own ceiling of 200
-        /// plus margin for the extra MapView-level plumbing this composer drives through.</summary>
-        private const int SymbolReadinessCeiling = 300;
-
         private readonly List<VisualSource> _sources = new List<VisualSource>();
         private readonly List<VisualLayer>  _layers  = new List<VisualLayer>();
 
@@ -329,8 +323,8 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Pumps <c>LateUpdate</c> until the MapView-owned <c>SymbolPlacementSystem</c> has both
-        /// STAGED and SURVIVED <see cref="_expectedSymbolQuads"/> quads, or throws at
-        /// <see cref="SymbolReadinessCeiling"/> (always-bound-loops). It checks <c>LastSurvivorCount</c> too:
+        /// STAGED and SURVIVED <see cref="_expectedSymbolQuads"/> quads, or throws when
+        /// <see cref="SettleTimeout"/> elapses (always-bound-loops). It checks <c>LastSurvivorCount</c> too:
         /// the collision verdict arrives one tick late, so a quad count alone can meet a stale survivor
         /// count.</summary>
         private void SpinUntilSymbolsReady()
@@ -342,14 +336,14 @@ namespace MapRenderer.Tests
 
             int expected = _expectedSymbolQuads.Value;
             var placement = _mapView.View.SymbolPlacementSystem;
-            for (int f = 0; f < SymbolReadinessCeiling; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _mapView.LateUpdate();
                 if (placement.LastQuadCount >= expected && placement.LastSurvivorCount >= expected) return;
             }
 
             throw new InvalidOperationException(
-                $"VisualScene symbol readiness spin exhausted its {SymbolReadinessCeiling}-frame ceiling " +
+                $"VisualScene symbol readiness spin exhausted the settle timeout " +
                 $"without reaching {expected} placed+surviving quads — observed " +
                 $"LastQuadCount={placement.LastQuadCount}, LastSurvivorCount={placement.LastSurvivorCount}, " +
                 $"LastInputSymbolCount={placement.LastInputSymbolCount}. This is a genuine pipeline finding " +

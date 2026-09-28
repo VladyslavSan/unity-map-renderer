@@ -51,6 +51,9 @@ namespace MapRenderer.Tests.PlayMode.Text
         /// </summary>
         private const int ProfilerSampleCapacity = 64;
 
+        /// <summary>Frames pumped after a commit to assert that nothing further happens; a count the test asserts.</summary>
+        private const int SettledTailFrames = 30;
+
         private const string FontName = "LatinFont";
         private const string SourceId = "s";
 
@@ -160,7 +163,14 @@ namespace MapRenderer.Tests.PlayMode.Text
             // uploads across the whole build must be exactly 1 (the old per-tile path uploaded per commit).
             DriveTileBytesReady(a);
             int uploadsA = 0;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running && SymbolCount() == 0; )
+            {
+                _subsystem.ReconcileLoadedTiles(loadedA);
+                _subsystem.PumpBuilds();
+                uploadsA += _subsystem.AtlasUploadsLastPump;
+                yield return null;
+            }
+            for (int f = 0; f < SettledTailFrames; f++) // a fixed window on purpose: no further upload may follow
             {
                 _subsystem.ReconcileLoadedTiles(loadedA);
                 _subsystem.PumpBuilds();
@@ -173,7 +183,15 @@ namespace MapRenderer.Tests.PlayMode.Text
             // Build B (same bytes → same glyphs, already cached) — ZERO new atlas uploads.
             DriveTileBytesReady(b);
             int uploadsB = 0;
-            for (int f = 0; f < 200; f++)
+            int symbolsAfterA = SymbolCount();
+            for (var settle = SettleTimeout.Start(); settle.Running && SymbolCount() <= symbolsAfterA; )
+            {
+                _subsystem.ReconcileLoadedTiles(loadedAB);
+                _subsystem.PumpBuilds();
+                uploadsB += _subsystem.AtlasUploadsLastPump;
+                yield return null;
+            }
+            for (int f = 0; f < SettledTailFrames; f++) // a fixed window on purpose: no upload may follow B's commit
             {
                 _subsystem.ReconcileLoadedTiles(loadedAB);
                 _subsystem.PumpBuilds();
@@ -201,7 +219,7 @@ namespace MapRenderer.Tests.PlayMode.Text
                 ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame);
 
             DriveTileBytesReady(tile);
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -240,7 +258,11 @@ namespace MapRenderer.Tests.PlayMode.Text
 
             // Pump frames until the build parks on the gated glyph fetch — the tail's prepare step
             // (EnsureGlyphRangesAsync), which runs BEFORE the shape loop.
-            for (int f = 0; f < 60; f++) { _subsystem.PumpBuilds(); yield return null; }
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.TailsStartedLastPump == 0; )
+            {
+                _subsystem.PumpBuilds();
+                yield return null;
+            }
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet (parked on the gated glyph fetch).");
 
             // Restyle mid-build: cancels the in-flight build's token, clears the store, disposes the pipeline.
@@ -250,7 +272,11 @@ namespace MapRenderer.Tests.PlayMode.Text
             // unwinds the build BEFORE it touches the (now disposed) glyph manager / atlas / store.
             gate.TrySetCanceled();
 
-            for (int f = 0; f < 60; f++) { if (_subsystem.CancelledBuildCount == 1) break; _subsystem.PumpBuilds(); yield return null; }
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.CancelledBuildCount != 1; )
+            {
+                _subsystem.PumpBuilds();
+                yield return null;
+            }
             Assert.AreEqual(1, _subsystem.CancelledBuildCount, "cancelled build counted, not faulted.");
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "no stale labels committed after restyle.");
         }
@@ -267,7 +293,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             // Build the tile active — pump frames until its (async) build commits symbol records into the plan.
             DriveTileBytesReady(tile);
             SymbolGatherPlan active = null;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -288,7 +314,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             // buffer shows every record departing; a broken pickup/swap never flips it and times out.
             SymbolGatherPlan departing = null;
             bool flipped = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
@@ -312,7 +338,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             DriveTileBytesReady(tile);
             SymbolGatherPlan active = null;
             bool quiesced = false;
-            for (int f = 0; f < 300; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -330,7 +356,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
             SymbolGatherPlan departing = null;
             bool flipped = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
@@ -484,7 +510,7 @@ namespace MapRenderer.Tests.PlayMode.Text
 
             // Yield frames WITHOUT pumping — both worker phases land in the handoff queue via the player
             // loop, never via PumpBuilds.
-            for (int f = 0; f < 200 && _subsystem.ReadyTailCount() < 2; f++) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.ReadyTailCount() < 2; ) yield return null;
             Assert.AreEqual(2, _subsystem.ReadyTailCount(), "both worker phases landed in the pool→main handoff");
             Assert.AreEqual(0, _subsystem.TailsStartedLastPump, "no PumpBuilds call has run yet");
 
@@ -513,7 +539,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             _subsystem.PumpBuilds(); // starts the worker phase; nothing is ready to tail in this same call
 
             // Yield until the worker phase lands its hop — ready, but NOT started (no further PumpBuilds calls).
-            for (int f = 0; f < 200 && _subsystem.ReadyTailCount() < 1; f++) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.ReadyTailCount() < 1; ) yield return null;
             Assert.AreEqual(1, _subsystem.ReadyTailCount(), "sanity: worker phase landed, tail is ready but not started");
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet");
 
@@ -548,7 +574,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             // Pump frames until a tail has actually STARTED (its worker phase landed on an earlier pump, and
             // a later pump drained it into RunTailAsync, which is now parked on the gated glyph fetch).
             bool tailStarted = false;
-            for (int f = 0; f < 60 && !tailStarted; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running && !tailStarted; )
             {
                 _subsystem.PumpBuilds();
                 if (_subsystem.TailsStartedLastPump > 0) tailStarted = true;
@@ -564,7 +590,11 @@ namespace MapRenderer.Tests.PlayMode.Text
             // unwinds the tail BEFORE it reaches the ct check / commit (or touches the now-disposed pipeline).
             gate.TrySetCanceled();
 
-            for (int f = 0; f < 60 && _subsystem.CancelledBuildCount == 0; f++) { _subsystem.PumpBuilds(); yield return null; }
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.CancelledBuildCount == 0; )
+            {
+                _subsystem.PumpBuilds();
+                yield return null;
+            }
             Assert.AreEqual(1, _subsystem.CancelledBuildCount, "the tail's cancellation counted, not faulted");
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "partial labels never committed for the cancelled tail");
         }

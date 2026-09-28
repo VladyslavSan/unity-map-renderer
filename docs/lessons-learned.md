@@ -906,14 +906,18 @@ other, and the rule for guards applies: assert it was satisfiable.
   random. Clamp with `math.min(Count, Capacity)` against the recorder's actual capacity, not a duplicated
   literal.
 
-- **Off-main work that completes on wall-clock time (a `ThreadPool` mesh/symbol build) cannot be settled by
-  a bare `yield return null` in EditMode — the yield is instantaneous there, so the ThreadPool never gets
-  real wall-clock and the wait starves.** Two settle strategies actually work: an inline synchronous drain
-  helper that blocks on the in-flight work and consumes it (deterministic, but it consumes — it can't test
-  an unconsumed backlog, and if it's silent for one kind of work by construction it can't exercise that
-  path either); or move the test to PlayMode and `yield return null` across real frames, which gives the
-  ThreadPool genuine wall-clock. `Thread.Sleep` as an EditMode settle-poll is banned outside the couple of
-  cases structurally forced into it — it is slow and still flaky.
+- **Off-main work (a `ThreadPool` mesh/symbol build) finishes in wall-clock time, and an EditMode
+  `yield return null` is not tied to wall-clock time — so a settle loop bounded by a frame count fails
+  intermittently.** Pool threads run while the test yields; what runs out is the frame budget. A frame takes
+  well under a millisecond in EditMode, so 200 frames can end before a decode a loaded machine delays.
+  - Exit the loop on the completion signal (`PendingSpriteCount() != 0`, a commit, a counter) and bound it by
+    `SettleTimeout` (wall clock), never by a frame count: `for (var settle = SettleTimeout.Start();
+    settle.Running && !done; ) { …; yield return null; }`.
+  - A frame count stays only where the test asserts it ("still gated after N frames", "no upload in the next
+    N frames").
+  - Alternatives: a synchronous drain that blocks on the in-flight work and consumes it (deterministic, but
+    it consumes, so it cannot test an unconsumed backlog), or PlayMode when the test needs a player loop.
+  - `Thread.Sleep` as a settle-poll is banned outside the couple of cases structurally forced into it.
 
 - **A test that releases a parked worker without awaiting it can leave that worker running past the test's
   own return — mutating a process-wide counter during the NEXT test and producing a failure in an

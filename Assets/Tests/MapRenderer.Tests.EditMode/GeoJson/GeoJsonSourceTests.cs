@@ -922,8 +922,8 @@ namespace MapRenderer.Tests.GeoJsons
 
             UniTask<SharedDisposable<IDecodedTile>> task = source.GetTile(WorldTile);
             SharedDisposable<IDecodedTile> handle = null;
-            for (int f = 0; f < 200 && !task.Status.IsCompleted(); f++) yield return null;
-            Assert.IsTrue(task.Status.IsCompleted(), "the slice must complete within the pumped window");
+            for (var settle = SettleTimeout.Start(); settle.Running && !task.Status.IsCompleted(); ) yield return null;
+            Assert.IsTrue(task.Status.IsCompleted(), "the slice must complete within the settle timeout");
             handle = task.GetAwaiter().GetResult();
 
             Assert.IsNotNull(handle, "precondition: the world tile is inside the dataset's bbox, so it slices");
@@ -970,8 +970,8 @@ namespace MapRenderer.Tests.GeoJsons
 
             UniTask<SharedDisposable<IDecodedTile>> task = source.GetTile(WorldTile);
             SharedDisposable<IDecodedTile> handle = null;
-            for (int f = 0; f < 200 && !task.Status.IsCompleted(); f++) yield return null;
-            Assert.IsTrue(task.Status.IsCompleted(), "the slice must complete within the pumped window");
+            for (var settle = SettleTimeout.Start(); settle.Running && !task.Status.IsCompleted(); ) yield return null;
+            Assert.IsTrue(task.Status.IsCompleted(), "the slice must complete within the settle timeout");
             handle = task.GetAwaiter().GetResult();
 
             Assert.IsNotNull(handle, "precondition: the world tile is inside the dataset's bbox, so it slices");

@@ -364,7 +364,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   governs test PLACEMENT. In summary, first match wins:
   1. Asserts a shape — source text, the file tree, or reflection that IS the assertion — → `Structure/`.
   2. Renders/reads pixels back, or needs a GPU → `Visual/`.
-  3. Needs real frames to settle → PlayMode, under its topic's folder.
+  3. Needs a player loop or real frames, not merely a wait for pool work → PlayMode, under its topic's folder.
   4. Every named type is `Core`/`MapRenderer.Unity.Style`/BCL/NUnit/`Unity.Mathematics` → EditMode under its
      topic's folder, **and** add the `<Compile Include>` to `Tools/core-tests/core-tests.csproj` in the
      same commit.

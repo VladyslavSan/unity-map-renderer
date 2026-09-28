@@ -1627,14 +1627,14 @@ namespace MapRenderer.Tests.Text
 
             var loaded = new List<LoadedTileKey> { Key(Tile) };
             DriveTileBytesReady(Tile);
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 if (_subsystem.Store().DebugBlockFor(ProductionKey) != null) yield break;
                 yield return null;
             }
-            Assert.Fail("production build did not commit labels within 200 pumped frames");
+            Assert.Fail("production build did not commit labels within the settle timeout");
         }
 
         /// <summary>Builds the ORACLE symbol set: the single pass (<see cref="StyledSymbolTileBuilder.BuildAsync"/>)
@@ -1700,7 +1700,7 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(Tile) };
             DriveTileBytesReady(Tile);
             int symbolCount = 0;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -1843,7 +1843,7 @@ namespace MapRenderer.Tests.Text
         private IEnumerator PumpToQuiescence(List<LoadedTileKey> loaded)
         {
             int stable = 0; int lastRecompute = -1;
-            for (int f = 0; f < 400; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -1854,7 +1854,7 @@ namespace MapRenderer.Tests.Text
                 lastRecompute = _subsystem.CollectRecomputeCount;
                 yield return null;
             }
-            Assert.Fail("did not reach reconcile quiescence within the frame ceiling");
+            Assert.Fail("did not reach reconcile quiescence within the settle timeout");
         }
 
         // ═══ The cross-tile dedup runs OFF the main thread ═══
@@ -1926,7 +1926,7 @@ namespace MapRenderer.Tests.Text
             // A discard-on-mismatch pickup would never show departing here.
             gate.Set();
             bool staleApplied = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded, nowSeconds: 101.0); // store stays A-active
                 _subsystem.PumpBuilds();
@@ -1941,7 +1941,7 @@ namespace MapRenderer.Tests.Text
 
             // The newer (A-active) state eventually appears as the reschedule catches the display up.
             bool caughtUp = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded, nowSeconds: 101.0);
                 _subsystem.PumpBuilds();
@@ -1985,7 +1985,7 @@ namespace MapRenderer.Tests.Text
             _subsystem.Reconciler().FaultNextRun = true;
             var empty = new List<LoadedTileKey>();
             bool faultPicked = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
@@ -2004,7 +2004,7 @@ namespace MapRenderer.Tests.Text
             // A NEW event (advance the clock past the departing grace → purge → gen bump) reschedules; the fault is
             // spent, so it succeeds and the front recovers (A purged from the set → empty).
             bool recovered = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 1000.0);
                 _subsystem.PumpBuilds();
@@ -2034,7 +2034,7 @@ namespace MapRenderer.Tests.Text
             _testGate = gate;
             _subsystem.Reconciler().GateForTest = gate;
             var empty = new List<LoadedTileKey>();
-            for (int f = 0; f < 20 && !_subsystem.ReconcileInFlight(); f++)
+            for (var settle = SettleTimeout.Start(); settle.Running && !_subsystem.ReconcileInFlight(); )
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
@@ -2075,7 +2075,7 @@ namespace MapRenderer.Tests.Text
             _testGate = gate;
             _subsystem.Reconciler().GateForTest = gate;
             var empty = new List<LoadedTileKey>();
-            for (int f = 0; f < 20 && !_subsystem.ReconcileInFlight(); f++)
+            for (var settle = SettleTimeout.Start(); settle.Running && !_subsystem.ReconcileInFlight(); )
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
@@ -2121,7 +2121,7 @@ namespace MapRenderer.Tests.Text
             // so the phase-2 return to one is a REAL free.
             DriveTileBytesReady(tile);
             bool deferred = false;
-            for (int f = 0; f < 300; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -2134,7 +2134,7 @@ namespace MapRenderer.Tests.Text
             // PHASE 2: the successful swap demotes the old front and releases its pins, so the deferred block
             // frees and ONE live block remains, with no restyle or teardown.
             bool freedBackToBaseline = false;
-            for (int f = 0; f < 400; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -2165,7 +2165,7 @@ namespace MapRenderer.Tests.Text
             _subsystem.Reconciler().FaultNextRun = true;
             var empty = new List<LoadedTileKey>();
             bool faultObserved = false;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
@@ -2272,7 +2272,8 @@ namespace MapRenderer.Tests.Text
                 // and rebuilds on the swap frame itself.
                 bool sawInFlight = false;
                 bool swappedThisFrame = false;
-                for (int f = 0; f < 400 && !swappedThisFrame; f++)
+                int pollFrames = 0;
+                for (var settle = SettleTimeout.Start(); settle.Running && !swappedThisFrame; pollFrames++)
                 {
                     _subsystem.ReconcileLoadedTiles(loaded);
                     _subsystem.PumpBuilds();
@@ -2288,7 +2289,7 @@ namespace MapRenderer.Tests.Text
                     }
                     else
                     {
-                        Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, $"frame {f}: still waiting for pickup — the mirror must stay a memo HIT until the swap lands");
+                        Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, $"frame {pollFrames}: still waiting for pickup — the mirror must stay a memo HIT until the swap lands");
                         yield return null;
                     }
                 }
@@ -3368,7 +3369,14 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(Tile0) };
             DriveOnce(Tile0);
 
-            // Gate held: pump many frames — the tile must NOT commit anything (no icon-starved commit).
+            // Wait until the pool decode has parked, so the gated window below is a real one; then pump
+            // frames — the tile must NOT commit anything (no icon-starved commit).
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.PendingSpriteCount() == 0; )
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                yield return null;
+            }
             for (int f = 0; f < 60; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
@@ -3382,7 +3390,7 @@ namespace MapRenderer.Tests.Text
             gate.TrySetResult(new SpriteResponse { Json = _spriteJson, Png = _spritePng, HasData = true });
 
             int committed = 0;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -3415,6 +3423,12 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(Tile0) };
             DriveOnce(Tile0);
 
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.PendingSpriteCount() == 0; )
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                yield return null;
+            }
             for (int f = 0; f < 30; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
@@ -3428,7 +3442,7 @@ namespace MapRenderer.Tests.Text
             gate.TrySetResult(SpriteResponse.Absent());
 
             int committed = 0;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -3463,7 +3477,7 @@ namespace MapRenderer.Tests.Text
 
             // Pump until the entry APPEARS: the kick decodes on the pool before it parks. The clock is frozen,
             // so extra frames cannot cross the deadline or weaken the asserts below.
-            for (int f = 0; f < 300 && _subsystem.PendingSpriteCount() == 0; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running && _subsystem.PendingSpriteCount() == 0; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
@@ -3476,7 +3490,7 @@ namespace MapRenderer.Tests.Text
             _simulatedNow += SymbolSubsystem.SpriteFetchDeadlineSeconds + 1.0;
 
             int committed = 0;
-            for (int f = 0; f < 200; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();

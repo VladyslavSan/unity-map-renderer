@@ -159,18 +159,17 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        /// <summary>Mirrors <c>TileManager.KickMeshBuild</c>: decodes on the pool, owns the lease's first
-        /// reference, reads the tile for the mesh pass, and releases in a <c>finally</c>. So the tile
-        /// survives the park only if the park took its own reference, as in production.
-        /// <paramref name="kickTile"/> receives the tile the mesh pass read, so an assertion can check that
-        /// the parked drain read the SAME instance.</summary>
-        private static void DriveKick(SymbolSubsystem subsystem, TileId tile, byte[] bytes,
+        /// <summary>Mirrors <c>TileManager.KickMeshBuild</c>: decodes on the pool, reads the tile for the mesh
+        /// pass, and releases the lease's first reference in a <c>finally</c>, so the tile survives the park only
+        /// if the park took its own reference. <paramref name="kickTile"/> receives the tile the mesh pass read.
+        /// Returns the kick task, which completes after that final release.</summary>
+        private static UniTask DriveKick(SymbolSubsystem subsystem, TileId tile, byte[] bytes,
             ITileDecoder decoder, IDecodedTile[] kickTile = null, bool[] parked = null)
         {
             ISymbolTileWorkerPass pass = subsystem.TryBeginBuild(SourceId, tile);
             Assert.IsNotNull(pass, "sanity: the style names this source, so the kick must produce a pass");
             if (parked != null) parked[0] = WasParked(pass);
-            UniTask.RunOnThreadPool(() =>
+            return UniTask.RunOnThreadPool(() =>
             {
                 var decode = new SharedDisposable<IDecodedTile>(decoder.Decode(tile, bytes));
                 try
@@ -180,7 +179,7 @@ namespace MapRenderer.Tests.Text
                     pass.RunWorkerAndHandoff(decode);   // parks (acquires + enqueues) or runs, per SpritesSettled
                 }
                 finally { decode.Release(); }
-            }).Forget();
+            }).Preserve();
         }
 
         /// <summary>The pass's OWN park decision, read off the object <c>TryBeginBuild</c> returned, before
@@ -227,9 +226,9 @@ namespace MapRenderer.Tests.Text
         private static SymbolTileBlock Collect(SymbolSubsystem subsystem)
             => subsystem.Store().DebugBlockFor(new SymbolTileStore.Key(SourceId, Tile0));
 
-        private static IEnumerator PumpUntilCommitted(SymbolSubsystem subsystem, List<LoadedTileKey> loaded, int frames)
+        private static IEnumerator PumpUntilCommitted(SymbolSubsystem subsystem, List<LoadedTileKey> loaded)
         {
-            for (int f = 0; f < frames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 subsystem.ReconcileLoadedTiles(loaded);
                 subsystem.PumpBuilds();
@@ -252,7 +251,7 @@ namespace MapRenderer.Tests.Text
             var kickTile = new IDecodedTile[1];
             var parkedDecision = new bool[1];
             _parkedSubsystem = NewSubsystem(_ => gate.Task);
-            DriveKick(_parkedSubsystem, Tile0, _tileBytes, parkedProbe, kickTile, parkedDecision);
+            UniTask kick = DriveKick(_parkedSubsystem, Tile0, _tileBytes, parkedProbe, kickTile, parkedDecision);
 
             // Vacuity guard 0 — read before a frame is pumped, so nothing downstream can undo it. It mirrors
             // the oracle arm's guard below; the count-shaped guards that follow all sample after the fact.
@@ -261,7 +260,9 @@ namespace MapRenderer.Tests.Text
                 "open, so SpritesSettled is false and the settled branch must not have been taken. If this " +
                 "is false the whole differential compares un-parked against un-parked.");
 
-            for (int f = 0; f < 60; f++)
+            // Wait for the kick task itself: the build enqueues (parks) inside it, and its final release comes
+            // after, so only the task's completion means both have happened.
+            for (var settle = SettleTimeout.Start(); settle.Running && !kick.Status.IsCompleted(); )
             {
                 _parkedSubsystem.ReconcileLoadedTiles(loaded);
                 _parkedSubsystem.PumpBuilds();
@@ -281,7 +282,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, parkedProbe.DisposedCount,
                 "the PARKED REFERENCE is what keeps the kick's tile alive across the whole " +
                 "SetStyle->SpritesSettled window. The kick lambda's finally has already released ITS " +
-                "reference by now (60 pumped frames), so a disposed tile here means the count reached zero — " +
+                "reference by now (the kick task has completed), so a disposed tile here means the count reached zero — " +
                 "i.e. the park never acquired, and the drain below will read freed Allocator.Persistent " +
                 "memory. This is the cost the reference count buys back, stated as the assertion that " +
                 "inverted.");
@@ -293,7 +294,7 @@ namespace MapRenderer.Tests.Text
             // Settle the sprites with the real fixture sheet — PumpBuilds now drains the parked entry, over
             // the tile the park's reference kept alive.
             gate.TrySetResult(new SpriteResponse { Json = _spriteJson, Png = _spritePng, HasData = true });
-            yield return PumpUntilCommitted(_parkedSubsystem, loaded, 200);
+            yield return PumpUntilCommitted(_parkedSubsystem, loaded);
 
             SymbolTileBlock parked = Collect(_parkedSubsystem);
             Assert.IsNotNull(parked, "the parked build must commit once the sprite fetch settles");
@@ -331,8 +332,12 @@ namespace MapRenderer.Tests.Text
             var oracleProbe = new LeaseProbeDecoder();
             var oracleDecision = new bool[1];
             _oracleSubsystem = NewSubsystem(_ => settled);
-            for (int f = 0; f < 10; f++) { _oracleSubsystem.PumpBuilds(); yield return null; } // let the fetch land
-            DriveKick(_oracleSubsystem, Tile0, _tileBytes, oracleProbe, null, oracleDecision);
+            for (var settle = SettleTimeout.Start(); settle.Running && _oracleSubsystem.SpriteAtlas == null; ) // let the fetch land
+            {
+                _oracleSubsystem.PumpBuilds();
+                yield return null;
+            }
+            UniTask oracleKick = DriveKick(_oracleSubsystem, Tile0, _tileBytes, oracleProbe, null, oracleDecision);
 
             // THE MIRROR GUARD: only before PumpBuilds runs does "never parked" differ from "parked and drained".
             // After the pump every count reads the same for both. Keep this assertion FIRST and keep it here.
@@ -341,7 +346,9 @@ namespace MapRenderer.Tests.Text
                 "TryBeginBuild must have taken the SETTLED branch and parked NOTHING. A true here means both " +
                 "arms parked and the label differential below compares parked against parked.");
 
-            yield return PumpUntilCommitted(_oracleSubsystem, loaded, 200);
+            yield return PumpUntilCommitted(_oracleSubsystem, loaded);
+            // The commit happens inside the kick; its final release comes after, so wait for the task itself.
+            for (var settle = SettleTimeout.Start(); settle.Running && !oracleKick.Status.IsCompleted(); ) yield return null;
 
             SymbolTileBlock unparked = Collect(_oracleSubsystem);
 
@@ -412,9 +419,11 @@ namespace MapRenderer.Tests.Text
             var gate = new UniTaskCompletionSource<SpriteResponse>();
             var probe = new LeaseProbeDecoder();
             _parkedSubsystem = NewSubsystem(_ => gate.Task);
-            DriveKick(_parkedSubsystem, Tile0, _tileBytes, probe);
+            UniTask kick = DriveKick(_parkedSubsystem, Tile0, _tileBytes, probe);
 
-            for (int f = 0; f < 60; f++)
+            // Wait for the kick task itself: the build enqueues (parks) inside it, and its final release comes
+            // after, so only the task's completion means both have happened.
+            for (var settle = SettleTimeout.Start(); settle.Running && !kick.Status.IsCompleted(); )
             {
                 _parkedSubsystem.ReconcileLoadedTiles(loaded);
                 _parkedSubsystem.PumpBuilds();
@@ -430,7 +439,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, probe.DecodeCount, "ANTI-VACUITY: the kick really decoded a tile");
             Assert.AreEqual(0, probe.DisposedCount,
                 "ANTI-VACUITY: and that tile is still ALIVE — the kick's own reference has long since been " +
-                "released (60 pumped frames), so the parked entry's reference is the only thing holding it. " +
+                "released (the kick task has completed), so the parked entry's reference is the only thing holding it. " +
                 "That is what makes the discard below the ONLY remaining thing that can free it.");
 
             // The restyle: SetStyle drains the parked queue through the discard funnel.
@@ -664,7 +673,7 @@ namespace MapRenderer.Tests.Text
             BuildCts(_parkedSubsystem).Cancel();
 
             gate.TrySetResult(new SpriteResponse { Json = _spriteJson, Png = _spritePng, HasData = true });
-            for (int f = 0; f < 300 && _parkedSubsystem.PendingSpriteCount() > 0; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running && _parkedSubsystem.PendingSpriteCount() > 0; )
             {
                 _parkedSubsystem.PumpBuilds();
                 yield return null;
@@ -707,7 +716,8 @@ namespace MapRenderer.Tests.Text
 
             gate.TrySetResult(new SpriteResponse { Json = _spriteJson, Png = _spritePng, HasData = true });
             Exception faulted = null;
-            for (int f = 0; f < 300 && faulted == null && _parkedSubsystem.PendingSpriteCount() > 0; f++)
+            for (var settle = SettleTimeout.Start();
+                 settle.Running && faulted == null && _parkedSubsystem.PendingSpriteCount() > 0; )
             {
                 try { _parkedSubsystem.PumpBuilds(); }
                 catch (Exception ex) { faulted = ex; }

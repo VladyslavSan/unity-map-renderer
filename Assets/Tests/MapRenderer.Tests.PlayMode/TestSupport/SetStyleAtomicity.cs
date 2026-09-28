@@ -61,21 +61,19 @@ namespace MapRenderer.Tests
 
         /// <summary>Yields frames to completion WITHOUT observing the result — used where the caller expects
         /// (and separately asserts on) a fault/cancel. Callers <c>yield return</c> this.</summary>
-        public static IEnumerator SpinToCompleted(UniTask task, int maxSpins = 20000)
+        public static IEnumerator SpinToCompleted(UniTask task)
         {
             var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && !t.Status.IsCompleted(); ) yield return null;
         }
 
         /// <summary>Yields frames to completion and RE-THROWS on fault/cancel — used where the caller expects
         /// success, so a regression surfaces as the real exception instead of a silently-stale assertion.
         /// Callers <c>yield return</c> this.</summary>
-        public static IEnumerator SpinToSucceeded(UniTask task, int maxSpins = 20000)
+        public static IEnumerator SpinToSucceeded(UniTask task)
         {
             var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && !t.Status.IsCompleted(); ) yield return null;
             t.GetAwaiter().GetResult();
         }
 

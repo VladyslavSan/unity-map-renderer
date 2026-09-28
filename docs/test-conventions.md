@@ -106,8 +106,9 @@ Three lanes. Take the **first** one whose entry condition holds.
     `Expressions/EvalArgBuffersReclamationTests.cs` is engine-free, its `Core` dependency is already in the
     fast lane, and it has no csproj entry — so it runs only in the slow lane, and nothing reports that.
 
-- **PlayMode.** Entry condition: the behaviour needs **real frames** — a player loop, `yield return null`,
-  an async settle, a `ThreadPool` completion that lands between frames.
+- **PlayMode.** Entry condition: the behaviour needs **real frames** — a player loop or `yield return null`
+  across real frames. Waiting for a `ThreadPool` completion is not an entry condition: an EditMode loop
+  exits on the completion signal, bounded by `SettleTimeout` (§ 6).
   - 15 test files. It is the smallest lane and the one that carries what EditMode cannot exercise.
   - A default gate that skips PlayMode leaves it red and unseen. Both runners run; a stage is done against
     the unqualified `./Tools/run-tests.sh`, never against `EditMode` alone.
@@ -261,7 +262,7 @@ Ordered. First match wins. Read down until one fires.
    `Structure/` is flat (no subfolders). Never inside a behavioural fixture.
 2. **Does it render and read pixels back, or need a GPU context?** → `Visual/`
    (`MapRenderer.Tests.Visual`, its own assembly). Not merged with anything outside `Visual/`.
-3. **Does it need real frames to settle?** → `MapRenderer.Tests.PlayMode/<Topic>/`.
+3. **Does it need a player loop or real frames (not merely a wait for pool work)?** → `MapRenderer.Tests.PlayMode/<Topic>/`.
 4. **Is every type it names from `Core`, the BCL, NUnit or `Unity.Mathematics`?** →
    `MapRenderer.Tests.EditMode/<Topic>/`, **and add the `<Compile Include>` to
    `Tools/core-tests/core-tests.csproj` in the same commit.**
@@ -305,6 +306,11 @@ Ordered. First match wins. Read down until one fires.
     and a `ThreadState` rendezvous with no event to park
     on in `Text/SymbolParkedRedecodeTests.cs`. Both carry their reason at the call site. If you need a
     third, write down which thread sleeps and why no event exists.
+
+- **No frame count as the bound of a wait for asynchronous work.** An EditMode frame rate is not tied to
+  wall-clock time, so the loop exits on its completion signal and is bounded by `SettleTimeout`
+  (`for (var settle = SettleTimeout.Start(); settle.Running && !done; )`). A frame count is allowed only
+  where the test asserts it. See `docs/lessons-learned.md` (off-main work and the settle bound).
 
 - **Never re-bake a snapshot or a golden to go green.** A moved snapshot means behaviour changed. Find out
   which, then decide. Re-baking deletes the only record that it moved.

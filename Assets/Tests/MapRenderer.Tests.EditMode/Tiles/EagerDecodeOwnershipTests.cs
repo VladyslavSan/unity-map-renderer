@@ -224,7 +224,8 @@ namespace MapRenderer.Tests.Tiles
                 fake.Serving = false;
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
-                for (int f = 0; f < 600; f++)
+                int f = 0;
+                for (var settle = SettleTimeout.Start(); settle.Running; f++)
                 {
                     view.LateUpdate();
                     if (f > 2 && view.ReleaseQueueDepth() == 0 &&
@@ -329,7 +330,7 @@ namespace MapRenderer.Tests.Tiles
                 // Update until the whole cover exists (the gate holds every fetch, so no decode races these ticks);
                 // a partial cover would request later tiles AFTER the pan and shrink the measured set.
                 int loaded = 0;
-                for (int f = 0; f < 60; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running; )
                 {
                     view.LateUpdate();
                     if (view.LoadedTileCount() == loaded && loaded >= 4) break;
@@ -345,7 +346,8 @@ namespace MapRenderer.Tests.Tiles
                 // more gated tasks onto the pen.
                 fake.Serving = false;
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
-                for (int f = 0; f < 600; f++)
+                int f = 0;
+                for (var settle = SettleTimeout.Start(); settle.Running; f++)
                 {
                     view.LateUpdate();
                     if (f > 2 && view.ReleaseQueueDepth() == 0) break;
@@ -370,7 +372,7 @@ namespace MapRenderer.Tests.Tiles
 
                 // PendingDisposalQueue.DrainCompleted runs once per Update and routes each completed task through the
                 // single abandonment funnel. Driven against the FIXED count, not the moving DecodeCount.
-                for (int f = 0; f < 600 && fake.Probe.DisposedCount < abandoned; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && fake.Probe.DisposedCount < abandoned; )
                 {
                     view.LateUpdate();
                 }

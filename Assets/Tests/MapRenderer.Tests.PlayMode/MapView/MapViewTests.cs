@@ -70,12 +70,12 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             ]
         }");
 
-        /// <summary>Pumps Update() until every loaded tile has settled or a spin budget is hit (real frames,
+        /// <summary>Pumps Update() until every loaded tile has settled or <c>SettleTimeout</c> elapses (real frames,
         /// so the ThreadPool mesh build actually progresses — mirrors
         /// <c>MapViewAsyncMeshBuildTests.PumpUntilSettled</c>).</summary>
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
@@ -579,12 +579,12 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         }");
 
         /// <summary>
-        /// Pumps Update() until every loaded tile has settled or a spin budget is hit. Real frames give the
+        /// Pumps Update() until every loaded tile has settled or <c>SettleTimeout</c> elapses. Real frames give the
         /// ThreadPool mesh build wall-clock to progress (never Thread.Sleep).
         /// </summary>
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
@@ -677,7 +677,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "synchronously in the same Update() call that starts it.");
 
                 // Now let the async task complete and drain naturally.
-                yield return PumpUntilSettled(view, maxFrames: 2500);
+                yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "After draining, all tiles must eventually settle.");
@@ -818,7 +818,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "Original tile (5,16,16) must be evicted after panning.");
 
                 // Let everything settle (new cover tiles build).
-                yield return PumpUntilSettled(view, maxFrames: 2500);
+                yield return PumpUntilSettled(view);
 
                 // After full settle, the evicted original tile must still be absent.
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
@@ -859,9 +859,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             return view;
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
@@ -991,9 +991,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             ]
         }");
 
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
@@ -1062,17 +1062,16 @@ namespace MapRenderer.Tests.PlayMode.MapViews
     {
         // Yield frames until a (Preserved) UniTask completes. The file:// loader and the inline-source spec
         // build complete on the ThreadPool, so real frames give them wall-clock.
-        private static IEnumerator Await(UniTask task, int maxSpins = 10000)
+        private static IEnumerator Await(UniTask task)
         {
             var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && !t.Status.IsCompleted(); ) yield return null;
             t.GetAwaiter().GetResult();
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
@@ -1328,17 +1327,16 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
         /// <summary>Yields frames until the (Preserved) style task completes, then propagates its result —
         /// the loaders complete on the ThreadPool, so a real frame gives them wall-clock. Never Thread.Sleep.</summary>
-        private static IEnumerator SpinToCompleted(UniTask task, int maxSpins = 20000)
+        private static IEnumerator SpinToCompleted(UniTask task)
         {
             var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
+            for (var settle = SettleTimeout.Start(); settle.Running && !t.Status.IsCompleted(); ) yield return null;
             t.GetAwaiter().GetResult();
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;

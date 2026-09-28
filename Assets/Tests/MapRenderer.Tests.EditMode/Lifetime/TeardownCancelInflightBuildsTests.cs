@@ -123,7 +123,7 @@ namespace MapRenderer.Tests.Lifetime
                 // Pump WITHOUT AwaitInFlightMeshBuilds: a gated build never completes, so awaiting it times out.
                 // Fetches do not wait on the gate, so plain LateUpdate ticks reach a kick.
                 int kicked = 0;
-                for (int f = 0; f < 3000 && kicked == 0; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && kicked == 0; )
                 {
                     view.LateUpdate();
                     kicked += view.TileBuildsStartedLastTick();

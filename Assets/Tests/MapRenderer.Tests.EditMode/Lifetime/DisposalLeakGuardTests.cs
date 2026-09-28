@@ -271,7 +271,7 @@ namespace MapRenderer.Tests.Lifetime
 
                 // LateUpdate ONLY: an Await would Complete() the held graph. The prologue still runs and
                 // hands off to ScheduleMeasure, where the delay job's Gate blocks the measure jobs.
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().GraphMeasureInFlight < 1; )
                     view.LateUpdate();
                 DelayGateJobInstrument.WaitForStart(started);
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
@@ -628,7 +628,7 @@ namespace MapRenderer.Tests.Lifetime
 
                 // Pump LateUpdate ONLY — no Await, which would Complete() the held graph and burn the whole
                 // spin bound (NIT 3).
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().GraphMeasureInFlight < 1; )
                     view.LateUpdate();
                 DelayGateJobInstrument.WaitForStart(started);
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,

@@ -67,9 +67,9 @@ namespace MapRenderer.Tests.PlayMode.DataSources
             mv.TileManager.SetSources(specs, view.Config.Backend);
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;

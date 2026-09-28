@@ -1937,7 +1937,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().PrologueInFlight < 1; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().PrologueInFlight < 1; )
                     view.LateUpdate();
                 Assert.GreaterOrEqual(view.CaptureTelemetry().PrologueInFlight, 1,
                     "drive precondition: the tile must be genuinely held in its PROLOGUE step before the pan.");
@@ -1948,7 +1948,7 @@ namespace MapRenderer.Tests.Tiles
                 // cannot exit on, or wait for, a post-pan tile.
                 Volatile.Write(ref panned, true);
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                for (int f = 0; f < 3000 && view.ReleasedMidFlightCount() == 0; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.ReleasedMidFlightCount() == 0; )
                     view.LateUpdate();
 
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
@@ -1971,14 +1971,14 @@ namespace MapRenderer.Tests.Tiles
                 // The poll cannot Await (no record), so a generous bound gives the worker real wall-clock.
                 meshGate.Set();
 
-                for (int f = 0; f < 100_000 && LayerMeshBuildCounters.DebugTotalBuildsCreated <= totalCreatedBefore; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && LayerMeshBuildCounters.DebugTotalBuildsCreated <= totalCreatedBefore; )
                     view.LateUpdate();
                 Assert.Greater(LayerMeshBuildCounters.DebugTotalBuildsCreated, totalCreatedBefore,
                     "the released worker must have built a real ILayerMeshBuild — the non-vacuity witness: " +
                     "this counter can only advance once the gate opens, since the columns it counts do not " +
                     "exist before the worker runs.");
 
-                for (int f = 0; f < 100_000 && LayerMeshBuildCounters.DebugLiveBuilds > requestsBaseline; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && LayerMeshBuildCounters.DebugLiveBuilds > requestsBaseline; )
                     view.LateUpdate();
 
                 Assert.AreEqual(requestsBaseline, LayerMeshBuildCounters.DebugLiveBuilds,
@@ -2050,7 +2050,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().GraphMeasureInFlight < 1; )
                     view.LateUpdate();
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
                     "drive precondition: the tile must be genuinely held in its MEASURE step before the pan.");
@@ -2061,7 +2061,7 @@ namespace MapRenderer.Tests.Tiles
                 // cannot exit on, or wait for, a post-pan tile.
                 Volatile.Write(ref panned, true);
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                for (int f = 0; f < 3000 && view.ReleasedMidFlightCount() == 0; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.ReleasedMidFlightCount() == 0; )
                     view.LateUpdate();
 
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
@@ -2074,7 +2074,7 @@ namespace MapRenderer.Tests.Tiles
                 gate[0] = 1; // release — the pen's Dispose() can now Complete() without blocking
 
                 // Bounded but generous — see the Prologue case's own comment on why this cannot Await.
-                for (int f = 0; f < 100_000 && TileBuildGraph.DebugLiveCount > graphBaseline; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && TileBuildGraph.DebugLiveCount > graphBaseline; )
                     view.LateUpdate();
 
                 Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
@@ -2285,7 +2285,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillStyle(),
                     decodeScheduler: new InlineWorkScheduler());
 
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().GraphMeasureInFlight < 1; )
                     view.LateUpdate();
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
                     "drive precondition: the tile must be genuinely held in its MEASURE step before teardown.");
@@ -2568,7 +2568,7 @@ namespace MapRenderer.Tests.Tiles
 
                 // Gate shut — held tiles pile up in MEASURE instead of racing through it. No Await/Drain
                 // while the gate holds a graph step; a plain bounded LateUpdate()-only pump.
-                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 3; f++)
+                for (var settle = SettleTimeout.Start(); settle.Running && view.CaptureTelemetry().GraphMeasureInFlight < 3; )
                     view.LateUpdate();
                 Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 3,
                     "drive precondition: at least three tiles must be genuinely held in MEASURE before the " +

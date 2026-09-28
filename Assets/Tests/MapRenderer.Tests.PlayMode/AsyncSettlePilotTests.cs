@@ -9,10 +9,9 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Async
 {
     /// <summary>
-    /// Settle-mechanism proof for the PlayMode test assembly. A real tile build runs on the ThreadPool, so
-    /// it completes on wall-clock time, not via the PlayerLoop. Non-obvious why: an EditMode <c>yield return
-    /// null</c> frame is instantaneous and starves that worker, while a PlayMode frame has real duration, so
-    /// the worker finishes and the next <c>LateUpdate</c> consumes it.
+    /// Settle-mechanism proof for the PlayMode test assembly: a real tile build runs on the ThreadPool, and a
+    /// loop that yields real player-loop frames until <c>AllTilesSettled</c> consumes it. It proves the
+    /// player-loop path; the same wait in EditMode also settles when bounded by <c>SettleTimeout</c>.
     /// </summary>
     [TestFixture]
     public class AsyncSettlePilotTests : BaseTestFixture
@@ -51,8 +50,7 @@ namespace MapRenderer.Tests.Async
                 Assert.IsFalse(view.AllTilesSettled(),
                     "the mesh build is dispatched to the ThreadPool — it must be in-flight, not settled synchronously.");
 
-                int f = 0;
-                while (!view.AllTilesSettled() && f++ < 600)
+                for (var settle = SettleTimeout.Start(); settle.Running && !view.AllTilesSettled(); )
                 {
                     view.LateUpdate();   // consume any completed builds
                     yield return null;   // real frame: give the ThreadPool worker wall-clock to finish
