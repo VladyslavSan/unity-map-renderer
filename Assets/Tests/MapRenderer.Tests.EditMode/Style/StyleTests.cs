@@ -1550,20 +1550,6 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(dataDriven.Opacity.DependsOnFeature);
         }
 
-        // ── vertical-gradient ─────────────────────────────────────────────────
-
-        [Test]
-        [TestCase("{}", 1.0f, TestName = "VerticalGradient_MatchesExpected(Absent_UsesSpecDefault_True)")]
-        [TestCase("{\"fill-extrusion-vertical-gradient\":false}", 0.0f, TestName = "VerticalGradient_MatchesExpected(False_EncodesAsZero)")]
-        public void VerticalGradient_MatchesExpected(string paintJson, float expected)
-        {
-            var layer = MakeLayer(paintJson);
-            var fp    = layer.Paint;
-
-            Assert.AreEqual(expected, fp.VerticalGradient.Evaluate(0.0), 1e-6f,
-                $"fill-extrusion-vertical-gradient ({paintJson}) must encode as {expected}.");
-        }
-
         // ── translate-anchor ──────────────────────────────────────────────────
 
         [Test]
@@ -1616,7 +1602,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(-10.0, zoomAtMax.y, 0.01);
 
             // fill-extrusion-translate is a layer-level property; a data-driven value is spec-invalid and
-            // must fall back to the default rather than throw at bind time (mirrors VerticalGradient).
+            // must fall back to the default rather than throw at bind time.
             var dataDriven = MakeLayer("{\"fill-extrusion-translate\":[\"get\",\"offset\"]}").Paint;
             Assert.AreEqual(ExpressionKind.Constant, dataDriven.Translate.Kind,
                 "a data-driven translate must fall back to the Constant default, not classify as Feature.");

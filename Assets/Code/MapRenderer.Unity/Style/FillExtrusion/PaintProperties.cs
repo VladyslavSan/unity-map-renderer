@@ -39,18 +39,11 @@ namespace MapRenderer.Unity.Style.FillExtrusion
         public StyleProperty<float> Opacity { get; init; }
 
         /// <summary>
-        /// fill-extrusion-vertical-gradient: whether a vertical gradient is applied to the sides of the
-        /// extruded geometry. Encoded as float: 1.0 = true (default), 0.0 = false. Constant only;
-        /// data-driven or malformed values fall back to 1.0 (true). Not yet consumed by the renderer.
-        /// </summary>
-        public StyleProperty<float> VerticalGradient { get; init; }
-
-        /// <summary>
         /// fill-extrusion-translate: pixel-space [x, y] translation offset. Default [0, 0]. Unlike
         /// <see cref="Fill.PaintProperties.Translate"/> / <see cref="Line.PaintProperties.Translate"/>, this
         /// one is parsed THROUGH the expression engine, so Constant AND Zoom kinds are both preserved
         /// (see the class doc). Feature/Composite (data-driven) is spec-invalid for a layer-level property —
-        /// falls back to the [0, 0] default, mirroring <see cref="VerticalGradient"/>'s guard.
+        /// falls back to the [0, 0] default.
         /// </summary>
         public StyleProperty<double2> Translate { get; init; }
 
@@ -96,30 +89,6 @@ namespace MapRenderer.Unity.Style.FillExtrusion
                 ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
 
-            // fill-extrusion-vertical-gradient: default true (1.0). Tolerates data-driven by falling to default.
-            JsonValue verticalGradientJson = paint?.Get(PropertyNames.FillExtrusionVerticalGradient);
-            StyleProperty<float> verticalGradient;
-            if (verticalGradientJson != null)
-            {
-                try
-                {
-                    var candidate = new StyleProperty<float>(
-                        verticalGradientJson, 1f, v => v.AsBool() ? 1f : 0f, interpolatable: false);
-                    // fill-extrusion-vertical-gradient must not be data-driven (Feature/Composite → default true)
-                    verticalGradient = candidate.DependsOnFeature
-                        ? new StyleProperty<float>(1f)
-                        : candidate;
-                }
-                catch
-                {
-                    verticalGradient = new StyleProperty<float>(1f);
-                }
-            }
-            else
-            {
-                verticalGradient = new StyleProperty<float>(1f);
-            }
-
             // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the
             // class doc) via the shared TranslateProperty helper.
             JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);
@@ -138,7 +107,6 @@ namespace MapRenderer.Unity.Style.FillExtrusion
                 Base             = baseHeight,
                 Color            = color,
                 Opacity          = opacity,
-                VerticalGradient = verticalGradient,
                 Translate        = translate,
                 TranslateAnchor  = translateAnchor,
             };

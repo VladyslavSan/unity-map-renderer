@@ -388,7 +388,8 @@ namespace MapRenderer.Tests.Visual
         /// Alpha comes from <c>fill-extrusion-opacity</c> ALONE. Arm 1 is the solid control (opacity 1, the
         /// plain hex). Arm 2: the spec ignores fill-extrusion-color's own alpha, so alpha 0.4 (same RGB,
         /// opacity 1) renders exactly as solid as the control. Arm 3: opacity 0.5 (same hex, full colour
-        /// alpha) must sample strictly between the background and the control, near their midpoint.
+        /// alpha) must sample strictly between the background and the control, near their midpoint. The
+        /// control also pins the authored hue, so a lost per-vertex colour (a black building) fails here.
         /// </summary>
         [Test]
         public void FillExtrusion_AlphaComesFromOpacityAlone()
@@ -397,6 +398,10 @@ namespace MapRenderer.Tests.Visual
             var bg = new float3(Background.r, Background.g, Background.b);
             Assert.Greater(math.length(drawn - bg), 0.05f,
                 $"CONTROL: the solid building must differ from the background — sampled={drawn} background={bg}.");
+            // Hue of the authored #CC6633 (red > green > blue), lit: pins the per-vertex colour reaching albedo.
+            Assert.That(drawn.x, Is.GreaterThan(drawn.y + 0.05f).And.GreaterThan(drawn.z + 0.15f),
+                $"the building must show its authored colour, red dominant and not black — sampled={drawn}.");
+            Assert.Greater(drawn.y, drawn.z, $"#CC6633 has green above blue — sampled={drawn}.");
 
             float3 colorAlpha04 = RenderGatedExtrusionLayer(true, "color-alpha-0.4",
                 "{\"fill-extrusion-color\":[\"rgba\",204,102,51,0.4],\"fill-extrusion-height\":40,\"fill-extrusion-opacity\":1}");

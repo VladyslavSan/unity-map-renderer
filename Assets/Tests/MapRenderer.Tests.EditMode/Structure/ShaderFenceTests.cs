@@ -738,26 +738,6 @@ namespace MapRenderer.Tests.Structure
         }
 
         [Test]
-        public void FillExtrusionVerticalGradient_NotRendered_NoWallDarkeningFold()
-        {
-            // fill-extrusion-vertical-gradient is parsed but NOT rendered: real ambient + shadows/SSAO replace
-            // the fake-AO wall darkening. Structural, because headless cannot render fragments.
-            string vmod = ReadShaderFile("FillExtrusion_VertexModify.hlsl");
-            Assert.That(vmod, Does.Not.Contain("FillExtrusionVerticalGradientFactor"),
-                "FillExtrusion_VertexModify.hlsl must NOT define the abandoned vertical-gradient factor helper.");
-
-            foreach (string pass in new[] { "FillExtrusion_LitForwardPass.hlsl", "FillExtrusion_LitGBufferPass.hlsl" })
-            {
-                string text = ReadShaderFile(pass);
-                // The base per-vertex colour must survive; only the darkening fold on top of it is removed.
-                Assert.That(text, Does.Contain("output.vColor = input.color;"),
-                    $"{pass}: the per-vertex vColor assignment must remain.");
-                Assert.That(text, Does.Not.Contain("FillExtrusionVerticalGradientFactor"),
-                    $"{pass}: the vertical-gradient darkening fold must NOT be applied to vColor.");
-            }
-        }
-
-        [Test]
         public void FillExtrusionShader_WiresCustomEditor()
         {
             // The shader's CustomEditor makes LitShaderGUI.ValidateMaterial run in the inspector and derive

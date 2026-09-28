@@ -23,7 +23,7 @@ row again.
 | `not supported` | Not parsed. A style that sets it gets the same output as a style that does not. |
 | `no rendering effect` | The spec gives the key no rendering effect. The row is listed for completeness and is not in the totals. |
 
-Rows: 61 supported, 50 partial, 4 parsed but inert, 77 not supported; 6 rows with no rendering effect are not
+Rows: 61 supported, 50 partial, 3 parsed but inert, 78 not supported; 6 rows with no rendering effect are not
 counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
@@ -41,8 +41,8 @@ limit. The design and the open work are in
 **What an unsupported expression does.** It depends on where it is:
 
 - In an expression-capable property, or in `light.color`, `light.intensity` or `sky`, it fails the style
-  parse. `MapView.SetStyle` logs the error and keeps the previous style. Seven properties are exceptions:
-  `fill-antialias`, `fill-extrusion-translate`, `fill-extrusion-vertical-gradient`, `line-dasharray`,
+  parse. `MapView.SetStyle` logs the error and keeps the previous style. Six properties are exceptions:
+  `fill-antialias`, `fill-extrusion-translate`, `line-dasharray`,
   `fill-translate`, `line-translate` and `text-translate` catch the error and use their default.
 - In a property whose note starts with "Constant only", or in a pattern name, any expression gives that
   property's default.
@@ -314,7 +314,7 @@ Owning design: [`depth-and-render-regimes-design.md`](depth-and-render-regimes-d
 | `fill-extrusion-pattern` | `not supported` | Not built. |
 | `fill-extrusion-height` | `supported` | Data-driven values are †. |
 | `fill-extrusion-base` | `supported` | Data-driven values are †. |
-| `fill-extrusion-vertical-gradient` | `parsed, inert` | No shader reads it. |
+| `fill-extrusion-vertical-gradient` | `not supported` | Not built. Ambient light and SSAO shade the walls. |
 
 ### Layer types with no renderer
 

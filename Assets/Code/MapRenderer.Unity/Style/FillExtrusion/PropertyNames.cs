@@ -27,8 +27,5 @@ namespace MapRenderer.Unity.Style.FillExtrusion
 
         /// <summary>Coordinate space for <see cref="FillExtrusionTranslate"/>: <c>"map"</c> or <c>"viewport"</c>.</summary>
         public const string FillExtrusionTranslateAnchor  = "fill-extrusion-translate-anchor";
-
-        /// <summary>Whether a vertical shading gradient is applied to the sides of the extruded geometry.</summary>
-        public const string FillExtrusionVerticalGradient = "fill-extrusion-vertical-gradient";
     }
 }
