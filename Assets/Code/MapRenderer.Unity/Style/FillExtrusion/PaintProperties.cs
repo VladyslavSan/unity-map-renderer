@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using Unity.Mathematics;
@@ -55,6 +56,9 @@ namespace MapRenderer.Unity.Style.FillExtrusion
 
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private PaintProperties() { }
 
@@ -65,36 +69,17 @@ namespace MapRenderer.Unity.Style.FillExtrusion
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static PaintProperties Parse(JsonValue paint)
         {
-            // fill-extrusion-height: default 0
-            JsonValue heightJson = paint?.Get(PropertyNames.FillExtrusionHeight);
-            StyleProperty<float> height = heightJson != null
-                ? new StyleProperty<float>(heightJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
-            // fill-extrusion-base: default 0
-            JsonValue baseJson = paint?.Get(PropertyNames.FillExtrusionBase);
-            StyleProperty<float> baseHeight = baseJson != null
-                ? new StyleProperty<float>(baseJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
-            // fill-extrusion-color: default rgba(0,0,0,1)
-            JsonValue colorJson = paint?.Get(PropertyNames.FillExtrusionColor);
-            StyleProperty<Color> color = colorJson != null
-                ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
-                : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
-
-            // fill-extrusion-opacity: default 1.0
-            JsonValue opacityJson = paint?.Get(PropertyNames.FillExtrusionOpacity);
-            StyleProperty<float> opacity = opacityJson != null
-                ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1f);
-
-            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the
-            // class doc) via the shared TranslateProperty helper.
-            JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);
-            StyleProperty<double2> translate = translateJson != null
-                ? TranslateProperty.Parse(translateJson)
-                : new StyleProperty<double2>(new double2(0.0, 0.0));
+            var reader = new PropertyReader("paint");
+            StyleProperty<float> height = reader.ReadProperty(paint, PropertyNames.FillExtrusionHeight, 0f,
+                v => (float)v.AsNumber());
+            StyleProperty<float> baseHeight = reader.ReadProperty(paint, PropertyNames.FillExtrusionBase, 0f,
+                v => (float)v.AsNumber());
+            StyleProperty<Color> color = reader.ReadProperty(paint, PropertyNames.FillExtrusionColor,
+                new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced());
+            StyleProperty<float> opacity = reader.ReadProperty(paint, PropertyNames.FillExtrusionOpacity, 1f,
+                v => (float)v.AsNumber());
+            StyleProperty<double2> translate = reader.Read(paint, PropertyNames.FillExtrusionTranslate,
+                new StyleProperty<double2>(new double2(0.0, 0.0)), TranslateProperty.Parse);
 
             // fill-extrusion-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.FillExtrusionTranslateAnchor);
@@ -109,6 +94,7 @@ namespace MapRenderer.Unity.Style.FillExtrusion
                 Opacity          = opacity,
                 Translate        = translate,
                 TranslateAnchor  = translateAnchor,
+                Errors           = reader.Errors,
             };
         }
     }

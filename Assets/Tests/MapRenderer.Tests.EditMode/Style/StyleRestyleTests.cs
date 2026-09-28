@@ -1990,17 +1990,19 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// <c>fill-antialias</c> is a JSON boolean, and <c>false</c> must survive the parse as 0. A converter
-        /// that read it through <c>Value.AsNumber()</c> would throw, and the property's <c>catch</c> would
-        /// turn that into the default 1. A non-boolean still falls to the default.
+        /// that read it through <c>Value.AsNumber()</c> would throw, and the property reader would
+        /// turn that into the default 1. A non-boolean still falls to the default, with an error.
         /// </summary>
         /// <param name="paintJson">The layer's paint block.</param>
         /// <param name="expected">The value <c>Antialias</c> must evaluate to.</param>
-        [TestCase("{\"fill-antialias\":false}", false)]
-        [TestCase("{\"fill-antialias\":true}", true)]
-        [TestCase("{\"fill-color\":\"#fff\"}", true)]
-        [TestCase("{\"fill-antialias\":0}", true)]
-        [TestCase("{\"fill-antialias\":[\"get\",\"aa\"]}", true)]
-        public void FillPaint_Antialias_ParsesAsABoolean(string paintJson, bool expected)
+        /// <param name="expectedErrors">How many errors the parse records: one for a non-boolean, none for a
+        /// feature-dependent value.</param>
+        [TestCase("{\"fill-antialias\":false}", false, 0)]
+        [TestCase("{\"fill-antialias\":true}", true, 0)]
+        [TestCase("{\"fill-color\":\"#fff\"}", true, 0)]
+        [TestCase("{\"fill-antialias\":0}", true, 1)]
+        [TestCase("{\"fill-antialias\":[\"get\",\"aa\"]}", true, 0)]
+        public void FillPaint_Antialias_ParsesAsABoolean(string paintJson, bool expected, int expectedErrors)
         {
             // MakeFillLayer parses with antialiasDefault=true (the Style Spec default), so fallback cases land
             // on true. FillAntialiasBandTests exercises the project default.
@@ -2010,6 +2012,8 @@ namespace MapRenderer.Tests.Style
                 $"fill-antialias in {paintJson} must evaluate to {expected}.");
             Assert.IsFalse(fp.Antialias.DependsOnFeature,
                 "fill-antialias must never be data-driven — a feature-dependent value falls to the default.");
+            // A non-boolean is malformed, so it adds one error. A feature-dependent value is not an error.
+            Assert.AreEqual(expectedErrors, fp.Errors.Count, string.Join(" | ", fp.Errors));
         }
     }
 

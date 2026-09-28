@@ -1,5 +1,6 @@
 // Engine-free: no UnityEngine dependency.
 
+using System.Collections.Generic;
 using MapRenderer.Core.Json;
 
 namespace MapRenderer.Unity.Style.Fill
@@ -20,6 +21,9 @@ namespace MapRenderer.Unity.Style.Fill
         /// </summary>
         public StyleProperty<float> SortKey { get; init; }
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private LayoutProperties() { }
 
@@ -28,12 +32,12 @@ namespace MapRenderer.Unity.Style.Fill
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static LayoutProperties Parse(JsonValue layout)
         {
-            JsonValue sortKeyJson = layout?.Get(PropertyNames.FillSortKey);
+            var reader = new PropertyReader("layout");
             return new LayoutProperties
             {
-                SortKey = sortKeyJson != null
-                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber(), interpolatable: false)
-                    : null,
+                SortKey = reader.Read<StyleProperty<float>>(layout, PropertyNames.FillSortKey, null,
+                    json => new StyleProperty<float>(json, 0f, v => (float)v.AsNumber(), interpolatable: false)),
+                Errors = reader.Errors,
             };
         }
     }

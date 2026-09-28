@@ -40,10 +40,9 @@ limit. The design and the open work are in
 
 **What an unsupported expression does.** It depends on where it is:
 
-- In an expression-capable property, or in `light.color`, `light.intensity` or `sky`, it fails the style
-  parse. `MapView.SetStyle` logs the error and keeps the previous style. Six properties are exceptions:
-  `fill-antialias`, `fill-extrusion-translate`, `line-dasharray`,
-  `fill-translate`, `line-translate` and `text-translate` catch the error and use their default.
+- In an expression-capable property, or in `light.color`, `light.intensity` or `sky`, that property uses its
+  default and the style gains one error. The error names the layer (or `light`/`sky`), the block and the
+  property. `MapView.SetStyle` logs each error with `LogError`. The layer stays and draws.
 - In a property whose note starts with "Constant only", or in a pattern name, any expression gives that
   property's default.
 - In a layer `filter`, the style load checks it once and logs one warning if it does not compile (an
@@ -254,7 +253,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `text-pitch-alignment` | `partial` | Constant only. Used only for curved line text. Point text always stands upright (`viewport`). |
 | `text-rotation-alignment` | `partial` | Constant only. `viewport-glyph` is not built and reads as `auto`. Under line placement, `viewport` gives upright text at each anchor instead of curved text: [`road-shields-design.md`](road-shields-design.md) § 3 (D4). |
 | `text-field` | `partial` | `format` is not built, so that feature gets no text. A legacy function object is not supported: a `{token}` string still expands, but a `{"stops": …}` object resolves to no text. |
-| `text-font` | `partial` | Constant and zoom expressions evaluate correctly, including a legacy `{"stops": …}` function (it steps, not ramps: `text-font` has no "interpolate" marker). In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there fails the style parse. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
+| `text-font` | `partial` | Constant and zoom expressions evaluate correctly, including a legacy `{"stops": …}` function (it steps, not ramps: `text-font` has no "interpolate" marker). In a `step` or `interpolate` stop, write the font list as `["literal", […]]`; a bare list there uses the default stack and logs an error. The spec also allows data-driven, which degrades to the default stack (the font stack is resolved once per layer, not per feature). |
 | `text-size` | `supported` | |
 | `text-max-width` | `supported` | |
 | `text-line-height` | `supported` | |

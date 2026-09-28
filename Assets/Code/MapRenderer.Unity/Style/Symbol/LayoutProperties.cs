@@ -160,6 +160,9 @@ namespace MapRenderer.Unity.Style.Symbol
         /// entry. True per-side collision needs a wider change.</summary>
         public StyleProperty<float> IconPadding { get; init; }
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private LayoutProperties() { }
 
@@ -168,71 +171,35 @@ namespace MapRenderer.Unity.Style.Symbol
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static LayoutProperties Parse(JsonValue layout)
         {
-            JsonValue textSizeJson = layout?.Get(PropertyNames.TextSize);
-            JsonValue maxWidthJson = layout?.Get(PropertyNames.TextMaxWidth);
-            JsonValue lineHeightJson = layout?.Get(PropertyNames.TextLineHeight);
-            JsonValue letterSpacingJson = layout?.Get(PropertyNames.TextLetterSpacing);
-            JsonValue radialOffsetJson = layout?.Get(PropertyNames.TextRadialOffset);
-            JsonValue placementJson = layout?.Get(PropertyNames.SymbolPlacement);
-            JsonValue sortKeyJson = layout?.Get(PropertyNames.SymbolSortKey);
-            JsonValue spacingJson = layout?.Get(PropertyNames.SymbolSpacing);
-            JsonValue maxAngleJson = layout?.Get(PropertyNames.TextMaxAngle);
-            JsonValue paddingJson = layout?.Get(PropertyNames.TextPadding);
-            JsonValue iconSizeJson = layout?.Get(PropertyNames.IconSize);
-            JsonValue iconRotateJson = layout?.Get(PropertyNames.IconRotate);
-            JsonValue iconPaddingJson = layout?.Get(PropertyNames.IconPadding);
-
+            var reader = new PropertyReader("layout");
             return new LayoutProperties
             {
-                TextField = ParseSymbolString(layout?.Get(PropertyNames.TextField)),
+                TextField = reader.Read<StyleProperty<string>>(layout, PropertyNames.TextField, null, ParseSymbolString),
 
-                TextFont = ParseFontStack(layout?.Get(PropertyNames.TextFont)),
+                TextFont = ParseFontStack(reader, layout),
 
-                TextSize = textSizeJson != null
-                    ? new StyleProperty<float>(textSizeJson, 16f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(16f),
+                TextSize = reader.ReadProperty(layout, PropertyNames.TextSize, 16f, v => (float)v.AsNumber()),
+                TextMaxWidth = reader.ReadProperty(layout, PropertyNames.TextMaxWidth, 10f, v => (float)v.AsNumber()),
+                TextLineHeight = reader.ReadProperty(layout, PropertyNames.TextLineHeight, 1.2f, v => (float)v.AsNumber()),
+                TextLetterSpacing = reader.ReadProperty(layout, PropertyNames.TextLetterSpacing, 0f, v => (float)v.AsNumber()),
+                TextRadialOffset = reader.ReadProperty(layout, PropertyNames.TextRadialOffset, 0f, v => (float)v.AsNumber()),
 
-                TextMaxWidth = maxWidthJson != null
-                    ? new StyleProperty<float>(maxWidthJson, 10f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(10f),
+                SymbolPlacement = reader.ReadProperty(layout, PropertyNames.SymbolPlacement,
+                    MapRenderer.Core.Text.SymbolPlacement.Point, v => ParsePlacement(v.ToDisplayString()),
+                    interpolatable: false),
 
-                TextLineHeight = lineHeightJson != null
-                    ? new StyleProperty<float>(lineHeightJson, 1.2f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(1.2f),
+                SymbolSortKey = reader.ReadProperty(layout, PropertyNames.SymbolSortKey, 0f,
+                    v => (float)v.AsNumber(), interpolatable: false),
 
-                TextLetterSpacing = letterSpacingJson != null
-                    ? new StyleProperty<float>(letterSpacingJson, 0f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(0f),
-
-                TextRadialOffset = radialOffsetJson != null
-                    ? new StyleProperty<float>(radialOffsetJson, 0f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(0f),
-
-                SymbolPlacement = placementJson != null
-                    ? new StyleProperty<SymbolPlacement>(placementJson, MapRenderer.Core.Text.SymbolPlacement.Point,
-                        v => ParsePlacement(v.ToDisplayString()), interpolatable: false)
-                    : new StyleProperty<SymbolPlacement>(MapRenderer.Core.Text.SymbolPlacement.Point),
-
-                SymbolSortKey = sortKeyJson != null
-                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber(), interpolatable: false)
-                    : new StyleProperty<float>(0f),
-
-                SymbolSpacing = spacingJson != null
-                    ? new StyleProperty<float>(spacingJson, 250f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(250f),
-
-                TextMaxAngle = maxAngleJson != null
-                    ? new StyleProperty<float>(maxAngleJson, 45f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(45f),
+                SymbolSpacing = reader.ReadProperty(layout, PropertyNames.SymbolSpacing, 250f, v => (float)v.AsNumber()),
+                TextMaxAngle = reader.ReadProperty(layout, PropertyNames.TextMaxAngle, 45f, v => (float)v.AsNumber()),
 
                 TextKeepUpright = layout?.Get(PropertyNames.TextKeepUpright)?.AsBool(true) ?? true,
 
                 TextAllowOverlap = layout?.Get(PropertyNames.TextAllowOverlap)?.AsBool(false) ?? false,
                 TextIgnorePlacement = layout?.Get(PropertyNames.TextIgnorePlacement)?.AsBool(false) ?? false,
 
-                TextPadding = paddingJson != null
-                    ? new StyleProperty<float>(paddingJson, 2f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(2f),
+                TextPadding = reader.ReadProperty(layout, PropertyNames.TextPadding, 2f, v => (float)v.AsNumber()),
 
                 TextAnchor = ParseAnchor(layout?.Get(PropertyNames.TextAnchor)?.AsString(null)),
                 TextJustify = ParseJustify(layout?.Get(PropertyNames.TextJustify)?.AsString(null)),
@@ -241,15 +208,11 @@ namespace MapRenderer.Unity.Style.Symbol
                 TextPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.TextPitchAlignment)?.AsString(null)),
                 TextOffset = ParseOffset(layout?.Get(PropertyNames.TextOffset)),
 
-                IconImage = ParseSymbolString(layout?.Get(PropertyNames.IconImage)),
+                IconImage = reader.Read<StyleProperty<string>>(layout, PropertyNames.IconImage, null, ParseSymbolString),
 
-                IconSize = iconSizeJson != null
-                    ? new StyleProperty<float>(iconSizeJson, 1f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(1f),
+                IconSize = reader.ReadProperty(layout, PropertyNames.IconSize, 1f, v => (float)v.AsNumber()),
 
-                IconRotate = iconRotateJson != null
-                    ? new StyleProperty<float>(iconRotateJson, 0f, v => (float)v.AsNumber())
-                    : new StyleProperty<float>(0f),
+                IconRotate = reader.ReadProperty(layout, PropertyNames.IconRotate, 0f, v => (float)v.AsNumber()),
 
                 IconOffset = ParseOffset(layout?.Get(PropertyNames.IconOffset)),
 
@@ -262,10 +225,10 @@ namespace MapRenderer.Unity.Style.Symbol
                 IconOptional = layout?.Get(PropertyNames.IconOptional)?.AsBool(false) ?? false,
                 TextOptional = layout?.Get(PropertyNames.TextOptional)?.AsBool(false) ?? false,
 
-                IconPadding = iconPaddingJson != null
-                    ? new StyleProperty<float>(
-                        ExpressionParser.WrapBareArrayLiterals(iconPaddingJson), 2f, ProjectIconPadding)
-                    : new StyleProperty<float>(2f),
+                IconPadding = reader.Read(layout, PropertyNames.IconPadding, new StyleProperty<float>(2f),
+                    json => new StyleProperty<float>(ExpressionParser.WrapBareArrayLiterals(json), 2f, ProjectIconPadding)),
+
+                Errors = reader.Errors,
             };
         }
 
@@ -277,16 +240,9 @@ namespace MapRenderer.Unity.Style.Symbol
         /// </summary>
         private static StyleProperty<string> ParseSymbolString(JsonValue json)
         {
-            if (json == null || json.Kind == JsonKind.Object) return null;
-            try
-            {
-                return new StyleProperty<string>(
-                    DesugarTokenTemplate(json), null, v => v.ToDisplayString(), interpolatable: false);
-            }
-            catch
-            {
-                return null;
-            }
+            if (json.Kind == JsonKind.Object) return null;
+            return new StyleProperty<string>(
+                DesugarTokenTemplate(json), null, v => v.ToDisplayString(), interpolatable: false);
         }
 
         /// <summary>Desugars a <c>{prop}</c> token template into <c>["concat", literal, ["get","prop"], …]</c>
@@ -332,41 +288,33 @@ namespace MapRenderer.Unity.Style.Symbol
         private static readonly string[] DefaultFontStack = { "Open Sans Regular", "Arial Unicode MS Regular" };
 
         // A non-string item (["literal",[…]], a ["step",…] stop) is unambiguously an expression; an
-        // all-string array is ambiguous with a plain font-name list — see the fallback below. text-font has
+        // all-string array is ambiguous with a plain font-name list — see ParseFontValue. text-font has
         // no "interpolate" marker, so a legacy function (an object, not an array) steps, not ramps.
-        private static StyleProperty<string[]> ParseFontStack(JsonValue json)
+        private static StyleProperty<string[]> ParseFontStack(PropertyReader reader, JsonValue layout)
+            => reader.Read(layout, PropertyNames.TextFont, new StyleProperty<string[]>(DefaultFontStack), ParseFontValue);
+
+        private static StyleProperty<string[]> ParseFontValue(JsonValue json)
         {
-            if (json == null) return new StyleProperty<string[]>(DefaultFontStack);
-
-            if (json.Kind == JsonKind.Object)
-            {
-                try { return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack, interpolatable: false); }
-                catch (System.Exception ex) when (ex is ExpressionParseException || ex is ExpressionEvaluationException)
-                {
-                    return new StyleProperty<string[]>(DefaultFontStack);
-                }
-            }
-
-            if (!json.IsArray || json.Items.Count == 0)
-                return new StyleProperty<string[]>(DefaultFontStack);
-
-            bool isPlainNameArray = true;
-            for (int i = 0; i < json.Items.Count; i++)
-                if (json.Items[i].Kind != JsonKind.String) { isPlainNameArray = false; break; }
-
-            if (!isPlainNameArray)
-                return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack, interpolatable: false);
+            bool isExpression = json.Kind == JsonKind.Object || (json.IsArray && json.Items.Count > 0);
+            if (!isExpression) return new StyleProperty<string[]>(DefaultFontStack);
 
             // All-string items are ambiguous with a data-driven ["get","fontProp"]; try it as an expression
-            // first — a real font name is never a recognized operator, so a genuine array falls back below.
+            // first — a real font name is never a recognized operator, so a genuine array falls back here.
             try
             {
                 return new StyleProperty<string[]>(json, DefaultFontStack, ProjectFontStack, interpolatable: false);
             }
-            catch (ExpressionParseException)
+            catch (ExpressionParseException) when (json.IsArray && IsPlainNameArray(json))
             {
                 return new StyleProperty<string[]>(ReadFontNames(json));
             }
+        }
+
+        private static bool IsPlainNameArray(JsonValue json)
+        {
+            for (int i = 0; i < json.Items.Count; i++)
+                if (json.Items[i].Kind != JsonKind.String) return false;
+            return true;
         }
 
         private static string[] ReadFontNames(JsonValue json)

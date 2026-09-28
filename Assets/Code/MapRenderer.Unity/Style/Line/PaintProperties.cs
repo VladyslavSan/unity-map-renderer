@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using Unity.Mathematics;
@@ -82,6 +83,9 @@ namespace MapRenderer.Unity.Style.Line
 
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private PaintProperties() { }
 
@@ -90,47 +94,16 @@ namespace MapRenderer.Unity.Style.Line
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static PaintProperties Parse(JsonValue paint)
         {
-            // line-color: default rgba(0,0,0,1)
-            JsonValue colorJson = paint?.Get(PropertyNames.LineColor);
-            StyleProperty<Color> color = colorJson != null
-                ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
-                : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
-
-            // line-opacity: default 1.0
-            JsonValue opacityJson = paint?.Get(PropertyNames.LineOpacity);
-            StyleProperty<float> opacity = opacityJson != null
-                ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1f);
-
-            // line-width: default 1.0 px
-            JsonValue widthJson = paint?.Get(PropertyNames.LineWidth);
-            StyleProperty<float> width = widthJson != null
-                ? new StyleProperty<float>(widthJson, 1f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1f);
-
-            // line-blur: default 0
-            JsonValue blurJson = paint?.Get(PropertyNames.LineBlur);
-            StyleProperty<float> blur = blurJson != null
-                ? new StyleProperty<float>(blurJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
-            // line-gap-width: default 0 px
-            JsonValue gapWidthJson = paint?.Get(PropertyNames.LineGapWidth);
-            StyleProperty<float> gapWidth = gapWidthJson != null
-                ? new StyleProperty<float>(gapWidthJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
-            // line-offset: default 0 (signed pixels)
-            JsonValue offsetJson = paint?.Get(PropertyNames.LineOffset);
-            StyleProperty<float> offset = offsetJson != null
-                ? new StyleProperty<float>(offsetJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
-            // line-translate: [x, y] px offset, parsed through the expression engine via TranslateProperty.
-            JsonValue translateJson = paint?.Get(PropertyNames.LineTranslate);
-            StyleProperty<double2> translate = translateJson != null
-                ? TranslateProperty.Parse(translateJson)
-                : new StyleProperty<double2>(new double2(0.0, 0.0));
+            var reader = new PropertyReader("paint");
+            StyleProperty<Color> color = reader.ReadProperty(paint, PropertyNames.LineColor,
+                new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced());
+            StyleProperty<float> opacity  = reader.ReadProperty(paint, PropertyNames.LineOpacity, 1f, v => (float)v.AsNumber());
+            StyleProperty<float> width    = reader.ReadProperty(paint, PropertyNames.LineWidth, 1f, v => (float)v.AsNumber());
+            StyleProperty<float> blur     = reader.ReadProperty(paint, PropertyNames.LineBlur, 0f, v => (float)v.AsNumber());
+            StyleProperty<float> gapWidth = reader.ReadProperty(paint, PropertyNames.LineGapWidth, 0f, v => (float)v.AsNumber());
+            StyleProperty<float> offset   = reader.ReadProperty(paint, PropertyNames.LineOffset, 0f, v => (float)v.AsNumber());
+            StyleProperty<double2> translate = reader.Read(paint, PropertyNames.LineTranslate,
+                new StyleProperty<double2>(new double2(0.0, 0.0)), TranslateProperty.Parse);
 
             // line-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.LineTranslateAnchor);
@@ -138,8 +111,7 @@ namespace MapRenderer.Unity.Style.Line
             StyleProperty<float> translateAnchor = new StyleProperty<float>(anchorVal);
 
             // line-dasharray: stay as raw Expression (variable-length, zoom-dependent); null when absent.
-            JsonValue dashArrayJson = paint?.Get(PropertyNames.LineDasharray);
-            Expression dashArray = dashArrayJson != null ? LineDash.ParseDashArray(dashArrayJson) : null;
+            Expression dashArray = reader.Read<Expression>(paint, PropertyNames.LineDasharray, null, LineDash.ParseDashArray);
 
             // line-pattern: solid fallback
             JsonValue patternJson = paint?.Get(PropertyNames.LinePattern);
@@ -157,6 +129,7 @@ namespace MapRenderer.Unity.Style.Line
                 TranslateAnchor = translateAnchor,
                 DashArray       = dashArray,
                 PatternName     = patternName,
+                Errors          = reader.Errors,
             };
         }
     }

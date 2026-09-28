@@ -972,6 +972,13 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
                 "an alpha-only text-color change must refuse — the two colours differ ONLY in the " +
                 "component the in-place path cannot move (the uniform is RGB-only).");
+
+            // A malformed colour loads with its default, but its alpha cannot be read: the gate refuses (a
+            // full rebuild) instead of throwing out of the restyle.
+            var badOld = SymbolStyleDoc(@"""text-color"": ""notacolor""");
+            var badNew = SymbolStyleDoc(@"""text-color"": ""alsonotacolor""");
+            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(badOld, badNew),
+                "a text-color whose alpha cannot be read must refuse, not throw.");
         }
     }
 

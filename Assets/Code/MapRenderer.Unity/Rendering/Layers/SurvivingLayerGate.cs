@@ -107,13 +107,20 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// alpha rides the vertex COLOR stream (<c>SymbolFeatureExtractor.StreamRgba</c>), which the in-place
         /// path never re-bakes. Halo alpha also decides whether a halo run is emitted
         /// (<c>WorldSymbolRenderer.Emit</c>).
-        /// <see cref="IsFreeAtKind"/> has proven both Constant, so <c>Evaluate</c> cannot throw.
+        /// A colour that cannot be read (a malformed value loads with its default) is not free, so it returns false.
         /// </summary>
         private static bool ConstantAlphaMatches(JsonValue oldValue, JsonValue newValue)
         {
-            double oldAlpha = ExpressionParser.Parse(oldValue).Evaluate(new EvaluationContext(0.0)).AsColorCoerced().A;
-            double newAlpha = ExpressionParser.Parse(newValue).Evaluate(new EvaluationContext(0.0)).AsColorCoerced().A;
-            return oldAlpha == newAlpha;
+            try
+            {
+                double oldAlpha = ExpressionParser.Parse(oldValue).Evaluate(new EvaluationContext(0.0)).AsColorCoerced().A;
+                double newAlpha = ExpressionParser.Parse(newValue).Evaluate(new EvaluationContext(0.0)).AsColorCoerced().A;
+                return oldAlpha == newAlpha;
+            }
+            catch (ExpressionEvaluationException)
+            {
+                return false; // unreadable colour => not free => full rebuild
+            }
         }
 
         /// <summary>

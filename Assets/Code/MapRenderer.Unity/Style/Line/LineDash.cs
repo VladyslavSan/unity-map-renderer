@@ -84,14 +84,12 @@ namespace MapRenderer.Unity.Style.Line
         /// (<c>[2,1]</c>, or the stop outputs of <c>["step",["zoom"],[1,1],10,[2,1]]</c>), which the strict
         /// expression parser rejects, so <see cref="ExpressionParser.WrapBareArrayLiterals"/> wraps them as
         /// <c>["literal", …]</c> at the top level and in an operator's direct arguments. Returns null for a null
-        /// or malformed value (→ render solid); never throws.
+        /// value (→ render solid). A malformed value throws <see cref="ExpressionParseException"/>.
         /// </summary>
         public static Expression ParseDashArray(JsonValue json)
         {
             JsonValue toParse = ExpressionParser.WrapBareArrayLiterals(json);
-            if (toParse == null) return null;
-            try { return ExpressionParser.Parse(toParse, interpolatable: false); }
-            catch (ExpressionParseException) { return null; }
+            return toParse == null ? null : ExpressionParser.Parse(toParse, interpolatable: false);
         }
 
         /// <summary>

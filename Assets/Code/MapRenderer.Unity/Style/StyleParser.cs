@@ -9,10 +9,8 @@ namespace MapRenderer.Unity.Style
     /// Parses a MapLibre Style document into the typed <see cref="StyleDocument"/> model; the schema and
     /// defaults come from the public Style Spec docs. Unknown keys survive on the matching <c>Raw</c> JSON,
     /// and an unexpected field type falls back to a default. Malformed JSON throws
-    /// <see cref="JsonParseException"/>. Non-local invariant: a malformed expression value throws
-    /// <see cref="MapRenderer.Core.Expressions.ExpressionParseException"/> at eager paint/layout parse,
-    /// uncaught here; <c>MapView.SetStyle(string, CancellationToken)</c> guards its own call, and any other
-    /// caller of <see cref="Parse(string, bool)"/> must handle it itself.
+    /// <see cref="JsonParseException"/>. Non-local invariant: a malformed expression costs only its own
+    /// property, which takes its default and adds one <see cref="StyleDocument.Errors"/> entry.
     /// </summary>
     public static class StyleParser
     {
@@ -51,7 +49,7 @@ namespace MapRenderer.Unity.Style
             {
                 foreach (var layerJson in layers.Items)
                 {
-                    StyleLayer layer = ParseLayer(layerJson, fillAntialiasDefault);
+                    StyleLayer layer = ParseLayer(layerJson, fillAntialiasDefault, doc.Errors);
                     doc.Layers.Add(layer);
                     WarnOnCompositePaint(layer, doc.Warnings);
                 }
@@ -59,6 +57,8 @@ namespace MapRenderer.Unity.Style
 
             doc.Light = StyleLight.Parse(root.Get("light"));
             doc.Sky = StyleSky.Parse(root.Get("sky"));
+            doc.Errors.AddRange(doc.Light.Errors);
+            doc.Errors.AddRange(doc.Sky.Errors);
 
             return doc;
         }
@@ -141,6 +141,12 @@ namespace MapRenderer.Unity.Style
             }
         }
 
+        /// <summary>Adds each error of one layer carrier to <paramref name="errors"/>, prefixed with the layer id.</summary>
+        private static void ReportErrors(List<string> errors, string layerId, IReadOnlyList<string> layerErrors)
+        {
+            for (int i = 0; i < layerErrors.Count; i++) errors.Add($"layer '{layerId}' {layerErrors[i]}");
+        }
+
         /// <summary>The renderer does not support a composite (zoom AND feature) paint value.
         /// This records one warning per such paint key, whether or not the layer type models that key.</summary>
         private static void WarnOnCompositePaint(StyleLayer layer, List<string> warnings)
@@ -157,7 +163,7 @@ namespace MapRenderer.Unity.Style
             }
         }
 
-        private static StyleLayer ParseLayer(JsonValue json, bool fillAntialiasDefault)
+        private static StyleLayer ParseLayer(JsonValue json, bool fillAntialiasDefault, List<string> errors)
         {
             if (json == null || !json.IsObject)
                 return new StyleLayer { Raw = json };
@@ -170,49 +176,56 @@ namespace MapRenderer.Unity.Style
 
             // Factory: line/fill/symbol/background/fill-extrusion get their typed subclass with Paint/Layout
             // parsed eagerly; every other type uses the generic base.
+            string id = json.GetString("id");
             StyleLayer layer;
             switch (layerType)
             {
                 case StyleLayerType.Line:
-                    layer = new Line.StyleLayer
-                    {
-                        Paint  = Line.PaintProperties.Parse(paintJson),
-                        Layout = Line.LayoutProperties.Parse(layoutJson),
-                    };
+                {
+                    var paint = Line.PaintProperties.Parse(paintJson);
+                    layer = new Line.StyleLayer { Paint = paint, Layout = Line.LayoutProperties.Parse(layoutJson) };
+                    ReportErrors(errors, id, paint.Errors);
                     break;
+                }
                 case StyleLayerType.Fill:
-                    layer = new Fill.StyleLayer
-                    {
-                        Paint  = Fill.PaintProperties.Parse(paintJson, fillAntialiasDefault),
-                        Layout = Fill.LayoutProperties.Parse(layoutJson),
-                    };
+                {
+                    var paint  = Fill.PaintProperties.Parse(paintJson, fillAntialiasDefault);
+                    var layout = Fill.LayoutProperties.Parse(layoutJson);
+                    layer = new Fill.StyleLayer { Paint = paint, Layout = layout };
+                    ReportErrors(errors, id, paint.Errors);
+                    ReportErrors(errors, id, layout.Errors);
                     break;
+                }
                 case StyleLayerType.Symbol:
-                    layer = new Symbol.StyleLayer
-                    {
-                        Paint  = Symbol.PaintProperties.Parse(paintJson),
-                        Layout = Symbol.LayoutProperties.Parse(layoutJson),
-                    };
+                {
+                    var paint  = Symbol.PaintProperties.Parse(paintJson);
+                    var layout = Symbol.LayoutProperties.Parse(layoutJson);
+                    layer = new Symbol.StyleLayer { Paint = paint, Layout = layout };
+                    ReportErrors(errors, id, paint.Errors);
+                    ReportErrors(errors, id, layout.Errors);
                     break;
+                }
                 case StyleLayerType.Background:
-                    layer = new Background.StyleLayer
-                    {
-                        Paint = Background.PaintProperties.Parse(paintJson),
-                    };
+                {
+                    var paint = Background.PaintProperties.Parse(paintJson);
+                    layer = new Background.StyleLayer { Paint = paint };
+                    ReportErrors(errors, id, paint.Errors);
                     break;
+                }
                 case StyleLayerType.FillExtrusion:
-                    layer = new FillExtrusion.StyleLayer
-                    {
-                        Paint = FillExtrusion.PaintProperties.Parse(paintJson),
-                    };
+                {
+                    var paint = FillExtrusion.PaintProperties.Parse(paintJson);
+                    layer = new FillExtrusion.StyleLayer { Paint = paint };
+                    ReportErrors(errors, id, paint.Errors);
                     break;
+                }
                 default:
                     layer = new StyleLayer();
                     break;
             }
 
             layer.Raw = json;
-            layer.Id = json.GetString("id");
+            layer.Id = id;
             layer.RawType = rawType;
             layer.LayerType = layerType;
             layer.Source = json.GetString("source");

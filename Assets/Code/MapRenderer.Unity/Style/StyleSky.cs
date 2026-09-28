@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 
@@ -28,33 +29,36 @@ namespace MapRenderer.Unity.Style
         /// <summary>fog-color: base fog color. Default white.</summary>
         public StyleProperty<Color> FogColor { get; init; }
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private StyleSky() { }
 
         /// <summary>Parse the root <c>sky</c> block. Each color falls back to its spec default when
         /// <paramref name="sky"/> is null, non-object, or the key is absent. A malformed OR data-driven
-        /// color throws <see cref="MapRenderer.Core.Expressions.ExpressionEvaluationException"/>.</summary>
+        /// color also takes its default and adds to <see cref="Errors"/>.</summary>
         public static StyleSky Parse(JsonValue sky)
         {
+            var reader = new PropertyReader("sky");
             return new StyleSky
             {
-                SkyColor     = ParseColor(sky, SkyColorKey, DefaultSkyColor),
-                HorizonColor = ParseColor(sky, HorizonColorKey, DefaultHorizonColor),
-                FogColor     = ParseColor(sky, FogColorKey, DefaultFogColor),
+                SkyColor     = ParseColor(reader, sky, SkyColorKey, DefaultSkyColor),
+                HorizonColor = ParseColor(reader, sky, HorizonColorKey, DefaultHorizonColor),
+                FogColor     = ParseColor(reader, sky, FogColorKey, DefaultFogColor),
+                Errors       = reader.Errors,
             };
         }
 
         // Sky colors ride Evaluate(zoom) (SkyGradient, DistanceHaze), which throws for a Feature/Composite
-        // property anyway — fail the parse instead of at the first apply.
-        private static StyleProperty<Color> ParseColor(JsonValue sky, string key, Color defaultValue)
-        {
-            JsonValue json = sky?.Get(key);
-            if (json == null)
-                return new StyleProperty<Color>(defaultValue);
-            var color = new StyleProperty<Color>(json, defaultValue, v => v.AsColorCoerced());
-            if (color.DependsOnFeature)
-                throw new ExpressionEvaluationException($"sky.{key} may not be data-driven.");
-            return color;
-        }
+        // property anyway — reject it at parse time instead of at the first apply.
+        private static StyleProperty<Color> ParseColor(PropertyReader reader, JsonValue sky, string key, Color defaultValue)
+            => reader.Read(sky, key, new StyleProperty<Color>(defaultValue), json =>
+            {
+                var color = new StyleProperty<Color>(json, defaultValue, v => v.AsColorCoerced());
+                if (color.DependsOnFeature)
+                    throw new ExpressionEvaluationException($"sky.{key} may not be data-driven.");
+                return color;
+            });
     }
 }

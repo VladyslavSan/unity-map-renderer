@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using Unity.Mathematics;
@@ -73,6 +74,9 @@ namespace MapRenderer.Unity.Style.Fill
 
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private PaintProperties() { }
 
@@ -85,58 +89,31 @@ namespace MapRenderer.Unity.Style.Fill
         {
             // fill-color: default rgba(0,0,0,1); white on a pattern layer, where it tints the sprite. A pattern
             // layer is one whose fill-pattern is a sprite name, the same test the material flag uses.
+            var reader = new PropertyReader("paint");
             JsonValue patternJson = paint?.Get(PropertyNames.FillPattern);
             string patternName = patternJson?.AsString(null);
             var colorDefault = patternName != null ? new Color(1f, 1f, 1f, 1f) : new Color(0f, 0f, 0f, 1f);
-            JsonValue colorJson = paint?.Get(PropertyNames.FillColor);
-            StyleProperty<Color> color = colorJson != null
-                ? new StyleProperty<Color>(colorJson, colorDefault, v => v.AsColorCoerced())
-                : new StyleProperty<Color>(colorDefault);
-
-            // fill-opacity: default 1.0
-            JsonValue opacityJson = paint?.Get(PropertyNames.FillOpacity);
-            StyleProperty<float> opacity = opacityJson != null
-                ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1f);
+            StyleProperty<Color> color = reader.ReadProperty(paint, PropertyNames.FillColor, colorDefault,
+                v => v.AsColorCoerced());
+            StyleProperty<float> opacity = reader.ReadProperty(paint, PropertyNames.FillOpacity, 1f,
+                v => (float)v.AsNumber());
 
             // fill-outline-color: null when absent (see the property doc).
-            JsonValue outlineColorJson = paint?.Get(PropertyNames.FillOutlineColor);
-            StyleProperty<Color> outlineColor = outlineColorJson != null
-                ? new StyleProperty<Color>(outlineColorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
-                : null;
+            StyleProperty<Color> outlineColor = reader.Read<StyleProperty<Color>>(paint, PropertyNames.FillOutlineColor,
+                null, json => new StyleProperty<Color>(json, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced()));
 
-            // fill-antialias: default true (1.0). Tolerates data-driven by falling to default.
-            JsonValue antialiasJson = paint?.Get(PropertyNames.FillAntialias);
-            StyleProperty<bool> antialias;
-            if (antialiasJson != null)
-            {
-                try
+            // fill-antialias: default is the project default. A data-driven value is not an error: it takes the default.
+            // It is a JSON boolean, so the projection is AsBool, not AsNumber.
+            StyleProperty<bool> antialias = reader.Read(paint, PropertyNames.FillAntialias,
+                new StyleProperty<bool>(antialiasDefault), json =>
                 {
-                    // fill-antialias is a JSON boolean: an AsNumber() projection would throw into the catch
-                    // below and turn `false` into the default.
-                    var candidate = new StyleProperty<bool>(antialiasJson, antialiasDefault, v => v.AsBool(), interpolatable: false);
-                    // fill-antialias must not be data-driven (Feature/Composite → the project default)
-                    antialias = candidate.DependsOnFeature
-                        ? new StyleProperty<bool>(antialiasDefault)
-                        : candidate;
-                }
-                catch
-                {
-                    antialias = new StyleProperty<bool>(antialiasDefault);
-                }
-            }
-            else
-            {
-                // The layer said nothing — this is the case the project default exists for, and in the
-                // shipped Liberty style it is 12 of 16 fill layers.
-                antialias = new StyleProperty<bool>(antialiasDefault);
-            }
+                    var candidate = new StyleProperty<bool>(json, antialiasDefault, v => v.AsBool(), interpolatable: false);
+                    return candidate.DependsOnFeature ? new StyleProperty<bool>(antialiasDefault) : candidate;
+                });
 
             // fill-translate: [x, y] px offset, parsed through the expression engine via TranslateProperty.
-            JsonValue translateJson = paint?.Get(PropertyNames.FillTranslate);
-            StyleProperty<double2> translate = translateJson != null
-                ? TranslateProperty.Parse(translateJson)
-                : new StyleProperty<double2>(new double2(0.0, 0.0));
+            StyleProperty<double2> translate = reader.Read(paint, PropertyNames.FillTranslate,
+                new StyleProperty<double2>(new double2(0.0, 0.0)), TranslateProperty.Parse);
 
             // fill-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.FillTranslateAnchor);
@@ -169,6 +146,7 @@ namespace MapRenderer.Unity.Style.Fill
                 PatternName              = patternName,
                 PatternSizing            = patternSizing,
                 PatternWorldPeriodMetres = patternWorldPeriodMetres,
+                Errors                   = reader.Errors,
             };
         }
     }

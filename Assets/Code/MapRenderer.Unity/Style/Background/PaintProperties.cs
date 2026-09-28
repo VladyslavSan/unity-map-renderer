@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 
@@ -22,6 +23,9 @@ namespace MapRenderer.Unity.Style.Background
         /// completeness, but no renderer reads it: background-pattern is not implemented.</summary>
         public string PatternName { get; init; }
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public IReadOnlyList<string> Errors { get; init; }
+
         /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
         private PaintProperties() { }
 
@@ -31,17 +35,11 @@ namespace MapRenderer.Unity.Style.Background
         /// <returns>A fully-parsed, immutable carrier.</returns>
         public static PaintProperties Parse(JsonValue paint)
         {
-            // background-color: default rgba(0,0,0,1)
-            JsonValue colorJson = paint?.Get(PropertyNames.BackgroundColor);
-            StyleProperty<Color> color = colorJson != null
-                ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
-                : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
-
-            // background-opacity: default 1.0
-            JsonValue opacityJson = paint?.Get(PropertyNames.BackgroundOpacity);
-            StyleProperty<float> opacity = opacityJson != null
-                ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1f);
+            var reader = new PropertyReader("paint");
+            StyleProperty<Color> color = reader.ReadProperty(paint, PropertyNames.BackgroundColor,
+                new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced());
+            StyleProperty<float> opacity = reader.ReadProperty(paint, PropertyNames.BackgroundOpacity, 1f,
+                v => (float)v.AsNumber());
 
             // background-pattern
             JsonValue patternJson = paint?.Get(PropertyNames.BackgroundPattern);
@@ -52,6 +50,7 @@ namespace MapRenderer.Unity.Style.Background
                 Color       = color,
                 Opacity     = opacity,
                 PatternName = patternName,
+                Errors      = reader.Errors,
             };
         }
     }

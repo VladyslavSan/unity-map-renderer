@@ -34,6 +34,9 @@ namespace MapRenderer.Unity.Style
         /// <summary>One message per style feature the parser accepts but the renderer degrades. Never null.</summary>
         public readonly List<string> Warnings = new List<string>();
 
+        /// <summary>One message per property that fell back to its default. Never null.</summary>
+        public readonly List<string> Errors = new List<string>();
+
         /// <summary>Root <c>light</c> block. Never null; spec defaults when the key is absent (including
         /// for a hand-built <see cref="StyleDocument"/> that never sets it).</summary>
         public StyleLight Light = StyleLight.Parse(null);

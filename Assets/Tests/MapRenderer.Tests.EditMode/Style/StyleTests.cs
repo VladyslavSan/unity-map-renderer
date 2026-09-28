@@ -692,6 +692,23 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(2, doc.Warnings.Count, string.Join(" | ", doc.Warnings));
             StringAssert.Contains("layer 'countries-fill' paint 'fill-color'", doc.Warnings[0]);
             StringAssert.Contains("layer 'countries-fill' paint 'fill-opacity'", doc.Warnings[1]);
+
+            // One malformed property costs only itself: the layer stays, the property takes its default, and
+            // one error names layer and property. A sibling in the same block is untouched.
+            StyleDocument bad = StyleParser.Parse("{\"version\":8,\"sources\":{},\"layers\":[" +
+                "{\"id\":\"countries-fill\",\"type\":\"fill\",\"paint\":{}}," +
+                "{\"id\":\"bad-line\",\"type\":\"line\",\"paint\":{\"line-color\":\"#f00\"," +
+                "\"line-width\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,1,5,2]}}]}");
+            var badLine = (Line.StyleLayer)bad.Layers[1];
+            Assert.AreEqual(2, bad.Layers.Count);
+            Assert.AreEqual(ExpressionKind.Constant, badLine.Paint.Width.Kind);
+            Assert.AreEqual(1f, badLine.Paint.Width.Evaluate(0.0));
+            Assert.AreEqual(1.0, badLine.Paint.Color.Evaluate(0.0).R, 1e-6, "the sibling line-color is still red.");
+            Assert.AreEqual(1, bad.Errors.Count, string.Join(" | ", bad.Errors));
+            StringAssert.Contains("layer 'bad-line' paint 'line-width'", bad.Errors[0]);
+            StringAssert.Contains("default", bad.Errors[0]);
+            Assert.AreEqual(2, doc.Warnings.Count, "the composite warnings are unaffected.");
+            Assert.AreEqual(0, doc.Errors.Count, "a well-formed style adds no errors.");
         }
 
         [Test]
@@ -2380,6 +2397,20 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(ok, "a data-driven text-font has no feature at the per-layer evaluation site");
             CollectionAssert.AreEqual(new[] { "Open Sans Regular", "Arial Unicode MS Regular" }, degraded,
                 "TryEvaluate must degrade to the spec default stack, not the literal tokens [\"get\",\"fontProp\"]");
+
+            // An all-string array that parses to a non-array constant is malformed, not a font list: the layer
+            // keeps the default stack and the style gains one error, instead of the parse throwing.
+            foreach (string malformed in new[] { "['literal','Open Sans']", "['upcase','Noto Sans']", "['concat','a','b']" })
+            {
+                StyleDocument doc = Parse(@"{ 'version':8, 'layers':[
+                    { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                        'text-font':" + malformed + @" } } ] }");
+                var layer = (SymbolStyle.StyleLayer)doc.Layers[0];
+                CollectionAssert.AreEqual(new[] { "Open Sans Regular", "Arial Unicode MS Regular" },
+                    layer.Layout.TextFont.Evaluate(0.0), malformed);
+                Assert.AreEqual(1, doc.Errors.Count, malformed + ": " + string.Join(" | ", doc.Errors));
+                StringAssert.Contains("layer 'a' layout 'text-font'", doc.Errors[0]);
+            }
         }
 
         [Test]
@@ -3163,33 +3194,43 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(ExpressionKind.Zoom, light.Color.Kind);
         }
 
-        /// <summary>Light.color and Light.intensity are both expression-backed, each behind its own guard
-        /// call, so an invalid value fails at eager parse rather than deferring to an apply-time throw or a
-        /// default fallback.</summary>
+        /// <summary>Light.color and Light.intensity are both expression-backed, each read on its own, so an
+        /// invalid value takes the spec default and adds one error naming the property.</summary>
         [Test]
-        // Unlike position, color is expression-backed: a bad value throws at eager parse, like any other
-        // paint color, instead of falling back to the default.
-        [TestCase("\"color\":\"notacolor\"", TestName = "Light_InvalidValue_FailsParse(Color_Malformed)")]
+        // Unlike position, color is expression-backed: a bad value falls back with an error, like any other
+        // paint color.
+        [TestCase("\"color\":\"notacolor\"", "color", TestName = "Light_InvalidValue_FallsBackWithError(Color_Malformed)")]
         // A legacy identity function on a feature property is data-driven (Feature kind): SunLight has no
-        // feature to evaluate against, so the parse must fail rather than defer to a throw at apply.
-        [TestCase("\"color\":{\"type\":\"identity\",\"property\":\"c\"}", TestName = "Light_InvalidValue_FailsParse(Color_LegacyPropertyFunction)")]
+        // feature to evaluate against, so the value falls back rather than deferring to a throw at apply.
+        [TestCase("\"color\":{\"type\":\"identity\",\"property\":\"c\"}", "color", TestName = "Light_InvalidValue_FallsBackWithError(Color_LegacyPropertyFunction)")]
         // A modern ["get",...] color is data-driven too, and the guard covers it the same as identity.
-        [TestCase("\"color\":[\"get\",\"c\"]", TestName = "Light_InvalidValue_FailsParse(Color_ModernGet)")]
+        [TestCase("\"color\":[\"get\",\"c\"]", "color", TestName = "Light_InvalidValue_FallsBackWithError(Color_ModernGet)")]
         // Intensity gets its own guard call, independent of color's.
-        [TestCase("\"intensity\":[\"get\",\"i\"]", TestName = "Light_InvalidValue_FailsParse(DataDrivenIntensity)")]
-        public void Light_InvalidValue_FailsParse(string lightProperty)
+        [TestCase("\"intensity\":[\"get\",\"i\"]", "intensity", TestName = "Light_InvalidValue_FallsBackWithError(DataDrivenIntensity)")]
+        public void Light_InvalidValue_FallsBackWithError(string lightProperty, string key)
         {
             var root = Root($"{{\"light\":{{{lightProperty}}}}}");
-            Assert.Throws<ExpressionEvaluationException>(() => StyleLight.Parse(root.Get("light")));
+            var light = StyleLight.Parse(root.Get("light"));
+
+            Assert.AreEqual(1, light.Errors.Count, string.Join(" | ", light.Errors));
+            StringAssert.Contains($"light '{key}'", light.Errors[0]);
+            StringAssert.Contains("default", light.Errors[0]);
+            Assert.AreEqual(ExpressionKind.Constant, (key == "color" ? light.Color.Kind : light.Intensity.Kind));
+            if (key == "color") Assert.AreEqual(new Color(1.0, 1.0, 1.0, 1.0), light.Color.Evaluate(0.0));
+            else Assert.AreEqual(0.5f, light.Intensity.Evaluate(0.0));
         }
 
         [Test]
-        public void Sky_LegacyPropertyFunctionFogColor_FailsParse()
+        public void Sky_LegacyPropertyFunctionFogColor_FallsBackWithError()
         {
-            // SkyGradient/DistanceHaze evaluate sky colors with no feature — a data-driven value must fail
-            // the parse, the same guard as light.color.
+            // SkyGradient/DistanceHaze evaluate sky colors with no feature — a data-driven value takes the
+            // default and adds an error, the same guard as light.color.
             var root = Root("{\"sky\":{\"fog-color\":{\"type\":\"identity\",\"property\":\"c\"}}}");
-            Assert.Throws<ExpressionEvaluationException>(() => StyleSky.Parse(root.Get("sky")));
+            var sky = StyleSky.Parse(root.Get("sky"));
+
+            Assert.AreEqual(1, sky.Errors.Count, string.Join(" | ", sky.Errors));
+            StringAssert.Contains("sky 'fog-color'", sky.Errors[0]);
+            Assert.AreEqual(new Color(1.0, 1.0, 1.0, 1.0), sky.FogColor.Evaluate(0.0));
         }
 
         // ── sky: defaults ─────────────────────────────────────────────────────────

@@ -3271,13 +3271,15 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>An inline vector `tiles[]` source with one fill layer, plus whatever extra source keys
-        /// <paramref name="extraSourceKeys"/> supplies (e.g. <c>, "scheme": "tms"</c>).</summary>
-        private static StyleDocument VectorStyle(string extraSourceKeys = "") => StyleParser.Parse($@"{{
+        /// <paramref name="extraSourceKeys"/> supplies (e.g. <c>, "scheme": "tms"</c>) and
+        /// <paramref name="extraPaintKeys"/> adds to its paint.</summary>
+        private static StyleDocument VectorStyle(string extraSourceKeys = "", string extraPaintKeys = "")
+            => StyleParser.Parse($@"{{
             ""version"": 8,
             ""sources"": {{ ""v"": {{ ""type"": ""vector"",
                 ""tiles"": [""https://example.com/{{z}}/{{x}}/{{y}}.pbf""] {extraSourceKeys} }} }},
             ""layers"": [ {{ ""id"": ""v-fill"", ""type"": ""fill"", ""source"": ""v"", ""source-layer"": ""x"",
-                ""paint"": {{ ""fill-color"": ""#ff0000"" }} }} ]
+                ""paint"": {{ ""fill-color"": ""#ff0000"" {extraPaintKeys} }} }} ]
         }}");
 
         /// <summary>A `url`-only vector source, resolved through a TileJSON the test serves via
@@ -3540,7 +3542,10 @@ namespace MapRenderer.Tests.Tiles
                 view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent(); // never a real network fetch
 
                 LogAssert.Expect(LogType.Warning, new Regex("malformed bounds"));
-                SpinToCompleted(view.SetStyle(VectorStyle(boundsJson), "malformed"));
+                // MapView.SetStyle logs each StyleDocument error: a malformed paint value names layer and
+                // property, and says its default is used.
+                LogAssert.Expect(LogType.Error, new Regex("layer 'v-fill' paint 'fill-opacity'.*default"));
+                SpinToCompleted(view.SetStyle(VectorStyle(boundsJson, @", ""fill-opacity"": ""x"""), "malformed"));
                 PumpUntilSettled(view);
 
                 var loaded = new List<TileId>();

@@ -274,8 +274,8 @@ namespace MapRenderer.Unity.Rendering.Map
             StyleDocument style;
             try
             {
-                // Expressions parse eagerly, so a malformed one throws here, before the other overload commits
-                // anything. Returning without calling it leaves the previous style fully live.
+                // Malformed JSON throws here, before the other overload commits anything. A malformed
+                // expression does not: its property takes the default and lands in StyleDocument.Errors.
                 style = StyleParser.Parse(json, _config.FillAntialiasing);
             }
             catch (Exception ex)
@@ -298,6 +298,7 @@ namespace MapRenderer.Unity.Rendering.Map
             var specs = await BuildSourceSpecs(style, ct);
             ct.ThrowIfCancellationRequested(); // last safe abort — nothing mutated yet (old style stays intact)
             foreach (string warning in style.Warnings) Debug.LogWarning($"[MapView.SetStyle] {warning}");
+            foreach (string error in style.Errors) Debug.LogError($"[MapView.SetStyle] {error}");
 
             // TOCTOU: _config.MaterialSet is live-mutable, so capture it once and validate that same reference;
             // no await separates validation from Layers.Build. Across style loads the token's numbering fold guards.
