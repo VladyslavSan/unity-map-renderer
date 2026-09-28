@@ -307,8 +307,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "the same icon reprojected parent→child lands in the same identity cell");
         }
 
-        // ── (c) text parity: two text keys (IconImage explicitly null) are equal + hash equal — the guard-skip
-        //    fold must not perturb the text-only path. ──
+        // ── (c) text parity: two text keys (IconImage explicitly null) are equal + hash equal, and the hash
+        //    is a fixed value — string.GetHashCode is randomised per process. ──
         [Test]
         public void TextParity_ExplicitNullIconImage_EqualsAndHashesSame()
         {
@@ -318,6 +318,7 @@ namespace MapRenderer.Tests.Text.Placement
             var k2 = CrossTileSymbolKey.For(a, 0, "Paris", null, q);
             Assert.AreEqual(k1, k2);
             Assert.AreEqual(k1.GetHashCode(), k2.GetHashCode());
+            Assert.AreEqual(-203834735, k1.GetHashCode(), "FNV-1a text fold: the same in every process.");
         }
 
     }

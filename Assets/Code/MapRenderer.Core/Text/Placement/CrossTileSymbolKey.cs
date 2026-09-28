@@ -26,9 +26,7 @@ namespace MapRenderer.Core.Text.Placement
         public readonly int LayerId;
         public readonly string Text;
 
-        /// <summary>The resolved sprite name — the icon's cross-tile identity. Null for a text symbol, whose
-        /// hash/equality must not change: <see cref="GetHashCode"/> skips the fold rather than folding
-        /// <c>?? 0</c>.</summary>
+        /// <summary>The resolved sprite name — the icon's cross-tile identity. Null for a text symbol.</summary>
         public readonly string IconImage;
 
         public CrossTileSymbolKey(long gridX, long gridZ, long gridY, int layerId, string text, string iconImage)
@@ -76,6 +74,17 @@ namespace MapRenderer.Core.Text.Placement
 
         public override bool Equals(object obj) => obj is CrossTileSymbolKey o && Equals(o);
 
+        /// <summary>FNV-1a over the chars. Unlike <c>string.GetHashCode</c>, the value is the same in every process.</summary>
+        private static int StableHash(string value)
+        {
+            unchecked
+            {
+                uint h = 2166136261u;
+                for (int i = 0; i < value.Length; i++) h = (h ^ value[i]) * 16777619u;
+                return (int)h;
+            }
+        }
+
         public override int GetHashCode()
         {
             unchecked
@@ -85,10 +94,8 @@ namespace MapRenderer.Core.Text.Placement
                 h = h * 31 + GridZ.GetHashCode();
                 h = h * 31 + GridY.GetHashCode();
                 h = h * 31 + LayerId;
-                h = h * 31 + (Text?.GetHashCode() ?? 0);
-                // Guard-skip fold: only fold IconImage when non-null, so a text key (IconImage always null)
-                // keeps its hash — an unconditional `?? 0` fold would change every text hash.
-                if (IconImage != null) h = h * 31 + IconImage.GetHashCode();
+                h = h * 31 + (Text == null ? 0 : StableHash(Text));
+                h = h * 31 + (IconImage == null ? 0 : StableHash(IconImage));
                 return h;
             }
         }
