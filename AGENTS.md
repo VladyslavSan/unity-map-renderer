@@ -16,7 +16,7 @@ workflow) — check it before debugging a shader/material/test-harness surprise.
 `.Run()`/`.Schedule()` discriminator, and the disposal/cancellation invariant for in-flight `JobHandle`s);
 it partly supersedes `docs/tile-pipeline-design.md`'s build seam — read "What this design owns"
 for which parts.
-Proprietary / all rights reserved.
+Dual-licensed: PolyForm Noncommercial 1.0.0 (`LICENSE.md`) for non-commercial use, a separate commercial licence otherwise.
 
 `docs/*-design.md` state **the design and the principles that govern it** — the invariants a mechanism
 must hold, the contracts between parts, and the reasoning that makes the current shape the right one
@@ -232,8 +232,8 @@ these were learned the expensive way:
   settled a decision by citing MapLibre's `symbol_layout.ts` — including a verbatim source comment — and
   instructed the developer to paste that comment into `docs/`. The decision was independently derivable and
   survived unchanged; the citation was pure contamination risk. Caught before any developer ran, but the
-  failure is asymmetric: a bad design is reverted, foreign source text committed to a proprietary repo is
-  not.
+  failure is asymmetric: a bad design is reverted, foreign source text committed to a repo we license
+  commercially is not.
 - **Escalation beats invention. If a decision genuinely needs the maintainer, STOP, say so, and write down
   the options with their consequences.** A role has no channel to the human, so "decide it or leave it
   open" is a false choice — and a brief that forbids leaving it open (rightly: a spec must not be committed

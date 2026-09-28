@@ -3,7 +3,7 @@
 How the map's instantaneous levels (tile cover, prepared cache, symbol store, symbol placement) reach a reader:
 who owns them, how a reader reaches them, and what they cost when nobody looks. Companions:
 `docs/symbol-label-perf-design.md` (the profiling work these levels serve) and `docs/frame-timeline.md` (the
-marker taxonomy telemetry sits beside). Proprietary / all rights reserved.
+marker taxonomy telemetry sits beside).
 
 ---
 

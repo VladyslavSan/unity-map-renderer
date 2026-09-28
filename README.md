@@ -37,4 +37,5 @@ and filters) with the status of each item in this renderer.
 See `AGENTS.md` for the full recipe (exit codes, licensing/lockfile caveats, single-platform runs).
 
 ## License
-Proprietary — all rights reserved. Not open source.
+Dual-licensed. Non-commercial use is free under the PolyForm Noncommercial License 1.0.0 (`LICENSE.md`).
+Commercial use needs a separate commercial licence from the copyright holder.

@@ -1,7 +1,8 @@
 THIRD-PARTY NOTICES
 ===================
 
-unity-map-renderer is proprietary — all rights reserved. The items below are third-party
+unity-map-renderer is dual-licensed: PolyForm Noncommercial 1.0.0 (LICENSE.md) for non-commercial use,
+a separate commercial licence otherwise. The items below are third-party
 materials included with or referenced by this project, with their respective licenses.
 
 CODE

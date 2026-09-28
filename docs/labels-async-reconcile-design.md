@@ -4,7 +4,7 @@ The cross-tile dedup — which copy of a point symbol wins when several loaded t
 that changes only on a tile event. It is recomputed off the main thread when a tile event occurs, not every
 frame. Companions: [`labels-and-symbols-design.md`](labels-and-symbols-design.md) (the pipeline) and
 [`symbol-label-perf-design.md`](symbol-label-perf-design.md), which owns the per-frame label cost downstream
-of this reconcile. Proprietary / all rights reserved.
+of this reconcile.
 
 ---
 
