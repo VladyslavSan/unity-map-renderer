@@ -18,7 +18,8 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// The total placement order for <see cref="SymbolCandidate"/>s: LOWER <see cref="SymbolCandidate.SortKey"/>
-        /// first (MapLibre priority), then the incumbency bias, then LOWER
+        /// first (MapLibre priority), then the layer drawn LATER (higher <see cref="SymbolCandidate.DeclaredOrder"/>),
+        /// then the incumbency bias, then LOWER
         /// <see cref="SymbolCandidate.FeatureIndex"/>, then LOWER <see cref="SymbolCandidate.TileKey"/>, then
         /// LOWER <see cref="SymbolCandidate.FadeId"/>.
         /// </summary>
@@ -26,7 +27,10 @@ namespace MapRenderer.Core.Text.Placement
         {
             if (a.SortKey < b.SortKey) return -1;
             if (a.SortKey > b.SortKey) return 1;
-            // Hysteresis below SortKey: at equal sort key an incumbent sorts first, so the arbitrary tiebreak
+            // Declared order sits above incumbency: it is a style-level rule, so a restyle that reorders two
+            // layers must change the outcome. Two labels of one layer share it, so their anti-flicker holds.
+            if (a.DeclaredOrder != b.DeclaredOrder) return a.DeclaredOrder > b.DeclaredOrder ? -1 : 1;
+            // Hysteresis below DeclaredOrder: at equal sort key an incumbent sorts first, so the arbitrary tiebreak
             // below cannot flicker; incumbency only raises priority, so the survivor set is a fixed point.
             if (a.WasPlacedLastFrame != b.WasPlacedLastFrame) return a.WasPlacedLastFrame ? -1 : 1;
             if (a.FeatureIndex != b.FeatureIndex) return a.FeatureIndex < b.FeatureIndex ? -1 : 1;

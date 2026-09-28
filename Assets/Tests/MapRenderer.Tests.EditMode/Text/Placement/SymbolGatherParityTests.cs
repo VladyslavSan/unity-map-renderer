@@ -1269,10 +1269,11 @@ namespace MapRenderer.Tests.Text.Placement
             return quads;
         }
 
-        private static void AddPoint(SymbolTileBuffer buffer, double3 anchor, float sortKey, string text, int feature, List<SymbolQuad> quads = null)
+        private static void AddPoint(SymbolTileBuffer buffer, double3 anchor, float sortKey, string text, int feature,
+            List<SymbolQuad> quads = null, int materialIndex = 0)
             => TestSymbolTileBuffer.AddPoint(buffer, anchor, quads ?? OneQuad(), float2.zero, new float2(18f, 18f),
                 paint: SymbolPaint.Default, textSizePx: 24f, paddingPx: 2f, sortKey: sortKey, text: text,
-                featureIndex: feature, tileKey: 0L);
+                featureIndex: feature, tileKey: 0L, materialIndex: materialIndex);
 
         // Point symbols draw through the WORLD path: the fade opacity lives on the world slot's Opacity stream, not
         // on system.Mesh's vertex-colour alpha. tileKey 0L is the key every symbol in this file uses.
@@ -1693,6 +1694,38 @@ namespace MapRenderer.Tests.Text.Placement
             fresh.System.TickSymbols(in fresh.Frame, controlBuffer, fresh.Atlas, fresh.Projection);
             Assert.AreEqual(1, fresh.System.LastQuadCount,
                 "control: with no prior incumbent, FeatureIndex alone decides — X wins, proving tick 2's outcome above was incumbency, not a fixed bias");
+
+            // Declared order sits above incumbency: X (slot 0) and Y (slot 1) tie on SortKey, and the layer
+            // declared LATER wins. Swapping the declared order flips the winner despite Y's incumbency.
+            using var layered = new Harness();
+            var twoLayers = new SymbolTileBuffer();
+            AddPoint(twoLayers, layered.Origin, sortKey: 0f, text: "A", feature: 0, quads: NQuads(1), materialIndex: 0);
+            AddPoint(twoLayers, layered.Origin, sortKey: 0f, text: "B", feature: 1, quads: NQuads(2), materialIndex: 1);
+            var settings = MapMaterialSetTestUtil.Load();
+            SymbolRenderLayer LayerAt(string id, int drawIndex) => SymbolRenderLayer.Create(
+                (Symbol.StyleLayer)StyleParser.Parse(@"{ ""version"": 8, ""layers"": [ { ""id"": ""ID"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"", ""layout"": { ""text-field"": ""{NAME}"" } } ] }".Replace("ID", id)).Layers[0],
+                settings, 5.0, drawIndex);
+            SymbolRenderLayer layer0 = LayerAt("l0", 0);
+            SymbolRenderLayer layer1 = LayerAt("l1", 1);
+            try
+            {
+                var layers = new List<SymbolRenderLayer> { layer0, layer1 };
+                layered.System.TickSymbols(in layered.Frame, twoLayers, layered.Atlas, layered.Projection, symbolLayers: layers);
+                layered.System.TickSymbols(in layered.Frame, twoLayers, layered.Atlas, layered.Projection, symbolLayers: layers);
+                Assert.AreEqual(2, layered.System.LastQuadCount, "the later-declared layer's label Y wins, over the lower FeatureIndex");
+
+                layer0.SetDrawOrder(1);
+                layer1.SetDrawOrder(0);
+                layered.System.TickSymbols(in layered.Frame, twoLayers, layered.Atlas, layered.Projection, symbolLayers: layers);
+                layered.System.TickSymbols(in layered.Frame, twoLayers, layered.Atlas, layered.Projection, symbolLayers: layers);
+                Assert.AreEqual(1, layered.System.LastQuadCount,
+                    "after the swap X's layer is declared later, so X wins even though Y is the incumbent");
+            }
+            finally
+            {
+                layer0.Dispose();
+                layer1.Dispose();
+            }
         }
     }
 

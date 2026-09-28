@@ -62,10 +62,12 @@ namespace MapRenderer.Unity.Jobs.Symbols
         // This frame's metres per LOGICAL screen pixel, already recombined by SymbolPlacementSystem.Update
         // (MetresPerDevicePixel × DevicePixelRatio). Patched into each curved record below.
         public float   MetresPerLogicalPixel;
-        // Per-slot text-translate, patched into each TEXT record below. Read below SlotTranslateCount
-        // only (see CullJob.SlotVisible).
+        // This frame's live slot count — the exclusive upper bound on the per-slot reads below (see CullJob.SlotCount).
+        public int     SlotCount;
+        // Per-slot text-translate, patched into each TEXT record below.
         public NativeArray<float2> SlotTranslate;
-        public int     SlotTranslateCount;
+        // Per-slot declared layer order, stamped onto each staged candidate.
+        [ReadOnly] public NativeArray<int> SlotDeclaredOrder;
         // This frame's view transform, which projects render-space points for the map-pitched collision box.
         // StageCurved only; a default value selects the screen-space box (SymbolViewTransform.IsUsable).
         public SymbolViewTransform View;
@@ -130,6 +132,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
 
                     ReadOnlySpan<SymbolQuad> quadSpan = Quads.AsSpan().Slice(PointQuadStart[d], PointQuadCount[d]);
 
+                    int firstCandidate = candidateCount;
+
                     // An owner whose rider is the NEXT point record (the reconciler emits them adjacently and the
                     // gather keeps winner order) stages as ONE pair. A broken adjacency degrades to a lone badge.
                     if (s.PairRole == SymbolPairRole.Owner && d + 1 < Points.Length && Points[d + 1].PairRole == SymbolPairRole.Rider)
@@ -152,6 +156,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
                         candidateCount += SymbolStagingMath.StagePoint(in s, quadSpan, Bearing, Viewport, candidateCount,
                             boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
                     }
+                    StampDeclaredOrder(cands, firstCandidate, candidateCount, s.Slot);
                 }
                 else
                 {
@@ -172,9 +177,11 @@ namespace MapRenderer.Unity.Jobs.Symbols
                     ReadOnlySpan<long> fadeIds   = AnchorFadeIds.AsSpan().Slice(fadeStart, anchorCount + 1);
                     ReadOnlySpan<byte> wasPlaced = AnchorWasPlaced.AsSpan().Slice(fadeStart, anchorCount + 1);
 
+                    int firstCurvedCandidate = candidateCount;
                     candidateCount += SymbolStagingMath.StageCurved(in s, screen, depth, valid, world, worldUps, glyphs, anchors,
                         fadeIds, wasPlaced, path.Slice(0, wc), cum.Slice(0, wc), Bearing, in View, candidateCount,
                         boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
+                    StampDeclaredOrder(cands, firstCurvedCandidate, candidateCount, s.Slot);
                 }
             }
 
@@ -184,12 +191,20 @@ namespace MapRenderer.Unity.Jobs.Symbols
             OutCounts[3] = emitCount;
         }
 
+        /// <summary>Writes this frame's declared layer order for <paramref name="slot"/> into candidates
+        /// <c>[first, end)</c>; the slot itself when it falls outside this frame's live slots.</summary>
+        private void StampDeclaredOrder(Span<SymbolCandidate> cands, int first, int end, int slot)
+        {
+            int order = (slot >= 0 && slot < SlotCount) ? SlotDeclaredOrder[slot] : slot;
+            for (int i = first; i < end; i++) cands[i].DeclaredOrder = order;
+        }
+
         /// <summary>This frame's <c>text-translate</c> for one record: zero for an icon (the spec property
         /// is text-only), and zero when <paramref name="slot"/> falls outside this frame's live slots.</summary>
         private float2 TranslateForSlot(int slot, SymbolKind atlasKind)
         {
             if (atlasKind != SymbolKind.Text) return float2.zero;
-            return (slot >= 0 && slot < SlotTranslateCount) ? SlotTranslate[slot] : float2.zero;
+            return (slot >= 0 && slot < SlotCount) ? SlotTranslate[slot] : float2.zero;
         }
     }
 }

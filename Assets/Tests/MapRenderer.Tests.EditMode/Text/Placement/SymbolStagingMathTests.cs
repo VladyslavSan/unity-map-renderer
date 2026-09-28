@@ -11,7 +11,7 @@
 //   PolylineArcMathWorldSampleTests     — SegmentAt (the resumable segment search factored out of At) and SampleWorld (the double3 world-polyline sampler at an already-resolved (seg,t)) — the seam SymbolStagingMath.StageCurvedAnchor uses to bake a per-glyph world…
 //   SymbolBearingTests                  — the alignment→billboard-rotation mapping.
 //   SymbolCandidateRangeTilingTests     — Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast dotnet core-tests project.
-//   SymbolCollisionTests                — The one direct tooth for ComparePlacementOrder: the placement order key is (SortKey, WasPlacedLastFrame, FeatureIndex, TileKey, FadeId), each term breaking a tie left by the one before it.
+//   SymbolCollisionTests                — The one direct tooth for ComparePlacementOrder: the placement order key is (SortKey, DeclaredOrder descending, WasPlacedLastFrame, FeatureIndex, TileKey, FadeId), each term breaking a tie left by the one before it.
 //   SymbolFarPlaneCullTests             — The Core view-depth math for the pre-projection far-plane symbol cull: a symbol whose depth along the camera's forward axis exceeds the cull distance is culled; a non-positive distance disables it; the per-frame rebase rotation is applied to the anchor…
 //   SymbolPairingTests                  — Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast dotnet core-tests project.
 //   SymbolScreenProjectionTests         — TryProjectAnchor golden + culling, over a hand-built view-projection matrix chosen so every value is hand-computable (no live camera needed — the EditMode-only SymbolScreenProjectionUnityTests cross-checks against a REAL…
@@ -990,7 +990,7 @@ namespace MapRenderer.Tests.Text.Placement
 
     /// <summary>
     /// The one direct tooth for <see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate,in SymbolCandidate)"/>:
-    /// the placement order key is (SortKey, WasPlacedLastFrame, FeatureIndex, TileKey, FadeId), each term
+    /// the placement order key is (SortKey, DeclaredOrder descending, WasPlacedLastFrame, FeatureIndex, TileKey, FadeId), each term
     /// breaking a tie left by the one before it. The other collision properties need the job runtime and
     /// live in <c>CollisionJobPlacementTests</c> and <c>CollisionGridContractTests</c>.
     /// </summary>
@@ -998,11 +998,11 @@ namespace MapRenderer.Tests.Text.Placement
     public class SymbolCollisionTests
     {
         private static SymbolCandidate Candidate(float sortKey, bool wasPlacedLastFrame, int featureIndex,
-            long tileKey, long fadeId)
+            long tileKey, long fadeId, int declaredOrder = 0)
             => new SymbolCandidate
             {
                 SortKey = sortKey, WasPlacedLastFrame = wasPlacedLastFrame, FeatureIndex = featureIndex,
-                TileKey = tileKey, FadeId = fadeId,
+                TileKey = tileKey, FadeId = fadeId, DeclaredOrder = declaredOrder,
             };
 
         [Test]
@@ -1013,6 +1013,17 @@ namespace MapRenderer.Tests.Text.Placement
                 Candidate(sortKey: 1f, wasPlacedLastFrame: false, featureIndex: 9, tileKey: 9, fadeId: 9),
                 Candidate(sortKey: 2f, wasPlacedLastFrame: true, featureIndex: 0, tileKey: 0, fadeId: 0)), 0,
                 "a lower sort key must order first regardless of every tiebreak field");
+
+            // Equal sort key -> the layer declared LATER (higher DeclaredOrder) orders first, ahead of
+            // incumbency; a set sort key still beats it.
+            Assert.Less(SymbolCollision.ComparePlacementOrder(
+                Candidate(sortKey: 5f, wasPlacedLastFrame: false, featureIndex: 9, tileKey: 9, fadeId: 9, declaredOrder: 2),
+                Candidate(sortKey: 5f, wasPlacedLastFrame: true, featureIndex: 0, tileKey: 0, fadeId: 0, declaredOrder: 1)), 0,
+                "equal sort keys order the later-declared layer first regardless of incumbency and later terms");
+            Assert.Less(SymbolCollision.ComparePlacementOrder(
+                Candidate(sortKey: 1f, wasPlacedLastFrame: false, featureIndex: 0, tileKey: 0, fadeId: 0, declaredOrder: 0),
+                Candidate(sortKey: 2f, wasPlacedLastFrame: false, featureIndex: 0, tileKey: 0, fadeId: 0, declaredOrder: 9)), 0,
+                "a lower sort key beats a later declared layer");
 
             // Equal sort key -> incumbency (hysteresis) breaks the tie.
             Assert.Less(SymbolCollision.ComparePlacementOrder(

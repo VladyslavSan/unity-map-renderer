@@ -777,9 +777,10 @@ namespace MapRenderer.Tests.Text.Placement
             // The per-half drop carry. A curved symbol never reads it, but every NativeContainer job field must
             // be constructed at schedule time, so it is allocated empty.
             var droppedHalves = new NativeHashMap<long, byte>(1, alloc);
-            // Per-slot text-translate: this harness never sets it, so SlotTranslateCount stays 0 and
+            // Per-slot text-translate: this harness never sets it, so SlotCount stays 0 and
             // TranslateForSlot always reads zero — same NativeContainer-must-be-constructed reasoning as above.
             var slotTranslate = new NativeArray<float2>(0, alloc);
+            var slotDeclaredOrder = new NativeArray<int>(0, alloc);
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<SymbolBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
             var oCands = new NativeArray<SymbolCandidate>(anchors.Length + 1, alloc); var oEmit = new NativeArray<CandidateEmit>(anchors.Length + 1, alloc);
@@ -795,7 +796,7 @@ namespace MapRenderer.Tests.Text.Placement
                 PointOffset = pointOffset, Screen = nScreen, Depth = nDepth, Valid = nValid, WorldPointsRender = nWorld,
                 WorldUpsRender = nWorldUps,
                 AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), DroppedHalves = droppedHalves.AsReadOnly(),
-                SlotTranslate = slotTranslate, SlotTranslateCount = 0,
+                SlotTranslate = slotTranslate, SlotCount = 0, SlotDeclaredOrder = slotDeclaredOrder,
                 Bearing = bearing, Viewport = new double2(1920, 1080), View = view,
                 // StageJob overwrites s.MetresPerLogicalPixel from this field, while the managed arm reads it off
                 // `s`; set only on `s`, the arms take different branches. Default 0 serves the bend cases.
@@ -812,7 +813,7 @@ namespace MapRenderer.Tests.Text.Placement
             kinds.Dispose(); detail.Dispose(); worldCount.Dispose(); points.Dispose(); pqs.Dispose(); pqc.Dispose();
             curveds.Dispose(); cgs.Dispose(); cgc.Dispose(); cas.Dispose(); cac.Dispose(); cafs.Dispose();
             nQuads.Dispose(); nGlyphs.Dispose(); nAnchors.Dispose(); nFade.Dispose();
-            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); nWorldUps.Dispose(); awp.Dispose(); placed.Dispose(); droppedHalves.Dispose(); slotTranslate.Dispose();
+            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); nWorldUps.Dispose(); awp.Dispose(); placed.Dispose(); droppedHalves.Dispose(); slotTranslate.Dispose(); slotDeclaredOrder.Dispose();
             path.Dispose(); cum.Dispose(); oBoxes.Dispose(); oQuads.Dispose(); oCands.Dispose(); oEmit.Dispose(); counts.Dispose();
             return r;
         }

@@ -160,6 +160,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// here off the live style layer's paint, never baked onto <see cref="ShapedSymbol"/>.
         /// <see cref="StageJob"/> patches it into each TEXT record.</summary>
         private NativeList<float2> _slotTranslateThisFrame; // not readonly — allocated in the ctor
+        private NativeList<int> _slotDeclaredOrderThisFrame; // not readonly — allocated in the ctor
 
         /// <summary>Per-symbol cull verdict from <c>GatherSymbolPoints</c>' Cull pass, consumed by its Compact pass.</summary>
         private NativeList<GatherTrigger> _gatherTrigger; // not readonly — allocated in the ctor
@@ -407,6 +408,7 @@ namespace MapRenderer.Unity.Text.Placement
             _gatherTrigger = new NativeList<GatherTrigger>(Allocator.Persistent);
             _slotVisibleThisFrame = new NativeList<bool>(Allocator.Persistent);
             _slotTranslateThisFrame = new NativeList<float2>(Allocator.Persistent);
+            _slotDeclaredOrderThisFrame = new NativeList<int>(Allocator.Persistent);
             _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, Allocator.Persistent);
             // _debugFadeIdSeen isn't allocated here — see its field doc; AssertFadeIdsUnique allocates it lazily.
             _stageBoxes = new NativeList<SymbolBox>(Allocator.Persistent);
@@ -611,10 +613,15 @@ namespace MapRenderer.Unity.Text.Placement
                 _slotVisibleThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
             if (_slotTranslateThisFrame.Length < slotCount)
                 _slotTranslateThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
+            if (_slotDeclaredOrderThisFrame.Length < slotCount)
+                _slotDeclaredOrderThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
             for (int s = 0; s < slotCount; s++)
             {
                 var sl = symbolLayers[s]?.StyleLayer;
                 _slotVisibleThisFrame[s] = sl == null || sl.IsVisibleAtZoom(zoom);
+
+                // Declared order is read live, so an in-place reorder (slots never move) changes placement.
+                _slotDeclaredOrderThisFrame[s] = symbolLayers[s]?.DeclaredOrder ?? s; // null layer: test-only
 
                 // text-translate is per-layer: read straight off the live paint every frame, not baked
                 // onto a symbol.
@@ -1076,7 +1083,8 @@ namespace MapRenderer.Unity.Text.Placement
         {
             new StageJob
             {
-                SlotTranslate = _slotTranslateThisFrame.AsArray(), SlotTranslateCount = slotCount,
+                SlotTranslate = _slotTranslateThisFrame.AsArray(), SlotCount = slotCount,
+                SlotDeclaredOrder = _slotDeclaredOrderThisFrame.AsArray(),
                 Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(), WorldCount = _mirrorWorldCount.AsArray(), Count = _mirrorCount,
                 Points = _mirrorPoints.AsArray(), PointQuadStart = _mirrorPointQuadStart.AsArray(), PointQuadCount = _mirrorPointQuadCount.AsArray(),
                 Curveds = _mirrorCurveds.AsArray(),
@@ -1248,6 +1256,7 @@ namespace MapRenderer.Unity.Text.Placement
             _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict scratch
             _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, CullJob input
             _slotTranslateThisFrame.Dispose(); // per-slot text-translate lookup, StageJob input
+            _slotDeclaredOrderThisFrame.Dispose(); // per-slot declared layer order, StageJob input
             _gatherCulledCounts.Dispose(); // per-trigger culled tally, CompactJob output bridge
             // AssertFadeIdsUnique's scratch set may be a default (never-created) value here; Dispose() no-ops on that.
             _debugFadeIdSeen.Dispose();

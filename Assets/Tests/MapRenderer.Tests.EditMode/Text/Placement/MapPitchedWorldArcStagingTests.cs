@@ -304,13 +304,15 @@ namespace MapRenderer.Tests.Text.Placement
         private static (SymbolBox Box, SymbolCandidate Candidate) Box(
             float minX, float minY, float maxX, float maxY,
             float sortKey, int featureIndex, long tileKey = 0L,
-            bool allowOverlap = false, bool ignorePlacement = false)
+            bool allowOverlap = false, bool ignorePlacement = false, int declaredOrder = 0,
+            bool wasPlacedLastFrame = false)
             => (
                 new SymbolBox { Min = new float2(minX, minY), Max = new float2(maxX, maxY) },
                 new SymbolCandidate
                 {
                     SortKey = sortKey, FeatureIndex = featureIndex, TileKey = tileKey, SymbolIndex = featureIndex,
                     AllowOverlap = allowOverlap, IgnorePlacement = ignorePlacement,
+                    DeclaredOrder = declaredOrder, WasPlacedLastFrame = wasPlacedLastFrame,
                 });
 
         // Runs collision over a COPY (so the caller's array order is preserved across permutations) and
@@ -390,6 +392,16 @@ namespace MapRenderer.Tests.Text.Placement
             };
             CollectionAssert.AreEquivalent(new[] { 1, 9 }, Survivors(l1Wins),
                 "reversing the two overlapping labels' sort keys must flip which one survives");
+
+            // No sort key: the later-declared layer wins, even against an incumbent.
+            var swapped = new List<(SymbolBox Box, SymbolCandidate Candidate)>
+            {
+                Box(0, 0, 20, 20, sortKey: 0f, featureIndex: 0, declaredOrder: 1, wasPlacedLastFrame: true),
+                Box(5, 5, 25, 25, sortKey: 0f, featureIndex: 1, declaredOrder: 0),
+                control,
+            };
+            CollectionAssert.AreEquivalent(new[] { 0, 9 }, Survivors(swapped),
+                "swapping the two layers' declared order must flip which label survives");
         }
 
         [Test]

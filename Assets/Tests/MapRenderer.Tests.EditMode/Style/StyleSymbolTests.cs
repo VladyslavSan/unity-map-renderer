@@ -443,6 +443,27 @@ namespace MapRenderer.Tests.Style
             Assert.Less(queueC, queueSIcon, "c (declared first) must draw below s's icon.");
             Assert.Less(queueSIcon, queueSText, "the icon (Base) must draw below its OWN layer's text (Above).");
             Assert.Less(queueSText, queueA, "s's text (declared second) must draw below a (declared last).");
+
+            // Symbol collision priority reads DeclaredOrder, which follows the NEW order while the slot stays.
+            string TwoSymbols(string first, string second) => @"{
+    ""version"": 8, ""name"": ""T"",
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""FIRST"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""FIRST"", ""layout"": { ""text-field"": ""{NAME}"" } },
+        { ""id"": ""SECOND"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""SECOND"", ""layout"": { ""text-field"": ""{NAME}"" } }
+    ]
+}".Replace("FIRST", first).Replace("SECOND", second);
+            var symbolsOld = StyleParser.Parse(TwoSymbols("p", "q"));
+            var symbolsNew = StyleParser.Parse(TwoSymbols("q", "p"));
+            var symbolSet = Build(TwoSymbols("p", "q"));
+            var slot0 = (SymbolRenderLayer)symbolSet[0];
+            var slot1 = (SymbolRenderLayer)symbolSet[1];
+            Assert.AreEqual(0, slot0.DeclaredOrder);
+            Assert.AreEqual(1, slot1.DeclaredOrder);
+            Assert.IsTrue(symbolSet.TryRestyleInPlace(symbolsOld, symbolsNew, StyleTransition.Default, nowSeconds: 0.0));
+            Assert.AreSame(slot0, symbolSet[0], "the slot must not move on a reorder.");
+            Assert.AreEqual(1, slot0.DeclaredOrder, "p is declared second after the reorder.");
+            Assert.AreEqual(0, slot1.DeclaredOrder, "q is declared first after the reorder.");
         }
 
         // fill a(0), fill b(1), symbol s(2), fill c(3) -> (a, c): removes BOTH b and s. b is removed at a

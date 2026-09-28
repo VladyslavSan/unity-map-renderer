@@ -47,7 +47,12 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>`symbol-sort-key` — greedy placement order. LOWER is placed FIRST (MapLibre priority).</summary>
         public float SortKey;
 
-        /// <summary>Feature index within its tile — the first stable tiebreak when <see cref="SortKey"/>s are equal.</summary>
+        /// <summary>The owning layer's position in the style's declared order (monotone in its <c>layers</c> index), patched per frame by
+        /// <c>StageJob</c> from the live layer list. A HIGHER value is a layer drawn later, on top, and places
+        /// first at equal <see cref="SortKey"/>. Not the slot: a reorder moves this without moving the slot.</summary>
+        public int DeclaredOrder;
+
+        /// <summary>Feature index within its tile — the first tiebreak after incumbency.</summary>
         public int FeatureIndex;
 
         /// <summary>Owning tile id (opaque key) — the second stable tiebreak, guaranteeing a total order.</summary>

@@ -391,15 +391,21 @@ one-frame flip becomes a sub-perceptual alpha step rather than a visible pop.
 
 **A-5 — Collision fighting / placement hysteresis.** A hair of camera motion can flip which of two near-tied
 candidates wins the greedy collision, like z-fighting; a *slowly-moving* camera re-runs collision every frame
-and can oscillate a marginal pair. **Sticky placement:** at EQUAL sort key, a candidate placed last frame
+and can oscillate a marginal pair. **Sticky placement:** at equal sort key and layer, a candidate placed last frame
 (the incumbent, keyed by the A-3/A-4 identity) sorts first in `ComparePlacementOrder`; a newcomer with a
 higher-priority sort key still sorts first and wins, so incumbency never blocks a higher-priority label. This
 is the one place placement history feeds back into collision. Because incumbency only ever raises priority,
-last frame's survivor set is a one-step fixed point — provided the order is **total**. Its last key is
-`FadeId`: without it, a curved feature's repeated anchors share `(SortKey, FeatureIndex, TileKey)` and
+last frame's survivor set is a one-step fixed point within each `(SortKey, DeclaredOrder)` group — provided the
+order is **total**. Its last key is `FadeId`: without it, a curved feature's repeated anchors share `(SortKey, FeatureIndex, TileKey)` and
 compare equal, the unstable sort resolves the tie arbitrarily, and the incumbency feedback can drive a limit
 cycle even on a still camera. Together with the finite sort key (see "The per-frame placement loop"), this
 keeps `ComparePlacementOrder` a strict total order.
+
+**Declared order between layers.** At equal sort key, the symbol layer declared later in the style's `layers`
+array (drawn on top) places first, ahead of incumbency, so the label you see on top also wins the overlap. It is
+a style-level rule, so it outranks placement history; two labels of one layer share it, so their hysteresis is
+unchanged. Each candidate carries the layer's position in declared order, which `StageJob` stamps every frame from the live
+layer list. It is not the slot, because an in-place reorder moves the declared position and leaves the slot fixed.
 
 ## Track B — performance
 

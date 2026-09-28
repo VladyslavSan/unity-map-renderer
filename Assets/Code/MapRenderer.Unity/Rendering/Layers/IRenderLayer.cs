@@ -66,7 +66,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds);
 
         /// <summary>Stamps this layer's queue band from <paramref name="declaredOrder"/> — its position in
-        /// the CURRENT document's <c>layers</c> array, which may differ from <see cref="DrawIndex"/> (the
+        /// the CURRENT document's declared order (monotone in the <c>layers</c> index), which may differ from <see cref="DrawIndex"/> (the
         /// slot) after a partial-survival reorder. A no-op when <see cref="Material"/> is null (that slot's
         /// own base material is unconfigured).</summary>
         /// <param name="declaredOrder">This layer's index in the new document's declared layer order.</param>

@@ -43,6 +43,10 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <c>MapMaterialSet.Validate()</c> rejects, so only a set that skipped Validate reaches it.</summary>
         public Material WorldTextMaterial { get; }
 
+        /// <summary>This layer's position in the current document's declared order (monotone in its <c>layers</c> index). Unlike
+        /// <see cref="DrawIndex"/> (the slot) it moves on an in-place reorder; symbol collision reads it.</summary>
+        public int DeclaredOrder { get; private set; }
+
         /// <summary>The owned <c>Map/Symbol/IconWorld</c> clone of
         /// <c>MapMaterialSet.SymbolIconWorld</c>. <c>null</c> iff that base is unassigned (optional, warns);
         /// then world icons stay hidden. <see cref="RenderLayerSet.Build"/> never reads it, so
@@ -68,6 +72,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             WorldTextMaterial = worldTextMaterial;
             WorldIconMaterial = worldIconMaterial;
             DrawIndex         = drawIndex;
+            DeclaredOrder     = drawIndex;
             Applier           = applier;
         }
 
@@ -174,6 +179,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <param name="declaredOrder">This layer's index in the new document's declared layer order.</param>
         public void SetDrawOrder(int declaredOrder)
         {
+            DeclaredOrder = declaredOrder;
             if (WorldTextMaterial != null)
                 WorldTextMaterial.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, LayerSubSlot.Above);
             if (WorldIconMaterial != null)
