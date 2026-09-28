@@ -1295,8 +1295,8 @@ framebuffer and indistinguishable from background.
 and emits that colour at the resulting coverage. It has no halo width or blur uniform and no halo branch,
 because there is no halo concept — the fragment cannot tell the two runs apart and does not need to.
 
-`_HaloColor` is only the CONSTANT arm of `text-halo-color`'s two-carrier split, the mirror of `_TextColor`
-(see "…except one colour uniform, for the restyle ease").
+`_HaloColor` is only the uniform arm of `text-halo-color`'s two-carrier split (any kind that does not depend on
+the feature), the mirror of `_TextColor` (see "…except one colour uniform, for the restyle ease").
 
 **A halo is a second copy of the label's glyphs.** `WorldSymbolRenderer.Emit` writes each label's whole glyph
 run twice into the same mesh: the halo run first, carrying `text-halo-color` in the colour stream and
@@ -1318,18 +1318,19 @@ Decisions worth keeping:
   `PointStageInput`/`CurvedStageInput` → `CandidateEmit` → the vertex stream, as `text-color` does.
   *Rejected:* resolving the halo per layer to keep those three blittable structs untouched — it builds a
   second path for a value the extractor already computes. Consequence: a **data-driven** and a
-  zoom-expression `text-halo-*` both work, because both use the per-feature evaluation rather than a
-  style-load-zoom snapshot.
+  zoom-expression `text-halo-*` both work: a data-driven one from its per-feature evaluation, a Zoom
+  `text-halo-color` from the uniform at the live zoom (§ 8.1). Halo width and blur come from the build zoom.
 - **`text-halo-color` is `.linear` on the CPU for the stream carrier**, in
   `SymbolPlacementSystem.LinearHaloColor` — the sibling of `LinearColor`. `_HaloColor` is a Color-TYPED
   material property, which Unity converts on upload, so the uniform carrier must NOT be pre-converted;
   Unity does not convert a vertex stream, so on the stream carrier the conversion happens upstream. One
   rule per carrier (see the next section); same rendered colour either way. `SymbolHaloColorRenderTests` has
-  an arm per carrier and carries the reasoning in its header; without it a future reader finds one
-  rationale and "fixes" the other side to match.
+  an arm per carrier (the stream arm uses a Feature-kind halo) and carries the reasoning in its header;
+  without it a future reader finds one rationale and "fixes" the other side to match.
 - **Width and blur stay LOGICAL px all the way to the emit**, where they take the logical→device conversion
   together against the LIVE ratio. So a dpr change re-scales the halo on the next Update with no re-bake, no
-  change detection, and no frozen-zoom bookkeeping — `SymbolRenderLayer.ApplyZoom` has no halo work.
+  change detection, and no frozen-zoom bookkeeping — `SymbolRenderLayer.ApplyZoom` does no halo width or blur
+  work; it only drives the colour uniforms. Width and blur are read at the tile build zoom.
 - **The halo copy is the same quad**, not an inflated one. A halo wider than the glyph cell's SDF padding
   clips at the cell edge — as a one-fragment combine would too, so this is not a defect to chase.
 - **A haloless label pays nothing.** A zero `text-halo-width` or a transparent `text-halo-color` gates the
@@ -1343,9 +1344,10 @@ and `text-halo-color` are the two paint keys the shipped liberty → liberty-nig
 symbol layers, so without both of them free, the restyle gate refuses the whole document and the ease never
 runs at all.
 
-So `text-halo-color` takes the same split: **Constant → the `_HaloColor` uniform, every other kind → the
-vertex stream**, with the unused carrier left at identity white and the fragment multiplying the two. Exactly
-one of them is ever non-white, so the colour is converted once and applied once on either path.
+So `text-halo-color` takes a split of its own: **any kind that does not depend on the feature → the `_HaloColor`
+uniform, a Feature or Composite kind → the vertex stream**, with the unused carrier left at identity white and
+the fragment multiplying the two. A Zoom halo is one value per layer, so the applier evaluates it at the live
+zoom and eases it. Exactly one carrier is ever non-white, so the colour is converted once and applied once.
 
 - **Which uniform a run uses is read off `SdfWidenPx`, in the vertex stage.** One material draws both runs,
   so a single tint uniform would paint the halo with the text's colour. The discriminator is exact rather
@@ -1353,12 +1355,14 @@ one of them is ever non-white, so the colour is converted once and applied once 
   `SdfWidenPx.x > 0` and a text vertex always has exactly `0`. It costs no vertex attribute and no flag bit —
   and a flag bit is not free, because `AlignFlags` is tested with float comparisons (`>= 1.5`) that a new
   high bit would break.
-- **Only the colours, and only at Constant.** `text-halo-width`/`-blur` stay per-feature on the vertex stream;
-  the restyle gate refuses a change to either, and refuses a non-Constant colour change on the same grounds.
-  A colour's ALPHA also stays on the stream — for the halo it additionally decides whether the second run is
-  emitted at all — so an alpha-only change refuses too.
-- **What this costs.** A zoom-expression `text-halo-color` does not ease across a restyle. It is the same
-  rule `text-color` lives under, and the shipped pair uses constants throughout.
+- **Only the colours.** `text-halo-width`/`-blur` stay per-feature on the vertex stream; the restyle gate
+  refuses a change to either. `text-color` rides the uniform at Constant only, and the gate refuses any other
+  `text-color` change. A colour's ALPHA always stays on the stream, evaluated at the tile build zoom — for the
+  halo it additionally decides whether the second run is emitted at all — so the gate compares alpha
+  (`SurvivingLayerGate.AlphaMatches`) and an alpha change refuses, including a Zoom alpha schedule that differs
+  at any stop.
+- **What this costs.** A zoom-expression `text-color` does not ease across a restyle, and a halo whose alpha
+  schedule changes needs a full rebuild. The halo's RGB is read at the live zoom, its alpha at the build zoom.
 
 Two consequences that are correct, not bugs:
 

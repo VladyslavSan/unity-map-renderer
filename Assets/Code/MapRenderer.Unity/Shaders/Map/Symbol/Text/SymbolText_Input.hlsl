@@ -9,10 +9,11 @@
 // Every property here is engine plumbing (SDF threshold, AA, per-frame screen size) EXCEPT the two colour
 // tints below; the plumbing names avoid every `text-*`/`symbol-*` style-spec term so a future style binding
 // can never collide.
-// `text-color`/`text-halo-color`: a two-carrier split. A CONSTANT value rides
-// `_TextColor`/`_HaloColor` below — a multiplier, identity white — so it can ease across a restyle; every
-// other kind (Zoom/Feature/Composite) bakes into the per-vertex COLOR stream (mirrors how `line-color` rides
-// vertex color in StyledLineTileBuilder), which then carries white for exactly the constant arm.
+// `text-color`/`text-halo-color`: a two-carrier split. A CONSTANT `text-color`, and a `text-halo-color` that
+// does not depend on the feature (Constant or Zoom), rides `_TextColor`/`_HaloColor` below — a multiplier,
+// identity white — so it can ease across a restyle; every other kind bakes into the per-vertex COLOR stream
+// (mirrors how `line-color` rides vertex color in StyledLineTileBuilder), which then carries white for the
+// uniform arm.
 // Every OTHER `text-*` paint term rides a vertex stream alone and appears nowhere here: `text-opacity` on
 // the opacity stream, and `text-halo-width`/`-blur` on WorldBillboardVertex.SdfWidenPx (the halo is real
 // geometry — a second copy of the glyph run — so the shader has no halo term of its own).
@@ -52,11 +53,11 @@ float _SdfEdge;
 float _SdfAaDevicePx;
 float _SdfRangeTexels;
 
-// The two CONSTANT-kind colour tints (see this file's header). Multipliers over the vertex COLOR stream,
+// The two uniform-carried colour tints (see this file's header). Multipliers over the vertex COLOR stream,
 // identity white; `_HaloColor` tints the halo run and `_TextColor` the text run, told apart by
 // SdfWidenPx (see SymbolTextWorld_ForwardPass.hlsl). Both defaults MUST stay white
-// (SymbolTextWorld.shader) — every other expression kind leaves them there and carries its colour in the
-// vertex instead. The `.a` of both is unread by design: a colour's own alpha rides the opacity stream.
+// (SymbolTextWorld.shader) — a colour that rides the stream leaves its uniform there and carries its
+// colour in the vertex instead. The `.a` of both is unread by design: a colour's own alpha rides the opacity stream.
 float4 _TextColor;
 float4 _HaloColor;
 CBUFFER_END

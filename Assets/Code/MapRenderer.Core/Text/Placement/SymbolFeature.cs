@@ -91,7 +91,7 @@ namespace MapRenderer.Core.Text.Placement
         public long TileKey { get; init; }
 
         /// <summary>Resolved <c>text-color</c>/<c>text-opacity</c>/<c>text-halo-*</c> paint. A CONSTANT
-        /// colour rides a per-layer uniform instead and leaves white RGB here — see
+        /// <c>text-color</c> or non-feature <c>text-halo-color</c> rides a per-layer uniform and leaves white RGB here — see
         /// <see cref="SymbolPaint"/>.</summary>
         public SymbolPaint Paint { get; init; }
 

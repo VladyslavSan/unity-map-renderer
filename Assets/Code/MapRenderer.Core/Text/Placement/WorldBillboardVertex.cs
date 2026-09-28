@@ -26,7 +26,7 @@ namespace MapRenderer.Core.Text.Placement
         /// .rgb on a text run and <see cref="SymbolPaint.HaloColor"/>.rgb on a halo one, converted by
         /// <c>SymbolPlacementSystem.LinearColor</c>/<c>LinearHaloColor</c> (not verbatim). WHITE whenever
         /// that colour rides the <c>_TextColor</c>/<c>_HaloColor</c> uniform instead (a CONSTANT
-        /// expression). Opacity is stream 1, not this field.</summary>
+        /// text colour, or a non-feature halo colour). Opacity is stream 1, not this field.</summary>
         public float3 ColorRGB;
 
         /// <summary>Normalized atlas UV (TEXCOORD0) — straight from <see cref="SymbolQuad.UvTopLeft"/>/

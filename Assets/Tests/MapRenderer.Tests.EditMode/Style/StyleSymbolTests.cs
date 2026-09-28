@@ -238,12 +238,11 @@ namespace MapRenderer.Tests.Style
             => new StyleProperty<CoreColor>(JsonParser.Parse(json), new CoreColor(0, 0, 0, 1),
                 v => v.AsColorCoerced());
 
-        /// <summary><c>RidesUniform</c> is true for Constant, and false for Zoom/Feature/Composite — the
-        /// discriminator is <c>Kind == Constant</c>, not <c>!DependsOnFeature</c>, because Zoom stays on the
-        /// vertex-bake carrier (see <c>RestyleSurvivorGateTests.SymbolLayer_ZoomKindTextColorChange_IsRefused</c>).
-        /// A <c>!DependsOnFeature</c> predicate reads true on the Zoom row.</summary>
+        /// <summary><c>RidesUniform</c> (text-color) is true for Constant only, because Zoom text-color stays on
+        /// the vertex-bake carrier (see <c>RestyleSurvivorGateTests.SymbolLayer_ZoomKindTextColorChange_IsRefused</c>).
+        /// <c>HaloRidesUniform</c> is true for Constant and Zoom, and false for Feature and Composite.</summary>
         [Test]
-        public void RidesUniform_IsTrueOnlyForConstant()
+        public void RidesUniform_TextIsConstantOnly_HaloAtAnyNonFeatureKind()
         {
             var constant  = ColorProperty("\"#996633\"");
             var zoom      = ColorProperty("[\"interpolate\",[\"linear\"],[\"zoom\"],5,\"#000000\",15,\"#ffffff\"]");
@@ -262,6 +261,11 @@ namespace MapRenderer.Tests.Style
                 "so widening it here would silently free a key the in-place path cannot re-bake.");
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(feature), "Feature must not ride the uniform.");
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(composite), "Composite must not ride the uniform.");
+
+            Assert.IsTrue(SymbolTextColorCarrier.HaloRidesUniform(constant), "a Constant halo must ride the uniform.");
+            Assert.IsTrue(SymbolTextColorCarrier.HaloRidesUniform(zoom), "a Zoom halo must ride the uniform: one value per layer, eased.");
+            Assert.IsFalse(SymbolTextColorCarrier.HaloRidesUniform(feature), "a Feature halo must bake into the stream.");
+            Assert.IsFalse(SymbolTextColorCarrier.HaloRidesUniform(composite), "a Composite halo must bake into the stream.");
         }
 
         // ── the extraction half of the in-place restyle's "no symbol BAKE output" claim ───────
@@ -291,6 +295,16 @@ namespace MapRenderer.Tests.Style
             // assertion that fires (see RestyleSurvivorGateTests' alpha-only tooth for the differing case).
             Assert.That(newRgba.w, Is.EqualTo(oldRgba.w).Within(1e-6f),
                 "a Constant text-color CHANGE must not move the extracted vertex ALPHA either.");
+
+            // A Zoom text-halo-color rides _HaloColor too, so the halo stream stays white on both sides and
+            // only its alpha survives. If the stream kept the RGB, the shader would apply the colour twice.
+            const string ZoomHaloA = "[\"interpolate\",[\"linear\"],[\"zoom\"],0,\"#996633\",22,\"#996633\"]";
+            const string ZoomHaloB = "[\"interpolate\",[\"linear\"],[\"zoom\"],0,\"#2288DD\",22,\"#2288DD\"]";
+            float4 haloA = Extract(CentroidsLayer("{\"text-halo-color\":" + ZoomHaloA + "}"))[0].Paint.HaloColor;
+            float4 haloB = Extract(CentroidsLayer("{\"text-halo-color\":" + ZoomHaloB + "}"))[0].Paint.HaloColor;
+            Assert.That(haloA.xyz, Is.EqualTo(new float3(1f, 1f, 1f)), "a Zoom halo must leave the stream RGB white.");
+            Assert.That(haloB.xyz, Is.EqualTo(new float3(1f, 1f, 1f)), "a Zoom halo must leave the stream RGB white.");
+            Assert.That(haloB.w, Is.EqualTo(haloA.w).Within(1e-6f), "the halo alpha stays on the stream, identical on both sides.");
         }
 
         // ── text-field zoom step: must extract at the BUILD zoom, not zoom 0 ──────────────────────
@@ -909,24 +923,42 @@ namespace MapRenderer.Tests.Style
                 "stream — MapView's SymbolSubsystem.SetStyle skip and _symbolStyleLayers assume it never has to.");
         }
 
-        /// <summary>A Zoom-kind text-halo-color change — different stops on each side — must
-        /// be REFUSED, on the same grounds as a Zoom-kind text-color. The halo is GEOMETRY: a non-Constant
-        /// text-halo-color bakes into the vertex COLOR stream of a second glyph run, which the in-place path
-        /// never re-bakes. RED-verify: widen the gate's symbol-colour arm from RidesUniform(kind) to
-        /// !DependsOnFeature(kind).</summary>
+        /// <summary>A Zoom-kind text-halo-color change with the same alpha schedule survives and EASES: the
+        /// colour rides <c>_HaloColor</c>, which the applier evaluates at the live zoom. Mid-way the blue channel
+        /// sits strictly between the old and the new value, and it settles on the new one.
+        /// RED-verify: narrow the gate's halo arm back to <c>RidesUniform(kind)</c>.</summary>
         [Test]
-        public void SymbolLayer_ZoomKindHaloColorChange_IsRefused()
+        public void SymbolLayer_ZoomKindHaloColorChange_Eases()
         {
             var oldStyle = SymbolStyleDoc(
                 @"""text-halo-color"": [""interpolate"",[""linear""],[""zoom""],5,""#000000"",15,""#808080""]");
             var newStyle = SymbolStyleDoc(
                 @"""text-halo-color"": [""interpolate"",[""linear""],[""zoom""],5,""#000000"",15,""#4099C0""]");
-            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
-                "freeing text-halo-color above Constant requires the in-place path to re-bake the halo run's " +
-                "vertex COLOR stream — the same carrier argument that refuses a Zoom-kind text-color.");
+            Assert.IsTrue(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
+                "a Zoom-kind text-halo-color rides _HaloColor, so a change with the same alpha must survive.");
+
+            var set = new RenderLayerSet();
+            set.Build(oldStyle, 0.0, MapMaterialSetTestUtil.Load());
+            var layer = (SymbolRenderLayer)set[0];
+            int haloId = Shader.PropertyToID("_HaloColor");
+            set.ApplyZoom(new StyleFrameInputs(10.0, 1.0, 0.0));
+            float oldBlue = layer.WorldTextMaterial.GetColor(haloId).b;
+
+            Assert.IsTrue(set.TryRestyleInPlace(oldStyle, newStyle, StyleTransition.Default, nowSeconds: 0.0));
+            set.ApplyZoom(new StyleFrameInputs(10.0, 1.0, 0.15));
+            Assert.Greater(set.TransitioningCount(), 0, "mid-way through the default duration, still easing.");
+            float midBlue = layer.WorldTextMaterial.GetColor(haloId).b;
+
+            set.ApplyZoom(new StyleFrameInputs(10.0, 1.0, 0.30));
+            float newBlue = layer.WorldTextMaterial.GetColor(haloId).b;
+            Assert.AreNotEqual(oldBlue, newBlue, "fixture: the two styles must differ at zoom 10.");
+            Assert.AreEqual(0.3765f, newBlue, 1e-3f, "settled on the new style's zoom-10 blue (the blue channel 0xC0/255 half-way up its ramp from #000000).");
+            Assert.That(midBlue, Is.GreaterThan(math.min(oldBlue, newBlue)).And.LessThan(math.max(oldBlue, newBlue)),
+                "the halo colour must be part-way between the old and the new value.");
+            Assert.AreEqual(0, set.TransitioningCount(), "settled at exactly the default duration.");
         }
 
-        /// <summary>The Constant control for <see cref="SymbolLayer_ZoomKindHaloColorChange_IsRefused"/> —
+        /// <summary>The Constant control for <see cref="SymbolLayer_ZoomKindHaloColorChange_Eases"/> —
         /// same fixture shape, opposite verdict, so that refusal is not vacuous. RED-verify: remove text-halo-color from
         /// TransitionablePaintKeys.</summary>
         [Test]
@@ -966,14 +998,14 @@ namespace MapRenderer.Tests.Style
         /// A Constant <c>text-color</c> pair differing ONLY in alpha must be REFUSED — only RGB rides the
         /// <c>_TextColor</c> uniform; alpha travels by the vertex COLOR stream
         /// (<c>SymbolFeatureExtractor.EvaluatePaint</c>'s <c>textRgba.w</c>), which the in-place path never
-        /// re-bakes. RED-verify: drop the <c>ConstantAlphaMatches</c> conjunct from
+        /// re-bakes. RED-verify: drop the <c>AlphaMatches</c> conjunct from
         /// <c>SurvivingLayerGate.FreelyTransitionableKeys</c>.
         /// </summary>
         /// <summary>
         /// The halo twin of <see cref="SymbolLayer_AlphaOnlyTextColorChange_IsRefused"/>. text-halo-color's
         /// alpha rides the opacity stream AND decides whether a halo run is emitted at all
         /// (<c>WorldSymbolRenderer.Emit</c>), so an alpha-only change must refuse even though both sides are
-        /// Constant. RED-verify: restrict <c>ConstantAlphaMatches</c> back to text-color only.
+        /// Constant. RED-verify: restrict <c>AlphaMatches</c> back to text-color only.
         /// </summary>
         [Test]
         public void SymbolLayer_AlphaOnlyHaloColorChange_IsRefused()
@@ -983,6 +1015,23 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
                 "an alpha-only text-halo-color change must refuse — the uniform is RGB-only, and the alpha " +
                 "also gates whether the halo run exists.");
+
+            // A Zoom pair equal at zoom 0 but different at the z15 stop must refuse too: a check of the
+            // zoom-0 alpha alone would pass it.
+            var oldZoom = SymbolStyleDoc(
+                @"""text-halo-color"": [""interpolate"",[""linear""],[""zoom""],0,""#808080"",15,""#808080""]");
+            var newZoom = SymbolStyleDoc(
+                @"""text-halo-color"": [""interpolate"",[""linear""],[""zoom""],0,""#808080"",15,""rgba(128,128,128,0.5)""]");
+            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldZoom, newZoom),
+                "a Zoom text-halo-color whose alpha schedule differs at any stop must refuse.");
+
+            // Colour-looking strings outside an output position (a comparison operand) must not be rewritten:
+            // these two differ in alpha (1 vs 0 at every zoom), and only the ["==","red",...] operand differs.
+            string CaseHalo(string right) =>
+                @"""text-halo-color"": [""interpolate"",[""linear""],[""zoom""],0,[""case"",[""=="",""red"",""" + right +
+                @"""],""#000000"",""rgba(0,0,0,0)""],22,""#000000""]";
+            Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(SymbolStyleDoc(CaseHalo("red")), SymbolStyleDoc(CaseHalo("blue"))),
+                "a comparison operand that looks like a colour must not be treated as a colour output.");
         }
 
         [Test]

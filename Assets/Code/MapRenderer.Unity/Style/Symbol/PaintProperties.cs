@@ -10,8 +10,8 @@ namespace MapRenderer.Unity.Style.Symbol
     /// The parsed MapLibre symbol <b>paint</b> properties: the <c>text-*</c> colour/halo knobs plus
     /// <c>icon-opacity</c>, each a <see cref="StyleProperty{T}"/> as in <c>Line</c>/<c>Fill</c>; <c>icon-color</c>
     /// and <c>icon-halo-*</c> are not parsed. The text properties evaluate per feature into the billboard vertex
-    /// streams, except a constant <see cref="Color"/> or <see cref="HaloColor"/>: its RGB binds to the per-layer
-    /// <c>_TextColor</c>/<c>_HaloColor</c> uniform so a restyle can ease it, and the stream carries white.
+    /// streams, except a constant <see cref="Color"/> and a non-feature <see cref="HaloColor"/>: their RGB binds to
+    /// the per-layer <c>_TextColor</c>/<c>_HaloColor</c> uniform so a restyle can ease it, and the stream carries white.
     /// </summary>
     public sealed class PaintProperties
     {

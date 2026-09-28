@@ -87,10 +87,10 @@ evaluating only the Zoom-kind bindings):
 - **Line** — zoom-expression paint + **line width** + **dasharray**.
 - **Background** — zoom-expression color/opacity.
 - **Symbols (paint only)** — `SymbolRenderLayer.ApplyZoom` drives its applier every frame too, covering
-  the two symbol colours — `text-color` (`_TextColor`) and `text-halo-color` (`_HaloColor`), each at its
-  CONSTANT kind only, which is the kind that rides a uniform. `text-halo-width`/`-blur` are NOT here: the
-  halo is geometry (a second glyph run), so those two ride its vertex stream per feature and move only
-  when the tile is rebuilt.
+  the two symbol colours — `text-color` (`_TextColor`) at its CONSTANT kind only, and `text-halo-color`
+  (`_HaloColor`) at any kind that does not depend on the feature, Zoom included. A halo's alpha and
+  `text-halo-width`/`-blur` are NOT here: the halo is geometry (a second glyph run), so those ride its vertex
+  stream per feature and move only when the tile is rebuilt.
 - **Easing** — a restyle does not pop a changed uniform: `ZoomStyleApplier.BindOrRetarget` eases a
   retargeted binding, and `RenderLayerSet.UpdateFade` eases a layer's zoom-range fade, both over
   `StyleTransition` (§ "Shared easing machinery" below). This covers restyle-triggered changes only; it says

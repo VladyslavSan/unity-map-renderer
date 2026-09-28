@@ -28,12 +28,12 @@ counted.
 
 **† — evaluated at the tile build zoom.** The spec re-evaluates a zoom-dependent value continuously as the
 camera zooms. The renderer does this for layer paint that rides a material uniform: constant and zoom forms
-of background, fill, line and fill-extrusion paint, `line-dasharray`, and constant `text-color` /
-`text-halo-color`. `text-translate` is also re-evaluated every frame, but not through a uniform: it rides
+of background, fill, line and fill-extrusion paint, `line-dasharray`, constant `text-color`, and
+constant or zoom `text-halo-color` (its RGB; its alpha is read at the build zoom). `text-translate` is also re-evaluated every frame, but not through a uniform: it rides
 no material property, and `SymbolPlacementSystem` reads it straight off the live style layer's paint,
 per slot, into the CPU-side vertex math. It evaluates the following values once, at the zoom the tile is
 built at, and keeps them until the tile is rebuilt: every data-driven paint value (baked into the mesh),
-every symbol layout value, symbol paint other than a constant text/halo colour or `text-translate`,
+every symbol layout value, symbol paint other than a constant `text-color`, the RGB of a non-feature `text-halo-color`, or `text-translate`,
 `fill-sort-key`, `fill-antialias`. A row marked † is otherwise complete; its status does not count this
 limit. The design and the open work are in
 [`smooth-transitions-design.md`](smooth-transitions-design.md) § "Camera-driven property re-evaluation".
@@ -279,8 +279,8 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 
 ### `symbol` — paint
 
-Every value in this table is †, except a constant `text-color`, a constant `text-halo-color`, or
-`text-translate`.
+Every value in this table is †, except a constant `text-color`, the RGB of a `text-halo-color` that does not
+depend on the feature, or `text-translate`.
 
 | Property | Status | Note |
 |---|---|---|
@@ -293,7 +293,7 @@ Every value in this table is †, except a constant `text-color`, a constant `te
 | `icon-translate-anchor` | `not supported` | Not built. |
 | `text-opacity` | `supported` | |
 | `text-color` | `supported` | |
-| `text-halo-color` | `supported` | |
+| `text-halo-color` | `supported` | A zoom value's RGB follows the live zoom; its alpha is read at the build zoom. |
 | `text-halo-width` | `supported` | |
 | `text-halo-blur` | `supported` | |
 | `text-translate` | `supported` | Constant or zoom. |

@@ -132,9 +132,9 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
     output.positionCS = clip;
     output.uv    = input.uv;
     output.page  = input.page;
-    // Two-carrier text/halo colour: a CONSTANT `text-color`/`text-halo-color` rides _TextColor/_HaloColor
-    // and leaves the vertex stream white; every other kind bakes into the stream and leaves the uniform
-    // white, so the product is the colour ONCE either way. WHICH uniform applies is the run: Emit gives a
+    // Two-carrier text/halo colour: a CONSTANT `text-color`, or a non-feature `text-halo-color` (Constant or
+    // Zoom), rides _TextColor/_HaloColor and leaves the vertex stream white; every other kind bakes into the
+    // stream and leaves the uniform white, so the product is the colour ONCE either way. WHICH uniform applies is the run: Emit gives a
     // halo run a non-zero sdfWidenPx.x — it emits one only when text-halo-width > 0 — and a text run
     // exactly zero, so the test below is exact rather than a threshold. Both uniforms' .a is unread:
     // text-opacity and the colour's own alpha already ride input.opacity.

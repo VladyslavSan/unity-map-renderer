@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <summary>
         /// A key is listed only when it is BOTH bound to a uniform AND re-bound on restyle.
         /// <c>text-halo-width</c>/<c>-blur</c> ride the vertex stream, which the in-place path never re-bakes.
-        /// Every key is free at any non-data-driven kind EXCEPT the two symbol colours, which defer to the
+        /// Every key is free at any non-data-driven kind EXCEPT <c>text-color</c>, which defers to the
         /// narrower <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/>.
         /// </summary>
         private static readonly HashSet<string> TransitionablePaintKeys = new HashSet<string>
@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <summary>
         /// The paint keys this pair may drop from its signature: a transitionable key, present in BOTH paints
         /// (presence changes the binding set), non-data-driven on BOTH sides, and for the symbol colours equal
-        /// in alpha (<see cref="ConstantAlphaMatches"/>). Non-obvious why: a data-driven colour is baked, so a
+        /// in alpha (<see cref="AlphaMatches"/>). Non-obvious why: a data-driven colour is baked, so a
         /// change between two <c>["get",…]</c> colours that passed would leave every tile on the old colour.
         /// A parse failure counts as data-driven (fail closed). <see cref="PatternTintMayAppear"/> is the one
         /// exception to "present in both".
@@ -79,7 +79,7 @@ namespace MapRenderer.Unity.Rendering.Layers
                 }
                 if (!hasOld || !hasNew) continue;
                 if (!IsFreeAtKind(key, oldValue) || !IsFreeAtKind(key, newValue)) continue;
-                if (IsSymbolColor(key) && !ConstantAlphaMatches(oldValue, newValue)) continue;
+                if (IsSymbolColor(key) && !AlphaMatches(oldValue, newValue)) continue;
                 free.Add(key);
             }
             return free;
@@ -97,36 +97,70 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <summary>True when <paramref name="pattern"/> is a sprite-name string.</summary>
         private static bool IsPatternName(JsonValue pattern) => pattern?.AsString(null) != null;
 
-        /// <summary>The two symbol paint colours that ride a uniform only at <c>Constant</c> — see
+        /// <summary>The two symbol paint colours whose alpha rides the vertex stream — see
         /// <see cref="SymbolTextColorCarrier"/>.</summary>
         private static bool IsSymbolColor(string key)
             => key == SymbolProperty.TextColor || key == SymbolProperty.TextHaloColor;
 
         /// <summary>
-        /// True iff two Constant symbol-colour expressions have the SAME alpha. RGB rides a uniform, but
-        /// alpha rides the vertex COLOR stream (<c>SymbolFeatureExtractor.StreamRgba</c>), which the in-place
-        /// path never re-bakes. Halo alpha also decides whether a halo run is emitted
-        /// (<c>WorldSymbolRenderer.Emit</c>).
-        /// A colour that cannot be read (a malformed value loads with its default) is not free, so it returns false.
+        /// True iff two symbol-colour expressions carry the SAME alpha at every zoom, because alpha rides the
+        /// vertex COLOR stream, which the in-place path never re-bakes. Two Constants compare by evaluation;
+        /// otherwise each colour literal becomes its alpha and the JSON is compared (alpha interpolates
+        /// independently of the colour space). Fails closed: an <c>["rgba",…]</c> stop compares as written,
+        /// and a colour that cannot be read (a malformed value loads with its default) returns false.
         /// </summary>
-        private static bool ConstantAlphaMatches(JsonValue oldValue, JsonValue newValue)
+        private static bool AlphaMatches(JsonValue oldValue, JsonValue newValue)
         {
-            try
+            Expression oldExpr = ExpressionParser.Parse(oldValue);
+            Expression newExpr = ExpressionParser.Parse(newValue);
+            if (oldExpr.Kind == ExpressionKind.Constant && newExpr.Kind == ExpressionKind.Constant)
             {
-                double oldAlpha = ExpressionParser.Parse(oldValue).Evaluate(new EvaluationContext(0.0)).AsColorCoerced().A;
-                double newAlpha = ExpressionParser.Parse(newValue).Evaluate(new EvaluationContext(0.0)).AsColorCoerced().A;
-                return oldAlpha == newAlpha;
+                try
+                {
+                    var context = new EvaluationContext(0.0);
+                    return oldExpr.Evaluate(context).AsColorCoerced().A == newExpr.Evaluate(context).AsColorCoerced().A;
+                }
+                catch (ExpressionEvaluationException)
+                {
+                    return false; // unreadable colour => not free => full rebuild
+                }
             }
-            catch (ExpressionEvaluationException)
+            return JsonCanonical.Write(WithColorsAsAlpha(oldValue)) == JsonCanonical.Write(WithColorsAsAlpha(newValue));
+        }
+
+        /// <summary>Rewrites a colour-string literal to <c>"alpha:"</c> plus its alpha, but only at a colour OUTPUT
+        /// position: a bare string, or the default and stop outputs of an array <c>interpolate*</c>/<c>step</c>
+        /// expression (recursing into those). Everything else, comparison operands and match labels included,
+        /// stays as written, so two expressions that differ there never compare equal. A legacy <c>{"stops"}</c>
+        /// object is not rewritten either, so it compares as written.</summary>
+        private static JsonValue WithColorsAsAlpha(JsonValue value)
+        {
+            if (value == null) return null;
+            if (!value.IsArray)
             {
-                return false; // unreadable colour => not free => full rebuild
+                string text = value.AsString(null);
+                return text != null && ColorParser.TryParse(text, out Color color)
+                    ? JsonValue.OfString("alpha:" + color.A.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
+                    : value;
             }
+
+            string head = value.Items.Count > 0 ? value.Items[0].AsString(null) : null;
+            bool isStep = head == "step";
+            if (!isStep && head != "interpolate" && head != "interpolate-hcl" && head != "interpolate-lab") return value;
+
+            var items = new List<JsonValue>(value.Items.Count);
+            for (int i = 0; i < value.Items.Count; i++)
+            {
+                bool isOutput = isStep ? i == 2 || (i >= 4 && i % 2 == 0) : i >= 4 && i % 2 == 0;
+                items.Add(isOutput ? WithColorsAsAlpha(value.Items[i]) : value.Items[i]);
+            }
+            return JsonValue.OfArray(items);
         }
 
         /// <summary>
         /// A key is free only at the kinds whose value the in-place path can MOVE: by default
-        /// <c>!DependsOnFeature</c> (a re-bound uniform). The symbol colours defer to
-        /// <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/>, because at other kinds they bake
+        /// <c>!DependsOnFeature</c> (a re-bound uniform). <c>text-color</c> defers to
+        /// <see cref="SymbolTextColorCarrier.RidesUniform(ExpressionKind)"/>, because at other kinds it bakes
         /// into the vertex stream, which the in-place path never re-bakes. A parse failure is not free.
         /// </summary>
         private static bool IsFreeAtKind(string key, JsonValue expr)
@@ -141,9 +175,9 @@ namespace MapRenderer.Unity.Rendering.Layers
                 return false; // parse failure => not free => refuse
             }
 
-            return IsSymbolColor(key)
-                ? SymbolTextColorCarrier.RidesUniform(kind)
-                : !ExpressionKinds.DependsOnFeature(kind);
+            if (key == SymbolProperty.TextHaloColor) return SymbolTextColorCarrier.HaloRidesUniform(kind);
+            if (key == SymbolProperty.TextColor) return SymbolTextColorCarrier.RidesUniform(kind);
+            return !ExpressionKinds.DependsOnFeature(kind);
         }
 
         private static string Signature(StyleLayer layer, HashSet<string> freePaintKeys)

@@ -80,8 +80,8 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// mapping and the source-fetch derivation need every Source-bearing symbol layer to take its slot.
         /// With <c>SymbolTextWorld</c> unassigned, <see cref="Material"/> stays <c>null</c> (warns) and the
         /// slot never presents. <see cref="WorldIconMaterial"/> is independently optional.</summary>
-        /// <param name="initialZoom">Unused: construction binds only CONSTANT paint. Kept so every layer
-        /// kind shares one creation shape.</param>
+        /// <param name="initialZoom">Unused: construction queues a Zoom halo colour and the first
+        /// <see cref="ApplyZoom"/> evaluates it. Kept so every layer kind shares one creation shape.</param>
         public static SymbolRenderLayer Create(
             SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex)
         {
@@ -116,30 +116,38 @@ namespace MapRenderer.Unity.Rendering.Layers
 
         /// <summary>
         /// Binds <c>_TextColor</c> and <c>_HaloColor</c> onto <paramref name="applier"/>. Non-local: each is
-        /// the CONSTANT arm of a two-carrier split whose other arm is the vertex COLOR stream, so
+        /// the uniform arm of a two-carrier split whose other arm is the vertex COLOR stream, so
         /// <c>SymbolFeatureExtractor.EvaluatePaint</c> must stay the exact complement of
         /// <see cref="SymbolTextColorCarrier"/>. The halo's width and blur are NOT here — they ride the
         /// vertex stream per feature (<c>WorldSymbolRenderer.Emit</c>).
         /// </summary>
         private static void BindTextPaint(Material material, ZoomStyleApplier applier, SymbolStyle.PaintProperties paint)
         {
-            BindColorTint(material, applier, paint.Color, TextColorId);
-            BindColorTint(material, applier, paint.HaloColor, HaloColorId);
+            BindColorTint(material, applier, paint.Color, TextColorId, SymbolTextColorCarrier.RidesUniform(paint.Color));
+            BindColorTint(material, applier, paint.HaloColor, HaloColorId, SymbolTextColorCarrier.HaloRidesUniform(paint.HaloColor));
         }
 
         /// <summary>
-        /// Binds one colour tint: a Constant <paramref name="color"/> rides <paramref name="propertyId"/>,
-        /// every other kind leaves the uniform at identity white and bakes into the vertex stream instead.
+        /// Binds one colour tint: a <paramref name="color"/> that <paramref name="ridesUniform"/> rides
+        /// <paramref name="propertyId"/>; every other one leaves the uniform at identity white and bakes into
+        /// the vertex stream instead.
         /// NO manual gamma conversion belongs here — both uniforms are Color-TYPED, so Unity converts
         /// sRGB→linear on upload itself — converting here too applies the curve twice.
         /// </summary>
         private static void BindColorTint(Material material, ZoomStyleApplier applier,
-            StyleProperty<MapRenderer.Core.Expressions.Color> color, int propertyId)
+            StyleProperty<MapRenderer.Core.Expressions.Color> color, int propertyId, bool ridesUniform)
         {
-            if (!SymbolTextColorCarrier.RidesUniform(color))
+            if (!ridesUniform)
             {
                 // The clone inherits the base asset's value — defend against an edited base.
                 material.SetColor(propertyId, Color.white);
+                return;
+            }
+
+            // A Zoom colour is evaluated and eased per frame by the applier; the shader leaves .a unread.
+            if (color.Kind == MapRenderer.Core.Expressions.ExpressionKind.Zoom)
+            {
+                applier.BindColor(color, propertyId);
                 return;
             }
 

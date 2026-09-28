@@ -764,9 +764,9 @@ namespace MapRenderer.Tests.Visual
     // NOT included in Tools/core-tests/core-tests.csproj.
     //
     // Non-local invariant: text-halo-color reaches the screen converted sRGB→linear exactly ONCE, on one of two
-    // carriers. A CONSTANT rides the Color-typed `_HaloColor` uniform, which Unity converts on upload, so
-    // BindColorTint must NOT pre-convert. Every other kind bakes into the vertex COLOR stream, which Unity does
-    // not convert, so LinearHaloColor MUST. The fragment multiplies the two, so one is always WHITE; one arm per
+    // carriers. A Constant or Zoom colour rides the Color-typed `_HaloColor` uniform, which Unity converts on
+    // upload, so BindColorTint must NOT pre-convert. A Feature or Composite one bakes into the vertex COLOR
+    // stream, which Unity does not convert, so LinearHaloColor MUST. The fragment multiplies the two, so one is always WHITE; one arm per
     // carrier. SDF overrides drive coverage to a flat 1, so the centre pixel is the pure halo colour.
 
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -792,10 +792,10 @@ namespace MapRenderer.Tests.Visual
         /// colour rides <c>_HaloColor</c>, so the vertex stream is white at this fixture's opaque alpha.</summary>
         private static readonly float4 StreamWhite = new float4(1f, 1f, 1f, 1f);
 
-        // A ZOOM-kind text-halo-color that evaluates to AuthoredHaloHex at every zoom — the value is held
-        // constant so the arms differ in CARRIER alone, never in the colour being measured.
-        private const string ZoomHaloColorJson =
-            @"[""interpolate"",[""linear""],[""zoom""],0,""" + AuthoredHaloHex + @""",22,""" + AuthoredHaloHex + @"""]";
+        // A FEATURE-kind halo yielding AuthoredHaloHex for every feature, so the arms differ in CARRIER alone.
+        // A Zoom halo rides the uniform, so only a feature-dependent one takes the vertex stream.
+        private const string FeatureHaloColorJson =
+            @"[""case"",[""has"",""__absent""],""#000000"",""" + AuthoredHaloHex + @"""]";
 
         /// <param name="haloColorJson">The raw <c>text-halo-color</c> JSON value — a quoted hex for the
         /// CONSTANT arm, an expression for the vertex-stream arm.</param>
@@ -985,13 +985,14 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void StreamCarriedHaloColor_RenderedPixel_MatchesAuthored()
         {
-            Symbol.StyleLayer layer = BuildSymbolLayer(ZoomHaloColorJson);
-            Assert.That(SymbolTextColorCarrier.RidesUniform(layer.Paint.HaloColor), Is.False,
+            Symbol.StyleLayer layer = BuildSymbolLayer(FeatureHaloColorJson);
+            Assert.That(SymbolTextColorCarrier.HaloRidesUniform(layer.Paint.HaloColor), Is.False,
                 "precondition: this arm's text-halo-color must ride the vertex stream, not the uniform — " +
                 "otherwise it silently duplicates the constant arm.");
 
-            double3 measured = RenderHalo(ZoomHaloColorJson,
-                HaloSrgbFloat4(layer.Paint.HaloColor.Evaluate(Zoom)));
+            Assert.IsTrue(MapRenderer.Core.Expressions.ColorParser.TryParse(AuthoredHaloHex,
+                out MapRenderer.Core.Expressions.Color streamColor));
+            double3 measured = RenderHalo(FeatureHaloColorJson, HaloSrgbFloat4(streamColor));
 
             Assert.IsTrue(ColorUtility.TryParseHtmlString(AuthoredHaloHex, out Color authored));
             Color   expected = authored.linear;

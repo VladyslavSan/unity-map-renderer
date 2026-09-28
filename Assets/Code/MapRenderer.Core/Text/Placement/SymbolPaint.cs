@@ -8,9 +8,9 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The resolved text PAINT properties for one symbol, straight RGBA (0..1), linearized at bake. All five
     /// are evaluated per feature and feed the billboard vertex streams, the halo trio on a second copy of the
-    /// glyphs. A CONSTANT <see cref="TextColor"/> or <see cref="HaloColor"/> carries white RGB, because a
-    /// per-layer uniform (<c>SymbolRenderLayer.BindTextPaint</c>) carries it so a restyle can ease it; alpha
-    /// and <see cref="Opacity"/> always ride the stream.
+    /// glyphs. A CONSTANT <see cref="TextColor"/> or a non-feature <see cref="HaloColor"/> carries white RGB,
+    /// because a per-layer uniform (<c>SymbolRenderLayer.BindTextPaint</c>) carries it so a restyle can ease it;
+    /// alpha and <see cref="Opacity"/> always ride the stream.
     /// </summary>
     public readonly struct SymbolPaint
     {
@@ -21,8 +21,8 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Overall opacity (`text-opacity`), multiplies <see cref="TextColor"/>.a at bake time.</summary>
         public float Opacity { get; init; }
 
-        /// <summary>Halo color (`text-halo-color`), straight RGBA. White RGB when a CONSTANT value rides the
-        /// per-layer uniform, on the same terms as <see cref="TextColor"/>.</summary>
+        /// <summary>Halo color (`text-halo-color`), straight RGBA. White RGB when a Constant or Zoom value rides
+        /// the per-layer uniform; alpha always rides this stream, at the build zoom.</summary>
         public float4 HaloColor { get; init; }
 
         /// <summary>Halo width in pixels (`text-halo-width`).</summary>
