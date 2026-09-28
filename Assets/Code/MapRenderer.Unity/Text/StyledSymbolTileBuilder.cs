@@ -9,6 +9,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Unity.Text.Bidi;
 using MapRenderer.Unity.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Text
@@ -31,7 +32,7 @@ namespace MapRenderer.Unity.Text
         internal SymbolStringTable StringTable { get; }
 
         /// <summary>Monotonic count of symbols skipped because their build threw a non-cancellation exception
-        /// (e.g. deferred mixed-direction bidi). Surfaced as SymbolSubsystem telemetry. Main-thread
+        /// (e.g. a bidi run over <c>BidiResolver.MaxCodepoints</c>). Surfaced as SymbolSubsystem telemetry. Main-thread
         /// only (Shape is the main tail) — no synchronization.</summary>
         internal int SkippedSymbolCount { get; private set; }
 
@@ -159,15 +160,23 @@ namespace MapRenderer.Unity.Text
                     // codepoint walk changes the requested set.
                     for (int c = 0; c < text.Length; c++)
                     {
+                        // The mirror glyph (L4) may sit in another range, so request that range too.
                         int rangeStart = FontStackResolver.ComputeRangeStart(text[c]);
-                        // All stack names: the winning font is known only after the cache is populated, so
-                        // collecting only the first name would kill fallback fonts.
-                        for (int n = 0; n < fontStack.Names.Count; n++)
+                        int mirrorRangeStart = FontStackResolver.ComputeRangeStart(
+                            (uint)UnicodeBidiData.MirrorOf(text[c]));
+                        for (int pass = 0; pass < 2; pass++)
                         {
-                            string name = fontStack.Names[n];
-                            if (name == null) continue;
-                            var key = (name, rangeStart);
-                            if (seen.Add(key)) into.Add(key);
+                            int wanted = pass == 0 ? rangeStart : mirrorRangeStart;
+                            if (pass == 1 && wanted == rangeStart) break;
+                            // All stack names: the winning font is known only after the cache is populated, so
+                            // collecting only the first name would kill fallback fonts.
+                            for (int n = 0; n < fontStack.Names.Count; n++)
+                            {
+                                string name = fontStack.Names[n];
+                                if (name == null) continue;
+                                var key = (name, wanted);
+                                if (seen.Add(key)) into.Add(key);
+                            }
                         }
                     }
                 }
@@ -205,6 +214,7 @@ namespace MapRenderer.Unity.Text
             // Per-call locals, not fields: SymbolSubsystem shares one builder across tails, so two Shape
             // calls can interleave on the main thread. `buffer` is per-build and shared by its layers.
             var glyphQuads = new List<PositionedGlyph>();
+            var glyphLevels = new List<byte>();
             // Per-symbol temps: the layout overloads Clear() their output, so passing the build-wide pools
             // directly would erase earlier symbols. Each result is copied into `buffer`.
             var quadCorners = new List<SymbolQuad>();
@@ -299,15 +309,15 @@ namespace MapRenderer.Unity.Text
                         }
 
                         resolver ??= _glyphManager.CreateResolver(fontStack);
-                        // Fills the reused glyphQuads. The wrapping ShapedRun still allocates: the layouts
-                        // take a ShapedRun and have no caller-buffer variant.
-                        TextDirection direction = _shaper.Shape(new ShapingRequest
+                        // Fills the reused glyphQuads and glyphLevels. The wrapping ShapedRun still allocates: the
+                        // layouts take a ShapedRun and have no caller-buffer variant.
+                        _shaper.Shape(new ShapingRequest
                         {
                             Text = s.Text,
                             FontStack = fontStack,
                             Metrics = resolver,
-                        }, glyphQuads);
-                        ShapedRun run = new ShapedRun { Glyphs = glyphQuads, Direction = direction };
+                        }, glyphQuads, glyphLevels);
+                        ShapedRun run = new ShapedRun { Glyphs = glyphQuads, Levels = glyphLevels };
                         if (s.Placement == SymbolPlacement.Point)
                         {
                             // Writes into the reused quadCorners, then copies into buffer's build-wide Quads.

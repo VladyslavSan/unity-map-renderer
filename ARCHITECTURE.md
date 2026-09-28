@@ -33,13 +33,15 @@ that aren't your differentiator.
 - **polygon triangulation (fills)** → clean-room **earcut** (ear-clipping; what Mapbox/MapLibre use).
   Small enough to own; ISC as reference only; implementable **Burst-compatible** (struct/array-based) so
   fill tessellation jobifies. We classify MVT rings (outer vs hole) by signed area before triangulating.
+- **text bidi** (UAX #9, mixed LTR/RTL), written clean-room from the Unicode specification and the public UCD
+  data files (`MapRenderer.Unity/Text/Bidi`). The algorithm is a bounded set of rules over generated property
+  tables, and the Unicode conformance data (`BidiCharacterTest.txt`, `BidiTest.txt`) checks it against a sampled
+  subset of its cases. A third-party bidi library would add a dependency for a rule set the repo can prove
+  against that data.
 - **label placement & collision** — the crown jewel; where domain experience differentiates the result
 - the ECS rendering layer (this *is* the product) — meshes / materials / GPU-driven draw
 
 **Vendor as clean permissive dependencies — don't reinvent** (one-line notice each):
-- **text bidi** (UAX #9, mixed LTR/RTL) → a **managed** ICU-derived lib (ICU4N / BidiReshapeSharp) when
-  mixed-direction labels arrive — never hand-roll full UAX #9. (the shaper ships only bounded Arabic joining +
-  single-run RTL, which *is* small enough to own; see below.)
 - **text shaping** (full GSUB/GPOS glyph-index shaping) → `HarfBuzzSharp` (MIT) — an entire subfield; never
   hand-roll — **BUT** only relevant to the *beyond-parity* "Model B" (runtime SDF from shipped fonts by glyph
   index). Our locked model consumes MapLibre's **glyph-PBF SDF** (codepoint-keyed), which pre-bakes the

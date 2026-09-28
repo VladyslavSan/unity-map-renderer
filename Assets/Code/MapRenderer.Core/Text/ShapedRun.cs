@@ -6,17 +6,19 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// The output of <see cref="CodepointTextShaper.Shape(in ShapingRequest)"/>: an ordered run of positioned glyphs in VISUAL
-    /// order (the order quads are laid out in, left-to-right on screen) plus the run's resolved
-    /// direction. Render-path-agnostic — no anchor/offset/quad assumptions (the SDF glyph-atlas →
-    /// text-shaping handoff).
+    /// The output of the text shaper: an ordered run of positioned glyphs in LOGICAL order and an embedding
+    /// level per glyph. The layouts place each line's glyphs in visual order (<see cref="BidiReorder"/>).
+    /// Render-path-agnostic — no anchor/offset/quad assumptions (the SDF glyph-atlas → text-shaping handoff).
     /// </summary>
     public sealed class ShapedRun
     {
-        /// <summary>Positioned glyphs in VISUAL order (already bidi-reordered for RTL runs).</summary>
+        /// <summary>Positioned glyphs in LOGICAL (reading) order.</summary>
         public IReadOnlyList<PositionedGlyph> Glyphs { get; init; }
 
-        /// <summary>The run's resolved direction (see <see cref="CodepointTextShaper"/> for how it's determined).</summary>
-        public TextDirection Direction { get; init; }
+        /// <summary>
+        /// The embedding level of each glyph, parallel to <see cref="Glyphs"/>. Null or empty means every level
+        /// is 0, and the layouts then skip the reordering.
+        /// </summary>
+        public IReadOnlyList<byte> Levels { get; init; }
     }
 }

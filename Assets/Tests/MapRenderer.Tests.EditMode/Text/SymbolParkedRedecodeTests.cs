@@ -24,6 +24,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
+using MapRenderer.Unity.Text.Bidi;
 using MapRenderer.Tests;
 using MapRenderer.Tests.Text.Placement; // BlockColumnHash
 using Symbol = MapRenderer.Unity.Style.Symbol;
@@ -725,6 +726,113 @@ namespace MapRenderer.Tests.Text
                 "explicit ownership guard over that window the decoded tile is stranded — one dropped " +
                 "reference per faulting drain, silently, under Allocator.Persistent.");
             Assert.AreEqual(0, probe.UnbalancedCount, "…exactly once");
+        }
+    }
+
+    /// <summary>
+    /// Runs <c>BidiResolver</c> over <c>Assets/Fixtures/bidi-character-test-subset.txt</c>, which
+    /// <c>Tools/generate-bidi-tables.py</c> samples from the Unicode <c>BidiCharacterTest.txt</c> (the hand-written
+    /// lines, a stride of the permutations) and <c>BidiTest.txt</c> (a stride of the class sequences).
+    /// </summary>
+    [TestFixture]
+    public class BidiConformanceTests
+    {
+        private const int MaxReportedFailures = 10;
+
+        /// <summary>
+        /// One test holds every conformance line, so a failure names the lines and the count. The same test
+        /// proves the resolver and the L2 reordering (<see cref="BidiReorder"/>) allocate no managed memory.
+        /// </summary>
+        [Test]
+        public void Resolver_MatchesTheUnicodeConformanceSubset_AndAllocatesNothing()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "bidi-character-test-subset.txt");
+            int total = 0;
+            var failures = new List<string>();
+            int lineNumber = 0;
+            foreach (string line in File.ReadLines(path))
+            {
+                lineNumber++;
+                if (line.Length == 0 || line[0] == '#') continue;
+                total++;
+                string problem = CheckBidiLine(line);
+                if (problem != null) failures.Add($"line {lineNumber}: {problem}");
+            }
+
+            Assert.That(total, Is.GreaterThan(5000), "the fixture holds a real sample.");
+            Assert.That(failures, Is.Empty,
+                $"{failures.Count} of {total} conformance lines fail. First: " +
+                string.Join(" | ", failures.GetRange(0, global::Unity.Mathematics.math.min(failures.Count, MaxReportedFailures))));
+
+            // The all-LTR fast path comes before the cap; a run that needs resolving over the cap is rejected.
+            int[] longLtr = new int[BidiResolver.MaxCodepoints + 1];
+            Array.Fill(longLtr, 0x61);
+            Assert.AreEqual(0, BidiResolver.Resolve(longLtr, new byte[longLtr.Length]), "an all-LTR label over the cap still resolves");
+            longLtr[longLtr.Length - 1] = 0x627;
+            Assert.Throws<ArgumentException>(() => BidiResolver.Resolve(longLtr, new byte[longLtr.Length]));
+
+            // P1: a paragraph separator ends a paragraph, each paragraph resolves alone, and each segment reorders alone.
+            int[] twoRtlParagraphs = { 0x5D0, 0x5D1, 0x2029, 0x5D2, 0x5D3 };
+            byte[] paragraphLevels = new byte[twoRtlParagraphs.Length];
+            BidiResolver.Resolve(twoRtlParagraphs, paragraphLevels);
+            var separatedGlyphs = new List<PositionedGlyph>();
+            foreach (int codepoint in twoRtlParagraphs) separatedGlyphs.Add(new PositionedGlyph { AtlasCodepoint = (uint)codepoint });
+            int[] segmentOrder = new int[twoRtlParagraphs.Length];
+            BidiReorder.ReorderSegments(separatedGlyphs, paragraphLevels, 0, twoRtlParagraphs.Length, segmentOrder);
+            Assert.That(segmentOrder, Is.EqualTo(new[] { 2, 1, 0, 4, 3 }), "each segment reverses alone; one line-wide reversal gives 4 3 2 1 0");
+            byte[] mixedParagraphLevels = new byte[4];
+            BidiResolver.Resolve(new[] { 0x5D0, 0x2029, 0x61, 0x5D1 }, mixedParagraphLevels);
+            Assert.That(mixedParagraphLevels, Is.EqualTo(new byte[] { 1, 1, 0, 1 }), "the second paragraph takes its own direction from 'a'");
+
+            // Cairo, Arabic, a bracket pair, digits and a tail: every rule family runs in the measured call.
+            int[] mixed = { 0x43, 0x61, 0x69, 0x72, 0x6F, 0x20, 0x627, 0x644, 0x642, 0x20, 0x28, 0x645, 0x29, 0x20, 0x31, 0x32, 0x33 };
+            byte[] levels = new byte[mixed.Length];
+            int[] visual = new int[mixed.Length];
+            AllocationDiagnostics.AssertNotAllocating(() =>
+            {
+                BidiResolver.Resolve(mixed, levels);
+                BidiReorder.ReorderLine(levels, 0, levels.Length, visual);
+            }, "the resolver and the L2 reordering allocate nothing on the managed heap.");
+        }
+
+        /// <summary>Returns a description of the first mismatch on one fixture line, or null when it conforms.</summary>
+        private static string CheckBidiLine(string line)
+        {
+            string[] fields = line.Split(';');
+            string[] hex = fields[0].Split(' ');
+            var codepoints = new int[hex.Length];
+            for (int i = 0; i < hex.Length; i++) codepoints[i] = Convert.ToInt32(hex[i], 16);
+
+            ParagraphDirection direction = fields[1] switch
+            {
+                "0" => ParagraphDirection.LeftToRight,
+                "1" => ParagraphDirection.RightToLeft,
+                _ => ParagraphDirection.Auto,
+            };
+            var levels = new byte[codepoints.Length];
+            int paragraphLevel = BidiResolver.Resolve(codepoints, levels, direction);
+            if (paragraphLevel.ToString() != fields[2])
+                return $"paragraph level {paragraphLevel}, expected {fields[2]}";
+
+            string[] expectedLevels = fields[3].Split(' ');
+            var kept = new List<int>();
+            for (int i = 0; i < expectedLevels.Length; i++)
+            {
+                if (expectedLevels[i] == "x") continue;
+                kept.Add(i);
+                if (levels[i].ToString() != expectedLevels[i])
+                    return $"level of index {i} is {levels[i]}, expected {expectedLevels[i]} ({fields[0]})";
+            }
+
+            var visual = new int[codepoints.Length];
+            BidiReorder.ReorderLine(levels, 0, levels.Length, visual);
+            var actualOrder = new System.Text.StringBuilder();
+            foreach (int logical in visual)
+                if (kept.Contains(logical)) actualOrder.Append(logical).Append(' ');
+            string expectedOrder = fields[4].Trim();
+            return actualOrder.ToString().Trim() == expectedOrder
+                ? null
+                : $"visual order {actualOrder.ToString().Trim()}, expected {expectedOrder} ({fields[0]})";
         }
     }
 }

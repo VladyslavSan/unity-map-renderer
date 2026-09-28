@@ -21,6 +21,9 @@ namespace MapRenderer.Core.Text
         /// <summary>The baked-pixel size MapLibre bakes glyph-PBFs at; every em-valued <see cref="TextLayoutOptions"/> property converts via this.</summary>
         public const float OneEm = 24f;
 
+        /// <summary>The longest run whose visual order is built on the stack. A longer run takes a heap array.</summary>
+        internal const int MaxStackGlyphs = 1024;
+
         /// <summary><see cref="TextLayoutOptions.MaxWidthEm"/> fallback for a non-positive (e.g. zero-valued <see cref="TextLayoutOptions"/>) value.</summary>
         private const float DefaultMaxWidthEm = 10f;
 
@@ -51,7 +54,7 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// No-alloc caller-buffer overload (mirrors <see cref="CodepointTextShaper.Shape(in ShapingRequest, List{PositionedGlyph})"/>):
+        /// No-alloc caller-buffer overload (mirrors the shaper's caller-buffer overload):
         /// clears and writes into <paramref name="output"/> instead of allocating a <c>List</c>.
         /// Guaranteed zero managed allocation on the steady no-wrap path once <paramref name="output"/>'s
         /// backing capacity has stabilized from a prior call (see <c>TextQuadLayoutAllocTests</c>, Unity-only).
@@ -81,89 +84,42 @@ namespace MapRenderer.Core.Text
                 _ => 0.5f,
             };
 
-            // RTL runs arrive in visual order and stay single-line: multi-line RTL wrap would need the
-            // logical order the shaper does not expose.
-            bool singleLine = run.Direction == TextDirection.RightToLeft;
+            // The line order is decided on the logical glyphs first; each line then places in visual order.
+            bool reorder = run.Levels is { Count: > 0 };
+            Span<int> visual = !reorder ? default : glyphCount <= MaxStackGlyphs ? stackalloc int[glyphCount] : new int[glyphCount];
 
             int lineIndex = 0;
             int lineOutputStart = 0;
-            float penX = 0f;
             float baselineY = 0f;
-            float currentLineWidth = 0f;
-            bool lineHasContent = false;
             float blockWidth = 0f;
+            float currentLineWidth = 0f;
 
-            int i = 0;
-            if (singleLine)
+            int lineStart = 0;
+            for (int line = 0; line <= glyphCount; line++)
             {
-                while (i < glyphCount)
+                FindLine(glyphs, atlas, lineStart, maxWidthPx, letterPx, out int lineEnd, out int nextLineStart);
+                int lineLength = lineEnd - lineStart;
+                if (reorder) BidiReorder.ReorderSegments(glyphs, run.Levels, lineStart, lineLength, visual);
+
+                float penX = 0f;
+                currentLineWidth = 0f;
+                for (int k = 0; k < lineLength; k++)
                 {
-                    float advance = PlaceGlyph(glyphs[i], atlas, penX, baselineY, lineIndex, output, out bool isWhitespace);
+                    float advance = PlaceGlyph(glyphs[lineStart + (reorder ? visual[k] : k)], atlas, penX, baselineY, lineIndex, output, out bool isWhitespace);
                     penX += advance;
                     if (!isWhitespace) currentLineWidth = penX;
                     penX += letterPx;
-                    i++;
                 }
-            }
-            else
-            {
-                while (i < glyphCount)
-                {
-                    bool tokenIsWhitespace = ClassifyWhitespace(glyphs[i], atlas);
-                    if (!tokenIsWhitespace)
-                    {
-                        int wordEnd = i;
-                        while (wordEnd < glyphCount && !ClassifyWhitespace(glyphs[wordEnd], atlas)) wordEnd++;
 
-                        while (i < wordEnd)
-                        {
-                            float advance = PlaceGlyph(glyphs[i], atlas, penX, baselineY, lineIndex, output, out _);
-                            penX += advance;
-                            currentLineWidth = penX;
-                            penX += letterPx;
-                            i++;
-                        }
-                        lineHasContent = true;
-                    }
-                    else
-                    {
-                        int wsEnd = i;
-                        while (wsEnd < glyphCount && ClassifyWhitespace(glyphs[wsEnd], atlas)) wsEnd++;
-                        int nextWordEnd = wsEnd;
-                        while (nextWordEnd < glyphCount && !ClassifyWhitespace(glyphs[nextWordEnd], atlas)) nextWordEnd++;
+                if (nextLineStart >= glyphCount) break;
 
-                        float wsWidth = MeasureRange(glyphs, i, wsEnd, atlas, letterPx);
-                        float nextWordWidth = MeasureRange(glyphs, wsEnd, nextWordEnd, atlas, letterPx);
-                        bool wouldOverflow = lineHasContent && nextWordEnd > wsEnd
-                            && (currentLineWidth + letterPx + wsWidth + letterPx + nextWordWidth) > maxWidthPx;
-
-                        if (wouldOverflow)
-                        {
-                            // Greedy word-wrap: the breaking space is dropped
-                            // (never placed, doesn't advance the pen on either line).
-                            ApplyJustifyToLine(output, lineOutputStart, currentLineWidth, justifyFactor);
-                            blockWidth = math.max(blockWidth, currentLineWidth);
-
-                            lineIndex++;
-                            lineOutputStart = output.Count;
-                            penX = 0f;
-                            baselineY = -lineIndex * lineHeightPx;
-                            currentLineWidth = 0f;
-                            lineHasContent = false;
-                            i = wsEnd;
-                        }
-                        else
-                        {
-                            while (i < wsEnd)
-                            {
-                                float advance = PlaceGlyph(glyphs[i], atlas, penX, baselineY, lineIndex, output, out _);
-                                penX += advance;
-                                penX += letterPx;
-                                i++;
-                            }
-                        }
-                    }
-                }
+                // Greedy word-wrap: the breaking space is dropped (never placed, doesn't advance the pen).
+                ApplyJustifyToLine(output, lineOutputStart, currentLineWidth, justifyFactor);
+                blockWidth = math.max(blockWidth, currentLineWidth);
+                lineIndex++;
+                lineOutputStart = output.Count;
+                baselineY = -lineIndex * lineHeightPx;
+                lineStart = nextLineStart;
             }
 
             // Finalize the last (or only) line.
@@ -215,6 +171,64 @@ namespace MapRenderer.Core.Text
 
             return new TextLayoutBounds { Min = boundsMin, Max = boundsMax, LineCount = lineCount };
         }
+
+        /// <summary>
+        /// Finds where the line that starts at <paramref name="lineStart"/> ends, in logical order: greedy word-wrap
+        /// on advance widths. <paramref name="nextLineStart"/> skips the breaking space and equals the glyph count
+        /// on the last line.
+        /// </summary>
+        private static void FindLine(IReadOnlyList<PositionedGlyph> glyphs, IGlyphAtlasView atlas, int lineStart,
+            float maxWidthPx, float letterPx, out int lineEnd, out int nextLineStart)
+        {
+            int glyphCount = glyphs.Count;
+            float penX = 0f;
+            float lineWidth = 0f;
+            bool lineHasContent = false;
+            int i = lineStart;
+            while (i < glyphCount)
+            {
+                if (!ClassifyWhitespace(glyphs[i], atlas))
+                {
+                    int wordEnd = i;
+                    while (wordEnd < glyphCount && !ClassifyWhitespace(glyphs[wordEnd], atlas)) wordEnd++;
+                    for (; i < wordEnd; i++)
+                    {
+                        penX += AdvanceOf(glyphs[i], atlas);
+                        lineWidth = penX;
+                        penX += letterPx;
+                    }
+                    lineHasContent = true;
+                    continue;
+                }
+
+                int wsEnd = i;
+                while (wsEnd < glyphCount && ClassifyWhitespace(glyphs[wsEnd], atlas)) wsEnd++;
+                int nextWordEnd = wsEnd;
+                while (nextWordEnd < glyphCount && !ClassifyWhitespace(glyphs[nextWordEnd], atlas)) nextWordEnd++;
+
+                float wsWidth = MeasureRange(glyphs, i, wsEnd, atlas, letterPx);
+                float nextWordWidth = MeasureRange(glyphs, wsEnd, nextWordEnd, atlas, letterPx);
+                if (lineHasContent && nextWordEnd > wsEnd
+                    && (lineWidth + letterPx + wsWidth + letterPx + nextWordWidth) > maxWidthPx)
+                {
+                    lineEnd = i;
+                    nextLineStart = wsEnd;
+                    return;
+                }
+
+                for (; i < wsEnd; i++)
+                {
+                    penX += AdvanceOf(glyphs[i], atlas);
+                    penX += letterPx;
+                }
+            }
+            lineEnd = glyphCount;
+            nextLineStart = glyphCount;
+        }
+
+        /// <summary>The pen step of a glyph: the atlas entry's advance, or the shaped advance for a notdef.</summary>
+        private static float AdvanceOf(PositionedGlyph glyph, IGlyphAtlasView atlas)
+            => atlas.TryGetEntry(glyph.FontId, glyph.AtlasCodepoint, out GlyphAtlasEntry entry) ? entry.Advance : glyph.XAdvance;
 
         /// <summary>
         /// Missing-entry policy: a codepoint absent from the atlas (notdef) emits

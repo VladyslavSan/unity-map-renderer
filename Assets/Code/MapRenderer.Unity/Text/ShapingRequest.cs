@@ -1,7 +1,9 @@
 // Engine-free: no UnityEngine dependency.
 // Construction convention: object initializer with named members.
 
-namespace MapRenderer.Core.Text
+using MapRenderer.Core.Text;
+
+namespace MapRenderer.Unity.Text
 {
     /// <summary>
     /// One request to <see cref="CodepointTextShaper.Shape(in ShapingRequest)"/>: a source string, the resolved font stack it

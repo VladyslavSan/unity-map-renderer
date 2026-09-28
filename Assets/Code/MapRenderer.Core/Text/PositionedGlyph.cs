@@ -13,7 +13,7 @@ namespace MapRenderer.Core.Text
         /// <summary>
         /// The codepoint that keys the <see cref="GlyphAtlas"/>/<see cref="GlyphAtlasEntry"/> lookup —
         /// NOT necessarily the source character's own codepoint (Arabic joining maps it to a
-        /// presentation-form codepoint; see <see cref="ArabicJoining"/>).
+        /// presentation-form codepoint; see <c>ArabicJoining</c>).
         /// </summary>
         public uint AtlasCodepoint { get; init; }
 
@@ -38,7 +38,7 @@ namespace MapRenderer.Core.Text
         public float YOffset { get; init; }
 
         /// <summary>
-        /// The UTF-16 char offset into the source <see cref="ShapingRequest.Text"/> this glyph was
+        /// The UTF-16 char offset into the source <c>ShapingRequest.Text</c> this glyph was
         /// produced from (the first source char, for a merged ligature such as lam-alef).
         /// </summary>
         public int Cluster { get; init; }

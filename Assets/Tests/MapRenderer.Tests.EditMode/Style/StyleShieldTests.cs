@@ -173,7 +173,7 @@ namespace MapRenderer.Tests.Style
                     AtlasCodepoint = codepoint, XAdvance = entry.Advance, Cluster = glyphs.Count,
                 });
             }
-            var run = new ShapedRun { Glyphs = glyphs, Direction = TextDirection.LeftToRight };
+            var run = new ShapedRun { Glyphs = glyphs };
             TextLayoutOptions options = SymbolStyle.TextLayoutOptionsBuilder.Build(
                 PointProbeLayer(layoutJson).Layout, 0.0, null);
             var textLayoutQuads = new List<SymbolQuad>();

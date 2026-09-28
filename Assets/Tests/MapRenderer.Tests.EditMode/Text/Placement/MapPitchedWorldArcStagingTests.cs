@@ -3064,8 +3064,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "a top anchor lowers the cell by the optical-centre constant against the centre anchor");
         }
 
-        // ── Per-symbol build isolation: one symbol whose build throws (e.g. a deferred mixed-direction
-        //    bidi NotSupportedException) must be SKIPPED, never abort the whole tile's symbols. ──
+        // ── Per-symbol build isolation: one symbol whose build throws (e.g. an RTL run over the bidi
+        //    code point cap) must be SKIPPED, never abort the whole tile's symbols. ──
 
         private static SymbolFeature PointSymbol(string text) => new SymbolFeature
         {
@@ -3076,17 +3076,17 @@ namespace MapRenderer.Tests.Text.Placement
         };
 
         [Test]
-        public void Shape_MixedDirectionSymbol_IsSkipped_OtherSymbolsSurvive()
+        public void Shape_OverCapRtlSymbol_IsSkipped_OtherSymbolsSurvive()
         {
             using var manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
 
-            // Two LTR symbols around one MIXED symbol ('A' U+0041 + Arabic beh U+0628), which CodepointTextShaper
-            // rejects (single-run bidi). The missing Arabic range caches empty in Pass 1; Pass 2's shaper throws.
+            // Two LTR symbols around one RTL symbol over the bidi cap, which the shaper rejects. The missing
+            // Arabic range caches empty in Pass 1; Pass 2's shaper throws.
             var symbols = new List<SymbolFeature>
             {
                 PointSymbol("Aruba"),
-                PointSymbol("Aب"),
+                PointSymbol(new string('\u0628', MapRenderer.Unity.Text.Bidi.BidiResolver.MaxCodepoints + 1)),
                 PointSymbol("Angola"),
             };
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(
@@ -3096,12 +3096,12 @@ namespace MapRenderer.Tests.Text.Placement
             builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
 
             // The whole tile is NOT aborted: the two LTR symbols build; only the mixed one is skipped.
-            Assert.AreEqual(2, output.Symbols.Count, "the two LTR labels survive; the mixed label is skipped");
+            Assert.AreEqual(2, output.Symbols.Count, "the two LTR labels survive; the over-cap RTL label is skipped");
             Assert.AreEqual(builder.StringTable.Intern("Aruba"), output.Symbols[0].TextId);
             Assert.AreEqual(builder.StringTable.Intern("Angola"), output.Symbols[1].TextId);
             Assert.AreEqual(1, builder.SkippedSymbolCount, "exactly one label skipped");
             Assert.IsNotNull(builder.LastSkipReason, "skip reason recorded for the throttled diagnostic");
-            StringAssert.Contains("NotSupportedException", builder.LastSkipReason);
+            StringAssert.Contains("ArgumentException", builder.LastSkipReason);
         }
 
         [Test]

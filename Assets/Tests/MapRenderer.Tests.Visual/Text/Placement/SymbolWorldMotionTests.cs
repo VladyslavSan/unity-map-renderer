@@ -795,7 +795,6 @@ namespace MapRenderer.Tests.Visual
                     {
                         new PositionedGlyph { AtlasCodepoint = (uint)'5', XAdvance = 0f, Cluster = 0 },
                     },
-                    Direction = TextDirection.LeftToRight,
                 };
 
                 var curvedCells = new List<CurvedGlyph>();

@@ -58,16 +58,37 @@ synchronous, no atlas mutation — started by `PumpBuilds`' once-per-frame drain
 per-label body in `StyledSymbolTileBuilder.Shape` (shape → layout → `output.Add`) is wrapped in a
 `catch … when (!(ex is OperationCanceledException) && !ct.IsCancellationRequested)` that skips + counts the one
 label (`SkippedSymbolCount` telemetry, throttled once-per-session warn) and lets the rest build + commit.
-The case that needs it is single-run bidi: `CodepointTextShaper` throws on mixed strong-direction text
-(RTL+LTR), which the liberty `["concat", name:latin, " ", name:nonlatin]` place field produces for every
-Arabic/Hebrew-region place — without isolation every low-zoom world tile (which spans an RTL region) would
-render **zero** symbols. **Known gaps:** **Pass 1** (glyph fetch/`GlyphPbfDecoder.Decode`) is unguarded — a
+The designed throw is a run that needs bidi resolving and holds more than `BidiResolver.MaxCodepoints` code
+points: the shaper rejects it, and the label is skipped and counted. **Known gaps:** **Pass 1** (glyph fetch/`GlyphPbfDecoder.Decode`) is unguarded — a
 corrupt glyph-PBF for one label would blank a tile through the same mechanism; the isolation covers Pass 2
 (shape/layout) only. Separately, because of the `when` guard above, a pre-cancelled token reaching a Pass-2
 label that throws a non-`OperationCanceledException` bug fails the guard, so the exception propagates and
 drops the whole build instead of being skipped — a hole in the per-label isolation guarantee, with no
-observable impact and no test. Full UAX #9 bidi (actually *rendering* mixed-direction labels) is a separate,
-deferred feature.
+observable impact and no test.
+
+**Bidirectional text (UAX #9).** A label's text stays in logical order through shaping and only the last step
+reorders it.
+
+- `CodepointTextShaper` decodes UTF-16 into code points, then `BidiResolver.Resolve` (paragraph direction Auto)
+  writes one embedding level per code point. A B character ends a paragraph (P1), and each paragraph resolves
+  alone. Joining (`ArabicJoining`) runs over the whole logical string, so a letter joins across a neutral it
+  cannot see. L4 replaces a glyph on an odd level with its mirror (`BidiMirroring` pairs) when the metrics hold
+  a glyph for it, and otherwise keeps the source glyph.
+- `ShapedRun` carries the glyphs in logical order plus the level column (`Levels`, null or empty for all 0).
+  The all-LTR label takes a fast path: no R, AL or AN means every level is 0 and the output is the plain
+  code point sequence.
+- `TextQuadLayout` breaks lines in logical order (greedy word wrap on advances). It then reorders each line
+  alone (L2, `BidiReorder`), splitting segments at paragraph separators. A long RTL label therefore wraps.
+  `CurvedTextLayout` has no lines, so it reorders the whole run.
+- **The cut rules.** Explicit embeddings and overrides are removed as in X9 and do not embed, and isolate
+  characters act as neutrals (X1-X8 are not resolved). Text that uses those controls lays out in implicit
+  order. L3 (combining-mark reordering), HL1 and digit shaping are not applied. L1 treats each paragraph as
+  one line. It needs no per-line pass, because the layout drops the space at every wrap.
+- **The cap.** A run that needs resolving and holds more than `BidiResolver.MaxCodepoints` code points is
+  rejected, and the per-label isolation above skips and counts the label. An all-LTR label of any length
+  still renders.
+- The resolver is checked against the Unicode conformance data (`BidiCharacterTest.txt`, `BidiTest.txt`) by
+  the conformance test over `Assets/Fixtures/bidi-character-test-subset.txt`.
 
 **Single-world anchor clip (point labels).** `SymbolFeatureExtractor` drops POINT features whose tile-local
 anchor falls outside the tile's half-open `[0, extent)` bounds (per-axis). Low-zoom source tiles carry ±360°
@@ -690,7 +711,7 @@ horizon-cull grazing margin.
 `CurrentBatch`), `SymbolTileStore` (active/cached/departing), `SymbolReconciler` (the off-main
 cross-tile dedup — `docs/labels-async-reconcile-design.md`), `Placement/SymbolPlacementSystem` (`Update`),
 `Placement/SymbolGatherPlan` (the per-frame winner plan), `SymbolFeatureExtractor` (`ProjectPath`,
-`LineAnchorPlacement.Compute`). `MapRenderer.Core/Text/`: `CodepointTextShaper`, `TextQuadLayout`,
+`LineAnchorPlacement.Compute`), `CodepointTextShaper`. `MapRenderer.Core/Text/`: `TextQuadLayout`,
 `CurvedTextLayout`, `Placement/SymbolStagingMath` (`StageCurved`, tangent), `Placement/PolylineArcMath`,
 `Placement/CrossTileSymbolKey`, `Placement/LineAnchor`, `Placement/SymbolTileCoverage`,
 `Placement/SymbolTileCoverageFilter` (the pre-build cull), `Placement/SymbolScreenProjection` (the

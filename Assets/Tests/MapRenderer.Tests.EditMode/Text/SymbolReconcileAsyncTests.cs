@@ -112,23 +112,33 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // (b) Shape a cached run (steady LTR path) into a caller-owned List<PositionedGlyph> buffer.
-        //     The warm-up call stabilizes the List's capacity; the measured call reuses it.
+        // (b) Shape a cached LTR run and a cached RTL run (Arabic joining) into caller-owned buffers.
+        //     The warm-up calls stabilize the Lists' capacities; the measured calls reuse them.
         // =========================================================================================
         [Test]
-        public void Shape_CachedLatinRun_IntoCallerBuffer_AllocatesNoGCMemory()
+        public void Shape_CachedRuns_IntoCallerBuffers_AllocateNoGCMemory()
         {
             var metrics = new FixedAdvanceMetrics(12f);
             var shaper = new CodepointTextShaper();
             var request = new ShapingRequest { Text = "Hello Map Symbols", FontStack = null, Metrics = metrics };
+            var mixedRequest = new ShapingRequest { Text = "Cairo \u0627\u0644\u0642\u0627\u0647\u0631\u0629 (\u0645\u0635\u0631)", FontStack = null, Metrics = metrics };
+            var arabicRequest = new ShapingRequest { Text = "\u0645\u0631\u062D\u0628\u0627 \u0644\u0627", FontStack = null, Metrics = metrics };
             var output = new List<PositionedGlyph>(32);
+            var levels = new List<byte>(32);
 
-            // Warm-up: stabilizes `output`'s backing array capacity.
-            shaper.Shape(in request, output);
+            // Warm-up: stabilizes the buffers' backing array capacities and the shaper's join scratch.
+            shaper.Shape(in request, output, levels);
+            shaper.Shape(in arabicRequest, output, levels);
+            shaper.Shape(in mixedRequest, output, levels);
 
-            AllocationDiagnostics.AssertNotAllocating(() => { shaper.Shape(in request, output); },
-                "Shape(in request, output) must not allocate on the steady LTR path once the caller " +
-                "buffer's capacity has stabilized from the warm-up call.");
+            AllocationDiagnostics.AssertNotAllocating(() =>
+                {
+                    shaper.Shape(in request, output, levels);
+                    shaper.Shape(in arabicRequest, output, levels);
+                    shaper.Shape(in mixedRequest, output, levels);
+                },
+                "Shape(in request, output, levels) must not allocate on the steady LTR or RTL path once the " +
+                "caller buffers' capacities have stabilized from the warm-up calls.");
         }
 
         private sealed class FixedAdvanceMetrics : IGlyphMetricsProvider
@@ -441,7 +451,11 @@ namespace MapRenderer.Tests.Text
             var layer2 = new StyledSymbolTileBuilder.ExtractedLayer(
                 0, new FontStack { Names = new[] { "FontC" } },
                 new List<SymbolFeature> { PointSymbol("ب") });
-            var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer1, layer2 };
+            // U+2215 mirrors to U+29F5, which sits in another range, so both ranges are collected.
+            var layer3 = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { "FontC" } },
+                new List<SymbolFeature> { PointSymbol("\u2215") });
+            var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer1, layer2, layer3 };
 
             var ranges = new List<(string FontName, int RangeStart)>();
             var seen = new HashSet<(string FontName, int RangeStart)>();
@@ -450,6 +464,7 @@ namespace MapRenderer.Tests.Text
             var expected = new List<(string FontName, int RangeStart)>
             {
                 ("FontA", 0), ("FontB", 0), ("FontA", 1536), ("FontB", 1536), ("FontC", 1536),
+                ("FontC", 8704), ("FontC", 10496),
             };
             CollectionAssert.AreEqual(expected, ranges,
                 "collected ranges must be in FIRST-ENCOUNTER order (layer -> symbol -> code unit -> stack " +

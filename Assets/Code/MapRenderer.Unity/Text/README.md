@@ -17,7 +17,7 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
                  │  + RunWorkerAndHandoff (pool, inside the SAME kick task as the mesh pass)  (Unity/Text)
                  │  decode + extract features — off the main thread (thread pool), sharing the mesh
                  │  pass's decode (one decode-once entry, no parallel push feed)
-                 │  shape glyphs (HarfBuzz-free CodepointTextShaper, bidi, Arabic joining)  (Core/Text)
+                 │  shape glyphs (HarfBuzz-free CodepointTextShaper, UAX #9 levels, Arabic joining, L4 mirroring)  (Unity/Text)
                  │  Shape writes each raw label into a reused SymbolTileBuffer (no per-label alloc), after
                  │  the tail's one glyph-ensure suspension has already populated the atlas
                  ▼
@@ -43,7 +43,8 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
 
 | Concern | Assembly / path | Key files |
 |---|---|---|
-| Shaping, bidi, glyph atlas/SDF, font stacks | `Core/Text/` | `CodepointTextShaper`, `BidiReorder`, `ArabicJoining`, `GlyphAtlas*`, `FontStack*`, `TextQuadLayout`, `CurvedTextLayout` |
+| Glyph atlas/SDF, font stacks, layout, L2 reordering | `Core/Text/` | `BidiReorder`, `GlyphAtlas*`, `FontStack*`, `TextQuadLayout`, `CurvedTextLayout` |
+| Shaping, Arabic joining, UAX #9 resolver | `Unity/Text/` | `CodepointTextShaper`, `ArabicJoining`, `Bidi/BidiResolver` |
 | Placement math (engine-free) | `Core/Text/Placement/` | `SymbolBox`, `SymbolCollision`, `SymbolScreenProjection`, `PolylineArcMath`, `SymbolTileBuffer`/`ShapedSymbol` (the reused per-build shape buffer), `PlacedQuad`, `SymbolBearing` |
 | Tile build orchestration (off-thread) | `Unity/Text/` | `SymbolSubsystem`, `StyledSymbolTileBuilder`, `SymbolTileStore` |
 | Glyph atlas texture (GPU) | `Unity/Text/` | `GlyphAtlasTexture`, `GlyphManager` |
@@ -58,8 +59,8 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
   compete for the same space. Runs as the Burst `CollisionJob`.
 - **Fade** (A-4) — labels ease in/out instead of popping; **cross-tile identity** (A-3) keeps a label's
   opacity across a parent/child tile swap; **sticky-placement hysteresis** (A-5) resists flicker.
-- **Shaping** — a clean-room codepoint shaper with bidi reordering + Arabic joining, SDF glyphs from
-  glyph-PBF ranges, multi-font stacks.
+- **Shaping** — a clean-room codepoint shaper with UAX #9 bidi (levels resolved in logical order, each line
+  reordered after breaking) + Arabic joining, SDF glyphs from glyph-PBF ranges, multi-font stacks.
 - **Off-main tile build** — decode + feature-extract run on the thread pool; only glyph shaping and the
   atlas upload touch the main thread (see `SymbolSubsystem.TryBeginBuild`/`RunWorkerAndHandoff`,
   driven by `TileManager`'s per-tile kick).

@@ -10,7 +10,7 @@ namespace MapRenderer.Core.Text
     /// font in <see cref="FontStack.Names"/> order whose range (<c>(codepoint / 256) * 256</c>) holds it
     /// wins, else notdef/skip. It reads the <see cref="GlyphCache"/> per font name, not per joined
     /// <see cref="FontStack.RequestToken"/>, because client-side fallback tries each font in order. It
-    /// backs <see cref="ShapingRequest.Metrics"/>.
+    /// backs <c>ShapingRequest.Metrics</c>.
     /// </summary>
     public sealed class FontStackResolver : IGlyphMetricsProvider
     {

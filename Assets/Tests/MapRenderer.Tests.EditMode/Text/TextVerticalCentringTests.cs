@@ -221,7 +221,7 @@ namespace MapRenderer.Tests.Text
             var list = new List<PositionedGlyph>(codepoints.Length);
             for (int i = 0; i < codepoints.Length; i++)
                 list.Add(new PositionedGlyph { AtlasCodepoint = codepoints[i], XAdvance = 0f, Cluster = i });
-            return new ShapedRun { Glyphs = list, Direction = TextDirection.LeftToRight };
+            return new ShapedRun { Glyphs = list };
         }
 
         /// <summary>Bare (unpadded) glyph height in baked px — the SDF cell less its symmetric buffer border.</summary>
@@ -404,7 +404,7 @@ namespace MapRenderer.Tests.Text
             var list = new List<PositionedGlyph>(codepoints.Length);
             for (int i = 0; i < codepoints.Length; i++)
                 list.Add(new PositionedGlyph { AtlasCodepoint = codepoints[i], XAdvance = 0f, Cluster = i });
-            return new ShapedRun { Glyphs = list, Direction = TextDirection.LeftToRight };
+            return new ShapedRun { Glyphs = list };
         }
 
         [Test]
@@ -2001,7 +2001,7 @@ namespace MapRenderer.Tests.Text
             {
                 list.Add(new PositionedGlyph { AtlasCodepoint = glyphs[i].codepoint, XAdvance = glyphs[i].advance, Cluster = i });
             }
-            return new ShapedRun { Glyphs = list, Direction = TextDirection.LeftToRight };
+            return new ShapedRun { Glyphs = list };
         }
 
         private static TextLayoutOptions MakeOptions(
@@ -2329,14 +2329,14 @@ namespace MapRenderer.Tests.Text
 
         private static FontStackGlyphs DecodeLatin() => GlyphPbfDecoder.Decode(LoadFixture("0-255.pbf.bytes")).Stacks[0];
 
-        private static ShapedRun MakeRun(TextDirection direction, params (uint codepoint, float advance)[] glyphs)
+        private static ShapedRun MakeRun(params (uint codepoint, float advance)[] glyphs)
         {
             var list = new List<PositionedGlyph>(glyphs.Length);
             for (int i = 0; i < glyphs.Length; i++)
             {
                 list.Add(new PositionedGlyph { AtlasCodepoint = glyphs[i].codepoint, XAdvance = glyphs[i].advance, Cluster = i });
             }
-            return new ShapedRun { Glyphs = list, Direction = direction };
+            return new ShapedRun { Glyphs = list };
         }
 
         // =========================================================================================
@@ -2351,7 +2351,7 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
             GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
 
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
+            ShapedRun run = MakeRun(((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
             var resultQuads = new List<SymbolQuad>();
             TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, resultQuads);
@@ -2423,7 +2423,7 @@ namespace MapRenderer.Tests.Text
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
             GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
+            ShapedRun run = MakeRun(((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
             var resultQuads = new List<SymbolQuad>();
             TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, resultQuads);
@@ -2520,7 +2520,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance));
+            ShapedRun run = MakeRun(((uint)'A', entryA.Advance));
 
             TextLayoutOptions zeroOptions = default;
             var resultQuads = new List<SymbolQuad>();
@@ -2534,6 +2534,19 @@ namespace MapRenderer.Tests.Text
         }
     }
 
+    /// <summary>Reads a logical-order <see cref="ShapedRun"/> the way the layouts place it: left to right on screen.</summary>
+    internal static class ShapedRunVisualOrder
+    {
+        public static List<PositionedGlyph> Of(ShapedRun run)
+        {
+            var visual = new int[run.Glyphs.Count];
+            BidiReorder.ReorderLine(run.Levels, 0, run.Glyphs.Count, visual);
+            var ordered = new List<PositionedGlyph>(visual.Length);
+            foreach (int logical in visual) ordered.Add(run.Glyphs[logical]);
+            return ordered;
+        }
+    }
+
     // ───────────────────────────────────────────────────────────────────────────────────
     // TextRtlLayoutTests — RTL single-line correctness
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -2541,7 +2554,7 @@ namespace MapRenderer.Tests.Text
     /// <summary>
     /// RTL single-line correctness. Reuses the "marhaba" (Arabic for "hello")
     /// golden setup from <c>TextShapingTests</c> (same fixtures, same shaper) so this test operates on
-    /// a real, independently-verified visual-order <see cref="ShapedRun"/> rather than a synthetic one.
+    /// a real, independently-verified <see cref="ShapedRun"/> read in visual order rather than a synthetic one.
     /// </summary>
     [TestFixture]
     public class TextRtlLayoutTests
@@ -2583,7 +2596,7 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        /// <summary>Builds a real <see cref="GlyphAtlas"/> (and a matching advance-only metrics provider for shaping) from BOTH presentation-form fixture ranges.</summary>
+        /// <summary>Builds a real <see cref="GlyphAtlas"/> (and a matching advance-only metrics provider for shaping) from BOTH presentation-form fixture ranges plus the Latin range (for the space).</summary>
         private static (GlyphAtlas atlas, FixtureGlyphMetricsProvider metrics) BuildPresentationFormAtlas()
         {
             FontStackGlyphs presentationFormsA = GlyphPbfDecoder.Decode(LoadFixture("64256-64511.pbf.bytes")).Stacks[0];
@@ -2593,6 +2606,7 @@ namespace MapRenderer.Tests.Text
             var advances = new Dictionary<uint, float>();
             foreach (var kv in presentationFormsA.Glyphs) { atlas.Append(kv.Value, 0); advances[kv.Key] = kv.Value.Advance; }
             foreach (var kv in presentationFormsB.Glyphs) { atlas.Append(kv.Value, 0); advances[kv.Key] = kv.Value.Advance; }
+            foreach (var kv in GlyphPbfDecoder.Decode(LoadFixture("0-255.pbf.bytes")).Stacks[0].Glyphs) { atlas.Append(kv.Value, 0); advances[kv.Key] = kv.Value.Advance; }
 
             return (atlas, new FixtureGlyphMetricsProvider(advances));
         }
@@ -2605,8 +2619,8 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T7 — RTL single-line correctness: forced single line, correct total advance, first VISUAL
-        // glyph at the left edge.
+        // T7 — RTL layout: a short label stays on one line with the first VISUAL glyph at the left edge and the
+        // right total advance; a long one wraps in logical order and each line reorders alone.
         // =========================================================================================
         [Test]
         public void Layout_Rtl_SingleLine_FirstVisualGlyphAtLeftEdge_AndTotalAdvanceMatches()
@@ -2614,11 +2628,11 @@ namespace MapRenderer.Tests.Text
             (GlyphAtlas atlas, FixtureGlyphMetricsProvider metrics) = BuildPresentationFormAtlas();
             ShapedRun run = ShapeMarhaba(metrics);
 
-            Assert.AreEqual(TextDirection.RightToLeft, run.Direction, "pure Arabic text must resolve to RTL (T1)");
             Assert.AreEqual(5, run.Glyphs.Count);
+            List<PositionedGlyph> visual = ShapedRunVisualOrder.Of(run);
             // Sanity: reuse the shaping golden -- the first VISUAL glyph is ALEF (U+FE8E). If this ever
             // regresses it means shaping changed, not layout -- fail loudly here rather than silently.
-            Assert.AreEqual(0xFE8Eu, run.Glyphs[0].AtlasCodepoint, "Golden: first visual glyph is ALEF final");
+            Assert.AreEqual(0xFE8Eu, visual[0].AtlasCodepoint, "Golden: first visual glyph is ALEF final");
 
             // Anchor=Left (hAlign=0) -> no horizontal anchor shift, so quads land at their raw pen positions.
             var options = new TextLayoutOptions
@@ -2635,11 +2649,11 @@ namespace MapRenderer.Tests.Text
             var resultQuads = new List<SymbolQuad>();
             TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
-            Assert.AreEqual(1, result.LineCount, "RTL is forced single-line (decision 4 / fork 3)");
+            Assert.AreEqual(1, result.LineCount, "a label that fits the width stays on one line");
             Assert.AreEqual(5, resultQuads.Count, "no whitespace in \"marhaba\" -- one quad per glyph");
 
             // First visual glyph (ALEF) sits at the line's left edge: penX = 0.
-            Assert.IsTrue(atlas.TryGetEntry(0, run.Glyphs[0].AtlasCodepoint, out GlyphAtlasEntry entryFirst));
+            Assert.IsTrue(atlas.TryGetEntry(0, visual[0].AtlasCodepoint, out GlyphAtlasEntry entryFirst));
             float expectedFirstMinX = 0f + entryFirst.Left - GlyphSdf.Buffer;
             Assert.AreEqual(expectedFirstMinX, resultQuads[0].TopLeft.x, Tolerance, "the first VISUAL glyph must sit at the line's left edge");
 
@@ -2652,17 +2666,45 @@ namespace MapRenderer.Tests.Text
                 expectedTotalAdvance += e.Advance;
             }
 
-            Assert.IsTrue(atlas.TryGetEntry(0, run.Glyphs[4].AtlasCodepoint, out GlyphAtlasEntry entryLast));
+            Assert.IsTrue(atlas.TryGetEntry(0, visual[4].AtlasCodepoint, out GlyphAtlasEntry entryLast));
             float expectedLastMinX = (expectedTotalAdvance - entryLast.Advance) + entryLast.Left - GlyphSdf.Buffer;
             Assert.AreEqual(expectedLastMinX, resultQuads[4].TopLeft.x, Tolerance, "pen must accumulate every preceding glyph's advance, in visual order");
+
+            // Two words at a width that fits only the first: RTL text wraps too. Line 0 holds the logically first word.
+            var shaper = new CodepointTextShaper();
+            var twoWords = new ShapingRequest { Text = Marhaba + " \u0644\u0627", FontStack = null, Metrics = metrics };
+            ShapedRun wrapped = shaper.Shape(in twoWords);
+            float firstWordWidth = 0f;
+            for (int i = 0; i < 5; i++)
+            {
+                Assert.IsTrue(atlas.TryGetEntry(0, wrapped.Glyphs[i].AtlasCodepoint, out GlyphAtlasEntry e));
+                firstWordWidth += e.Advance;
+            }
+            var narrow = new TextLayoutOptions
+            {
+                Anchor = TextAnchor.Left,
+                MaxWidthEm = (firstWordWidth + 1f) / TextQuadLayout.OneEm,
+                LineHeightEm = 1.2f,
+            };
+            var wrappedQuads = new List<SymbolQuad>();
+            TextLayoutBounds wrappedBounds = TextQuadLayout.Layout(wrapped, atlas, in narrow, wrappedQuads);
+            Assert.AreEqual(2, wrappedBounds.LineCount, "an RTL label wraps like any other");
+            Assert.AreEqual(6, wrappedQuads.Count, "five glyphs of the first word plus the lam-alef ligature");
+            for (int k = 0; k < 5; k++)
+            {
+                Assert.IsTrue(atlas.TryGetEntry(0, wrapped.Glyphs[4 - k].AtlasCodepoint, out GlyphAtlasEntry expected));
+                Assert.AreEqual(((float2)expected.AtlasOrigin / atlas.Size).x, wrappedQuads[k].UvTopLeft.x, 1e-6f, $"line 0 quad {k} shows the first word reversed");
+                Assert.AreEqual(0, wrappedQuads[k].LineIndex);
+            }
+            Assert.AreEqual(1, wrappedQuads[5].LineIndex, "the second word starts line 1");
         }
 
         // =========================================================================================
-        // Teeth: re-reversing the visual-order run puts MEEM (logically first, visually last) at the left
+        // Teeth: reordering the run twice puts MEEM (logically first, visually last) at the left
         // edge instead of ALEF, which shows as a different quad width.
         // =========================================================================================
         [Test]
-        public void Layout_Rtl_Teeth_DoesNotReReverseTheAlreadyVisualOrderRun()
+        public void Layout_Rtl_Teeth_ReordersTheLogicalRunExactlyOnce()
         {
             (GlyphAtlas atlas, FixtureGlyphMetricsProvider metrics) = BuildPresentationFormAtlas();
             ShapedRun run = ShapeMarhaba(metrics);
@@ -2686,7 +2728,13 @@ namespace MapRenderer.Tests.Text
 
             float actualFirstWidth = resultQuads[0].BottomRight.x - resultQuads[0].TopLeft.x;
             Assert.AreEqual(entryAlef.CellSize.x, actualFirstWidth, Tolerance, "the first emitted quad must be ALEF's (visual position 0)");
-            Assert.AreNotEqual(entryMeem.CellSize.x, actualFirstWidth, "a re-reversing implementation would put MEEM first instead of ALEF");
+            Assert.AreNotEqual(entryMeem.CellSize.x, actualFirstWidth, "a layout that skips the reordering would put MEEM first instead of ALEF");
+
+            // The curved layout reorders the same run: its first cell is ALEF's too.
+            List<CurvedGlyph> curved = CurvedTextLayout.Layout(run, atlas);
+            float curvedFirstWidth = curved[0].Cell.BottomRight.x - curved[0].Cell.TopLeft.x;
+            Assert.AreEqual(entryAlef.CellSize.x, curvedFirstWidth, Tolerance, "the curved layout's first cell must be ALEF's");
+            Assert.AreNotEqual(entryMeem.CellSize.x, curvedFirstWidth, "a curved layout that skips the reordering would put MEEM first");
         }
 
         // =========================================================================================
@@ -2735,7 +2783,7 @@ namespace MapRenderer.Tests.Text
     ///   i=2 HAH  (U+062D, Dual):  REH cannot send; next BEH can receive        => INITIAL U+FEA3
     ///   i=3 BEH  (U+0628, Dual):  HAH sends a join in; next ALEF can receive   => MEDIAL  U+FE92
     ///   i=4 ALEF (U+0627, Right): BEH sends a join in; no next char            => FINAL   U+FE8E
-    /// Single-run RTL reverses this logical order to visual order. The fixture-existence tooth cannot
+    /// The layouts place this logical order right to left, so the golden below is the visual order. The fixture-existence tooth cannot
     /// catch a wrong mapping to a codepoint that also exists (e.g. FEE1, meem isolated); only this
     /// derivation does.
     /// </summary>
@@ -2837,12 +2885,15 @@ namespace MapRenderer.Tests.Text
             var (metrics, _) = LoadPresentationFormFixtures();
             ShapedRun run = ShapeMarhaba(metrics);
 
-            Assert.AreEqual(TextDirection.RightToLeft, run.Direction, "pure Arabic text must resolve to RTL");
             Assert.AreEqual(MarhabaGoldenVisualOrder.Length, run.Glyphs.Count);
+            // The run itself is in logical order (MEEM first) and every glyph sits at level 1.
+            Assert.AreEqual(0, run.Glyphs[0].Cluster, "the shaper emits logical order");
+            Assert.That(run.Levels, Is.EqualTo(new byte[] { 1, 1, 1, 1, 1 }));
 
+            List<PositionedGlyph> visual = ShapedRunVisualOrder.Of(run);
             for (int i = 0; i < MarhabaGoldenVisualOrder.Length; i++)
             {
-                PositionedGlyph glyph = run.Glyphs[i];
+                PositionedGlyph glyph = visual[i];
                 (uint codepoint, int cluster) expected = MarhabaGoldenVisualOrder[i];
                 Assert.AreEqual(expected.codepoint, glyph.AtlasCodepoint,
                     $"visual position {i}: expected atlas codepoint U+{expected.codepoint:X4}, got U+{glyph.AtlasCodepoint:X4}");
@@ -2888,11 +2939,11 @@ namespace MapRenderer.Tests.Text
 
             // The actual shaper must NOT equal the naive passthrough (this is what makes T1 decisive).
             var (metrics, _) = LoadPresentationFormFixtures();
-            ShapedRun run = ShapeMarhaba(metrics);
+            List<PositionedGlyph> visualRun = ShapedRunVisualOrder.Of(ShapeMarhaba(metrics));
             bool actualMatchesPassthrough = true;
             for (int i = 0; i < passthrough.Length; i++)
             {
-                if (run.Glyphs[i].AtlasCodepoint != passthrough[i].codepoint || run.Glyphs[i].Cluster != passthrough[i].cluster)
+                if (visualRun[i].AtlasCodepoint != passthrough[i].codepoint || visualRun[i].Cluster != passthrough[i].cluster)
                 {
                     actualMatchesPassthrough = false;
                     break;
@@ -2941,21 +2992,74 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Decision 8: mixed strong-direction (RTL + LTR) input is a documented throw, not silently
-        // wrong output -- full UAX #9 bidi is a deferred follow-up.
+        // "Cairo <Arabic> (<Arabic>)": levels, L4 mirrored parens, and a per-line reorder after wrapping.
         // =========================================================================================
         [Test]
-        public void Shape_MixedDirectionText_Throws()
+        public void Shape_MixedDirectionText_ResolvesLevelsMirrorsParensAndWrapsPerLine()
         {
-            var shaper = new CodepointTextShaper();
-            var request = new ShapingRequest
+            // "Cairo " + al-qahira + " (" + misr + ")", as escapes so no raw RTL text sits in this source file.
+            const string cairo = "Cairo \u0627\u0644\u0642\u0627\u0647\u0631\u0629 (\u0645\u0635\u0631)";
+            var advances = new Dictionary<uint, float>();
+            var atlas = new GlyphAtlas();
+            foreach (string fixture in new[] { "0-255.pbf.bytes", "64256-64511.pbf.bytes", "65024-65279.pbf.bytes" })
             {
-                Text = "abc" + Marhaba, // Latin + Arabic in the same run
-                FontStack = null,
-                Metrics = new FixtureGlyphMetricsProvider(new Dictionary<uint, float>()),
-            };
+                foreach (var kv in GlyphPbfDecoder.Decode(LoadFixture(fixture)).Stacks[0].Glyphs)
+                {
+                    atlas.Append(kv.Value, 0);
+                    advances[kv.Key] = kv.Value.Advance;
+                }
+            }
+            var shaper = new CodepointTextShaper();
+            var request = new ShapingRequest { Text = cairo, FontStack = null, Metrics = new FixtureGlyphMetricsProvider(advances) };
 
-            Assert.Throws<NotSupportedException>(() => shaper.Shape(in request));
+            ShapedRun run = shaper.Shape(in request);
+
+            Assert.That(run.Levels, Is.EqualTo(new byte[] { 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }),
+                "Latin at 0; the Arabic, its neighbours and the brackets around it at 1 (N0, N1)");
+            Assert.AreEqual(0x29u, run.Glyphs[14].AtlasCodepoint, "L4: the opening paren at level 1 draws the closing glyph");
+            Assert.AreEqual(0x28u, run.Glyphs[18].AtlasCodepoint, "L4: the closing paren at level 1 draws the opening glyph");
+
+            // A width that fits "Cairo <Arabic>" but not the bracketed word after it gives two lines.
+            float firstLineWidth = 0f;
+            for (int i = 0; i <= 12; i++)
+            {
+                Assert.IsTrue(atlas.TryGetEntry(0, run.Glyphs[i].AtlasCodepoint, out GlyphAtlasEntry entry));
+                firstLineWidth += entry.Advance;
+            }
+            var options = new TextLayoutOptions
+            {
+                Anchor = TextAnchor.Left,
+                MaxWidthEm = (firstLineWidth + 1f) / TextQuadLayout.OneEm,
+                LineHeightEm = 1.2f,
+            };
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, in options, quads);
+            Assert.AreEqual(2, bounds.LineCount);
+
+            // Visual order per line: line 1 is Latin then the Arabic reversed; line 2 is the bracketed word reversed.
+            int[] expectedLogical = { 0, 1, 2, 3, 4, 12, 11, 10, 9, 8, 7, 6, 18, 17, 16, 15, 14 };
+            Assert.AreEqual(expectedLogical.Length, quads.Count, "one quad per drawn glyph; the two spaces draw none");
+            for (int k = 0; k < expectedLogical.Length; k++)
+            {
+                Assert.IsTrue(atlas.TryGetEntry(0, run.Glyphs[expectedLogical[k]].AtlasCodepoint, out GlyphAtlasEntry expected));
+                float2 expectedUv = (float2)expected.AtlasOrigin / atlas.Size;
+                Assert.AreEqual(expectedUv.x, quads[k].UvTopLeft.x, 1e-6f, $"quad {k} shows logical glyph {expectedLogical[k]}");
+                Assert.AreEqual(expectedUv.y, quads[k].UvTopLeft.y, 1e-6f, $"quad {k} shows logical glyph {expectedLogical[k]}");
+                if (k > 0 && quads[k].LineIndex == quads[k - 1].LineIndex)
+                    Assert.Greater(quads[k].TopLeft.x, quads[k - 1].TopLeft.x, $"quad {k} sits right of quad {k - 1}");
+            }
+
+            // A bracket pair at level 0 keeps its own glyphs even though the run needs bidi resolving.
+            var levelZeroParens = new ShapingRequest { Text = "(Cairo) \u0645\u0635\u0631", FontStack = null, Metrics = new FixtureGlyphMetricsProvider(advances) };
+            ShapedRun unmirrored = shaper.Shape(in levelZeroParens);
+            Assert.AreEqual(0x28u, unmirrored.Glyphs[0].AtlasCodepoint, "level 0: the opening paren is not mirrored");
+            Assert.AreEqual(0x29u, unmirrored.Glyphs[6].AtlasCodepoint, "level 0: the closing paren is not mirrored");
+
+            // L4 keeps the source glyph when the mirrored code point has no glyph.
+            advances.Remove(0x28u);
+            var withoutOpenParen = new ShapingRequest { Text = cairo, FontStack = null, Metrics = new FixtureGlyphMetricsProvider(advances) };
+            ShapedRun kept = shaper.Shape(in withoutOpenParen);
+            Assert.AreEqual(0x29u, kept.Glyphs[18].AtlasCodepoint, "no glyph for the mirror: the closing paren keeps its own glyph");
         }
 
         // =========================================================================================
@@ -2974,7 +3078,6 @@ namespace MapRenderer.Tests.Text
             var request = new ShapingRequest { Text = "Ab", FontStack = null, Metrics = metrics };
             ShapedRun run = shaper.Shape(in request);
 
-            Assert.AreEqual(TextDirection.LeftToRight, run.Direction);
             Assert.AreEqual(2, run.Glyphs.Count);
             Assert.AreEqual((uint)'A', run.Glyphs[0].AtlasCodepoint);
             Assert.AreEqual(0, run.Glyphs[0].Cluster);
@@ -2982,6 +3085,15 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, run.Glyphs[1].Cluster);
             Assert.Greater(run.Glyphs[0].XAdvance, 0f);
             Assert.Greater(run.Glyphs[1].XAdvance, 0f);
+
+            // A lone surrogate shapes as U+FFFD, on the LTR path and on the bidi path with Arabic joining.
+            ShapedRun loneLtr = shaper.Shape(new ShapingRequest { Text = "A\uD800b", FontStack = null, Metrics = metrics });
+            Assert.AreEqual(3, loneLtr.Glyphs.Count);
+            Assert.AreEqual(0xFFFDu, loneLtr.Glyphs[1].AtlasCodepoint);
+            Assert.AreEqual(1, loneLtr.Glyphs[1].Cluster);
+            ShapedRun loneRtl = shaper.Shape(new ShapingRequest { Text = "\u0645\uD800\u0631", FontStack = null, Metrics = metrics });
+            Assert.AreEqual(3, loneRtl.Glyphs.Count);
+            Assert.AreEqual(0xFFFDu, loneRtl.Glyphs[1].AtlasCodepoint);
         }
     }
 
@@ -3023,14 +3135,14 @@ namespace MapRenderer.Tests.Text
 
         private static FontStackGlyphs DecodeLatin() => GlyphPbfDecoder.Decode(LoadFixture("0-255.pbf.bytes")).Stacks[0];
 
-        private static ShapedRun MakeRun(TextDirection direction, params (uint codepoint, float advance)[] glyphs)
+        private static ShapedRun MakeRun(params (uint codepoint, float advance)[] glyphs)
         {
             var list = new List<PositionedGlyph>(glyphs.Length);
             for (int i = 0; i < glyphs.Length; i++)
             {
                 list.Add(new PositionedGlyph { AtlasCodepoint = glyphs[i].codepoint, XAdvance = glyphs[i].advance, Cluster = i });
             }
-            return new ShapedRun { Glyphs = list, Direction = direction };
+            return new ShapedRun { Glyphs = list };
         }
 
         private static TextLayoutOptions MakeOptions(TextAnchor anchor = TextAnchor.Center, float lineHeightEm = 1.2f, float maxWidthEm = 10f)
@@ -3080,7 +3192,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
+            ShapedRun run = MakeRun(((uint)'5', entryFive.Advance));
 
             // Top anchor => globalY = 0, so quad y is baselineY-relative with no anchor shift --
             // isolates the ink-band computation from the anchor math this stage changes.
@@ -3103,7 +3215,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
+            ShapedRun run = MakeRun(((uint)'5', entryFive.Advance));
 
             var resultQuads = new List<SymbolQuad>();
             TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, resultQuads);
@@ -3122,7 +3234,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
+            ShapedRun run = MakeRun(((uint)'5', entryFive.Advance));
 
             var textResultQuads = new List<SymbolQuad>();
             TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, textResultQuads);
@@ -3160,7 +3272,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
+            ShapedRun run = MakeRun(((uint)'5', entryFive.Advance));
 
             var tightQuads = new List<SymbolQuad>();
             var looseQuads = new List<SymbolQuad>();
@@ -3183,7 +3295,7 @@ namespace MapRenderer.Tests.Text
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
             GlyphAtlasEntry entrySpace = atlas.Append(latin.Glyphs[(uint)' '], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight,
+            ShapedRun run = MakeRun(
                 ((uint)'5', entryFive.Advance), ((uint)' ', entrySpace.Advance), ((uint)'5', entryFive.Advance));
 
             // maxWidthPx strictly between "5" alone and "5 5" combined -- forces exactly one break.
@@ -3218,7 +3330,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance));
+            ShapedRun run = MakeRun(((uint)'A', entryA.Advance));
 
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
 
@@ -3264,10 +3376,10 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryG = atlas.Append(latin.Glyphs[(uint)'g'], 0);
             GlyphAtlasEntry entryX = atlas.Append(latin.Glyphs[(uint)'x'], 0);
 
-            ShapedRun runFive = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
-            ShapedRun runFiveZero = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance), ((uint)'0', entryZero.Advance));
-            ShapedRun runFiveG = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance), ((uint)'g', entryG.Advance));
-            ShapedRun runFiveX = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance), ((uint)'x', entryX.Advance));
+            ShapedRun runFive = MakeRun(((uint)'5', entryFive.Advance));
+            ShapedRun runFiveZero = MakeRun(((uint)'5', entryFive.Advance), ((uint)'0', entryZero.Advance));
+            ShapedRun runFiveG = MakeRun(((uint)'5', entryFive.Advance), ((uint)'g', entryG.Advance));
+            ShapedRun runFiveX = MakeRun(((uint)'5', entryFive.Advance), ((uint)'x', entryX.Advance));
 
             var fiveQuads = new List<SymbolQuad>();
             var fiveZeroQuads = new List<SymbolQuad>();
@@ -3297,7 +3409,7 @@ namespace MapRenderer.Tests.Text
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
-            ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
+            ShapedRun run = MakeRun(((uint)'5', entryFive.Advance));
 
             var leftQuads = new List<SymbolQuad>();
             var rightQuads = new List<SymbolQuad>();
@@ -3381,7 +3493,7 @@ namespace MapRenderer.Tests.Text
             {
                 list.Add(new PositionedGlyph { AtlasCodepoint = glyphs[i].codepoint, XAdvance = glyphs[i].advance, Cluster = i });
             }
-            return new ShapedRun { Glyphs = list, Direction = TextDirection.LeftToRight };
+            return new ShapedRun { Glyphs = list };
         }
 
         // =========================================================================================

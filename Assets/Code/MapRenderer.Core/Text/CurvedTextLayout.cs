@@ -47,9 +47,13 @@ namespace MapRenderer.Core.Text
             float lineHeightPx = (lineHeightEm > 0f ? lineHeightEm : TextQuadLayout.DefaultLineHeightEm) * TextQuadLayout.OneEm;
             float verticalShiftPx = TextQuadLayout.VerticalAnchorShiftPx(vertical, 1, lineHeightPx);
 
+            bool reorder = run.Levels is { Count: > 0 };
+            Span<int> visual = !reorder ? default
+                : glyphs.Count <= TextQuadLayout.MaxStackGlyphs ? stackalloc int[glyphs.Count] : new int[glyphs.Count];
+            if (reorder) BidiReorder.ReorderSegments(glyphs, run.Levels, 0, glyphs.Count, visual);
             for (int i = 0; i < glyphs.Count; i++)
             {
-                PositionedGlyph glyph = glyphs[i];
+                PositionedGlyph glyph = glyphs[reorder ? visual[i] : i];
                 if (!atlas.TryGetEntry(glyph.FontId, glyph.AtlasCodepoint, out GlyphAtlasEntry entry))
                 {
                     // notdef: no quad, fall back to the shaped advance (mirrors TextQuadLayout).

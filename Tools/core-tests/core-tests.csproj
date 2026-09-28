@@ -344,16 +344,19 @@
     <!-- S18 Slice 2: T3 SDF-crispness + atlas packing/blit tests (shared verbatim) -->
     <!-- S105 Slice 3b: fixed-size atlas (Size-constant + graceful overflow) -->
 
-    <!-- S18 Slice 3: clean-room shaper (Option Y, no HarfBuzz) — Core source, engine-free -->
+    <!-- S18 Slice 3: clean-room shaper (Option Y, no HarfBuzz) — engine-free; the shaper, joining and bidi files live under MapRenderer.Unity/Text -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/PositionedGlyph.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextDirection.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/ShapedRun.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IGlyphMetricsProvider.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/FontStack.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/ShapingRequest.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/ArabicJoining.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/ShapingRequest.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/ArabicJoining.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/BidiReorder.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CodepointTextShaper.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/CodepointTextShaper.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Bidi/BidiClass.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Bidi/BidiResolver.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Bidi/UnicodeBidiData.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/Bidi/UnicodeBidiData.g.cs" />
 
     <!-- S18 Slice 3: T1 Arabic shaping golden + teeth (shared verbatim) -->
 

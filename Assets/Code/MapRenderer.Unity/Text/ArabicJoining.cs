@@ -3,7 +3,7 @@
 
 using System.Collections.Generic;
 
-namespace MapRenderer.Core.Text
+namespace MapRenderer.Unity.Text
 {
     /// <summary>
     /// A character's joining behavior (Unicode "Joining_Type" property). Right/Left describe which
@@ -187,58 +187,43 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Runs the full Arabic joining pass over a codepoint sequence in LOGICAL (reading) order,
-        /// producing presentation-form-mapped <see cref="ArabicShapedUnit"/>s still in logical order
-        /// (bidi reversal to visual order is a separate step — see <see cref="BidiReorder"/>).
+        /// Runs the Arabic joining pass over the whole logical string and appends one
+        /// <see cref="ArabicShapedUnit"/> per output glyph, in LOGICAL order, to <paramref name="output"/>
+        /// (cleared first). Allocates nothing once <paramref name="output"/>'s capacity has stabilized.
         /// </summary>
-        public static IReadOnlyList<ArabicShapedUnit> Shape(IReadOnlyList<uint> codepoints, IReadOnlyList<int> clusters)
+        public static void Shape(string text, List<ArabicShapedUnit> output)
         {
-            int n = codepoints.Count;
-            var types = new ArabicJoiningType[n];
-            for (int i = 0; i < n; i++)
+            output.Clear();
+            for (int i = 0; i < text.Length;)
             {
-                types[i] = GetJoiningType(codepoints[i]);
-            }
-
-            var joinsPrev = new bool[n];
-            var joinsNext = new bool[n];
-            for (int i = 0; i < n; i++)
-            {
-                if (types[i] == ArabicJoiningType.Transparent) continue;
-
-                ArabicJoiningType prevType = FindPrevNonTransparent(types, i);
-                ArabicJoiningType nextType = FindNextNonTransparent(types, i);
-                joinsPrev[i] = CanReceiveFromPrev(types[i]) && CanSendToNext(prevType);
-                joinsNext[i] = CanSendToNext(types[i]) && CanReceiveFromPrev(nextType);
-            }
-
-            var result = new List<ArabicShapedUnit>(n);
-            for (int i = 0; i < n; i++)
-            {
-                if (types[i] == ArabicJoiningType.Transparent)
+                uint codepoint = (uint)CodepointTextShaper.DecodeCodepoint(text, i, out int consumed);
+                ArabicJoiningType type = GetJoiningType(codepoint);
+                if (type == ArabicJoiningType.Transparent)
                 {
                     // Combining marks are not presentation-form-mapped; pass through.
-                    result.Add(new ArabicShapedUnit { AtlasCodepoint = codepoints[i], Cluster = clusters[i] });
+                    output.Add(new ArabicShapedUnit { AtlasCodepoint = codepoint, Cluster = i });
+                    i += consumed;
                     continue;
                 }
 
-                if (codepoints[i] == Lam && i + 1 < n
-                    && LamAlefLigatures.TryGetValue(codepoints[i + 1], out var ligature))
+                bool joinsPrev = CanReceiveFromPrev(type) && CanSendToNext(PreviousNonTransparent(text, i));
+                if (codepoint == Lam && i + 1 < text.Length
+                    && LamAlefLigatures.TryGetValue(text[i + 1], out var ligature))
                 {
-                    uint ligatureCodepoint = joinsPrev[i] ? ligature.final : ligature.isolated;
-                    result.Add(new ArabicShapedUnit { AtlasCodepoint = ligatureCodepoint, Cluster = clusters[i] });
-                    i++; // consume the alef too — the pair collapses into one glyph.
+                    uint ligatureCodepoint = joinsPrev ? ligature.final : ligature.isolated;
+                    output.Add(new ArabicShapedUnit { AtlasCodepoint = ligatureCodepoint, Cluster = i });
+                    i += 2; // the alef collapses into the ligature glyph.
                     continue;
                 }
 
-                ArabicGlyphForm form = ResolveForm(joinsPrev[i], joinsNext[i]);
-                result.Add(new ArabicShapedUnit
+                bool joinsNext = CanSendToNext(type) && CanReceiveFromPrev(NextNonTransparent(text, i + consumed));
+                output.Add(new ArabicShapedUnit
                 {
-                    AtlasCodepoint = ToPresentationForm(codepoints[i], form),
-                    Cluster = clusters[i],
+                    AtlasCodepoint = ToPresentationForm(codepoint, ResolveForm(joinsPrev, joinsNext)),
+                    Cluster = i,
                 });
+                i += consumed;
             }
-            return result;
         }
 
         private static ArabicGlyphForm ResolveForm(bool joinsPrev, bool joinsNext)
@@ -259,20 +244,24 @@ namespace MapRenderer.Core.Text
         private static bool CanSendToNext(ArabicJoiningType type)
             => type == ArabicJoiningType.LeftJoining || type == ArabicJoiningType.DualJoining || type == ArabicJoiningType.JoinCausing;
 
-        private static ArabicJoiningType FindPrevNonTransparent(ArabicJoiningType[] types, int index)
+        // A UTF-16 surrogate unit is never in the joining table, so it reads as NonJoining and stops the scan,
+        // exactly as the astral code point it belongs to would.
+        private static ArabicJoiningType PreviousNonTransparent(string text, int index)
         {
             for (int j = index - 1; j >= 0; j--)
             {
-                if (types[j] != ArabicJoiningType.Transparent) return types[j];
+                ArabicJoiningType type = GetJoiningType(text[j]);
+                if (type != ArabicJoiningType.Transparent) return type;
             }
             return ArabicJoiningType.NonJoining; // start of run: no neighbor to join with.
         }
 
-        private static ArabicJoiningType FindNextNonTransparent(ArabicJoiningType[] types, int index)
+        private static ArabicJoiningType NextNonTransparent(string text, int index)
         {
-            for (int j = index + 1; j < types.Length; j++)
+            for (int j = index; j < text.Length; j++)
             {
-                if (types[j] != ArabicJoiningType.Transparent) return types[j];
+                ArabicJoiningType type = GetJoiningType(text[j]);
+                if (type != ArabicJoiningType.Transparent) return type;
             }
             return ArabicJoiningType.NonJoining; // end of run: no neighbor to join with.
         }

@@ -7,8 +7,8 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// A resolved <c>text-font</c> stack (an ordered list of font names). The clean-room shaper
-    /// (<see cref="CodepointTextShaper"/>) does not consult it; advances come from
-    /// <see cref="ShapingRequest.Metrics"/> instead. <see cref="RequestToken"/> is the glyph-PBF
+    /// (<c>CodepointTextShaper</c>) does not consult it; advances come from
+    /// <c>ShapingRequest.Metrics</c> instead. <see cref="RequestToken"/> is the glyph-PBF
     /// <c>{fontstack}</c> fetch key; per-glyph fallback lives in <see cref="FontStackResolver"/>.
     /// </summary>
     public sealed class FontStack

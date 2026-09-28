@@ -544,17 +544,17 @@ namespace MapRenderer.Tests.Text
 
         // ── Glyph-fetch hoist: a cancel at the glyph-prepare await ─────────────────────────────────
 
-        // Non-obvious why: a literal text-field (no '{') resolves VERBATIM for every "centroids" feature, and 'A'
-        // + U+0628 is single-run bidi, which CodepointTextShaper rejects (NotSupportedException). That throw makes
+        // Non-obvious why: a literal text-field (no '{') resolves VERBATIM for every "centroids" feature, and an
+        // RTL run over BidiResolver.MaxCodepoints is the designed shaper throw (ArgumentException). That throw makes
         // "the shape loop ran" observable in the glyph-prepare cancel tooth below. It is a BORROWED
-        // precondition: Precondition_ShapingTheMixedDirectionTextStillThrows pins it.
-        private const string MixedDirectionText = "Aب";
-        private static readonly string MixedDirectionStyleJson = (@"{
+        // precondition: Precondition_ShapingTheOverCapRtlTextThrows pins it.
+        private static readonly string OverCapRtlText = new string('\u0628', MapRenderer.Unity.Text.Bidi.BidiResolver.MaxCodepoints + 1);
+        private static readonly string OverCapRtlStyleJson = (@"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
             'layers': [
                 { 'id':'labels', 'type':'symbol', 'source':'s', 'source-layer':'centroids',
-                  'layout': { 'text-field':'" + MixedDirectionText + @"', 'text-size':16, 'text-font':['LatinFont'] } }
+                  'layout': { 'text-field':'" + OverCapRtlText + @"', 'text-size':16, 'text-font':['LatinFont'] } }
             ]
         }").Replace('\'', '"');
 
@@ -564,9 +564,9 @@ namespace MapRenderer.Tests.Text
         /// <c>tail.Ct.ThrowIfCancellationRequested()</c> then stops the cancelled token reaching the loop.</summary>
         /// <remarks>Non-obvious why: a cancelled release throws from the await and hides the pre-loop check, and the
         /// trailing ct check before commit yields the same final outcome. Shape's per-symbol catch filter is false on a
-        /// cancelled <c>ct</c>, so if the loop runs, the <see cref="MixedDirectionText"/> throw reaches the generic
+        /// cancelled <c>ct</c>, so if the loop runs, the <see cref="OverCapRtlText"/> throw reaches the generic
         /// catch and <see cref="SymbolSubsystem.CancelledBuildCount"/> stays 0. The tooth goes vacuous if that text
-        /// ever shapes; <see cref="Precondition_ShapingTheMixedDirectionTextStillThrows"/> pins it.</remarks>
+        /// ever shapes; <see cref="Precondition_ShapingTheOverCapRtlTextThrows"/> pins it.</remarks>
         [Test]
         public void CancelDuringGlyphPrepare_UnwindsBeforeShapeOrCommit_ReleasesTheDecodeExactlyOnce()
         {
@@ -574,7 +574,7 @@ namespace MapRenderer.Tests.Text
             _subsystem = new SymbolSubsystem(_mapCamera) { NowSecondsOverride = () => _simulatedNow };
             _subsystem.GlyphSourceFactoryOverride = _ => new TestGlyphSource((fontStack, rangeStart, ct) => gate.Task);
             // No 'sprite' key -> settles immediately, no park.
-            StyleDocument style = StyleParser.Parse(MixedDirectionStyleJson);
+            StyleDocument style = StyleParser.Parse(OverCapRtlStyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var key = new SymbolTileStore.Key(SourceId, Tile0);
@@ -592,7 +592,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsNull(_subsystem.Store().DebugBlockFor(key), "PRECONDITION: nothing committed while parked.");
 
             // Restyle mid-tail: cancels the in-flight build's token scope (does not by itself wake the await).
-            StyleDocument restyle = StyleParser.Parse(MixedDirectionStyleJson);
+            StyleDocument restyle = StyleParser.Parse(OverCapRtlStyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             // Release the gate NORMALLY: EnsureGlyphRangesAsync returns cleanly, so only the pre-loop ct check
             // under test can stop this cancelled build before the shape loop.
@@ -600,7 +600,7 @@ namespace MapRenderer.Tests.Text
 
             Assert.AreEqual(1, _subsystem.CancelledBuildCount,
                 "the pre-loop ct check must fire BEFORE the shape loop — if the shape loop ran instead, the " +
-                "mixed-direction throw would escape into the generic catch and this would stay 0.");
+                "over-cap throw would escape into the generic catch and this would stay 0.");
             Assert.IsNull(_subsystem.Store().DebugBlockFor(key), "a cancelled ensure step must commit nothing.");
             Assert.AreEqual(1, probe.DisposedCount, "…still exactly once — the tail's cancel path touches no decode.");
             Assert.AreEqual(0, probe.UnbalancedCount, "no double release / leak on the cancel path.");
@@ -608,11 +608,11 @@ namespace MapRenderer.Tests.Text
 
         /// <summary>Precondition for
         /// <see cref="CancelDuringGlyphPrepare_UnwindsBeforeShapeOrCommit_ReleasesTheDecodeExactlyOnce"/>:
-        /// shaping <see cref="MixedDirectionText"/> throws (CodepointTextShaper's single-run-bidi rejection), and
+        /// shaping <see cref="OverCapRtlText"/> throws (the shaper's over-cap bidi rejection), and
         /// that tooth's discriminator depends on it. If this goes red, both unwind paths of that tooth reach the
         /// same <c>CancelledBuildCount</c>, so it is hollow and needs a new discriminator.</summary>
         [Test]
-        public void Precondition_ShapingTheMixedDirectionTextStillThrows()
+        public void Precondition_ShapingTheOverCapRtlTextThrows()
         {
             using var manager = new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
             var builder = new StyledSymbolTileBuilder(manager);
@@ -620,7 +620,7 @@ namespace MapRenderer.Tests.Text
             {
                 new SymbolFeature
                 {
-                    Text = MixedDirectionText,
+                    Text = OverCapRtlText,
                     Placement = SymbolPlacement.Point,
                     LayoutOptions = TextLayoutOptions.Default,
                     TextSizePx = 16f,
@@ -632,23 +632,23 @@ namespace MapRenderer.Tests.Text
             builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
 
             Assert.AreEqual(1, builder.SkippedSymbolCount,
-                $"shaping '{MixedDirectionText}' must still throw today — it is the precondition " +
+                "shaping the over-cap RTL text must throw — it is the precondition " +
                 $"{nameof(CancelDuringGlyphPrepare_UnwindsBeforeShapeOrCommit_ReleasesTheDecodeExactlyOnce)} " +
-                "depends on. If this fails, mixed-direction shaping has been implemented and that tooth needs " +
+                "depends on. If this fails, the over-cap rejection is gone and that tooth needs " +
                 "a new discriminator.");
-            StringAssert.Contains("NotSupportedException", builder.LastSkipReason);
+            StringAssert.Contains("ArgumentException", builder.LastSkipReason);
         }
 
         // Two style layers on the SAME source-layer with DIFFERENT text-font names give two distinct (fontName,
-        // rangeStart) keys. Both use MixedDirectionText, so each shaped symbol bumps builder.SkippedSymbolCount.
-        private static readonly string TwoFontMixedDirectionStyleJson = (@"{
+        // rangeStart) keys. Both use OverCapRtlText, so each shaped symbol bumps builder.SkippedSymbolCount.
+        private static readonly string TwoFontOverCapRtlStyleJson = (@"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
             'layers': [
                 { 'id':'labels-a', 'type':'symbol', 'source':'s', 'source-layer':'centroids',
-                  'layout': { 'text-field':'" + MixedDirectionText + @"', 'text-size':16, 'text-font':['FontA'] } },
+                  'layout': { 'text-field':'" + OverCapRtlText + @"', 'text-size':16, 'text-font':['FontA'] } },
                 { 'id':'labels-b', 'type':'symbol', 'source':'s', 'source-layer':'centroids',
-                  'layout': { 'text-field':'" + MixedDirectionText + @"', 'text-size':16, 'text-font':['FontB'] } }
+                  'layout': { 'text-field':'" + OverCapRtlText + @"', 'text-size':16, 'text-font':['FontB'] } }
             ]
         }").Replace('\'', '"');
 
@@ -660,7 +660,7 @@ namespace MapRenderer.Tests.Text
         /// <remarks>Non-obvious why: a test cannot see the production tail's buffer, so
         /// <see cref="StyledSymbolTileBuilder.SkippedSymbolCount"/>
         /// (via <see cref="SymbolSubsystemTestExtensions.Builder"/>) is the "a symbol was shaped" signal:
-        /// every <see cref="MixedDirectionText"/> shape attempt increments it.</remarks>
+        /// every <see cref="OverCapRtlText"/> shape attempt increments it.</remarks>
         [Test]
         public void EveryGlyphFetchPrecedesTheFirstShapedSymbol_ThroughProductionDispatch()
         {
@@ -672,7 +672,7 @@ namespace MapRenderer.Tests.Text
                 return UniTask.FromResult(GlyphRangeResponse.Absent()); // absent is fine: shaping fails on the
                                                                           // bidi check, before glyph resolution
             });
-            StyleDocument style = StyleParser.Parse(TwoFontMixedDirectionStyleJson); // no 'sprite' key -> no park
+            StyleDocument style = StyleParser.Parse(TwoFontOverCapRtlStyleJson); // no 'sprite' key -> no park
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var probe = new LeaseProbeDecoder();
@@ -695,7 +695,7 @@ namespace MapRenderer.Tests.Text
                     $"fetch of ({fetch.FontName}, {fetch.RangeStart}) observed a symbol already shaped(-and-" +
                     "failed) — every fetch must happen BEFORE the build shapes its first symbol.");
             Assert.Greater(_subsystem.Builder().SkippedSymbolCount, 0,
-                "sanity: the build must actually attempt to shape (and fail on) the mixed-direction symbols, " +
+                "sanity: the build must actually attempt to shape (and fail on) the over-cap RTL symbols, " +
                 "or the zero-at-fetch-time check above is vacuously true.");
         }
 
@@ -2036,7 +2036,7 @@ namespace MapRenderer.Tests.Text
             {
                 glyphs.Add(new PositionedGlyph { AtlasCodepoint = codepoint, XAdvance = 14f, Cluster = (int)codepoint - 1 });
             }
-            var run = new ShapedRun { Glyphs = glyphs, Direction = TextDirection.LeftToRight };
+            var run = new ShapedRun { Glyphs = glyphs };
 
             var options = new TextLayoutOptions
             {
