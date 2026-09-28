@@ -488,11 +488,12 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         // SymbolFadeTests test the two symbol providers instead.
 
         /// <summary>
-        /// A CLEAN tick must not blank the readout. The tile loop returns early when the cover is unchanged, so
-        /// a refresh inside that path would read zero when the camera goes still. The refresh therefore sits in
-        /// <c>Update</c>, a shell around <c>UpdateCore</c> that the early return cannot skip.
+        /// A CLEAN tick must not freeze the readout. <c>UpdateCore</c> skips the cover recompute
+        /// (the <c>_coverGate.IsDirty</c> block) when the cover is unchanged. A refresh inside that block would
+        /// stop at the last dirty tick, before admission fills the loaded set, so the loaded count would read
+        /// zero. The refresh therefore sits in <c>Update</c>, which runs on every tick.
         /// Limitation: a pull has no callback to count, so this test cannot observe that the refresh ran; it
-        /// catches only a refresh that blanks the levels.
+        /// catches only a refresh that leaves the levels stale.
         /// </summary>
         [UnityTest]
         public IEnumerator TileTelemetry_SurvivesACleanTick_WithoutBlankingTheLevels()
@@ -516,12 +517,15 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 int settledVisible = view.CaptureTelemetry().VisibleTileCount;
                 Assert.Greater(settledVisible, 0,
                     "positive control: the cover is non-empty, so a zero below is a blanked readout, not an empty map.");
+                int settledLoaded = view.CaptureTelemetry().LoadedTileCount;
+                Assert.Greater(settledLoaded, 0,
+                    "positive control: tiles are loaded, so a zero below is a readout frozen before admission.");
 
                 // Nothing moves: no camera change, no config change, so every one of these is a clean tick.
                 for (int i = 0; i < 8; i++)
                 {
                     view.LateUpdate();
-                    AssertLiveVisibleTileCountUnchanged(view, settledVisible, i);
+                    AssertLiveCountsUnchanged(view, settledVisible, settledLoaded, i);
                 }
             }
             finally
@@ -533,12 +537,14 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         /// <summary>Bound by reference: aliases the provider's own field, so this is observed through the
         /// same storage the production readers use. Split out of the coroutine body — a `ref readonly`
         /// local is illegal inside an iterator method (CS8176).</summary>
-        private static void AssertLiveVisibleTileCountUnchanged(MapView view, int expectedVisible, int tickIndex)
+        private static void AssertLiveCountsUnchanged(MapView view, int expectedVisible, int expectedLoaded, int tickIndex)
         {
             ref readonly TileTelemetrySnapshot live = ref view.View.TileManager.Telemetry;
             Assert.AreEqual(expectedVisible, live.VisibleTileCount,
-                $"clean tick {tickIndex} blanked or changed the cover level — a refresh reached from UpdateCore's " +
-                "early-return path is how that happens, and it is a readout that dies when the map stills.");
+                $"clean tick {tickIndex} changed the cover level — the readout must not move when the map stills.");
+            Assert.AreEqual(expectedLoaded, live.LoadedTileCount,
+                $"clean tick {tickIndex} changed the loaded level — a refresh placed inside UpdateCore's " +
+                "dirty-cover block freezes it at a value read before admission.");
         }
     }
 

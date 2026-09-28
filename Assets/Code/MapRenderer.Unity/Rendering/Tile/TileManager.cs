@@ -843,8 +843,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
         /// <summary>One frame of the tile loop — a thin shell over <see cref="UpdateCore"/> so telemetry
-        /// refreshes after every return from it, early returns included (a dirty-frame-only update would
-        /// freeze when the map goes still). A throw from <see cref="UpdateCore"/> skips the refresh.</summary>
+        /// refreshes after every return from it, the <c>Selector == null</c> early return included (a
+        /// dirty-frame-only update would freeze when the map goes still). A throw from <see cref="UpdateCore"/> skips the refresh.</summary>
         public void Update(CameraProperties cam, TileSelectionConfig cfg)
         {
             UpdateCore(cam, cfg);
