@@ -1024,7 +1024,7 @@ namespace MapRenderer.Tests.Style
             Track(go);
             try
             {
-                view.View.StyleTransition = StyleTransition.Instant;
+                view.Config.StyleTransitionDurationSeconds = 0.0; // the production writer, not the MapView property
                 RestyleHarness.SpinToCompleted(view.SetStyle(BoundedFillStyle(), "A"));
 
                 Assert.AreEqual(0f, Opacity(view), 1e-6f,
@@ -1036,7 +1036,7 @@ namespace MapRenderer.Tests.Style
                 view.LateUpdate();
 
                 Assert.AreEqual(AuthoredOpacity, Opacity(view), 1e-6f,
-                    "with MapView.StyleTransition = Instant the gate must reach its endpoint in a SINGLE " +
+                    "with MapViewConfig.StyleTransitionDurationSeconds = 0 the gate must reach its endpoint in a SINGLE " +
                     "frame. Reading 0 here means the 0.30 s default was used instead — i.e. RenderLayerSet " +
                     "hard-codes StyleTransition.Default rather than taking the value MapView threads into " +
                     "StyleFrameInputs.Transition.");
@@ -1080,7 +1080,7 @@ namespace MapRenderer.Tests.Style
 
                 // Cross the bound with the DEFAULT (non-instant) transition and stop halfway through it.
                 double d = StyleTransition.Default.DurationSeconds;
-                view.View.StyleTransition = StyleTransition.Default;
+                view.Config.StyleTransitionDurationSeconds = d;
                 view.View.Camera.Apply(new CameraPropertiesUpdate { Zoom = ZoomInsideBound });
                 view.LateUpdate();          // arms the fade at now = 0
                 now = d / 2.0;

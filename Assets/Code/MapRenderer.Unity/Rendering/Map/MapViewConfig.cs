@@ -97,6 +97,17 @@ namespace MapRenderer.Unity.Rendering.Map
                  "next tile build, not on tiles already in cover.")]
         public bool FillAntialiasing = true;
 
+        [Header("Style transitions")]
+        [Min(0f)]
+        [Tooltip("Seconds a restyled paint value takes to ease from its old value to its new one. 0 = snap. " +
+                 "Read live every Update. Default 0.3.")]
+        public double StyleTransitionDurationSeconds = Rendering.Layers.StyleTransition.Default.DurationSeconds;
+
+        [Min(0f)]
+        [Tooltip("Seconds a restyled paint value holds its old value before the ease starts. Read live every " +
+                 "Update. Default 0.")]
+        public double StyleTransitionDelaySeconds = Rendering.Layers.StyleTransition.Default.DelaySeconds;
+
         [Header("Symbols")]
         [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
                  "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +

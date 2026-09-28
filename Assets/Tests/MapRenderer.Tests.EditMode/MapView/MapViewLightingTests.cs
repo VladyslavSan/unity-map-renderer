@@ -1099,7 +1099,8 @@ namespace MapRenderer.Tests.MapViews
             {
                 double now = 0.0;
                 view.View.NowSecondsOverride = () => now;
-                view.View.StyleTransition = Eased;
+                view.Config.StyleTransitionDurationSeconds = Eased.DurationSeconds;
+                view.Config.StyleTransitionDelaySeconds    = Eased.DelaySeconds;
                 RestyleHarness.SpinToCompleted(view.SetStyle(MapStyle(Day), "day"));
                 view.LateUpdate();
                 Color daySky = environment.Sky.SkyColor;
@@ -1134,7 +1135,7 @@ namespace MapRenderer.Tests.MapViews
             var environment = new SceneEnvironment(Track(new GameObject("TestSun")).AddComponent<Light>());
             try
             {
-                view.View.StyleTransition = StyleTransition.Instant;
+                view.Config.StyleTransitionDurationSeconds = 0.0;
                 environment.EnableSky(view.View.Camera.Camera);
                 environment.EnableHaze();
                 view.View.SetEnvironment(environment);

@@ -146,9 +146,14 @@ namespace MapRenderer.Unity.Rendering.Map
         // per call, which allocates inside MapView_SteadyStateTick_DoesNotAllocateGCMemory's scope.
         private double NowSeconds => NowSecondsOverride != null ? NowSecondsOverride() : Time.unscaledTimeAsDouble;
 
-        /// <summary>How long a restyled uniform binding eases from its old value to its new one. The ONLY
-        /// source of the duration/delay: no style key is read.</summary>
-        public Rendering.Layers.StyleTransition StyleTransition { get; set; } = Rendering.Layers.StyleTransition.Default;
+        /// <summary>How long a restyled uniform binding eases from its old value to its new one. Backed by
+        /// <see cref="MapViewConfig"/>, the ONLY source of the duration/delay: no style key is read.</summary>
+        public Rendering.Layers.StyleTransition StyleTransition
+            => new Rendering.Layers.StyleTransition
+            {
+                DurationSeconds = _config.StyleTransitionDurationSeconds,
+                DelaySeconds    = _config.StyleTransitionDelaySeconds,
+            };
 
         // Per-style-layer render bundles (fills + lines), built at SetStyle. Owns the materials.
         /// <summary>The per-style-layer render bundles owned by this view. <c>internal</c>: tests read counts

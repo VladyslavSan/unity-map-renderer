@@ -3,7 +3,7 @@ namespace MapRenderer.Unity.Rendering.Layers
     /// <summary>
     /// How long a restyled uniform binding takes to ease from its old value to its new one. Not read
     /// from the style document: no <c>&lt;name&gt;-transition</c> and no root <c>transition</c> block is
-    /// parsed (epic decision 0a). The value comes from <see cref="Map.MapView.StyleTransition"/>.
+    /// parsed (epic decision 0a). The value comes from the <c>StyleTransition*Seconds</c> Inspector fields of <see cref="Map.MapViewConfig"/>.
     /// </summary>
     public readonly struct StyleTransition
     {

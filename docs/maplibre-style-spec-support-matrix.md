@@ -76,7 +76,7 @@ limit. The design and the open work are in
 | `sprite` | `supported` | Both the string form and the array form (several sprite sheets, each id:name-prefixed except `default`) merge into one atlas. The sheets stack vertically before the merge, so many large sheets can exceed `SpriteSheetPadder.MaxSheetDimension` (8192) or a GPU texture size limit. |
 | `glyphs` | `supported` | PBF glyph ranges are fetched into the SDF atlas. |
 | `font-faces` | `not supported` | Text uses the `glyphs` PBF path only. |
-| `transition` | `not supported` | A restyle eases over `MapView.StyleTransition`, a host setting. The root key and every `*-transition` key are not read. |
+| `transition` | `not supported` | A restyle eases over the `StyleTransitionDurationSeconds` and `StyleTransitionDelaySeconds` fields of `MapViewConfig` (Inspector settings). The root key and every `*-transition` key are not read. |
 | `layers` | `supported` | Declared order is paint order. Per-type status is in § 5. |
 
 ## 2. `light`
