@@ -37,6 +37,10 @@ namespace MapRenderer.Tests
         /// is already renderable.</summary>
         private const int WarmupFrames = 10;
 
+        /// <summary>Upper bound on the ticks <see cref="SettleSymbolFade"/> pumps; a fade needs about
+        /// <c>FadeDurationSeconds / Time.deltaTime</c>, so this covers any delta above a fraction of a millisecond.</summary>
+        private const int MaxFadeSettleTicks = 2000;
+
         private readonly List<VisualSource> _sources = new List<VisualSource>();
         private readonly List<VisualLayer>  _layers  = new List<VisualLayer>();
 
@@ -281,10 +285,13 @@ namespace MapRenderer.Tests
             // cullable before the snapshot — rendering on the settle frame itself is blank (see WarmupFrames).
             for (int f = 0; f < WarmupFrames; f++) _mapView.LateUpdate();
 
-            // Symbol readiness is LAST before the snapshot: symbols must be STAGED, not merely tile-settled, and
-            // a frame inserted after the spin is a flake source.
+            // Symbol readiness, then the fade settle, are the LAST pumps before the snapshot: symbols must be
+            // STAGED, not merely tile-settled. Nothing may pump after the settle.
             if (_layers.Exists(l => l is SymbolTextVisualLayer))
+            {
                 SpinUntilSymbolsReady();
+                SettleSymbolFade();
+            }
 
             // ── Render. Re-sync FIRST: SyncToCamera pushes the process-global _MapFrameMetersPerDevicePixel
             // ruler, so every scene pushes its own ruler right before it renders. ────────────────────────────
@@ -348,6 +355,32 @@ namespace MapRenderer.Tests
                 $"LastQuadCount={placement.LastQuadCount}, LastSurvivorCount={placement.LastSurvivorCount}, " +
                 $"LastInputSymbolCount={placement.LastInputSymbolCount}. This is a genuine pipeline finding " +
                 "(geojson→symbol produced fewer labels than authored), not a flake to retry around.");
+        }
+
+        /// <summary>Pumps enough <c>LateUpdate</c> ticks for every symbol fade to reach full opacity. A tick
+        /// advances a fade by <c>Time.deltaTime / FadeDurationSeconds</c>. <c>Time.deltaTime</c> is the last
+        /// engine frame's length, which the preceding tests decide, and it does not change across these ticks
+        /// because the render is synchronous. A snapshot taken mid-fade reads partial intensity. A delta so
+        /// small that the ticks would pass <see cref="MaxFadeSettleTicks"/> throws instead of truncating.</summary>
+        private void SettleSymbolFade()
+        {
+            float deltaTime = Time.deltaTime;
+            if (deltaTime <= 0f) return;
+
+            float needed = MapRenderer.Unity.Text.Placement.SymbolPlacementSystem.FadeDurationSeconds / deltaTime + 1f;
+            if (!(needed <= MaxFadeSettleTicks))
+                throw new InvalidOperationException(
+                    $"VisualScene symbol fade needs {needed} ticks at Time.deltaTime={deltaTime}, past the " +
+                    $"{MaxFadeSettleTicks}-tick cap — a snapshot now would read a mid-fade pixel.");
+
+            for (int f = 0, n = (int)global::Unity.Mathematics.math.ceil(needed); f < n; f++) _mapView.LateUpdate();
+
+            var placement = _mapView.View.SymbolPlacementSystem;
+            int expected = _expectedSymbolQuads.Value;
+            if (placement.LastQuadCount < expected || placement.LastSurvivorCount < expected)
+                throw new InvalidOperationException(
+                    $"VisualScene lost symbols while their fade settled: LastQuadCount={placement.LastQuadCount}, " +
+                    $"LastSurvivorCount={placement.LastSurvivorCount}, expected {expected}.");
         }
 
         /// <summary>Tears down in order: view → camera GO → RT → light/ambient → MapView GO.

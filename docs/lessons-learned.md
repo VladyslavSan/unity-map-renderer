@@ -919,6 +919,13 @@ other, and the rule for guards applies: assert it was satisfiable.
     it consumes, so it cannot test an unconsumed backlog), or PlayMode when the test needs a player loop.
   - `Thread.Sleep` as a settle-poll is banned outside the couple of cases structurally forced into it.
 
+- **In EditMode, `Time.deltaTime` is the previous engine frame's length and is frozen while a synchronous
+  test runs, so any time-driven animation pumped inside a test depends on suite order.** A symbol fade
+  advances by `Time.deltaTime / 0.3` per tick: the delta was 0.333 for a lone test and about 0.03 after
+  `UnityTest`s that had yielded frames, so a fixed tick count left the fade at 0.42 or 0.96 of full
+  intensity. A test that reads a time-driven quantity computes the ticks from the delta at hand and fails
+  loudly when it cannot (`VisualScene.SettleSymbolFade`), never from a constant.
+
 - **A test that releases a parked worker without awaiting it can leave that worker running past the test's
   own return — mutating a process-wide counter during the NEXT test and producing a failure in an
   unrelated file.** EditMode tests share one process and one static-counter space. Before returning from a
