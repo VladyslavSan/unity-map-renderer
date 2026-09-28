@@ -61,10 +61,11 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <param name="visible">False to submit no draw for this slot.</param>
         void SetLayerVisible(int slot, bool visible);
 
-        /// <summary>Replaces the full-width, SLOT-aligned per-layer material/shadow-mode lists —
-        /// restyle-time counterpart of construction's. A slot unchanged BY REFERENCE keeps its registration
-        /// and every live item; a slot going to null retires its own items its OWN way (the three backends
-        /// differ by design, and the caller MUST set every survivor's draw order first) — `docs/tile-pipeline-design.md`.</summary>
+        /// <summary>Replaces the full-width, SLOT-aligned per-layer material/shadow-mode lists at restyle.
+        /// A slot unchanged BY REFERENCE keeps its registration and live items; a slot going to null retires
+        /// its items its OWN way (the caller MUST set every survivor's draw order first —
+        /// `docs/tile-pipeline-design.md`). A surviving slot keeps its draw gate; a slot past the new width
+        /// loses it. The caller re-pushes gate values (<c>TileManager.PushLayerDrawGates</c>).</summary>
         void SetLayerMaterials(IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes);
 
         /// <summary>

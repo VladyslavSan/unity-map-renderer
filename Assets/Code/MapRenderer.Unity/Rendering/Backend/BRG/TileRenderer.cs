@@ -151,6 +151,9 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             _layerMaterials.Clear();
             _layerMaterials.AddRange(next);
 
+            if (_layerVisible.Count > layerMaterials.Count)
+                _layerVisible.RemoveRange(layerMaterials.Count, _layerVisible.Count - layerMaterials.Count);
+
             _layerShadowModes.Clear();
             if (layerShadowModes != null)
                 for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);

@@ -119,11 +119,10 @@ namespace MapRenderer.Tests.Rendering
         }
 
         /// <summary>
-        /// A gated slot is absent from the emit order in BOTH views, and the read applies REGARDLESS of
-        /// whether an item is registered before or after the slot is gated (BRG reads the gate while it
-        /// computes the emit order, so a late registration is covered by the same read). The light view is
-        /// asserted separately because that is where a gated building would otherwise keep casting a shadow
-        /// with nothing above it — the one visible artefact a camera-only gate would leave behind.
+        /// A gated slot is absent from the emit order in BOTH views, whether an item is registered before or
+        /// after the slot is gated (BRG reads the gate while it computes the emit order). The light view is
+        /// asserted separately: a gated building would otherwise keep casting a shadow with nothing above it.
+        /// A slot that leaves and returns through <c>SetLayerMaterials</c> comes back drawn.
         /// </summary>
         [Test]
         public void BrgBackend_DrawGate_SuppressesSlot_RegardlessOfRegistrationOrder()
@@ -178,6 +177,21 @@ namespace MapRenderer.Tests.Rendering
                     "a tile that finishes building while its layer is gated out must not draw — that is " +
                     "the ordinary case, since tiles keep loading across a zoom bound.");
             }
+
+            // ── A slot that leaves and returns through SetLayerMaterials comes back drawn ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                var mats = MaterialsOf(set);
+                using BrgTileRenderer r = new BrgTileRenderer(mats, AllCast);
+                r.SetLayerVisible(GatedSlot, false);
+                r.SetLayerMaterials(mats.GetRange(0, 1), AllCast); // the gated slot leaves
+                r.SetLayerMaterials(mats, AllCast);                // ...and returns
+                for (int i = 0; i < 3; i++) r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
+                r.Rebuild(SceneFrame.Mercator(double2.zero));
+                CollectionAssert.AreEqual(new[] { 0, 1, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
+                    "the material list and the draw gate must stay the same width: a stale gate flag must " +
+                    "not hide a slot that returns.");
+            }
         }
 
         // ── GameObjects ───────────────────────────────────────────────────────────────────────────
@@ -187,6 +201,7 @@ namespace MapRenderer.Tests.Rendering
         /// registered before or after the slot is gated — the ordinary case, since tiles keep finishing
         /// while a layer is out of its zoom range. The backend pools its layer children and enables the
         /// renderer per rent, so a fresh item lands drawn unless <c>AddTileLayer</c> consults the gate.
+        /// A slot that leaves and returns through <c>SetLayerMaterials</c> comes back drawn.
         /// </summary>
         [Test]
         public void GameObjectBackend_DrawGate_SuppressesSlot_RegardlessOfRegistrationOrder()
@@ -235,6 +250,20 @@ namespace MapRenderer.Tests.Rendering
                     Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
                         $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
             }
+
+            // ── A slot that leaves and returns through SetLayerMaterials comes back drawn ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                var mats = MaterialsOf(set);
+                using GameObjectTileRenderer r = new GameObjectTileRenderer(mats, LayerNames, AllCast);
+                r.SetLayerVisible(GatedSlot, false);
+                r.SetLayerMaterials(mats.GetRange(0, 1), AllCast); // the gated slot leaves
+                r.SetLayerMaterials(mats, AllCast);                // ...and returns
+                int handle = r.AddTileLayer(Track(new Mesh()), TileOrigin(), GatedSlot, Tile);
+                Assert.IsTrue(r.IsItemDrawn(handle),
+                    "the material list and the draw gate must stay the same width: a stale gate flag must " +
+                    "not hide a slot that returns.");
+            }
         }
 
         // ── Entities ──────────────────────────────────────────────────────────────────────────────
@@ -244,6 +273,7 @@ namespace MapRenderer.Tests.Rendering
         /// item is registered before or after the slot is gated. Both layer prototypes are built without
         /// <c>DisableRendering</c>, so a fresh instance arrives drawn unless <c>AddTileLayer</c> consults
         /// the gate.
+        /// A slot that leaves and returns through <c>SetLayerMaterials</c> comes back drawn.
         /// </summary>
         [Test]
         public void EntitiesBackend_DrawGate_SuppressesSlot_RegardlessOfRegistrationOrder()
@@ -292,6 +322,20 @@ namespace MapRenderer.Tests.Rendering
                 for (int i = 0; i < 3; i++)
                     Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
                         $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+            }
+
+            // ── A slot that leaves and returns through SetLayerMaterials comes back drawn ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                var mats = MaterialsOf(set);
+                using EntitiesTileRenderer r = new EntitiesTileRenderer(mats, LayerNames, AllCast);
+                r.SetLayerVisible(GatedSlot, false);
+                r.SetLayerMaterials(mats.GetRange(0, 1), AllCast); // the gated slot leaves
+                r.SetLayerMaterials(mats, AllCast);                // ...and returns
+                int handle = r.AddTileLayer(Track(new Mesh()), TileOrigin(), GatedSlot, Tile);
+                Assert.IsTrue(r.IsItemDrawn(handle),
+                    "the material list and the draw gate must stay the same width: a stale gate flag must " +
+                    "not hide a slot that returns.");
             }
         }
     }
