@@ -615,7 +615,7 @@ namespace MapRenderer.Unity.Jobs.Fill
         }
 
         /// <summary>
-        /// mapbox isValidDiagonal: a candidate split diagonal (a, b) must not be an existing edge, must
+        /// A candidate split diagonal (a, b) must not be an existing edge, must
         /// not cross any other edge of the ring, must be locally inside at BOTH endpoints, and its
         /// midpoint must fall inside the ring.
         /// </summary>
@@ -926,15 +926,14 @@ namespace MapRenderer.Unity.Jobs.Fill
 
         /// <summary>Twice the signed area of triangle (p, q, r): cross((q−p), (r−p)). Matches the
         /// sign convention <see cref="ComputeIsEar"/> uses (convex ⟺ ≤ 0 for a ring normalised
-        /// CCW-on-screen in Y-down space); this is also mapbox earcut's `area(p, q, r)`.</summary>
+        /// CCW-on-screen in Y-down space).</summary>
         private static double Area2(double2 p, double2 q, double2 r)
             => (q.x - p.x) * (r.y - p.y) - (r.x - p.x) * (q.y - p.y);
 
-        /// <summary>mapbox earcut's `locallyInside(a, b)`: for a convex a the interior is the
-        /// intersection of the two edges' half-planes (AND); for a reflex a it is their union (OR) —
-        /// the non-crossing guard the bridge selection needs. Mapbox's y-up `area` equals −Area2 in
-        /// this y-down convention, so the branch signs invert; the form below is derived directly from
-        /// geometry in this convention, for both convex and reflex a.</summary>
+        /// <summary>True when b lies in the interior side of the ring at a. For a convex a the interior is
+        /// the intersection of the two edges' half-planes (AND); for a reflex a it is their union (OR).
+        /// The bridge selection uses it as its non-crossing guard. The signs follow the Y-down
+        /// convention of <see cref="Area2"/>.</summary>
         private bool LocallyInside(int a, int b)
         {
             int ap = Prev[a];
@@ -947,8 +946,8 @@ namespace MapRenderer.Unity.Jobs.Fill
                            : (insidePrevEdge || insideNextEdge);
         }
 
-        /// <summary>mapbox earcut's `sectorContainsSector(m, p)` — innermost tiebreak in
-        /// <see cref="FindBridgeVertex"/> only.</summary>
+        /// <summary>True when the ring sector at p fits inside the ring sector at m. It is the innermost
+        /// tiebreak in <see cref="FindBridgeVertex"/> only.</summary>
         private bool SectorContainsSector(int m, int p)
         {
             int mp = Prev[m];
@@ -989,7 +988,7 @@ namespace MapRenderer.Unity.Jobs.Fill
         private static double Cross(double ax, double ay, double bx, double by, double px, double py)
             => (bx - ax) * (py - ay) - (by - ay) * (px - ax);
 
-        /// <summary>Proper segment-intersection test (mapbox earcut's `intersects`) over ring vertex
+        /// <summary>Proper segment-intersection test over ring vertex
         /// indices. Used by <see cref="CureLocalIntersections"/> and <see cref="IsValidDiagonal"/>.</summary>
         private bool Intersects(int p1, int q1, int p2, int q2)
         {
