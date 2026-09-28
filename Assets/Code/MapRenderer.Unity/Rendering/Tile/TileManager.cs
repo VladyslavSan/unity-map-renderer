@@ -91,7 +91,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// <summary>Which render-space distance ranks not-yet-admitted tiles for loading and <see cref="PumpPending"/>'s build/consume order.</summary>
             public TilePriorityStrategy PriorityStrategy;
 
-            /// <summary>How much of each tile's MVT buffer the fill meshes keep before triangulation. Not a live toggle — cover keeps old geometry until re-entry.</summary>
+            /// <summary>How much of each tile's MVT buffer the fill meshes keep before triangulation. A change starts a new bake revision; a tile already in cover rebuilds in the background and swaps in when ready.</summary>
             public TileBufferClip BufferClip;
         }
 
@@ -108,6 +108,25 @@ namespace MapRenderer.Unity.Rendering.Tile
             public WorkHandle<Processing.TilePrologueOutput> MeshBuildTask; // default until fetch completes; default after consumed
             public BuildStep                                        Step;           // which build step (if any) is in flight
             public bool                                             Built;          // mesh produced (or definitively absent/failed)
+
+            /// <summary><see cref="_bakeRevision"/> when this tile's build was kicked. A missed stamp only loses a
+            /// cache hit, because revisions only increase. Non-local invariant: take the stamp in the same
+            /// main-thread step that copies <see cref="_bufferClip"/> into the kick context. A stamp newer than
+            /// the captured clip would let stale geometry match the current revision.</summary>
+            public int BakeRevision;
+
+            /// <summary>True from the start of a rebuild for a newer <see cref="_bakeRevision"/> until its consume
+            /// retires the previous geometry. It stays true on a Built record whose rebuild failed, which keeps
+            /// drawing <see cref="OldMeshes"/> and <see cref="OldDrawHandles"/> until release. Non-local invariant: the
+            /// consume that registers the new meshes also retires the old ones in the same call, so no frame
+            /// shows the tile with neither or with both.</summary>
+            public bool Rebaking;
+
+            /// <summary>The previous revision's meshes while <see cref="Rebaking"/>. Destroyed exactly once, by <see cref="RetireOldGeometry"/> or teardown.</summary>
+            public Mesh[] OldMeshes;
+
+            /// <summary>The previous revision's draw-item handles, parallel to <see cref="OldMeshes"/>.</summary>
+            public int[] OldDrawHandles;
 
             /// <summary>The graph-arm build — non-null iff <see cref="Step"/> is <see cref="BuildStep.Measure"/> or <see cref="BuildStep.Write"/>.</summary>
             public Processing.TileBuildGraph Graph;
@@ -309,6 +328,14 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>The live fill tile-buffer clip, cached each Update — unlike <c>_projection</c> it can change at runtime, which is why <see cref="UpdateCore"/> diffs it.</summary>
         private TileBufferClip _bufferClip;
+
+        /// <summary>The bake-parameter generation, bumped whenever <see cref="_bufferClip"/> changes. A kick
+        /// stamps it on the record, and <see cref="PreparedKey.Revision"/> carries it into the cache.</summary>
+        private int _bakeRevision;
+
+        /// <summary>True while some in-cover record may still hold geometry from an older bake revision. Set by a
+        /// revision bump and cleared by <see cref="MarkStaleRecords"/> once every record is current.</summary>
+        private bool _rebakePending;
         /// <summary>The visible-tile selection seam (default <see cref="FrustumTileSelector"/>), owning the per-tick request/release transition.</summary>
         internal IVisibleTileSelector Selector { get; set; }
 
@@ -860,11 +887,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Defensive backstop, not the normal path — cfg.Projection is always non-null here in production.
             _projection = cfg.Projection ?? new WebMercatorProjection(); // cached for the mesh build bake
 
-            // A changed clip window invalidates every cached mesh — this Clear() IS the invalidation, not a reclamation.
-            if (cfg.BufferClip.IsEnabled             != _bufferClip.IsEnabled ||
-                cfg.BufferClip.KeepAtReferenceExtent != _bufferClip.KeepAtReferenceExtent)
+            // A changed clip window starts a new bake revision, which is what invalidates cached meshes. The
+            // Clear() only frees the now-unreachable entries early. In-cover tiles rebuild via MarkStaleRecords.
+            if (!cfg.BufferClip.Equals(_bufferClip))
             {
                 _bufferClip = cfg.BufferClip;
+                _bakeRevision++;
+                _rebakePending = true;
                 _prepared.Clear();
             }
 
@@ -943,6 +972,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Runs every Update, clean or dirty — admission is not gated on _coverGate, so entries drain once the camera stills.
             AdmitFromDesired(in priorityCtx, cfg.MaxConcurrentTileLoads);
+            if (_rebakePending) MarkStaleRecords(cfg.MaxConcurrentTileLoads, in priorityCtx);
             PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick, in priorityCtx);
 
             // Drain a budgeted slice of the deferred-release backlog EVERY Update, after admission/pump.
@@ -1017,6 +1047,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 {
                     lt.MeshBuildTask = KickMeshBuild(lt, id, lt.Decode, sourceId);
                     lt.Step          = BuildStep.Prologue;
+                    lt.BakeRevision  = _bakeRevision;
                     // The record keeps its reference — the kick took its own in KickMeshBuild's prologue; lt.Decode stays live until teardown.
                 }
 
@@ -1024,8 +1055,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (lt.FetchCompleted && lt.Step == BuildStep.None && lt.Decode == null &&
                     _sources.IsSourceless(key.Slot))
                 {
-                    lt.Graph = KickSourcelessBackground(id, lt.TileOriginRender);
-                    lt.Step  = BuildStep.Measure;
+                    lt.Graph        = KickSourcelessBackground(id, lt.TileOriginRender);
+                    lt.Step         = BuildStep.Measure;
+                    lt.BakeRevision = _bakeRevision;
                 }
 
                 // (b) A PROLOGUE build in-flight — spin, then hand off; a handoff here is picked up in this same iteration.
@@ -1260,7 +1292,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     Processing.ISymbolTileWorkerPass symbolPass = null;
                     try
                     {
-                        symbolPass = SymbolWorkerFactory?.TryBeginBuild(sourceId, id);
+                        if (!lt.Rebaking) symbolPass = SymbolWorkerFactory?.TryBeginBuild(sourceId, id); // a rebake changes no symbol input
                     }
                     catch (System.Exception ex)
                     {
@@ -1269,6 +1301,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                     lt.MeshBuildTask = KickMeshBuild(lt, id, lt.Decode, sourceId, symbolPass);
                     lt.Step          = BuildStep.Prologue;
+                    lt.BakeRevision  = _bakeRevision;
                     // The record keeps its reference — the kick took its own, live until RenderTeardownRecord releases it.
                     TileBuildsStartedLastTick++; // this is where a source tile is admitted — the only place it is charged
                     pending++; // mesh build now in-flight
@@ -1292,8 +1325,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                         continue;
                     }
 
-                    lt.Graph = KickSourcelessBackground(id, lt.TileOriginRender);
-                    lt.Step  = BuildStep.Measure;
+                    lt.Graph        = KickSourcelessBackground(id, lt.TileOriginRender);
+                    lt.Step         = BuildStep.Measure;
+                    lt.BakeRevision = _bakeRevision;
                     TileBuildsStartedLastTick++; // this is where a background tile is admitted — same as arm (5)
                     scheduledThisPass = true;
                     pending++; // measure step now in-flight
@@ -1462,6 +1496,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             meshesConsumed = 0;
             vertsConsumed  = 0;
 
+            // A rebake consumes the whole tile in one call, so its old meshes retire in the same frame the new ones appear.
+            if (lt.Rebaking) meshBudget = vertBudget = int.MaxValue;
+
             int denseCount        = payloads?.Length ?? 0;
             int currentLayerCount = _layers.Count;
 
@@ -1524,6 +1561,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 // Dispose the whole payload array (idempotent), freeing layers the active style doesn't render, then mark Built and release the task.
                 DisposeWholePayloads(payloads);
+                RetireOldGeometry(ref lt);
                 FinishConsume(ref lt);
             }
 
@@ -1609,15 +1647,16 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Drops <paramref name="key"/> from <see cref="_loaded"/> BEFORE tearing its record down —
         /// the one ordering every abandonment path shares. The dictionary value is a copy, so a teardown that
         /// ran first would leave a HUSK behind if it threw. A key already gone is a no-op.</summary>
-        /// <param name="transferToCache">Eviction only: hand a Built record's meshes to
-        /// <see cref="_prepared"/> first, so teardown finds nothing left to destroy.</param>
+        /// <param name="transferToCache">Eviction only: hand a Built record's current-revision meshes to
+        /// <see cref="_prepared"/> first. An older-revision record is destroyed, since no lookup matches it.</param>
         private void RemoveAndTeardownRecord(LoadedKey key, bool transferToCache = false)
         {
             if (!_loaded.Remove(key, out LoadedTile lt)) return;
 
             // Transfer instead of destroy — scoped to eviction, not restyle (docs/tile-pipeline-design.md).
             // A source-less background record is excluded: a full-tile quad is trivial to rebuild on re-entry.
-            if (transferToCache && _cacheEnabled && lt.Built && lt.Meshes != null && !_sources.IsSourceless(key.Slot))
+            if (transferToCache && _cacheEnabled && lt.Built && lt.Meshes != null && lt.BakeRevision == _bakeRevision
+                && !_sources.IsSourceless(key.Slot))
                 TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
 
             RenderTeardownRecord(ref lt);
@@ -1632,7 +1671,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             int trackedCount = lt.MaterialIndices?.Length ?? 0;
             for (int i = 0; i < trackedCount; i++)
-                _prepared.Put(new PreparedKey(CurrentStyle, id, lt.MaterialIndices[i]), lt.Meshes[i]);
+                _prepared.Put(new PreparedKey(CurrentStyle, id, lt.MaterialIndices[i], lt.BakeRevision), lt.Meshes[i]);
 
             for (int d = 0; d < _denseLayerIds.Count; d++)
             {
@@ -1646,7 +1685,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     }
 
                 if (!covered)
-                    _prepared.Put(new PreparedKey(CurrentStyle, id, layerId), null);
+                    _prepared.Put(new PreparedKey(CurrentStyle, id, layerId, lt.BakeRevision), null);
             }
 
             lt.Meshes          = null;
@@ -1693,7 +1732,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 allCached = _denseLayerIds.Count > 0;
                 for (int d = 0; d < _denseLayerIds.Count; d++)
                 {
-                    if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIds[d])))
+                    if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIds[d], _bakeRevision)))
                     {
                         allCached = false;
                         break;
@@ -1782,7 +1821,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int d = 0; d < denseLayerIds.Count; d++)
             {
                 int layerId = denseLayerIds[d];
-                _prepared.TryTake(new PreparedKey(CurrentStyle, id, layerId), out Mesh mesh);
+                _prepared.TryTake(new PreparedKey(CurrentStyle, id, layerId, _bakeRevision), out Mesh mesh);
                 if (mesh == null) continue; // empty-layer marker — nothing to register
 
                 int handle;
@@ -1794,7 +1833,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
 
             // A cache hit only probes at the current revision, so re-stamp it here — a later ReleaseTile must Put() under that same revision.
-            var lt = new LoadedTile { Built = true, FetchCompleted = true, TileOriginRender = origin };
+            var lt = new LoadedTile { Built = true, FetchCompleted = true, TileOriginRender = origin, BakeRevision = _bakeRevision };
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
@@ -1844,6 +1883,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (_instanced != null && lt.DrawHandles != null)
                 _instanced.RemoveItems(lt.DrawHandles);
 
+            RetireOldGeometry(ref lt); // a record released mid-rebake still owns its previous geometry
             DestroyTrackedMeshes(ref lt); // Unity does not free a Mesh asset just because nothing references it
         }
 
@@ -1889,6 +1929,81 @@ namespace MapRenderer.Unity.Rendering.Tile
             _decodeErrorCount++;
             if (_decodeErrorCount == 1 || (_decodeErrorCount & 63) == 0)
                 Debug.LogWarning($"[TileManager] tile decode failed ({_decodeErrorCount} total): {ex.Message}");
+        }
+
+        /// <summary>Unregisters and destroys the previous revision's geometry of a rebaking record, then clears
+        /// the rebake state. A no-op when the record holds none. Each mesh is destroyed exactly once.</summary>
+        private void RetireOldGeometry(ref LoadedTile lt)
+        {
+            if (_instanced != null && lt.OldDrawHandles != null)
+                _instanced.RemoveItems(lt.OldDrawHandles);
+            if (lt.OldMeshes != null)
+                for (int i = 0; i < lt.OldMeshes.Length; i++)
+                    lt.OldMeshes[i].DestroySafely(allowDestroyingAssets: true);
+            lt.OldMeshes      = null;
+            lt.OldDrawHandles = null;
+            lt.Rebaking       = false;
+        }
+
+        /// <summary>Starts a rebuild of every in-cover record baked at an older revision, nearest first, while
+        /// active loads stay under <paramref name="loadCap"/>. The old geometry keeps drawing until
+        /// <see cref="ConsumeMeshBuild"/> swaps it. Clears <see cref="_rebakePending"/> once every record is current.</summary>
+        private void MarkStaleRecords(int loadCap, in TilePriorityContext priorityCtx)
+        {
+            _toRelease.Clear();
+            bool anyOutstanding = false;
+            foreach (var kv in _loaded)
+            {
+                LoadedTile lt = kv.Value;
+                if (lt.BakeRevision == _bakeRevision) continue;
+                if (!lt.Built)
+                {
+                    // In flight at an old revision: it becomes Built stale and is caught by a later scan.
+                    if (lt.Step != BuildStep.None) anyOutstanding = true;
+                    continue;
+                }
+
+                // Nothing was baked (absent fetch, no layers): there is no geometry to rebuild. The revision
+                // stamp only matters where meshes exist, so the record is left alone (a write would invalidate the enumerator).
+                if (lt.Meshes == null && lt.Decode == null) continue;
+
+                anyOutstanding = true;
+                if (_coverSet.Contains(kv.Key.Tile) && !_releaseQueued.Contains(kv.Key))
+                    _toRelease.Add(kv.Key);
+            }
+
+            _rebakePending = anyOutstanding;
+            if (_toRelease.Count == 0) return;
+
+            _sorter.Sort(_toRelease, in priorityCtx);
+            int cap    = loadCap > 0 ? loadCap : int.MaxValue;
+            int active = CountActiveLoads();
+            for (int i = 0; i < _toRelease.Count && active < cap; i++)
+            {
+                LoadedKey  key = _toRelease[i];
+                LoadedTile lt  = _loaded[key];
+                if (lt.Meshes != null)
+                {
+                    lt.OldMeshes      = lt.Meshes;
+                    lt.OldDrawHandles = lt.DrawHandles;
+                }
+
+                lt.Meshes          = null;
+                lt.DrawHandles     = null;
+                lt.MaterialIndices = null;
+                lt.ConsumeCursor   = 0;
+                lt.Built           = false;
+                lt.Rebaking        = true;
+                if (lt.Decode == null && !_sources.IsSourceless(key.Slot))
+                {
+                    // A record restored from the cache holds no decode, so it fetches again like a miss.
+                    lt.FetchCompleted = false;
+                    lt.Request        = _sources.SourceAt(key.Slot).GetTile(key.Tile).Preserve();
+                }
+
+                _loaded[key] = lt;
+                active++;
+            }
         }
 
         /// <summary>Destroys every <see cref="Mesh"/> tracked in <paramref name="lt"/>.Meshes — not freed

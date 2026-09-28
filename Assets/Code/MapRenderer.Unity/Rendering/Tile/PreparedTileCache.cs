@@ -10,25 +10,29 @@ namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
     /// The composite key for a prepared (built) tile-layer <see cref="Mesh"/> — a style token, the tile
-    /// address, and the global material index (layerId) of the render layer the mesh belongs to. Value-type +
-    /// <see cref="IEquatable{T}"/> so a <see cref="Dictionary{TKey,TValue}"/> keyed by it is zero-boxing
-    /// (mirrors <c>TileManager.LoadedKey</c>).
+    /// address, the global material index (layerId) of the render layer, and the bake <see cref="Revision"/>.
+    /// Non-local invariant: a Put stamps the revision the mesh was baked at, a lookup probes the current one,
+    /// so a mesh baked before a bake-parameter change never matches again. Value-type +
+    /// <see cref="IEquatable{T}"/>, so a keyed <see cref="Dictionary{TKey,TValue}"/> does not box.
     /// </summary>
     internal readonly struct PreparedKey : IEquatable<PreparedKey>
     {
         public readonly StyleToken Style;
         public readonly TileId     Tile;
         public readonly int        LayerId;
+        public readonly int        Revision;
 
-        public PreparedKey(StyleToken style, TileId tile, int layerId)
+        public PreparedKey(StyleToken style, TileId tile, int layerId, int revision)
         {
-            Style   = style;
-            Tile    = tile;
-            LayerId = layerId;
+            Style    = style;
+            Tile     = tile;
+            LayerId  = layerId;
+            Revision = revision;
         }
 
         public bool Equals(PreparedKey other)
-            => LayerId == other.LayerId && Tile.Equals(other.Tile) && Style.Equals(other.Style);
+            => LayerId == other.LayerId && Revision == other.Revision && Tile.Equals(other.Tile) &&
+               Style.Equals(other.Style);
         public override bool Equals(object obj) => obj is PreparedKey other && Equals(other);
         public override int GetHashCode()
         {
@@ -38,6 +42,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 h = h * 31 + Style.GetHashCode();
                 h = h * 31 + Tile.GetHashCode();
                 h = h * 31 + LayerId;
+                h = h * 31 + Revision;
                 return h;
             }
         }

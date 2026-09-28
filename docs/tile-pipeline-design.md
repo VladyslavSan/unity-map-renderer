@@ -187,15 +187,23 @@ for other reasons; the bake does not read it.
 > `{ Tile, Zoom = id.Z, origin = f(tile, projection), projection, bufferClip }` + the typed paint and layout
 > (the style content **and** `MapViewConfig.FillAntialiasing`) + the built layer numbering.
 
-The rule that licenses `PreparedTileCache` holding no purge of its own: **a new bake input either enters the
-cache token or gets its own purge.** The current inputs split across the two mechanisms. Content,
+The rule that licenses `PreparedTileCache` holding no purge of its own: **a new bake input enters the cache
+identity.** The current inputs split across two components. Content,
 `FillAntialiasing`, the built layer numbering, and each source's resolved identity (`SourceId` + `SourceKey`)
 fold into `TileManager.CurrentStyle`'s `StyleToken` (`MapView.SetStyle`, keyed through
 `JsonCanonical.CacheKey`) — the resolved identity because a TileJSON can resolve differently under identical
-style text, and `PreparedKey` carries no source identity of its own to catch that. The clip window has its
-own diff-and-purge in `TileManager.UpdateCore`, where a changed `BufferClip` clears the prepared cache
-directly. `Zoom = id.Z` and the projection are session-constant, so neither needs a token component or a
-purge.
+style text, and `PreparedKey` carries no source identity of its own to catch that. The clip window enters
+`PreparedKey.Revision`: `TileManager.UpdateCore` bumps `_bakeRevision` when `BufferClip` changes. A kick
+stamps the revision on its record, and a Put uses that stamp, so a mesh baked before the change never matches
+a lookup made after it. The `Clear()` on the change only frees the unreachable entries early. A tile already
+in cover rebuilds: `MarkStaleRecords` moves its meshes aside as old geometry, and the normal build pipeline
+runs again over the record's retained decode, within the build and load caps. The consume that registers the
+new meshes also retires the old ones in the same call, so no frame shows the tile with neither or with both
+sets. That swap consume is exempt from the per-frame mesh and vertex budgets, so a tile's upload lands in one
+frame and never shows partly old and partly new. The kick and load caps still apply. A cache-restored record
+holds no decode, so it fetches again like a miss, which costs a network round trip. A failed rebuild keeps the
+old geometry until the tile is released, and a tile released mid-rebuild releases its old geometry with it. `Zoom = id.Z` and the projection are
+session-constant, so neither needs a component.
 
 **`MapViewConfig.MaterialSet` is assumed baked into the scene and constant for the session.** Nothing
 enforces it: `MaterialSet` is a serialized public field any caller could reassign, and test setup does. The
@@ -237,8 +245,8 @@ The same release that banks the meshes also drops the tile from the byte `TileCa
 `SourceRegistry.ReleaseTile`. A prepared-cache hit and a byte-cache hit are therefore mutually exclusive: for
 exactly the tiles the mesh cache can serve, a refused hit costs a network round trip, not just a decode.
 
-A hit marks the record `Built` and `FetchCompleted`, so `PumpPending` never reaches it and its symbol build
-never kicks. `AdmitTile` therefore requires the symbol store to still hold a committed block for the tile
+A hit marks the record `Built` and `FetchCompleted`, so `PumpPending` does not reach it and its symbol build
+never kicks. (A clip-change rebuild does reach it, but that rebuild skips the symbol pass.) `AdmitTile` therefore requires the symbol store to still hold a committed block for the tile
 (`ISymbolTileWorkerFactory.SymbolsCachedFor`) before it serves one. Without that check a full-rebuild restyle
 — which clears the symbol store while the mesh cache keeps its entries under their content token — re-shows a
 panned-back tile as geometry with every label permanently gone. The remedy is always to make the hit
@@ -545,7 +553,7 @@ snapshot per tile build, on the load path.
 - **Removing a layer and rebuilding it as the camera crosses its zoom bounds**, instead of gating it
   (§ "The draw gate — a layer draws, or it is not submitted" above). The prepared mesh cache would not
   absorb the re-entry; it would be discarded wholesale on every crossing. `PreparedKey` is (`StyleToken`,
-  `TileId`, `LayerId`), and `StyleToken` digests `MapView.LayerNumbering` — the `index:id` pairing of the
+  `TileId`, `LayerId`, `Revision`), and `StyleToken` digests `MapView.LayerNumbering` — the `index:id` pairing of the
   **built** set. A layer set that varies with zoom changes the token at every crossing, re-keying every entry
   for every tile and every layer, not just the layer that moved. Independently, `LayerId` is the slot index,
   so removing a layer mid-list renumbers every later layer and their cached meshes are keyed wrong. Each

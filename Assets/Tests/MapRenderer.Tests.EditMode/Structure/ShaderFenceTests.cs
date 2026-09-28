@@ -10,7 +10,7 @@
 //   CoreAssemblyBoundaryTests               — MapRenderer.Core stays engine-free; no UnityEngine/Unity.* crosses in.
 //   StyleModelAssemblyBoundaryTests         — the style model lives in MapRenderer.Unity, not Core.
 //   MdCitationFenceTests                   — every *.md citation in source resolves to a tracked file.
-//   PreparedKeyShapeStructureTests         — PreparedKey's recorded field-count shape.
+//   BakeIdentityShapeStructureTests        — the recorded shape of PreparedKey and TileBufferClip.
 //   RenderLayerRegistryStructureTests      — RenderLayerFactory is the sole StyleLayer-subtype dispatch point.
 //   SkyShaderStructureTests                — Map/Sky ships in every build; the sky writer never touches scene lighting.
 //   HazeFogStructureTests                  — the build keeps the haze's fog variants; every map forward pass takes fog.
@@ -1675,32 +1675,35 @@ namespace MapRenderer.Tests.Structure
 
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // PreparedKeyShapeStructureTests — PreparedKey's recorded field-count shape
+    // BakeIdentityShapeStructureTests — the recorded shape of PreparedKey and TileBufferClip
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A speed bump, not a ban. Pins the recorded 3-field shape of
-    /// <see cref="PreparedKey"/> — <c>Style</c> already partitions the cache, so a second discriminator
-    /// would change no outcome at a data-plane cost. A deliberate fourth field
-    /// (<c>park/umr-113-bake-revision</c>'s <c>Revision</c> is the known candidate) updates this tooth
-    /// together with that decision, not around it. Asserts the SHAPE (arity), not a call-site count.
+    /// A speed bump, not a ban. Pins the recorded shape of the bake-identity types. A
+    /// <see cref="PreparedKey"/> is (Style, Tile, LayerId, Revision). <c>TileBufferClip.Equals</c> compares its
+    /// state members by hand, so a new member without a term there would stop the bake-revision bump for it.
+    /// A deliberate change updates this tooth together with that decision. Asserts the SHAPE, not a call count.
     /// </summary>
     [TestFixture]
-    public class PreparedKeyShapeStructureTests
+    public class BakeIdentityShapeStructureTests
     {
         [Test]
-        public void PreparedKey_HasExactlyThreeFields()
+        public void BakeIdentityTypes_HaveTheRecordedShape()
         {
-            // Public|NonPublic — a non-public fourth field is a legal way to implement the rejected fork,
-            // and Public-only would not see it.
-            int count = typeof(PreparedKey)
+            // Public|NonPublic — a non-public field is a legal way to add a discriminator.
+            int keyFields = typeof(PreparedKey)
                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Length;
-            Assert.AreEqual(3, count,
-                "PreparedKey must stay a 3-field key (Style, Tile, LayerId) — a recorded decision: " +
-                "Style already partitions the cache, so a second discriminator would change no outcome at " +
-                "a data-plane cost. Landing a fourth field on purpose (park/umr-113-bake-revision's " +
-                "Revision is the known candidate)? Update this tooth together with that decision, not " +
-                "instead of it.");
+            Assert.AreEqual(4, keyFields,
+                "PreparedKey is (Style, Tile, LayerId, Revision). A new field needs a term in Equals and " +
+                "GetHashCode, and an update to this tooth.");
+
+            // Fields, not properties: the two auto-properties are two backing fields, and a new property or a
+            // non-public field of any kind adds one. The static Disabled and the const are not state.
+            int clipMembers = typeof(MapRenderer.Core.Tiles.TileBufferClip)
+                .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Length;
+            Assert.AreEqual(2, clipMembers,
+                "TileBufferClip compares IsEnabled and KeepAtReferenceExtent in Equals and GetHashCode. A new " +
+                "state member needs a term in both, or TileManager stops starting a new bake revision for it.");
         }
     }
 

@@ -93,11 +93,10 @@ namespace MapRenderer.Unity.Rendering.Map
                  "(pre-clip behaviour); NEGATIVE = disable the clip stage entirely, so no clip job runs. " +
                  "DEFAULT 0: the hairline crack a non-zero margin would hedge against was measured at " +
                  "ZERO pixels headlessly and confirmed on a real basemap, so there is nothing to hedge. " +
-                 "Read live, and a change evicts what is in the prepared-tile cache AT THAT MOMENT — but " +
-                 "meshes already in cover are NOT rebuilt, and when such a tile later leaves cover its " +
-                 "stale-window mesh re-enters the cache indistinguishably (the key carries no clip), so " +
-                 "re-entering cover serves it again. Restyle or restart to be certain every mesh reflects " +
-                 "the new value. A tuning knob, not a live toggle.")]
+                 "Read live: a change starts a new bake revision, so a mesh baked under the OLD value is " +
+                 "never served from the prepared-tile cache again. A tile already in cover rebuilds in the " +
+                 "background, within the build and load caps, and swaps in when ready; each tile's upload " +
+                 "lands in one frame. Old and new tiles can briefly show together.")]
         public double FillTileBufferClip = 0.0;
 
         [Tooltip("Default for fill antialiasing (the outward boundary band), applied to every fill layer " +

@@ -1,3 +1,4 @@
+using System;
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Tiles
@@ -10,7 +11,7 @@ namespace MapRenderer.Core.Tiles
     /// converted per layer only in <see cref="TryWindow"/>; 64 (the OpenMapTiles buffer) keeps everything
     /// and 0 cuts at the tile boundary. <c>default</c> is <see cref="Disabled"/>: "no clip".
     /// </summary>
-    public readonly struct TileBufferClip
+    public readonly struct TileBufferClip : IEquatable<TileBufferClip>
     {
         /// <summary>The extent the <see cref="KeepAtReferenceExtent"/> knob is authored against — the MVT
         /// authoring convention, in ONE place.</summary>
@@ -65,6 +66,24 @@ namespace MapRenderer.Core.Tiles
             min = new double2(-keep, -keep);
             max = new double2(extent + keep, extent + keep);
             return true;
+        }
+
+        /// <summary>Value equality over both state members. Non-local invariant: <c>TileManager</c> starts a new
+        /// bake revision when this is false, so a state member added here needs a term in
+        /// <see cref="Equals(TileBufferClip)"/> and <see cref="GetHashCode"/>.</summary>
+        public bool Equals(TileBufferClip other)
+            => IsEnabled == other.IsEnabled && KeepAtReferenceExtent.Equals(other.KeepAtReferenceExtent);
+
+        /// <summary>Boxed equality, the same comparison as <see cref="Equals(TileBufferClip)"/>.</summary>
+        public override bool Equals(object obj) => obj is TileBufferClip other && Equals(other);
+
+        /// <summary>A hash over the same members <see cref="Equals(TileBufferClip)"/> compares.</summary>
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (IsEnabled.GetHashCode() * 31) + KeepAtReferenceExtent.GetHashCode();
+            }
         }
     }
 }

@@ -764,6 +764,173 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
+        // ── A bake-parameter change must not leak stale geometry back in ───────────────────────
+
+        /// <summary>
+        /// Builds a tile under clip 0, changes the clip, and moves the tile out of cover before it is marked for a
+        /// rebuild. Its old-clip mesh must not enter the cache (no lookup could match it, and it would take budget
+        /// from valid entries), so it is destroyed, and the revisit bakes fresh. Two phases: the change lands
+        /// after the tile is built, and the change lands after the build was kicked and before it is consumed,
+        /// so only a stamp taken at kick time (not at consume) keeps the stale mesh out of the cache.
+        /// </summary>
+        [Test]
+        public void BufferClipChange_TileEvictedAfterChange_IsNotCached_RevisitBuildsFresh()
+        {
+            EvictAfterClipChange(bumpAfterKick: false);
+            EvictAfterClipChange(bumpAfterKick: true);
+        }
+
+        /// <summary>One fresh view: build a tile, change the clip (after the build, or between its kick and consume),
+        /// evict the tile, and check the stale mesh is destroyed and uncached and the revisit bakes fresh.</summary>
+        private void EvictAfterClipChange(bool bumpAfterKick)
+        {
+            var view = NewClipView();
+            try
+            {
+                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(10, 10, 4.0),
+                    style: InterpFillStyle());
+                if (bumpAfterKick)
+                {
+                    // Fetches complete off the update, so wait for them: the first tick that starts a build kicks
+                    // the tracked tile (nearest to the camera) without consuming it.
+                    var loaded = new List<TileId>();
+                    for (int f = 0; f < 50 && view.TileBuildsStartedLastTick() == 0; f++)
+                    {
+                        view.LateUpdate();
+                        view.AwaitInFlightMeshBuilds();
+                    }
+
+                    view.CollectLoadedTileIds(loaded);
+                    Assert.IsTrue(loaded.Contains(TrackedTile) && view.TileBuildsStartedLastTick() > 0,
+                        "drive precondition: the tracked tile is admitted and its build is kicked.");
+                    Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the build is kicked, not consumed.");
+                    view.Config.FillTileBufferClip = 64.0;
+                    view.LateUpdate(); // the revision bumps here, while the tile's build is still in flight
+                    view.DrainMeshBuilds();
+                }
+                else
+                {
+                    PumpUntilSettled(view);
+                }
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile is built under clip 0.");
+                Mesh originalMesh = view.GetTileMeshes(TrackedTile)[0];
+
+                if (!bumpAfterKick) view.Config.FillTileBufferClip = 64.0; // the standard MVT buffer, unlike 0
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile leaves cover.");
+
+                Assert.IsTrue(originalMesh == null,
+                    "an evicted mesh baked under the old clip must be destroyed, not parked in the cache.");
+                Assert.AreEqual(0, view.CaptureTelemetry().PreparedCacheEntryCount,
+                    "no stale entry may enter the prepared cache after a clip change.");
+                PumpUntilSettled(view);
+
+                int missesBefore = view.PreparedCacheMisses();
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+                PumpUntilSettled(view);
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "the tile must be built again on revisit.");
+                Assert.Greater(view.PreparedCacheMisses(), missesBefore,
+                    "the revisit must miss the cache and bake fresh under the new clip.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>
+        /// The ticket's literal repro: a tile that STAYS in cover across a clip change ends with the new clip's
+        /// geometry. A two-layer tile rebuilds in the background with a consume cap of one mesh per tick, and every
+        /// frame must show the same draw set as before: the swap is atomic, never old plus new, never neither.
+        /// Every other tile is absent, so records with nothing baked must not break the rebuild scan. The old
+        /// meshes are destroyed once, and a tile released mid-rebuild releases its old geometry too.
+        /// </summary>
+        [Test]
+        public void BufferClipChange_InCoverTile_RebuildsAndSwapsWithoutLeavingTheDrawSet()
+        {
+            int meshesBeforeLoad = CountMeshObjects();
+            var view = NewClipView(RenderBackend.Brg);
+            try
+            {
+                byte[] bytes = SampleTileFixture.Bytes();
+                var source = TestDataSource.FromFetch(id => UniTask.FromResult(id.Equals(TrackedTile)
+                    ? new TileResponse(bytes, TileEncoding.Mvt)
+                    : TileResponse.Absent(TileEncoding.Mvt)));
+                view.LoadTestStyle(source, Cam(10, 10, 4.0), style: TwoFillLayerStyle());
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile builds under clip 0.");
+                view.Config.MaxConsumesPerTick = 1;
+                Mesh oldMesh   = view.GetTileMeshes(TrackedTile)[0];
+                int  oldVerts  = oldMesh.vertexCount;
+                int  drawItems = view.BrgRenderer().DrawItemCount();
+                int  meshes    = CountMeshObjects();
+                Assert.GreaterOrEqual(drawItems, 2, "drive precondition: the tile has two layer meshes.");
+
+                view.Config.FillTileBufferClip = 64.0;
+                bool swapped = false;
+                for (int f = 0; f < 600 && !swapped; f++)
+                {
+                    view.LateUpdate();
+                    view.AwaitInFlightMeshBuilds();
+                    Assert.AreEqual(drawItems, view.BrgRenderer().DrawItemCount(),
+                        $"frame {f}: the draw set must not change while the tile rebuilds, or at the swap.");
+                    Mesh[] current = view.GetTileMeshes(TrackedTile);
+                    swapped = current != null && current[0] != oldMesh && view.AllTilesSettled();
+                }
+
+                Assert.IsTrue(swapped, "the in-cover tile must finish its rebuild.");
+                Mesh newMesh = view.GetTileMeshes(TrackedTile)[0];
+                Assert.AreNotEqual(oldVerts, newMesh.vertexCount,
+                    "POSITIVE CONTROL: the new clip must change this tile's geometry, or the swap proves nothing.");
+                Assert.IsTrue(oldMesh == null, "the old mesh must be destroyed once the new one commits.");
+                Assert.AreEqual(meshes, CountMeshObjects(), "the swap must destroy exactly the meshes it replaced.");
+
+                // Release mid-rebuild: mark the tile stale and kick its rebuild, then move out of cover.
+                view.Config.FillTileBufferClip = 0.0;
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile is rebuilding.");
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsTrue(newMesh == null, "a tile released mid-rebuild must destroy its old geometry.");
+                Assert.AreEqual(meshesBeforeLoad, CountMeshObjects(), "no mesh may leak from a mid-rebuild release.");
+                Assert.AreEqual(0, view.CaptureTelemetry().PreparedCacheEntryCount,
+                    "a record released mid-rebuild must not enter the prepared cache.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        private static StyleDocument TwoFillLayerStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                { ""id"": ""fill-b"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 50, 50, 200, 1] } }
+            ]
+        }");
+
+        private MapView NewClipView(RenderBackend backend = RenderBackend.Entities)
+        {
+            var go   = Track(new GameObject("MapView_BufferClipRevision"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.Config.Backend = backend; // before WithTestCamera, which builds the backend
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction and transfer
+            return view;
+        }
+
         // ── (g)'s revisit clause: a two-mesh tile, cache hit, no re-kick ────────────────────────
 
         /// <summary>

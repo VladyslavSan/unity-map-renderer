@@ -2896,25 +2896,35 @@ namespace MapRenderer.Tests.Tiles
             {
                 // Same TileId/layerId, different style — a naive "drop previous on insert" cache would let
                 // meshB's Put destroy/replace meshA's entry; PreparedTileCache keys them independently.
-                cache.Put(new PreparedKey(styleA, Tile0, 0), meshA);
-                cache.Put(new PreparedKey(styleB, Tile0, 0), meshB);
+                cache.Put(new PreparedKey(styleA, Tile0, 0, revision: 0), meshA);
+                cache.Put(new PreparedKey(styleB, Tile0, 0, revision: 0), meshB);
 
                 Assert.AreEqual(2, cache.Count, "Both styles' entries must coexist under the same TileId/layerId.");
 
-                Assert.IsTrue(cache.TryTake(new PreparedKey(styleA, Tile0, 0), out Mesh takenA));
+                Assert.IsTrue(cache.TryTake(new PreparedKey(styleA, Tile0, 0, revision: 0), out Mesh takenA));
                 Assert.AreSame(meshA, takenA, "styleA lookup must hit the styleA mesh, not styleB's.");
                 Assert.IsTrue(ColorsClose(colorA, FirstVertexColor(takenA), 1e-4f),
                     "styleA lookup must hit content baked from the interp-fill style, not the coexist style.");
 
-                Assert.IsTrue(cache.TryTake(new PreparedKey(styleB, Tile0, 0), out Mesh takenB));
+                Assert.IsTrue(cache.TryTake(new PreparedKey(styleB, Tile0, 0, revision: 0), out Mesh takenB));
                 Assert.AreSame(meshB, takenB, "styleB lookup must hit the styleB mesh, not styleA's — " +
                     "neither toggle re-prepared (TryTake serves the SAME Mesh object both put in).");
                 Assert.IsTrue(ColorsClose(colorB, FirstVertexColor(takenB), 1e-4f),
                     "styleB lookup must hit content baked from the coexist style, not the interp-fill style.");
+
+                // Same style, tile and layer, different bake revision: two entries, each found only at its own
+                // revision. Dropping Revision from BOTH Equals and GetHashCode collapses them to one.
+                cache.Put(new PreparedKey(styleA, Tile0, 0, revision: 1), takenA);
+                cache.Put(new PreparedKey(styleA, Tile0, 0, revision: 2), takenB);
+                Assert.AreEqual(2, cache.Count, "Entries that differ only in bake revision must be distinct.");
+                Assert.IsFalse(cache.Contains(new PreparedKey(styleA, Tile0, 0, revision: 3)),
+                    "A lookup at a revision nothing was baked at must miss.");
+                Assert.IsTrue(cache.TryTake(new PreparedKey(styleA, Tile0, 0, revision: 2), out Mesh takenRev2));
+                Assert.AreSame(takenB, takenRev2, "The revision-2 lookup must return the revision-2 mesh.");
             }
             finally
             {
-                cache.Dispose(); // both already taken out — no-op; the bag destroys the test meshes.
+                cache.Dispose(); // destroys the revision-1 mesh still held; the bag destroys the test meshes.
             }
         }
 
@@ -2932,8 +2942,8 @@ namespace MapRenderer.Tests.Tiles
             long budget = bytes1 + bytes1 / 2;
             var cache = new PreparedTileCache(budget, countCap: 0);
             var style = StyleToken.Default;
-            var keyA  = new PreparedKey(style, Tile0, 0);
-            var keyB  = new PreparedKey(style, Tile0, 1);
+            var keyA  = new PreparedKey(style, Tile0, 0, revision: 0);
+            var keyB  = new PreparedKey(style, Tile0, 1, revision: 0);
 
             cache.Put(keyA, mesh1);
             Assert.AreEqual(1, cache.Count);
@@ -2996,8 +3006,8 @@ namespace MapRenderer.Tests.Tiles
             Mesh meshB = MakeMesh(20);
             try
             {
-                cache.Put(new PreparedKey(StyleToken.Default, Tile0, 0), meshA);
-                cache.Put(new PreparedKey(StyleToken.Default, Tile0, 1), meshB);
+                cache.Put(new PreparedKey(StyleToken.Default, Tile0, 0, revision: 0), meshA);
+                cache.Put(new PreparedKey(StyleToken.Default, Tile0, 1, revision: 0), meshB);
 
                 long expected = ExpectedBytes(meshA) + ExpectedBytes(meshB);
                 Assert.Greater(expected, 0, "Positive control: non-zero expected bytes (non-vacuous).");
@@ -3016,7 +3026,7 @@ namespace MapRenderer.Tests.Tiles
         public void NullMeshMarker_IsAValidZeroByteEntry()
         {
             var cache = new PreparedTileCache(byteBudget: 0, countCap: 0);
-            var key   = new PreparedKey(StyleToken.Default, Tile0, 2);
+            var key   = new PreparedKey(StyleToken.Default, Tile0, 2, revision: 0);
 
             cache.Put(key, null);
 
@@ -3035,7 +3045,7 @@ namespace MapRenderer.Tests.Tiles
         {
             var cache = new PreparedTileCache(byteBudget: 0, countCap: 0);
             Mesh mesh = MakeMesh(5);
-            cache.Put(new PreparedKey(StyleToken.Default, Tile0, 0), mesh);
+            cache.Put(new PreparedKey(StyleToken.Default, Tile0, 0, revision: 0), mesh);
 
             cache.Dispose();
             Assert.IsTrue(mesh == null, "Dispose must destroy every held mesh.");
