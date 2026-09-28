@@ -163,7 +163,8 @@ namespace MapRenderer.Tests.Text.Placement
                 anchorRender: new double3(1000.0, 0.0, 2000.0),
                 text: text, materialIndex: materialIndex, textSizePx: 16f, paddingPx: 2f, sortKey: 1f,
                 maxAngleDeg: 45f, keepUpright: true,
-                featureIndex: featureIndex, tileKey: TileKeyValue, paint: SymbolPaint.Default, stringTable: stringTable);
+                featureIndex: featureIndex, tileKey: TileKeyValue, paint: SymbolPaint.Default, stringTable: stringTable,
+                alongShiftBaked: 7.5f);
         }
 
         // `stringTable` is REQUIRED: the golden asserts LITERAL TextIds/IconImageIds, which hold only for an
@@ -250,6 +251,7 @@ namespace MapRenderer.Tests.Text.Placement
                 CollectionAssert.AreEqual(new[] { 1 }, ToArray(block.CurvedAnchorCount), "CurvedAnchorCount");
                 CollectionAssert.AreEqual(new[] { 0 }, ToArray(block.CurvedAnchorFadeStart), "CurvedAnchorFadeStart");
                 Assert.AreEqual(SymbolTileBlockBaker.BuildCurvedInput(buffer.Symbols[2], 4, TileOrigin), block.Curveds[0], "Curveds[0]");
+                Assert.AreEqual(7.5f, block.Curveds[0].AlongShiftBaked, "Curveds[0].AlongShiftBaked — the fixture's literal, not re-derived.");
 
                 // ── flat pools — expected values read off the SOURCE symbols in Fill's raw-index order: an
                 // INDEPENDENT restatement of the input, not a re-derivation of Fill's math. ──

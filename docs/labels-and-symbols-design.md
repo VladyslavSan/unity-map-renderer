@@ -486,11 +486,12 @@ extract LineString feature                      project the render-space path �
   → symbol-spacing (px)                            line-center → [totalLen/2]
 shape text (existing CodepointTextShaper)         line        → every symbol-spacing px, centered
 CurvedTextLayout(run, atlas):                   for each anchor, for each glyph:
-  → per glyph: (arcCenter, centeredCell)          screenPt, tangent = walker.At(anchorArc + glyphArcCenter)
-  single-line, glyph cell centered on its         emit PlacedQuad{ AnchorScreenPx = screenPt,
-  own pen origin                                                    RotationRadians = tangentAngle,
+  → per glyph: (arcCenter, centeredCell)          labelArc = anchorArc + alongShift (text-anchor)
+  → alongShift (text-anchor, along the line)      screenPt, tangent = walker.At(labelArc + glyphArcCenter)
+  single-line, cell y carries the anchor's        emit PlacedQuad{ AnchorScreenPx = screenPt,
+  across-line shift                                                 RotationRadians = tangentAngle,
                                                                     Quad = centeredCell }
-                                                keep-upright: if the label's net screen direction is
+                                                keep-upright: if the anchor's tangent points
                                                   right-to-left, walk the arc reversed
 ```
 
@@ -509,11 +510,20 @@ different anchors/rotations instead of N sharing one. The rest is two pure Core 
   resumable cursor) returns `(float2 point, float tangentRadians)` by lerping within the containing segment
   (tangent = segment direction via `atan2`; clamps to the ends).
 - **`CurvedTextLayout`** — `Layout(ShapedRun, IGlyphAtlasView) → IReadOnlyList<CurvedGlyph>` where
-  `CurvedGlyph { float ArcCenter; SymbolQuad Cell }`. A single forward pass (mirrors `TextQuadLayout.PlaceGlyph`)
+  `CurvedGlyph { float ArcCenter; SymbolQuad Cell }`; the caller-buffer overload
+  `Layout(run, atlas, List<CurvedGlyph>, letterSpacingEm, anchor, lineHeightEm) → float` also takes the anchor
+  and returns the along-line shift. A single forward pass (mirrors `TextQuadLayout.PlaceGlyph`)
   places each glyph's cell relative to **its own** pen origin, centered **horizontally** on the glyph's
-  advance-center, and **vertically on the run's optical (cap-band) centre** — the same
-  `TextQuadLayout.OpticalCentreBelowReferencePx` a centre-anchored point label applies (`docs/road-shields-design.md`
-  D12), so a curved and a point label of the same string sit the same way on their anchor.
+  advance-center. **`text-anchor` applies as the point path applies it**: the vertical part is a constant per
+  label on every cell's y (`TextQuadLayout.VerticalAnchorShiftPx` with one line — for a centre anchor the run's
+  optical cap-band centre, `docs/road-shields-design.md` D12), so a curved and a point label of the same string
+  sit the same way on their anchor. The horizontal part cannot live in the cells: staging re-centres the run on
+  its first and last `ArcCenter`, which cancels any constant baked into them. `Layout` returns it instead, as the
+  baked-px distance along the line from the run centre to where the anchor puts it (0 for a centred run;
+  advance-box edges, `left` = the run's left edge as drawn). It travels as `AlongShiftBaked`, and `StageCurved` slides the label
+  by it in the reading direction, after keep-upright is decided at the anchor point. A label the shift pushes
+  past either end of the path stages nothing at that anchor. The midpoint fallback, staged only when no anchor fits, is centred and ignores `text-anchor`.
+  Curved `text-offset` is not applied.
   `ArcCenter` = cumulative advance to that center. The pen advances by the glyph's advance plus
   `text-letter-spacing`, as in `TextQuadLayout`.
 
@@ -536,7 +546,8 @@ camera — partial-visibility clipping is a refinement); build a cumulative-leng
 (`PolylineArcMath.BuildCumulative`) over the projected polyline, which also returns the polyline's total length;
 choose anchor arc-distances (`line-center` → half that total; `line` → centered multiples of `symbol-spacing`,
 label needs `labelWidthPx` ≤ the total); apply keep-upright (walk reversed when the net direction points
-leftward); emit one `PlacedQuad` per glyph.
+leftward, decided at the anchor point); slide the label by `AlongShiftBaked` in the reading direction; emit one
+`PlacedQuad` per glyph.
 
 **Double-rotation trap.** A curved glyph's rotation is the projected-line **tangent only**. The projection
 already baked the bearing in (path vertices go through the bearing-aware camera), and line placement defaults

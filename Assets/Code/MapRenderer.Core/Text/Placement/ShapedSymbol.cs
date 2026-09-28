@@ -102,6 +102,10 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary><c>text-keep-upright</c> — curved placement only.</summary>
         public bool KeepUpright { get; init; }
 
+        /// <summary>Curved text only: the signed baked-px distance along the line from the anchor to the run's
+        /// centre, from <c>text-anchor</c>. 0 means centred on the anchor.</summary>
+        public float AlongShiftBaked { get; init; }
+
         /// <summary><c>icon-rotate</c> in radians (MapLibre's own sense).</summary>
         public float IconRotateRadians { get; init; }
 

@@ -99,7 +99,7 @@ namespace MapRenderer.Tests.Text.Placement
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
             TextTranslateAnchor translateAnchor = default,
             AlignmentMode pitchAlignment = default, float iconRotateRadians = default,
-            SymbolPaint paint = default, SymbolStringTable stringTable = null)
+            SymbolPaint paint = default, SymbolStringTable stringTable = null, float alongShiftBaked = default)
         {
             SymbolStringTable table = stringTable ?? DefaultStringTable;
             int glyphStart = buffer.AppendGlyphs(glyphs, out int glyphCount);
@@ -115,7 +115,7 @@ namespace MapRenderer.Tests.Text.Placement
                 AnchorStart = anchorStart, AnchorCount = anchorCount,
                 PathStart = pathStart, PathCount = pathCount,
                 TextSizePx = textSizePx, PaddingPx = paddingPx, SortKey = sortKey,
-                MaxAngleDeg = maxAngleDeg, KeepUpright = keepUpright,
+                MaxAngleDeg = maxAngleDeg, KeepUpright = keepUpright, AlongShiftBaked = alongShiftBaked,
                 FeatureIndex = featureIndex, TileKey = tileKey,
                 AllowOverlap = allowOverlap, IgnorePlacement = ignorePlacement,
                 TranslateAnchor = translateAnchor, PitchAlignment = pitchAlignment,

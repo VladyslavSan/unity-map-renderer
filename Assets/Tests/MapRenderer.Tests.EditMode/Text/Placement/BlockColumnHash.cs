@@ -272,6 +272,7 @@ namespace MapRenderer.Tests.Text.Placement
             h = Combine(h, (int)c.TranslateAnchor);
             h = Combine(h, HashFloat(c.MaxAngleDeg));
             h = Combine(h, HashBool(c.KeepUpright));
+            h = Combine(h, HashFloat(c.AlongShiftBaked));
             h = Combine(h, HashFloat4(c.Color));
             h = Combine(h, HashFloat4(c.HaloColor));
             h = Combine(h, HashFloat(c.HaloWidthPx));
@@ -298,6 +299,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(a.TranslateAnchor, b.TranslateAnchor, msg + ".TranslateAnchor");
             AssertFloatEqual(a.MaxAngleDeg, b.MaxAngleDeg, msg + ".MaxAngleDeg");
             Assert.AreEqual(a.KeepUpright, b.KeepUpright, msg + ".KeepUpright");
+            AssertFloatEqual(a.AlongShiftBaked, b.AlongShiftBaked, msg + ".AlongShiftBaked");
             AssertFloat4Equal(a.Color, b.Color, msg + ".Color");
             AssertFloat4Equal(a.HaloColor, b.HaloColor, msg + ".HaloColor");
             AssertFloatEqual(a.HaloWidthPx, b.HaloWidthPx, msg + ".HaloWidthPx");

@@ -223,10 +223,9 @@ namespace MapRenderer.Core.Text.Placement
                 // With the world table this is the anchor's WORLD arc distance; resolved on the projected path,
                 // a map-pitched anchor would drift with the pose, since the two agree only at constant depth.
                 float centerArc = PolylineArcMath.ArcDistanceAt(cumulativeLengths, pathLen, anchors[a].Segment, anchors[a].T);
-                if (centerArc - halfSpan < 0f || centerArc + halfSpan > total) continue; // symbol spills the ends
                 if (StageCurvedAnchor(in s, pathPoints, cumulativeLengths, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
                         ordinal + staged, anchorFadeIds[a], anchorWasPlaced[a] != 0,
-                        centerArc, symbolCenterBaked, arcScale, cornerMetresPerLogicalPixel, pathDepth, bearingRadians,
+                        centerArc, symbolCenterBaked, halfSpan, s.AlongShiftBaked, arcScale, cornerMetresPerLogicalPixel, pathDepth, bearingRadians,
                         in view,
                         boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit, ref emitCount))
                     staged++;
@@ -236,7 +235,7 @@ namespace MapRenderer.Core.Text.Placement
             if (staged == 0 &&
                 StageCurvedAnchor(in s, pathPoints, cumulativeLengths, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
                     ordinal, anchorFadeIds[anchorCount], anchorWasPlaced[anchorCount] != 0,
-                    total * 0.5f, symbolCenterBaked, arcScale, cornerMetresPerLogicalPixel, pathDepth, bearingRadians,
+                    total * 0.5f, symbolCenterBaked, halfSpan, 0f, arcScale, cornerMetresPerLogicalPixel, pathDepth, bearingRadians,
                     in view,
                     boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit, ref emitCount))
                 staged = 1;
@@ -269,14 +268,15 @@ namespace MapRenderer.Core.Text.Placement
             tangentRadians = PolylineArcMath.SegmentTangent(path, pathLen, seg);
         }
 
-        // Stages ONE curved symbol at `centerArc`; rolls back and returns false past text-max-angle. The arc
-        // inputs share StageCurved's unit, while `path` stays the SCREEN polyline that (seg, t) lands on.
+        // Stages ONE curved symbol about `centerArc`; returns false if the shifted label spills either end;
+        // rolls back and returns false past text-max-angle. The arc inputs share StageCurved's unit.
         private static bool StageCurvedAnchor(in CurvedStageInput s,
             ReadOnlySpan<float2> path, ReadOnlySpan<float> cumulative, int pathLen, float total,
             ReadOnlySpan<double3> worldPath, ReadOnlySpan<float3> worldUpPath,
             ReadOnlySpan<CurvedGlyph> glyphs, ref int cursor,
             int ordinal, long fadeId, bool wasPlaced,
-            float centerArc, float symbolCenterBaked, float arcScale, float cornerMetresPerLogicalPixel,
+            float centerArc, float symbolCenterBaked, float halfSpan, float alongShiftBaked,
+            float arcScale, float cornerMetresPerLogicalPixel,
             float pathDepth, float bearingRadians, in SymbolViewTransform view,
             Span<SymbolBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
             Span<SymbolCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
@@ -287,6 +287,10 @@ namespace MapRenderer.Core.Text.Placement
             bool  reversed = s.KeepUpright && math.cos(centerTangent) < 0f;
             float dir      = reversed ? -1f : 1f;
             float flip     = reversed ? math.PI : 0f;
+            // text-anchor slides the label along the line in reading direction; a label the shift pushes
+            // past either end stages nothing here.
+            float labelArc = centerArc + dir * alongShiftBaked * arcScale;
+            if (labelArc - halfSpan < 0f || labelArc + halfSpan > total) return false;
             float maxAngleRad = math.radians(s.MaxAngleDeg);
             float sortKey = SanitizeSortKey(s.SortKey); // finite-SortKey invariant (comparator totality)
 
@@ -302,7 +306,7 @@ namespace MapRenderer.Core.Text.Placement
             for (int g = 0; g < glyphs.Length; g++)
             {
                 CurvedGlyph cg = glyphs[g];
-                float arc = centerArc + dir * (cg.ArcCenter - symbolCenterBaked) * arcScale;
+                float arc = labelArc + dir * (cg.ArcCenter - symbolCenterBaked) * arcScale;
                 AtWithSegment(path, cumulative, pathLen, total, arc, ref cursor,
                     out float2 pt, out float centerTangentAtGlyph, out int segArc, out float tArc);
 

@@ -67,7 +67,8 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Evaluated <c>text-letter-spacing</c> in ems — curved (along-line) text only; text that
         /// <c>TextQuadLayout</c> lays out (point and upright line text) carries the same value inside
-        /// <see cref="LayoutOptions"/> instead. Fed straight into <see cref="CurvedTextLayout"/>.</summary>
+        /// <see cref="LayoutOptions"/> instead. Fed straight into <see cref="CurvedTextLayout"/>, which also
+        /// reads the anchor and line height from <see cref="LayoutOptions"/>.</summary>
         public float LetterSpacingEm { get; init; }
 
         /// <summary><c>text-keep-upright</c> — flip a right-to-left curved symbol so it reads left-to-right
@@ -96,8 +97,8 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Size-independent layout options (anchor/offset/justify/max-width/line-height/letter-spacing/
         /// radial-offset), assembled per feature by <c>TextLayoutOptionsBuilder</c>. The Unity builder
-        /// feeds this straight into <c>TextQuadLayout</c>, so the parsed <c>text-*</c> layout keys affect
-        /// the placed quads.</summary>
+        /// feeds this into <c>TextQuadLayout</c> for point and upright text, so the parsed <c>text-*</c> layout
+        /// keys affect the placed quads. Curved text reads only its anchor and line height.</summary>
         public TextLayoutOptions LayoutOptions { get; init; }
 
         /// <summary><c>text-translate-anchor</c> — whether <c>text-translate</c> is a screen-space (viewport)

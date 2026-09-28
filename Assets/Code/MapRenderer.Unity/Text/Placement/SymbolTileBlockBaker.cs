@@ -73,7 +73,7 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
                 // TranslatePx left default — patched per frame, like MetresPerLogicalPixel below.
                 TranslateAnchor = symbol.TranslateAnchor,
-                MaxAngleDeg = symbol.MaxAngleDeg, KeepUpright = symbol.KeepUpright,
+                MaxAngleDeg = symbol.MaxAngleDeg, KeepUpright = symbol.KeepUpright, AlongShiftBaked = symbol.AlongShiftBaked,
                 Color = SymbolPlacementSystem.LinearColor(symbol.Paint),
                 HaloColor = SymbolPlacementSystem.LinearHaloColor(symbol.Paint),
                 HaloWidthPx = symbol.Paint.HaloWidthPx, HaloBlurPx = symbol.Paint.HaloBlurPx,

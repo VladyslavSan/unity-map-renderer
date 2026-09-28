@@ -113,6 +113,7 @@ namespace MapRenderer.Core.Text.Placement
         public TextTranslateAnchor TranslateAnchor;
         public float  MaxAngleDeg;                  // text-max-angle
         public bool   KeepUpright;                  // text-keep-upright
+        public float  AlongShiftBaked;              // text-anchor along-line shift, baked px (0 = centred on the anchor)
         public float4 Color;                        // pre-linearized × opacity
         // text-halo-*, per feature. HaloColor is pre-linearized; .w is the halo's own alpha (emit applies
         // text-opacity). Width/blur stay LOGICAL px and scale at emit, so a dpr change needs no re-bake.

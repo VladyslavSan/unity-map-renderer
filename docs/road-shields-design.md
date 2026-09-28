@@ -496,11 +496,11 @@ three-valued anchor, not a lerp-able `vAlign` float, so no caller can re-derive 
 `IconQuadLayout` is unchanged — it already centres ink on ink.
 
 Non-centre vertical anchors (`top`, `bottom`, the four corners), horizontal anchoring, justify, wrap,
-letter-spacing, `text-offset`, `text-radial-offset`, and RTL are unaffected — `CurvedTextLayout` takes no
-selectable block anchor at all. **Curved (along-line) labels are not exempt from the centring itself**,
-though: `CurvedTextLayout` places every glyph's cell using this same `OpticalCentreBelowReferencePx`
-constant, so a curved label's vertical position moves with this constant as a Centre-anchored point
-label's does — the two paths share one convention, not two. A paired symbol ("Symbol pairing") keeps its
+letter-spacing, `text-offset`, `text-radial-offset`, and RTL are unaffected. **Curved (along-line) labels are
+not exempt from the centring itself**: `CurvedTextLayout` applies the same `VerticalAnchorShiftPx` rule to every
+glyph's cell, and its Centre case is this `OpticalCentreBelowReferencePx` constant, so a curved label's vertical
+position moves with this constant as a Centre-anchored point label's does — the two paths share one
+convention, not two. A paired symbol ("Symbol pairing") keeps its
 placement verdict: the two boxes are tested all-or-nothing on one candidate, so the centring moves only
 the text half's screen rect, never whether the pair places.
 

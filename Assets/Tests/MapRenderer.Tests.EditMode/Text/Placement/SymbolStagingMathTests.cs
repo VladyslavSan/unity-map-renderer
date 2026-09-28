@@ -2260,7 +2260,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void StageCurved_HorizontalLine_ZeroRotationBoxAtAnchor()
+        public void StageCurved_HorizontalLine_BoxAtAnchor_AndAlongShiftFollowsReadingDirection()
         {
             var s = new CurvedStageInput
             {
@@ -2311,6 +2311,38 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0f, p.Quads[0].AnchorLocal.z, Tol);
             Assert.AreEqual(1f, p.Quads[0].Tangent.x, Tol);
             Assert.AreEqual(0f, p.Quads[0].Tangent.y, Tol);
+
+            // text-anchor: AlongShiftBaked slides the label along the line in READING direction.
+            // (a) forward path, shift 20 → glyph centred at x = 70.
+            var shifted = s;
+            shifted.AlongShiftBaked = 20f;
+            var pa = Pools.New();
+            Assert.AreEqual(1, SymbolStagingMath.StageCurved(in shifted, screenPath, depthPath, validPath, worldPath, worldUpPath,
+                glyphs, anchors, fadeIds, wasPlaced, pathPoints, cumulativeLengths, 0f, view: default, ordinal: 0,
+                pa.Boxes, ref pa.BoxCount, pa.Quads, ref pa.QuadCount, pa.Candidates, pa.Emit, ref pa.EmitCount));
+            Assert.AreEqual(70f, pa.Quads[0].AnchorScreenPx.x, Tol, "a positive shift moves the label forward along the line.");
+
+            // (b) reversed path with keep-upright: the label still reads left-to-right, so a positive shift
+            // still lands at screen x = 70. Ignoring the reading direction would give 30.
+            var reversedScreen = new[] { new float2(100, 0), new float2(0, 0) };
+            var reversedWorld  = new[] { new double3(100, 0, 0), new double3(0, 0, 0) };
+            var pb = Pools.New();
+            Assert.AreEqual(1, SymbolStagingMath.StageCurved(in shifted, reversedScreen, depthPath, validPath, reversedWorld, worldUpPath,
+                glyphs, anchors, fadeIds, wasPlaced, pathPoints, cumulativeLengths, 0f, view: default, ordinal: 0,
+                pb.Boxes, ref pb.BoxCount, pb.Quads, ref pb.QuadCount, pb.Candidates, pb.Emit, ref pb.EmitCount));
+            Assert.AreEqual(70f, pb.Quads[0].AnchorScreenPx.x, Tol,
+                "reversed by keep-upright, the path arc runs from screen x 100 toward 0: label arc 50 - 20 = 30, screen x 70.");
+
+            // (c) an anchor at arc 80 whose shift (30) pushes past the end (100) stages nothing; the fallback
+            // then stages one label centred at the midpoint (x = 50), unshifted.
+            var spilling = s;
+            spilling.AlongShiftBaked = 30f;
+            var lateAnchor = new[] { new LineAnchor(0, 0.8f) };
+            var pc = Pools.New();
+            Assert.AreEqual(1, SymbolStagingMath.StageCurved(in spilling, screenPath, depthPath, validPath, worldPath, worldUpPath,
+                glyphs, lateAnchor, fadeIds, wasPlaced, pathPoints, cumulativeLengths, 0f, view: default, ordinal: 0,
+                pc.Boxes, ref pc.BoxCount, pc.Quads, ref pc.QuadCount, pc.Candidates, pc.Emit, ref pc.EmitCount));
+            Assert.AreEqual(50f, pc.Quads[0].AnchorScreenPx.x, Tol, "the spilling anchor stages nothing; the fallback centres at 50.");
         }
 
         [Test]

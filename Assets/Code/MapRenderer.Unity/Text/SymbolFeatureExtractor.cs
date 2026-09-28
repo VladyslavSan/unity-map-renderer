@@ -221,11 +221,9 @@ namespace MapRenderer.Unity.Text
                 // This feature's decoded paths, as a span of the bucketed ring order (decode order preserved).
                 int pathCount = ringStart[f + 1] - ringStart[f];
 
-                // Built only when a point-style text symbol can emit; the curved branch never reads it. Each
-                // branch builds its own AnchorEmitContext because the line branch suppresses Text/HasIcon.
-                TextLayoutOptions layoutOptions = !isLine || textAtAnchors
-                    ? TextLayoutOptionsBuilder.Build(layout, zoom, feature)
-                    : default;
+                // Point and upright text lay out with all of it; curved text reads its anchor and line height.
+                // Each branch builds its own AnchorEmitContext because the line branch suppresses Text/HasIcon.
+                TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, feature);
 
                 if (isLine)
                 {
@@ -323,6 +321,7 @@ namespace MapRenderer.Unity.Text
                                 SpacingPx       = spacing,
                                 MaxAngleDeg     = maxAngle,
                                 LetterSpacingEm = letterSpacingEm,
+                                LayoutOptions   = layoutOptions,
                                 KeepUpright     = layout.TextKeepUpright,
                                 AllowOverlap    = layout.TextAllowOverlap,
                                 IgnorePlacement = layout.TextIgnorePlacement,

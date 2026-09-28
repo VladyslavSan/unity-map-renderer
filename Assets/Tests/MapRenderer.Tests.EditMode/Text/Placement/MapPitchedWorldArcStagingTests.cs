@@ -3007,7 +3007,7 @@ namespace MapRenderer.Tests.Text.Placement
         //    that threads text-letter-spacing onto CURVED text — dropping the 4th argument at the call site
         //    leaves the extractor-only teeth green, so this must go through the real BuildAsync path. ──
 
-        private static SymbolStyle.StyleLayer GeolinesLayer(float letterSpacingEm)
+        private static SymbolStyle.StyleLayer GeolinesLayer(float letterSpacingEm, string textAnchor = "center")
             => new SymbolStyle.StyleLayer
             {
                 Id = "lines",
@@ -3016,7 +3016,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Paint = TestStyle.SymbolPaint(),
                 Layout = TestStyle.SymbolLayout(
                     "{\"text-field\":\"AB\",\"text-font\":[\"" + FontName + "\"],\"symbol-placement\":\"line-center\"," +
-                    "\"text-letter-spacing\":" + letterSpacingEm.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}"),
+                    "\"text-letter-spacing\":" + letterSpacingEm.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    ",\"text-anchor\":\"" + textAnchor + "\"}"),
             };
 
         [Test]
@@ -3047,6 +3048,20 @@ namespace MapRenderer.Tests.Text.Placement
                     $"gap {i} must widen by exactly 0.5em (12px) — dropping the letter-spacing argument at " +
                     "the CurvedTextLayout.Layout call site leaves this at 0");
             }
+
+            // The same wire carries text-anchor: left bakes a positive along-line shift, top lowers the cell
+            // by the optical-centre constant, centre stays 0. Dropping any hop leaves 0.
+            SymbolTileBuffer left = await BuildSymbols(GeolinesLayer(0f, "left"), manager);
+            SymbolTileBuffer top = await BuildSymbols(GeolinesLayer(0f, "top"), manager);
+            ShapedSymbol leftFirst = left.Symbols[0];
+            int last = zeroFirst.GlyphStart + zeroFirst.GlyphCount - 1;
+            float runCentre = (zero.Glyphs[zeroFirst.GlyphStart].ArcCenter + zero.Glyphs[last].ArcCenter) * 0.5f;
+            Assert.AreEqual(0f, zeroFirst.AlongShiftBaked, "a centre anchor bakes no along-line shift");
+            Assert.Greater(runCentre, 0f, "fixture: the run centre is off the anchor");
+            Assert.AreEqual(runCentre, leftFirst.AlongShiftBaked, 1e-3f, "a left anchor puts the run's left edge on the anchor");
+            Assert.AreEqual(zero.Glyphs[zeroFirst.GlyphStart].Cell.TopLeft.y - TextQuadLayout.OpticalCentreBelowReferencePx,
+                top.Glyphs[top.Symbols[0].GlyphStart].Cell.TopLeft.y, 1e-3f,
+                "a top anchor lowers the cell by the optical-centre constant against the centre anchor");
         }
 
         // ── Per-symbol build isolation: one symbol whose build throws (e.g. a deferred mixed-direction

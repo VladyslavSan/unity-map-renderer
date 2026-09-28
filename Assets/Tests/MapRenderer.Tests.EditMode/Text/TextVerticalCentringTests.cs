@@ -303,47 +303,68 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Cross-check against the POINT path (pinned by TextVerticalCentringTests): same glyph, same atlas,
-        // and the cells' VERTICAL band must agree; x differs, as each path centres on a different point.
+        // Cross-check against the POINT path (pinned by TextVerticalCentringTests): same glyph, same atlas, and
+        // every text-anchor. The curved cell's vertical band must equal the point quad's, and its along-line
+        // position (returned shift + cell x) must equal the point quad's x.
         // Non-obvious why: the point shift's (lineCount - 1) line-spacing term vanishes only for one line,
         // so LineCount == 1 is a precondition.
         // =========================================================================================
         [Test]
-        public void CurvedCell_VerticalBand_MatchesThePointPath_ForTheSameGlyph()
+        public void CurvedCell_MatchesThePointPath_ForTheSameGlyph_UnderEveryAnchor()
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            atlas.Append(latin.Glyphs[(uint)'5'], 0);
-            ShapedRun run = MakeRun((uint)'5');
+            GlyphAtlasEntry five = atlas.Append(latin.Glyphs[(uint)'5'], 0);
+            GlyphAtlasEntry upperA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            GlyphAtlasEntry lowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
+            atlas.Append(latin.Glyphs[(uint)' '], 0);
+            Assert.AreNotEqual(upperA.Advance, lowerA.Advance,
+                "precondition: 'A' and 'a' differ in advance, so a wrong run-centre term cannot pass by symmetry");
 
-            var options = new TextLayoutOptions
+            // A one-glyph run (run centre == its arc centre) and an unequal-advance run with a trailing space.
+            var runs = new[] { new[] { (uint)'5' }, new[] { (uint)'A', (uint)'a', (uint)' ' } };
+            foreach (uint[] codepoints in runs)
+            foreach (TextAnchor anchor in System.Enum.GetValues(typeof(TextAnchor)))
             {
-                Anchor = TextAnchor.Center,
-                Offset = float2.zero,
-                RadialOffset = 0f,
-                Justify = TextJustify.Center,
-                MaxWidthEm = 10f,
-                LineHeightEm = 1.2f,
-                LetterSpacingEm = 0f,
-            };
+                ShapedRun run = MakeRun(codepoints);
+                var options = new TextLayoutOptions
+                {
+                    Anchor = anchor,
+                    Offset = float2.zero,
+                    RadialOffset = 0f,
+                    Justify = TextJustify.Center,
+                    MaxWidthEm = 10f,
+                    LineHeightEm = 1.2f,
+                    LetterSpacingEm = 0f,
+                };
 
-            var pointQuads = new List<SymbolQuad>();
-            TextLayoutBounds point = TextQuadLayout.Layout(run, atlas, in options, pointQuads);
-            Assert.AreEqual(1, point.LineCount, "precondition: the point twin must be single-line, or the " +
-                "block's (lineCount - 1) line-spacing term stops vanishing and the two paths are no longer comparable");
-            Assert.AreEqual(1, pointQuads.Count, "the point path emits one quad for '5'");
+                var pointQuads = new List<SymbolQuad>();
+                TextLayoutBounds point = TextQuadLayout.Layout(run, atlas, in options, pointQuads);
+                Assert.AreEqual(1, point.LineCount, "precondition: the point twin must be single-line, or the " +
+                    "block's (lineCount - 1) line-spacing term stops vanishing and the two paths are no longer comparable");
 
-            IReadOnlyList<CurvedGlyph> curved = CurvedTextLayout.Layout(run, atlas);
-            Assert.AreEqual(1, curved.Count, "the curved path emits one cell for '5'");
+                var curved = new List<CurvedGlyph>();
+                float alongShift = CurvedTextLayout.Layout(run, atlas, curved, 0f, anchor, 1.2f);
+                Assert.AreEqual(pointQuads.Count, curved.Count, $"{anchor}: one curved cell per visible point quad");
+                Assert.Greater(curved.Count, 0);
+                float runCentre = (curved[0].ArcCenter + curved[curved.Count - 1].ArcCenter) * 0.5f;
 
-            SymbolQuad pointQuad = pointQuads[0];
-            SymbolQuad curvedCell = curved[0].Cell;
+                for (int i = 0; i < curved.Count; i++)
+                {
+                    SymbolQuad pointQuad = pointQuads[i];
+                    SymbolQuad cell = curved[i].Cell;
+                    Assert.AreEqual(pointQuad.TopLeft.y, cell.TopLeft.y, 1e-3f,
+                        $"{anchor} glyph {i}: a curved cell's top must sit where the point quad's does");
+                    Assert.AreEqual(pointQuad.BottomRight.y, cell.BottomRight.y, 1e-3f, $"{anchor} glyph {i}: bottom");
 
-            Assert.AreEqual(pointQuad.TopLeft.y, curvedCell.TopLeft.y, 1e-3f,
-                $"a curved cell's top must sit where a centre-anchored point quad's does: point " +
-                $"{pointQuad.TopLeft.y}, curved {curvedCell.TopLeft.y} baked px");
-            Assert.AreEqual(pointQuad.BottomRight.y, curvedCell.BottomRight.y, 1e-3f,
-                $"…and likewise its bottom: point {pointQuad.BottomRight.y}, curved {curvedCell.BottomRight.y} baked px");
+                    // A centred run keeps its first/last-midpoint centring (the shift is 0 by design), which
+                    // differs from the point path's advance-box centring on an unequal-advance run.
+                    if (anchor is TextAnchor.Center or TextAnchor.Top or TextAnchor.Bottom && codepoints.Length > 1) continue;
+                    float x = alongShift + (curved[i].ArcCenter - runCentre) + cell.TopLeft.x;
+                    Assert.AreEqual(pointQuad.TopLeft.x, x, 1e-3f,
+                        $"{anchor} glyph {i}: shift + (arc centre - run centre) + cell left must equal the point quad's left edge");
+                }
+            }
         }
     }
 

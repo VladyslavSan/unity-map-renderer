@@ -25,14 +25,14 @@ namespace MapRenderer.Core.Text
         private const float DefaultMaxWidthEm = 10f;
 
         /// <summary><see cref="TextLayoutOptions.LineHeightEm"/> fallback for a non-positive (e.g. zero-valued <see cref="TextLayoutOptions"/>) value.</summary>
-        private const float DefaultLineHeightEm = 1.2f;
+        internal const float DefaultLineHeightEm = 1.2f;
 
         /// <summary>
         /// How far below a line's reference origin its OPTICAL centre sits: the baseline
         /// (<see cref="GlyphSdf.BaselineBelowReferencePx"/>) less half a cap height, exactly
         /// <c>26 − 8.5 = 17.5</c> baked px. The line-box midpoint sits higher, because the box top carries the
-        /// ascent slack. Non-local invariant: <see cref="VerticalAnchorShiftPx"/>'s Centre case and
-        /// <see cref="CurvedTextLayout"/> both apply it, so curved and centred point symbols align the same way.
+        /// ascent slack. Non-local invariant: <see cref="VerticalAnchorShiftPx"/>'s Centre case applies it, and the curved
+        /// path reuses that rule, so curved and centred point symbols align the same way.
         /// </summary>
         internal const float OpticalCentreBelowReferencePx = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * OneEm;
 
@@ -43,7 +43,7 @@ namespace MapRenderer.Core.Text
         /// and <see cref="VerticalAnchor.Bottom"/> — a bare lerp factor would invite that very
         /// interpolation bug.
         /// </summary>
-        private enum VerticalAnchor
+        internal enum VerticalAnchor
         {
             Top,
             Centre,
@@ -302,7 +302,7 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>hAlign: Left*=0, Right*=1, else .5. vertical: Top*-&gt;Top, Bottom*-&gt;Bottom, else Centre.</summary>
-        private static (float hAlign, VerticalAnchor vertical) ResolveAlignFactors(TextAnchor anchor)
+        internal static (float hAlign, VerticalAnchor vertical) ResolveAlignFactors(TextAnchor anchor)
         {
             float hAlign = anchor switch
             {
@@ -325,7 +325,7 @@ namespace MapRenderer.Core.Text
         /// last lines' optical centres, hence <c>(lineCount - 1)</c>, so the block moves by one constant
         /// (<see cref="OpticalCentreBelowReferencePx"/>) whatever the line count.
         /// </summary>
-        private static float VerticalAnchorShiftPx(VerticalAnchor vertical, int lineCount, float lineHeightPx) => vertical switch
+        internal static float VerticalAnchorShiftPx(VerticalAnchor vertical, int lineCount, float lineHeightPx) => vertical switch
         {
             VerticalAnchor.Top => 0f,
             VerticalAnchor.Bottom => lineCount * lineHeightPx,

@@ -262,14 +262,14 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `text-radial-offset` | `supported` | |
 | `text-variable-anchor` | `not supported` | Placement tries one anchor only. |
 | `text-variable-anchor-offset` | `not supported` | As `text-variable-anchor`. |
-| `text-anchor` | `partial` | Constant only; the spec also allows data-driven. Known deviation: `center` uses the optical centre of the text block: [`road-shields-design.md`](road-shields-design.md) § 11. Curved line text is always centred on its anchor. |
+| `text-anchor` | `partial` | Constant only; the spec also allows data-driven. Known deviation: `center` uses the optical centre of the text block: [`road-shields-design.md`](road-shields-design.md) § 11. On curved line text the anchor applies as on point text. |
 | `text-max-angle` | `supported` | |
 | `text-writing-mode` | `not supported` | No vertical text. |
 | `text-rotate` | `not supported` | Not built. |
 | `text-padding` | `supported` | |
 | `text-keep-upright` | `partial` | Constant only. |
 | `text-transform` | `partial` | Constant only; the spec also allows data-driven. |
-| `text-offset` | `partial` | Constant only; the spec also allows zoom and data-driven. |
+| `text-offset` | `partial` | Constant only; the spec also allows zoom and data-driven. Not applied to curved line text. |
 | `text-allow-overlap` | `partial` | Constant only. |
 | `text-overlap` | `not supported` | Not built. |
 | `text-ignore-placement` | `partial` | Constant only. |

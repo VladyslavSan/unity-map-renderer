@@ -17,9 +17,8 @@ namespace MapRenderer.Core.Text
         public float ArcCenter { get; init; }
 
         /// <summary>The cell, centred HORIZONTALLY on <see cref="ArcCenter"/> (its x-extent straddles 0) and
-        /// VERTICALLY on the line: a text glyph on the run's optical cap-band centre
-        /// (<c>TextQuadLayout.OpticalCentreBelowReferencePx</c>, as a centred point symbol), an icon quad on its
-        /// box centre. The cell→screen/world map is LINEAR about the anchor (<c>BillboardMath.BuildWorldQuad</c>,
+        /// VERTICALLY on the line: a text glyph placed by the <c>text-anchor</c> vertical rule
+        /// (the optical cap-band centre for a centre anchor), an icon quad on its box centre. The cell→screen/world map is LINEAR about the anchor (<c>BillboardMath.BuildWorldQuad</c>,
         /// <c>SymbolBox.BuildRotatedGlyph</c>), so placement stays correct for any vertical cell placement.</summary>
         public SymbolQuad Cell { get; init; }
 
