@@ -31,6 +31,9 @@ namespace MapRenderer.Unity.Style
         /// <summary>Layers in declared (paint) order (root <c>layers</c>). Never null.</summary>
         public readonly List<StyleLayer> Layers = new List<StyleLayer>();
 
+        /// <summary>One message per style feature the parser accepts but the renderer degrades. Never null.</summary>
+        public readonly List<string> Warnings = new List<string>();
+
         /// <summary>Root <c>light</c> block. Never null; spec defaults when the key is absent (including
         /// for a hand-built <see cref="StyleDocument"/> that never sets it).</summary>
         public StyleLight Light = StyleLight.Parse(null);

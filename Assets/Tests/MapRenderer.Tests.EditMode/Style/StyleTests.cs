@@ -641,7 +641,7 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void Composite_InterpolateZoom_FeatureColorStops_DistinctAtSameZoom()
+        public void Composite_InterpolateZoom_FeatureColorStops_DistinctAtSameZoom_AndWarnsAtStyleLoad()
         {
             const string compositeExpr =
                 "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
@@ -679,6 +679,19 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(210.0 / 255.0, samZ4.B, 0.01, "S.America at z=4: B must be 210/255.");
 
             Assert.AreNotEqual(asiaZ4, samZ4, "Composite at zoom 4: Asia and S.America must differ.");
+
+            // Style load warns once per composite property, naming layer and property. The zoom-only and
+            // feature-only keys are the negative controls; the legacy function is the second composite.
+            StyleDocument doc = StyleParser.Parse("{\"version\":8,\"sources\":{},\"layers\":[{\"id\":\"countries-fill\"," +
+                "\"type\":\"fill\",\"paint\":{\"fill-color\":" + compositeExpr + "," +
+                "\"fill-outline-color\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,[\"rgba\",0,0,0,1],8,[\"rgba\",255,255,255,1]]," +
+                "\"fill-antialias\":[\"match\",[\"get\",\"CONTINENT\"],\"Asia\",true,false]," +
+                "\"fill-opacity\":{\"property\":\"pop\",\"type\":\"exponential\"," +
+                "\"stops\":[[{\"zoom\":0,\"value\":0},0.2],[{\"zoom\":0,\"value\":10},0.4]," +
+                "[{\"zoom\":8,\"value\":0},0.6],[{\"zoom\":8,\"value\":10},0.8]]}}}]}");
+            Assert.AreEqual(2, doc.Warnings.Count, string.Join(" | ", doc.Warnings));
+            StringAssert.Contains("layer 'countries-fill' paint 'fill-color'", doc.Warnings[0]);
+            StringAssert.Contains("layer 'countries-fill' paint 'fill-opacity'", doc.Warnings[1]);
         }
 
         [Test]

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using Unity.Mathematics;
 
@@ -49,7 +50,11 @@ namespace MapRenderer.Unity.Style
             if (root.TryGet("layers", out var layers) && layers.IsArray)
             {
                 foreach (var layerJson in layers.Items)
-                    doc.Layers.Add(ParseLayer(layerJson, fillAntialiasDefault));
+                {
+                    StyleLayer layer = ParseLayer(layerJson, fillAntialiasDefault);
+                    doc.Layers.Add(layer);
+                    WarnOnCompositePaint(layer, doc.Warnings);
+                }
             }
 
             doc.Light = StyleLight.Parse(root.Get("light"));
@@ -133,6 +138,22 @@ namespace MapRenderer.Unity.Style
                 case "image": return SourceType.Image;
                 case "video": return SourceType.Video;
                 default: return SourceType.Unknown;
+            }
+        }
+
+        /// <summary>The renderer does not support a composite (zoom AND feature) paint value.
+        /// This records one warning per such paint key, whether or not the layer type models that key.</summary>
+        private static void WarnOnCompositePaint(StyleLayer layer, List<string> warnings)
+        {
+            JsonValue paintJson = layer.Raw != null && layer.Raw.IsObject ? layer.Raw.Get("paint") : null;
+            if (paintJson == null || !paintJson.IsObject) return;
+            foreach (KeyValuePair<string, JsonValue> member in paintJson.Members)
+            {
+                ExpressionKind kind;
+                try { kind = ExpressionParser.Parse(member.Value).Kind; }
+                catch (ExpressionParseException) { continue; } // a value that fails to parse is skipped
+                if (kind == ExpressionKind.Composite)
+                    warnings.Add($"layer '{layer.Id}' paint '{member.Key}' combines zoom and feature data, which is not supported.");
             }
         }
 

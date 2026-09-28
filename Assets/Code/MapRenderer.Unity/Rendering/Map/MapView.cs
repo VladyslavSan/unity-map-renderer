@@ -297,6 +297,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // leaves the old style's layers, materials, backend and identity live and rendering.
             var specs = await BuildSourceSpecs(style, ct);
             ct.ThrowIfCancellationRequested(); // last safe abort — nothing mutated yet (old style stays intact)
+            foreach (string warning in style.Warnings) Debug.LogWarning($"[MapView.SetStyle] {warning}");
 
             // TOCTOU: _config.MaterialSet is live-mutable, so capture it once and validate that same reference;
             // no await separates validation from Layers.Build. Across style loads the token's numbering fold guards.
