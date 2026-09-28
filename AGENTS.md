@@ -105,6 +105,7 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 | `4` | compilation failed; **no tests ran** |
 | `5` | no results produced for this run (crash), or an unfiltered run matched zero tests |
 | `6` | the `Tools/core-tests` fast loop failed (or ran zero tests) — Unity was never launched |
+| `7` | `Tools/check-doc-comments.py` found a doc-comment limit or citation finding in the diff, or failed to run — Unity was never launched |
 
 Running both runners does not change that table: the code is the **first failing platform's**, and `0`
 means every platform ran green.

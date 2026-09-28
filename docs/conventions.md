@@ -764,6 +764,26 @@ already answer it — not as ceremony on every signature.
 | `<param>` / `<returns>`, each | **2 lines** |
 | inline `//` comment | **2 lines** |
 
+**How a line is counted.** `Tools/check-doc-comments.py` measures the limits, and `Tools/run-tests.sh` runs it
+on the diff before Unity starts.
+
+- A **text line** is a comment line that holds something besides block tags. The `<summary>` and
+  `</summary>` lines, and blank `///` lines, do not count. A 7-line block with 5 lines of prose is 5.
+- `<param>` and `<returns>` are limited **per tag**, not in total.
+- An inline limit applies to a **run** of whole-line `//` comments. A trailing comment on a code line is not
+  part of any run and never counts.
+- `<remarks>`, `<typeparam>`, `<exception>` and `<value>` have **no limit**. Long design prose still
+  belongs in `docs/`.
+- A block fails when it is over its limit **and** it grew (or is new). Editing one word in an old, long
+  block passes. A block that was within the limit and is now over fails.
+- The checked diff is the merge base with `main`, plus uncommitted and untracked files. Move a file with
+  `git mv`. A plain `mv` shows as a deleted and an untracked file, and the checker pairs them only when the
+  basename is unique. A block whose every text line changed counts as new.
+- A block is exempt when its text holds one of the labels `Non-local invariant:`, `Non-obvious why:` or
+  `Limitation:`. The checker prints the exemption and does not fail.
+- A comment line the diff adds must not cite `File.ext:N` where the file or line does not exist. It must not
+  cite a transient conversation ("see the handback").
+
 Exceptions are allowed but **must be highly justified**, and in most cases the detail belongs in a
 `docs/*-design.md` instead — with at most a pointer left at the code. An exemption licenses the FACT, never
 the verbosity: state it in one plain sentence.

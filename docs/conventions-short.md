@@ -311,6 +311,13 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - **`<param>`/`<returns>`: 2 lines MAX each.**
   - **Inline `//` comments: 2 lines MAX.** Same exception rule, same remark: over two lines is nearly always
     narrating the code below, recounting history, or arguing a decision that belongs in a design doc.
+  - **How a line is counted** (`Tools/check-doc-comments.py`, run by `Tools/run-tests.sh` on the diff): only
+    TEXT lines count. Tag-only lines (`<summary>`, `</summary>`) and blank `///` lines do not. `<param>` and
+    `<returns>` are limited per tag. A `//` limit applies to a run of whole-line comments; a trailing
+    comment is not part of a run. `<remarks>` has no limit. A block fails when it is over its limit and
+    grew; the labels `Non-local invariant:`, `Non-obvious why:`, `Limitation:` exempt it.
+    The diff is the merge base with `main` plus uncommitted files. Use `git mv`; a block whose every text
+    line changed counts as new.
   - Every member gets a `<summary>`. Add `<param>`/`<returns>` when the name and type do not already answer
     it — not as ceremony on every signature.
   - Past the limits, prose is allowed only for a **non-local invariant** (a protocol/lifetime/ordering fact

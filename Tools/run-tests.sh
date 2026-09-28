@@ -27,6 +27,8 @@
 #   4 = compilation failed (`error CS` in the log) — no tests ran
 #   5 = Unity produced no results for this run (crashed/died before writing the XML)
 #   6 = the Tools/core-tests fast loop failed — Unity was never launched
+#   7 = Tools/check-doc-comments.py found a doc-comment finding in the diff, or failed to run (its exit
+#       code is 1 for findings, anything else for a checker error) — Unity was never launched
 #   otherwise = the `unity` CLI's own non-zero exit, reported verbatim
 #
 # Do not trust the exit code of the run. Unity has been observed returning BOTH 0 and 1 for the
@@ -75,6 +77,26 @@ LOG="$ROOT/Logs/test-run.log"
 # in place on that path would look exactly like this run's — the same hazard the header describes.
 [ -f "$RESULTS" ] && mv -f "$RESULTS" "$RESULTS_PREV"
 
+# ── Doc-comment limits: Tools/check-doc-comments.py (git diff against main, no Unity) ─────────
+# Runs before the fast loop: it takes well under a second. Warn-and-continue when python3 does not run,
+# and carry the skip into the final VERDICT like the fast loop. `python3 -c ''` is the probe, not
+# `command -v`: the Windows Store alias passes `command -v` and then exits 9009 on every call.
+SKIP_NOTE=""
+if python3 -c '' >/dev/null 2>&1; then
+  (cd "$ROOT" && python3 -B Tools/check-doc-comments.py) >&2
+  doc_rc=$?
+  if [ "$doc_rc" -eq 1 ]; then
+    echo "VERDICT: DOC-COMMENT CHECK FAILED — fix the findings above (or run Tools/check-doc-comments.py); Unity was not launched." >&2
+    exit 7
+  elif [ "$doc_rc" -ne 0 ]; then
+    echo "VERDICT: DOC-COMMENT CHECKER FAILED TO RUN (exit $doc_rc) — see the output above; Unity was not launched." >&2
+    exit 7
+  fi
+else
+  echo "python3 does not run on this machine — skipping the doc-comment check (Unity gate still runs)." >&2
+  SKIP_NOTE=" (doc-comment check SKIPPED: python3 does not run)"
+fi
+
 # ── Fast loop: Tools/core-tests (dotnet, no Editor, no project lock) ──────────────────────────
 # This is the loop AGENTS.md documents as authoritative for decode/geometry/earcut/assembler/
 # projection-math work. It ran unwired for weeks and rotted silently, because nothing built it —
@@ -85,7 +107,6 @@ LOG="$ROOT/Logs/test-run.log"
 # Warn-and-continue (not hard-fail) when `dotnet` is missing, so a maintainer without the .NET SDK
 # can still run the Unity gate — but the skip must reach the final VERDICT line too, or a machine
 # without dotnet reads a plain "compiled clean" with no sign the fast project was never built.
-FAST_LOOP_NOTE=""
 CORE_TESTS_LOG="$ROOT/Logs/core-tests.log"
 if command -v dotnet >/dev/null 2>&1; then
   if ! dotnet test "$ROOT/Tools/core-tests" >"$CORE_TESTS_LOG" 2>&1; then
@@ -104,7 +125,7 @@ if command -v dotnet >/dev/null 2>&1; then
   fi
 else
   echo "dotnet not found on PATH — skipping the Tools/core-tests fast loop (Unity gate still runs)." >&2
-  FAST_LOOP_NOTE=" (fast loop SKIPPED: dotnet not on PATH)"
+  SKIP_NOTE="$SKIP_NOTE (fast loop SKIPPED: dotnet not on PATH)"
 fi
 
 # Preserve the interactive Editor's open-scene selection across the batch run. Batch-mode Unity opens
@@ -204,14 +225,14 @@ run_platform() { # $1 = EditMode|PlayMode
   if [ -n "$compile_errors" ]; then
     echo "VERDICT [$platform]: COMPILE ERROR — no tests ran. (\`unity test\` exited $code; neither its" >&2
     echo "  code nor Unity's is reliable here — 0 and 1 have both been observed for the same kind of" >&2
-    echo "  failure, which is why this greps the log.)$FAST_LOOP_NOTE" >&2
+    echo "  failure, which is why this greps the log.)$SKIP_NOTE" >&2
     return 4
   fi
 
   if [ ! -f "$RESULTS" ]; then
     echo "VERDICT [$platform]: NO RESULTS — Unity wrote no test-results.xml for this run (crash, or it" >&2
     echo "  died before writing). Nothing can be concluded; see $LOG. Previous results, if any:" >&2
-    echo "  $RESULTS_PREV$FAST_LOOP_NOTE" >&2
+    echo "  $RESULTS_PREV$SKIP_NOTE" >&2
     return 5
   fi
 
@@ -224,24 +245,24 @@ run_platform() { # $1 = EditMode|PlayMode
   run_failed="$(run_attr failed)"
 
   if [ "${run_failed:-0}" != "0" ] || [ "$run_result" != "Passed" ]; then
-    echo "VERDICT [$platform]: TESTS FAILED — result=$run_result total=$run_total passed=$run_passed failed=$run_failed$FAST_LOOP_NOTE" >&2
+    echo "VERDICT [$platform]: TESTS FAILED — result=$run_result total=$run_total passed=$run_passed failed=$run_failed$SKIP_NOTE" >&2
     return 1
   fi
 
   # A filtered run legitimately matches nothing; an unfiltered one that ran zero tests is a broken setup
   # dressed up as success, which is the same trap as the stale XML.
   if [ -z "$FILTER" ] && [ "${run_total:-0}" = "0" ]; then
-    echo "VERDICT [$platform]: NO TESTS RAN — the results XML reports total=0 with no -testFilter. Treating as failure.$FAST_LOOP_NOTE" >&2
+    echo "VERDICT [$platform]: NO TESTS RAN — the results XML reports total=0 with no -testFilter. Treating as failure.$SKIP_NOTE" >&2
     return 5
   fi
 
   if [ "$code" != "0" ]; then
     echo "VERDICT [$platform]: all $run_total tests passed, but \`unity test\` exited $code (its own" >&2
-    echo "  code, not this script's table — 6 means it reached no verdict) — investigate $LOG.$FAST_LOOP_NOTE" >&2
+    echo "  code, not this script's table — 6 means it reached no verdict) — investigate $LOG.$SKIP_NOTE" >&2
     return "$code"
   fi
 
-  echo "VERDICT [$platform]: PASS — $run_passed/$run_total tests passed, compiled clean, results written by this run.$FAST_LOOP_NOTE"
+  echo "VERDICT [$platform]: PASS — $run_passed/$run_total tests passed, compiled clean, results written by this run.$SKIP_NOTE"
   return 0
 }
 
