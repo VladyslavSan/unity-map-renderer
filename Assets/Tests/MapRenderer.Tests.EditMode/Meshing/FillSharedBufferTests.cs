@@ -921,15 +921,15 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// <see cref="FillMeshPipeline.PrecountRingsAndVertices"/> walks the command stream as
+    /// <c>MvtDecodeJob.PrecountRingsAndVertices</c> walks the command stream as
     /// <c>MvtDecodeJob.Execute</c> does, so decode buffers are sized exactly for any input, including a
-    /// malformed multi-point MoveTo, in every build. <see cref="FillMeshPipeline.EnsureCapacity"/> stays as a
+    /// malformed multi-point MoveTo, in every build. <c>MvtDecodeJob.EnsureCapacity</c> stays as a
     /// backstop throw that exact sizing never fires; its boundary is tested so a sizing/decode desync throws.
     /// </summary>
     [TestFixture]
     public class FillMeshPipelineBoundsTests
     {
-        /// <summary><see cref="FillMeshPipeline.EnsureCapacity"/> does not throw while count is within (or
+        /// <summary><c>MvtDecodeJob.EnsureCapacity</c> does not throw while count is within (or
         /// exactly at) capacity — including the boundary case (capacity N admits exactly N).</summary>
         [Test]
         [TestCase(0, 0, "empty", TestName = "EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(Zero)")]
@@ -938,10 +938,10 @@ namespace MapRenderer.Tests.Meshing
         [TestCase(100, 100, "vertex", TestName = "EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(BoundaryExactFit)")]
         public void EnsureCapacity_WithinOrAtCapacity_DoesNotThrow(int count, int capacity, string label)
         {
-            Assert.DoesNotThrow(() => FillMeshPipeline.EnsureCapacity(count, capacity, label));
+            Assert.DoesNotThrow(() => MvtDecodeJob.EnsureCapacity(count, capacity, label));
         }
 
-        /// <summary><see cref="FillMeshPipeline.EnsureCapacity"/> throws once count exceeds capacity — from
+        /// <summary><c>MvtDecodeJob.EnsureCapacity</c> throws once count exceeds capacity — from
         /// exactly one over (the boundary: capacity N rejects N+1) through a large overflow — and the message
         /// names the overflowing quantity, the actual count, and the capacity.</summary>
         [Test]
@@ -952,7 +952,7 @@ namespace MapRenderer.Tests.Meshing
         public void EnsureCapacity_CountExceedsCapacity_ThrowsWithMessage(int count, int capacity, string label, string throwReason)
         {
             var ex = Assert.Throws<InvalidOperationException>(
-                () => FillMeshPipeline.EnsureCapacity(count, capacity, label), throwReason);
+                () => MvtDecodeJob.EnsureCapacity(count, capacity, label), throwReason);
             StringAssert.Contains(label, ex.Message, "message must name the overflowing quantity");
             StringAssert.Contains(count.ToString(), ex.Message, "message must report the actual count");
             StringAssert.Contains(capacity.ToString(), ex.Message, "message must report the capacity");
@@ -974,7 +974,7 @@ namespace MapRenderer.Tests.Meshing
 
             // 2a: PrecountRingsAndVertices takes flat (commands, offsets, lengths), so flatten this feature.
             using var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { geom });
-            FillMeshPipeline.PrecountRingsAndVertices(
+            MvtDecodeJob.PrecountRingsAndVertices(
                 flat.Commands, flat.FeatureOffsets, flat.FeatureLengths, out int rings, out int vertices);
 
             Assert.AreEqual(11, rings,    "MoveTo count=11 starts 11 rings");
@@ -1001,7 +1001,7 @@ namespace MapRenderer.Tests.Meshing
                 (3u << 3) | 2u, 0u, 0u, 0u, 0u, 0u, 0u, // LineTo count=3
             };
             using var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { geom });
-            FillMeshPipeline.PrecountRingsAndVertices(
+            MvtDecodeJob.PrecountRingsAndVertices(
                 flat.Commands, flat.FeatureOffsets, flat.FeatureLengths, out int rings, out int vertices);
 
             Assert.AreEqual(1, rings);

@@ -66,7 +66,7 @@ namespace MapRenderer.Unity.Jobs.Mvt
 
             // Pre-count rings and vertices with the same command walk as MvtDecodeJob, so no input, even a
             // malformed multi-point MoveTo, causes an out-of-range write in the job.
-            FillMeshPipeline.PrecountRingsAndVertices(
+            MvtDecodeJob.PrecountRingsAndVertices(
                 _commands, _featureOffsets, _featureLengths, out int exactRings, out int exactVertices);
 
             // ── Allocate decode output buffers. ───────────────────────────────────────────────────
@@ -102,8 +102,8 @@ namespace MapRenderer.Unity.Jobs.Mvt
             // frees the allocated buffer, so the owner-on-every-exit-path contract holds by reading the code.
             try
             {
-                FillMeshPipeline.EnsureCapacity(geometry.RingCount, exactRings, "ring");
-                FillMeshPipeline.EnsureCapacity(geometry.VertexCount, exactVertices, "decoded vertex");
+                MvtDecodeJob.EnsureCapacity(geometry.RingCount, exactRings, "ring");
+                MvtDecodeJob.EnsureCapacity(geometry.VertexCount, exactVertices, "decoded vertex");
             }
             catch { geometry.Dispose(); throw; }
 

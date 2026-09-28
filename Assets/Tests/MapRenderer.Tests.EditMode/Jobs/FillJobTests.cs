@@ -1264,7 +1264,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>The counts are the producing job's reported values, <b>stored</b>, not derived from
-        /// the buffer capacity. Deriving them would make <c>FillMeshPipeline.EnsureCapacity</c>'s
+        /// the buffer capacity. Deriving them would make <c>MvtDecodeJob.EnsureCapacity</c>'s
         /// count-vs-capacity comparison tautological and silently disarm the sizing-vs-decode backstop — a
         /// regression no behavioural test can see, because exact pre-count sizing makes the two values equal
         /// on every fixture in the repo.</summary>

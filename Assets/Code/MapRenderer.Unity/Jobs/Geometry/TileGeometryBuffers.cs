@@ -109,8 +109,8 @@ namespace MapRenderer.Unity.Jobs.Geometry
         /// <summary>Number of rings actually produced — <b>the count the producing job reported</b>, not
         /// <c>RingOffsets.Length - 1</c>.</summary>
         /// <remarks>Deriving it from the buffer length would be wrong in the array-backed mode, where the
-        /// buffers are <i>capacity</i>-sized from <see cref="FillMeshPipeline.PrecountRingsAndVertices"/>: the
-        /// never-fired <see cref="FillMeshPipeline.EnsureCapacity"/> backstop compares the reported count
+        /// buffers are <i>capacity</i>-sized from <c>MvtDecodeJob.PrecountRingsAndVertices</c>: the
+        /// never-fired <c>MvtDecodeJob.EnsureCapacity</c> backstop compares the reported count
         /// against that capacity, so a derived count would make the comparison tautological and silently
         /// disarm the sizing-vs-decode desync it exists to catch.</remarks>
         public int RingCount;

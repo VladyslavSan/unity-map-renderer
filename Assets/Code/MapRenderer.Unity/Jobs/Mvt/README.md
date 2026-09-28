@@ -83,7 +83,7 @@ from that side.
 | Type | Role |
 |---|---|
 | `MvtDecoder` | the decode entry point — the sole production parser of MVT bytes; frees every buffer it has minted so far if a malformed tile throws mid-decode |
-| `MvtDecodeJob` | `[BurstCompile] IJob` — decodes one layer's flattened geometry command stream into ring vertices + per-ring offsets |
+| `MvtDecodeJob` | `[BurstCompile] IJob` — decodes one layer's flattened geometry command stream into ring vertices + per-ring offsets; its static `PrecountRingsAndVertices` sizes those outputs and `EnsureCapacity` backstops that sizing |
 | `MvtGeometryMaterializer` | the `ITileGeometryMaterializer` (`Geometry/`) implementation for MVT: pre-counts exact ring/vertex capacity, then runs `MvtDecodeJob` |
 | `MvtValueNative` | the decoded Value sub-message as a blittable 16-byte struct (Number / Boolean / String-as-id / Null); `ToValue`/`ToNativeValue` are its two read boundaries, into the managed `Value` and the VM's `NativeValue` respectively |
 | `MvtLayerPropertyResolver` | the per-layer shared Keys/Values/tag-word/key-index tables every feature's store resolves its slice through; also implements `INativeFilterColumns` for the VM |
