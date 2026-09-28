@@ -783,7 +783,7 @@ other, and the rule for guards applies: assert it was satisfiable.
   **Fix (in `Tools/run-tests.sh`):** when the shader cache is cold OR stale, run one throwaway warm-up pass
   first — its renders compile the variants and PERSIST them to `Library/ShaderCache`, so the real pass (a fresh
   process) reads them warm and renders correctly. "Stale" is detected with a stamp file
-  (`Library/.umr-shader-warm-stamp`, touched only after a full unfiltered run): warm up if the cache is empty,
+  (`Library/.umr-shader-warm-stamp`, touched only after a passing run; a filtered run touches its own per-filter stamp, and a PlayMode-first run its own per-platform stamp): warm up if the cache is empty,
   never warmed, or any `.shader`/`.hlsl` is newer than the stamp. Warm, unchanged runs — the common case — pay
   nothing; opt out with `UMR_SKIP_SHADER_WARMUP=1`. (Rejected alternatives: `ShaderVariantCollection.WarmUp()`
   — canonical but needs a hand-maintained collection of every shader×keyword; the async flag — inert.

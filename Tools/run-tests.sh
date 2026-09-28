@@ -138,15 +138,16 @@ run_unity() { # $1 = platform, $2 = results path, $3 = editor log path
 #   • stale cache — you EDITED a shader, so the cache is non-empty but the changed shader's variants
 #                   are out of date and recompile (async) on first use.
 # A throwaway warm-up pass compiles+PERSISTS the current variants to Library/ShaderCache so the real
-# pass (a fresh process) reads them warm. A stamp file records the last FULL warmed run; we warm again
+# pass (a fresh process) reads them warm. A stamp file records the last warmed passing run; we warm again
 # whenever the cache is empty, never warmed, or any .shader/.hlsl is newer than the stamp. Warm,
 # unchanged runs (the common case) pay nothing. Opt out with UMR_SKIP_SHADER_WARMUP=1. See
 # docs/lessons-learned.md.
 SHADER_CACHE="$ROOT/Library/ShaderCache"
 # Per-filter stamp. A filtered run warms only its own subset, so it may not claim the FULL set is
 # warm — but it may claim ITS OWN subset is, which is what lets repeated filtered iteration skip the
-# warm-up instead of paying it forever. Unfiltered runs keep the unsuffixed stamp.
-WARM_STAMP="$ROOT/Library/.umr-shader-warm-stamp${FILTER:+-$(printf '%s' "$FILTER" | cksum | cut -d' ' -f1)}"
+# warm-up instead of paying it forever. The warm-up runs on the first platform, so a PlayMode-first
+# run has its own stamp. Unfiltered EditMode-first runs keep the unsuffixed stamp.
+WARM_STAMP="$ROOT/Library/.umr-shader-warm-stamp$([ "${PLATFORMS%% *}" = PlayMode ] && printf -- -PlayMode)${FILTER:+-$(printf '%s' "$FILTER" | cksum | cut -d' ' -f1)}"
 shaders_need_warmup() {
   [ -d "$SHADER_CACHE" ] || return 0                          # cache absent  => cold
   [ -z "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ] && return 0   # cache empty   => cold
@@ -260,7 +261,8 @@ done
 # a filtered run claims only its own subset. Before this was per-filter, a filtered run never
 # stamped at all, so every filtered iteration after a shader edit paid a full warm-up forever —
 # which made the fast path slower than the slow one.
-if [ -d "$SHADER_CACHE" ] && [ -n "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ]; then
+# A failed run does not stamp: its cache may be incomplete.
+if [ "$CODE" = "0" ] && [ -d "$SHADER_CACHE" ] && [ -n "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ]; then
   touch "$WARM_STAMP"
 fi
 
