@@ -1006,26 +1006,6 @@ namespace MapRenderer.Unity.Text.Placement
                 "bump WinnerSetVersion; falling back to a full rebuild this frame.");
         }
 
-        private static void Mirror<T>(NativeList<T> dst, T[] src, int count) where T : unmanaged
-        {
-            dst.ResizeUninitialized(count);
-            for (int i = 0; i < count; i++) dst[i] = src[i];
-        }
-
-
-        private static void MirrorBool(NativeList<byte> dst, bool[] src, int count)
-        {
-            dst.ResizeUninitialized(count);
-            for (int i = 0; i < count; i++) dst[i] = (byte)(src[i] ? 1 : 0);
-        }
-
-        // Zero-fill a symbol-level byte mask that has no per-symbol source to copy from.
-        private static void ClearBytes(NativeList<byte> dst, int count)
-        {
-            dst.ResizeUninitialized(count);
-            for (int i = 0; i < count; i++) dst[i] = 0;
-        }
-
         /// <summary>Test seam (via <c>InternalsVisibleTo</c>): materializes the private native mirror into
         /// <paramref name="dest"/>'s managed SoA, so a test can assert gather matches an independent oracle.</summary>
         internal void CopyMirrorInto(SymbolBatch dest)
