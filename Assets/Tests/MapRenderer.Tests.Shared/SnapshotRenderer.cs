@@ -25,6 +25,9 @@ namespace MapRenderer.Tests
         private Texture2D               _tex;
         private bool                    _rendered;
 
+        /// <summary>The colour the target holds before <see cref="Render"/>. No test background or ink is this value.</summary>
+        private static readonly Color32 Sentinel = new Color32(3, 251, 7, 255);
+
         /// <summary>Width of the render target in pixels.</summary>
         public int Width  => _width;
 
@@ -62,6 +65,8 @@ namespace MapRenderer.Tests
         /// The camera's existing <c>targetTexture</c> is saved and restored.
         /// <c>RenderTexture.active</c> is also saved and restored.
         /// </summary>
+        /// <exception cref="InvalidOperationException">The camera wrote nothing to the target: every pixel
+        /// still holds the pre-render sentinel, so the readback would return stale memory.</exception>
         public void Render(Camera camera)
         {
             if (camera == null) throw new ArgumentNullException(nameof(camera));
@@ -73,6 +78,12 @@ namespace MapRenderer.Tests
             try
             {
                 camera.targetTexture = _rt;
+                RenderTexture.active = _rt;
+                GL.Clear(true, true, Sentinel);
+                // The target stores the clear colour through the colour space's conversion, so read back what it
+                // actually holds rather than trusting the Color32 that went in.
+                _tex.ReadPixels(new Rect(0, 0, 1, 1), 0, 0, recalculateMipMaps: false);
+                Color32 cleared = _tex.GetPixel(0, 0);
                 camera.Render();
 
                 RenderTexture.active = _rt;
@@ -80,7 +91,12 @@ namespace MapRenderer.Tests
                 _tex.ReadPixels(new Rect(0, 0, _width, _height), 0, 0, recalculateMipMaps: false);
                 _tex.Apply(updateMipmaps: false);
 
-                Pixels    = new Frame(_tex.GetPixels32(), _width, _height);
+                Color32[] pixels = _tex.GetPixels32();
+                if (AllEqual(pixels, cleared))
+                    throw new InvalidOperationException(
+                        "camera.Render() did not write the target: every pixel still holds the pre-clear sentinel");
+
+                Pixels    = new Frame(pixels, _width, _height);
                 _rendered = true;
             }
             finally
@@ -88,6 +104,16 @@ namespace MapRenderer.Tests
                 camera.targetTexture  = prevTarget;
                 RenderTexture.active  = prevActive;
             }
+        }
+
+        private static bool AllEqual(Color32[] pixels, Color32 value)
+        {
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                Color32 pixel = pixels[i];
+                if (pixel.r != value.r || pixel.g != value.g || pixel.b != value.b || pixel.a != value.a) return false;
+            }
+            return true;
         }
 
         /// <summary>

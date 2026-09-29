@@ -915,11 +915,6 @@ namespace MapRenderer.Tests.Visual
 
     // Unity EditMode only — render tests requiring a GPU context (VisualScene/SnapshotRenderer).
     // NOT included in Tools/core-tests/core-tests.csproj.
-    //
-    // Non-obvious why: SymbolTextColorCarrierTests shares a CPU model of the fragment with the code it checks,
-    // so this reads the rendered pixel through the full production path. Two arms differ ONLY in `text-color`
-    // (#808080, #ffffff). grey/white must be linear(0.5019) ≈ 0.2158, applied ONCE: its square (≈0.0466)
-    // means both carriers hold the colour, and 1.0 means the uniform never reached the fragment.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // SymbolTextColorRenderTests — Unity EditMode only
@@ -976,6 +971,72 @@ namespace MapRenderer.Tests.Visual
             return sum / n;
         }
 
+        /// <summary>The name of the text-world shader, which every text renderer's material carries.</summary>
+        private const string TextWorldShaderName = "Map/Symbol/TextWorld";
+
+        /// <summary>The CPU-side state of the text-colour carrier, read from the live grey scene.</summary>
+        private readonly struct CarrierState
+        {
+            public readonly List<string> ForeignRenderers;
+            public readonly List<string> WrongMaterialRenderers;
+            public readonly Color TextColor;
+            public readonly string ParentName;
+            public readonly int RendererCount;
+
+            public CarrierState(List<string> foreign, List<string> wrongMaterial, Color textColor, string parentName, int rendererCount)
+            {
+                ForeignRenderers = foreign;
+                WrongMaterialRenderers = wrongMaterial;
+                TextColor = textColor;
+                ParentName = parentName;
+                RendererCount = rendererCount;
+            }
+        }
+
+        /// <summary>Reads which text renderers are live, which material each holds, and the layer material's
+        /// <c>_TextColor</c>.</summary>
+        private static CarrierState ReadCarrierState(VisualFrame frame)
+        {
+            MapRenderer.Unity.Rendering.Layers.SymbolRenderLayer layer = null;
+            foreach (MapRenderer.Unity.Rendering.Layers.IRenderLayer candidate in frame.MapView.View.Layers.Layers)
+                if (candidate is MapRenderer.Unity.Rendering.Layers.SymbolRenderLayer symbol) { layer = symbol; break; }
+            Assert.That(layer, Is.Not.Null, "the scene must build a symbol render layer.");
+
+            Transform root = frame.MapView.View.SymbolPlacementSystem.WorldSymbolTreeRoot();
+            var foreign = new List<string>();
+            var wrongMaterial = new List<string>();
+            int rendererCount = 0;
+            // FindObjectsOfTypeAll: the symbol nodes carry HideFlags.DontSave, which FindObjectsByType skips.
+            foreach (MeshRenderer renderer in Resources.FindObjectsOfTypeAll<MeshRenderer>())
+            {
+                Material material = renderer.sharedMaterial;
+                if (!renderer.gameObject.scene.IsValid() || !renderer.gameObject.activeInHierarchy) continue;
+                if (!renderer.enabled) continue;
+                // A leaked symbol tree may hold a destroyed material, so recognise it by its root's name too.
+                bool inForeignTree = !renderer.transform.IsChildOf(root) && renderer.transform.root.name == root.root.name;
+                bool isTextRenderer = material != null && material.shader.name == TextWorldShaderName;
+                if (inForeignTree || (isTextRenderer && !renderer.transform.IsChildOf(root))) { foreign.Add(renderer.name); continue; }
+                if (!isTextRenderer) continue;
+                rendererCount++;
+                if (material != layer.WorldTextMaterial) wrongMaterial.Add($"{renderer.name} ({material.name})");
+            }
+
+            Material layerMaterial = layer.WorldTextMaterial;
+            return new CarrierState(foreign, wrongMaterial, layerMaterial.GetColor("_TextColor"),
+                layerMaterial.parent != null ? layerMaterial.parent.name : "<none>", rendererCount);
+        }
+
+        /// <summary>A constant `text-color` reaches the rendered pixel once. A failure names its cause.</summary>
+        /// <remarks>
+        /// Non-obvious why: SymbolTextColorCarrierTests shares a CPU model of the fragment with the code it checks,
+        /// so this reads the rendered pixel through the full production path. Two arms differ ONLY in `text-color`
+        /// (#808080, #ffffff). grey/white must be linear(0.5019) ≈ 0.2158, applied ONCE: its square (≈0.0466)
+        /// means both carriers hold the colour, and 1.0 means the uniform never reached the fragment.
+        /// A ratio of exactly 1.0 has four causes, and the test names each. (1) The grey render never ran, so the
+        /// readback is stale (<c>SnapshotRenderer</c> throws on an untouched target). (2) A foreign renderer, or
+        /// the wrong material, drew the glyph. (3) The CPU binding was lost: the layer material's `_TextColor`
+        /// is not the constant. (4) All CPU state is correct, so the GPU or the environment lost the colour.
+        /// </remarks>
         [Test]
         public void ConstantTextColor_RenderedPixel_RidesTheUniformOnceNotSquared()
         {
@@ -1008,6 +1069,28 @@ namespace MapRenderer.Tests.Visual
             const double squared  = expected * expected;
             TestContext.WriteLine($"[SymbolTextColorRender] white={whiteSample} grey={greySample} ratio={ratio} " +
                                    $"expected~={expected} squared~={squared}");
+
+            CarrierState carrier = ReadCarrierState(greyFrame);
+            TestContext.WriteLine($"[SymbolTextColorRender] carrier: text renderers under the tree={carrier.RendererCount} " +
+                                   $"foreign={carrier.ForeignRenderers.Count} wrongMaterial={carrier.WrongMaterialRenderers.Count} " +
+                                   $"_TextColor={carrier.TextColor} parent={carrier.ParentName}");
+            Assert.That(carrier.RendererCount, Is.GreaterThan(0),
+                "no enabled text renderer is live under this scene's symbol tree: nothing drew the glyph.");
+            Assert.That(carrier.ForeignRenderers, Is.Empty,
+                "a symbol renderer outside this scene's symbol tree is live (a previous scene's leak, which the camera " +
+                $"has no culling mask against): {string.Join(", ", carrier.ForeignRenderers)}.");
+            Assert.That(carrier.WrongMaterialRenderers, Is.Empty,
+                "a text renderer under the tree draws with a material other than the layer's WorldTextMaterial " +
+                $"(the fallback material is white): {string.Join(", ", carrier.WrongMaterialRenderers)}.");
+            const float srgbGrey = 128f / 255f;
+            for (int c = 0; c < 3; c++)
+                Assert.That(carrier.TextColor[c], Is.EqualTo(srgbGrey).Within(1f / 255f),
+                    $"channel {c}: the layer material's _TextColor is {carrier.TextColor}, not #808080: the CPU " +
+                    $"binding was lost (material parent: {carrier.ParentName}).");
+            if (greySample.Equals(whiteSample))
+                Assert.Fail("all CPU carrier state correct (no foreign renderer, layer material, _TextColor #808080) " +
+                            "yet the grey arm is byte-identical to white: GPU/environment; see UMR-198. " +
+                            $"grey={greySample} white={whiteSample}");
 
             // The ratio cancels any factor common to both arms, so assert the white arm's absolute intensity
             // first; a bad denominator then reports as itself, not as a confusing ratio.
