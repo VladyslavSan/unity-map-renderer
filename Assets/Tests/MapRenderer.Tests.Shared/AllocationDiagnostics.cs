@@ -2,18 +2,17 @@ using System;
 using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.Profiling;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// The wrapper every zero-alloc assertion in this codebase uses in place of
-    /// <c>Is.Not.AllocatingGCMemory()</c> directly — see docs/gc-and-allocation-design.md § 6 for why it
-    /// warms the measured delegate itself before measuring. Pass <c>warmUp: false</c> when the FIRST call
-    /// IS the tested state (a fresh buffer, a transition's settling frame). A failure prints forensic
-    /// context: the recorder's count, <c>GC.CollectionCount(0)</c>, the frame count, and pending ThreadPool work.
+    /// The wrapper every zero-alloc assertion here uses in place of <c>Is.Not.AllocatingGCMemory()</c> directly.
+    /// It warms the measured delegate first (docs/gc-and-allocation-design.md § 6). Pass <c>warmUp: false</c> when
+    /// the FIRST call IS the tested state. A failure re-measures once and says whether the allocation repeated,
+    /// then prints gen-0 collections, frame and ThreadPool load. It prints no allocation count: under <c>Is.Not</c>
+    /// the failure message carries none, and the recorder is shared. The test fails either way.
     /// </summary>
     public static class AllocationDiagnostics
     {
@@ -41,7 +40,27 @@ namespace MapRenderer.Tests
             {
                 int collectionsAfter = GC.CollectionCount(0);
                 int frameAfter = Time.frameCount;
-                Recorder recorder = Recorder.Get("GC.Alloc");
+
+                // Re-measure once, only to say whether the allocation repeats. The test fails whatever this finds.
+                Exception actFailure = null;
+                TestDelegate remeasured = () =>
+                {
+                    try { act(); }
+                    catch (Exception ex) { actFailure = ex; throw; }
+                };
+                string remeasureLine;
+                try
+                {
+                    Assert.That(remeasured, Is.Not.AllocatingGCMemory());
+                    remeasureLine = "  re-measure: the allocation did NOT repeat (one-off)\n";
+                }
+                catch (Exception ex)
+                {
+                    Exception threw = actFailure ?? (ex is AssertionException ? null : ex);
+                    remeasureLine = threw != null
+                        ? $"  re-measure: the measured call threw {threw.GetType().Name}, so there is no second reading\n"
+                        : "  re-measure: the allocation REPEATED (per-call)\n";
+                }
 
                 string threadPoolLine;
                 try
@@ -58,7 +77,7 @@ namespace MapRenderer.Tests
 
                 TestContext.WriteLine(
                     $"allocation diagnostic — {message}\n" +
-                    $"  Recorder(\"GC.Alloc\") sampleBlockCount (as left by the constraint)={recorder.sampleBlockCount}\n" +
+                    remeasureLine +
                     $"  GC.CollectionCount(0): before={collectionsBefore} after={collectionsAfter}\n" +
                     $"  Time.frameCount: before={frameBefore} after={frameAfter}\n" +
                     $"  ThreadPool: {threadPoolLine}\n" +

@@ -150,7 +150,7 @@ one-line takeaways so a doc reader here does not repeat the discovery:
   can instead land it on a zero-alloc assertion, which then fails with no load and no logic change.
   `MapRenderer.Tests.AllocationDiagnostics.AssertNotAllocating` is the wrapper every zero-alloc assertion in
   this codebase uses in place of `Is.Not.AllocatingGCMemory()` directly: it warms the measured delegate
-  itself, so an isolated run pays the first-use cost outside the window, and prints forensic context (the
-  recorder's count, `GC.CollectionCount(0)`, the frame count, pending ThreadPool work) on a failure. Pass
+  itself, so an isolated run pays the first-use cost outside the window, and prints forensic context (whether a
+  re-measure repeats the allocation, `GC.CollectionCount(0)`, the frame count, pending ThreadPool work) on a failure. Pass
   `warmUp: false` when the FIRST call is itself the state under test — a fresh buffer never touched before,
   or a transition's settling frame — since the helper's own warm-up would then consume that first call.
