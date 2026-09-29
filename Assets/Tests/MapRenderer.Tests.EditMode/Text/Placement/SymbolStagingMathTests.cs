@@ -2700,6 +2700,52 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsFalse(fadingOut.Contains(TinyTileKey), "departing-only tile must not be marked fading");
             Assert.IsFalse(aboveThisFrame.Contains(TinyTileKey), "departing-only tile must not enter the above set");
         }
+
+        /// <summary>The Big tile under a viewProj scaled by k: k = 1 covers about the whole viewport, a tiny k about k² of it.</summary>
+        private static float4x4 ScaledViewProj(float k)
+            => new float4x4(
+                new float4((float)(k / WebMercator.WorldExtent), 0, 0, 0),
+                new float4(0, 0, 0, 0),
+                new float4(0, (float)(k / WebMercator.WorldExtent), 0, 0),
+                new float4(0, 0, 0, 1));
+
+        [Test]
+        public void ClassifyActive_TileReentersCoverageBeforeItsDeadline_ClearsItAndStampsAFreshOne()
+        {
+            var blockTileKeys = new List<long> { BigTileKey };
+            var blockId = new List<int> { 0 };
+            var isDeparting = new List<byte> { 0 };
+            var abovePrev = new HashSet<long>();
+            var aboveThisFrame = new HashSet<long>();
+            var departingUntil = new Dictionary<long, double>();
+            var fadingOut = new HashSet<long>();
+            var tileDecisions = new Dictionary<long, byte>();
+            var blockDecision = new List<byte>();
+            var decisions = new List<byte>();
+
+            byte Classify(float scale, double now)
+            {
+                SymbolTileCoverageFilter.ClassifyActive(blockTileKeys, blockId, isDeparting, Projection, SceneOrigin,
+                    ScaledViewProj(scale), Viewport, Rebase, MinCoverage, abovePrev, aboveThisFrame, departingUntil,
+                    fadingOut, now, GraceSeconds, tileDecisions, blockDecision, decisions, out _);
+                (abovePrev, aboveThisFrame) = (aboveThisFrame, abovePrev); // the caller's per-frame swap
+                return decisions[0];
+            }
+
+            const float Tiny = 1e-3f;
+            Assert.AreEqual(SymbolTileCoverageFilter.Keep, Classify(1f, now: 0.0), "precondition: the tile starts above");
+            Assert.AreEqual(SymbolTileCoverageFilter.Fade, Classify(Tiny, now: 1.0), "it crosses below and fades");
+            Assert.AreEqual(1.0 + GraceSeconds, departingUntil[BigTileKey], "the crossing stamps the deadline once");
+
+            Assert.AreEqual(SymbolTileCoverageFilter.Keep, Classify(1f, now: 1.1), "it re-enters coverage before the deadline");
+            Assert.IsFalse(departingUntil.ContainsKey(BigTileKey), "DECISIVE: re-entry clears the old deadline");
+
+            Assert.AreEqual(SymbolTileCoverageFilter.Fade, Classify(Tiny, now: 1.2), "a second crossing fades again");
+            Assert.AreEqual(1.2 + GraceSeconds, departingUntil[BigTileKey],
+                "the second crossing stamps a fresh deadline, not the first one's");
+            Assert.AreEqual(SymbolTileCoverageFilter.Fade, Classify(Tiny, now: 1.6),
+                "still fading past the first deadline, because the fresh deadline has not expired");
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
