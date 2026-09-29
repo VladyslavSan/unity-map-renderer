@@ -52,6 +52,14 @@ edge* through a corner. The coverage gradient is **Euclidean**, never `fwidth` �
 § "Shaders & HLSL" (the "`fwidth` is the WRONG length for an AA ramp" entry) for why a horizontal fixture
 cannot see it.
 
+**The ramp is 1 device pixel and is not tunable; the total outward displacement is `1 + outline width`.**
+With no `fill-outline-color` the outline width is 0 and nothing changes. With one, the vertex stage widens
+the band by the outline width (`_FillOutlineWidthPx`, 1 logical px = `dpr` device px), and the fragment paints
+a band fragment in `_FillOutlineColor`. The coverage function is unchanged: it saturates at 1 over the first
+`W` px from the fill edge and ramps over the last one, so the rim is solid and the ramp is the same single
+pixel. The rim lies outside the boundary, so the fill's area is exact. It reaches one logical px plus the ramp
+beyond the edge, where the spec's outline straddles it.
+
 A bindable AA width is not offered. That is a decision, not an omission: a tunable ramp width is how the
 line path's removed AA model went wrong (`docs/line-antialiasing-design.md` § "Why a fade inside the band
 fails").
@@ -67,6 +75,11 @@ The predicate is the **wider** reading: "both endpoints on one window line" is a
 "clip-introduced", so a genuine feature edge that happens to run along the window is also suppressed. That is
 the safe direction — the band stops, and the abutting neighbour fills the gap.
 
+A suppressed edge also gives no normal to the miter at its two endpoints. Without that, the band's outer vertex
+at a ring vertex on the window bisects the cut edge's normal and leans by the whole displacement across the
+seam, so the two tiles' bands overlap in a notch that grows with the outline width. With it, the miter there is
+the other edge's own unit normal.
+
 Suppression for an outward band is cheaper than it would be for an inset one: there is no taper to zero, no
 half-pixel step and no T-junction to reconcile.
 
@@ -75,6 +88,11 @@ half-pixel step and no T-junction to reconcile.
 Two polygons **of the same layer abutting inside one tile** share no such predicate: each one's band ramps
 across the other's interior, and the pair composites twice. On a translucent layer that is a **rim of
 `f(1−f)`** — over-ink, never a trench, and absent at `α = 1` and on every opaque layer.
+
+An outline widens the residual: bands are emitted after each feature's interior and the layer does not write
+depth, so index order is draw order. On an opaque layer the later polygon's interior covers the earlier rim and
+one clean rim shows. On a translucent layer both rims show, so a shared edge carries a rim about twice as wide
+and the `f(1−f)` over-ink on top of it. This limitation is accepted.
 
 The rim is accepted rather than closed. The alternative is an intra-layer directed-edge hash between ring
 assembly and the band node. It costs a new node, a `NativeHashMap` sized to the layer's edge count, a second
@@ -122,7 +140,8 @@ material tests).
 
 | item | why |
 |---|---|
-| **`fill-outline-color`** | a *differently coloured* boundary is real line geometry, a separate mechanism (`docs/fill-parity-design.md` § "`fill-outline-color` is line geometry") |
+| **`fill-outline-color` as real line geometry** | a second mesh and draw per fill layer; the recoloured, widened band gives a solid 1 logical px rim with none (`docs/fill-parity-design.md` § 7) |
+| **a data-driven `fill-outline-color`** | nothing tells an inner band vertex from an interior one (both carry a zero band value), and the curved arm interleaves them; a constant or zoom colour only |
 | **a world-space (metres) SDF variant** | a different mechanism, not a refinement of this one |
 | **MSAA / camera post-AA** | ruled out; a per-layer opt-out is unimplementable under either |
 | **the intra-layer edge hash** | "The residual rim, accepted" — a partial fix to a partial population, with a known blind spot |

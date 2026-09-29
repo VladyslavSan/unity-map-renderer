@@ -193,7 +193,7 @@ Owning design: [`fill-parity-design.md`](fill-parity-design.md).
 | `fill-opacity` | `supported` | Data-driven values are †. |
 | `fill-layer-opacity` | `not supported` | Not built. |
 | `fill-color` | `supported` | Data-driven values are †. On a pattern layer it tints the pattern; see `fill-pattern`. |
-| `fill-outline-color` | `parsed, inert` | Bound to a uniform that no shader pass reads. It needs line geometry: [`fill-parity-design.md`](fill-parity-design.md) § 7. |
+| `fill-outline-color` | `partial` | Constant or zoom only. A 1 logical px solid rim outside the boundary, then the 1 px ramp; the spec's outline straddles the edge. No outline with `fill-antialias: false` or `fill-pattern`. Two adjoining translucent polygons show both rims: [`fill-parity-design.md`](fill-parity-design.md) § 7. |
 | `fill-translate` | `supported` | Constant or Zoom. A data-driven value is spec-invalid for a layer-level property and falls back to `[0, 0]`. |
 | `fill-translate-anchor` | `partial` | Constant only. |
 | `fill-pattern` | `partial` | Constant sprite name only; the spec also allows data-driven. Known deviation: `fill-color` tints the pattern, and an absent `fill-color` is white. See [`fill-parity-design.md`](fill-parity-design.md) § 2. |

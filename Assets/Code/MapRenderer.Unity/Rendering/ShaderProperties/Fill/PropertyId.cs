@@ -10,6 +10,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
     public static class PropertyId
     {
         public static readonly int FillOutlineColor    = Shader.PropertyToID(PropertyNames.FillOutlineColor);
+        public static readonly int FillOutlineWidthPx  = Shader.PropertyToID(PropertyNames.FillOutlineWidthPx);
         public static readonly int FillAntialias       = Shader.PropertyToID(PropertyNames.FillAntialias);
         public static readonly int FillTranslate       = Shader.PropertyToID(PropertyNames.FillTranslate);
         public static readonly int FillTranslateAnchor = Shader.PropertyToID(PropertyNames.FillTranslateAnchor);

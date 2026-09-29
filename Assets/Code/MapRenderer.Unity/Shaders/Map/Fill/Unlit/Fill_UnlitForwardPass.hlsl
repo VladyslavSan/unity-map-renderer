@@ -132,6 +132,14 @@ void UnlitPassFragment(
         alpha  = patternTexel.a * _Opacity;
     }
 
+    // [MAP DELTA] fill-outline-color: a band fragment of an outlined layer (width > 0) paints the rim colour
+    // instead of the fill's. The vertex stage widened the band by the same width; coverage below still ramps it.
+    if (input.side > 0.0 && _FillOutlineWidthPx > 0.0)
+    {
+        albedo = _FillOutlineColor.rgb;
+        alpha  = _FillOutlineColor.a * input.vColor.a * _Opacity;
+    }
+
     // [MAP DELTA] Boundary antialiasing, applied AFTER the pattern branch (which REPLACES alpha) and
     // before AlphaDiscard/AlphaModulate, so a premultiplied composite carries the coverage too.
     alpha *= MapFillBandCoverage(input.side);

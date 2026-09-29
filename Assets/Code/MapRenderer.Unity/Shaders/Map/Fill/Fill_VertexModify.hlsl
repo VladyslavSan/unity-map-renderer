@@ -37,8 +37,8 @@
 // The hook also carries the boundary band. `band` is the mesh's TEXCOORD3: (dirEast, dirNorth, side) in
 // the vertex's own surface frame, `side` 0 on an interior vertex and 1 on a band vertex. It is handed to
 // the fragment stage as `side` (Fill_BandCoverage.hlsl turns it into coverage) and displaced here: the
-// band's outer ring is pushed ONE DEVICE PIXEL along (dirEast, dirNorth), measured per-vertex and
-// per-direction so the strip stays a pixel wide under tilt, where the two screen axes foreshorten
+// band's outer ring is pushed (1 + _FillOutlineWidthPx) DEVICE PIXELS along (dirEast, dirNorth), measured
+// per-vertex and per-direction so the strip stays a pixel wide under tilt, where the two screen axes foreshorten
 // differently. dirEast/dirNorth carry the join's miter factor in their MAGNITUDE, which is what keeps the
 // strip a pixel wide measured perpendicular to the edge through a corner.
 //
@@ -71,7 +71,7 @@ void MapVertexModify(inout float3 positionOS, float3 normalOS, float4 tangentOS,
 
         float3 bandCenterWS = TransformObjectToWorld(positionOS);
         positionOS += mul((float3x3)GetWorldToObjectMatrix(),
-                          dirWS * (miter * MapPixelsToWorld(bandCenterWS, dirWS)));
+                          dirWS * (miter * (1.0 + _FillOutlineWidthPx) * MapPixelsToWorld(bandCenterWS, dirWS)));
     }
 
     // fill-translate is [0,0] on every shipped layer, so this branch is skipped for essentially every

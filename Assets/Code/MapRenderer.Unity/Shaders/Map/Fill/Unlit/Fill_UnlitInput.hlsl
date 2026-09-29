@@ -39,6 +39,7 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // per-property rationale; the names are IDENTICAL so the C# registry/tweakers bind unchanged) ──
 float  _Opacity;
 float4 _FillOutlineColor;
+float  _FillOutlineWidthPx;
 float4 _FillTranslate;
 float  _FillAntialias;
 float  _FillTranslateAnchor;
@@ -56,6 +57,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _Cutoff)
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillOutlineColor)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillOutlineWidthPx)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillTranslate)
     UNITY_DOTS_INSTANCED_PROP(float , _FillAntialias)
     UNITY_DOTS_INSTANCED_PROP(float , _FillTranslateAnchor)
@@ -68,6 +70,7 @@ static float4 unity_DOTS_Sampled_BaseColor;
 static float  unity_DOTS_Sampled_Cutoff;
 static float  unity_DOTS_Sampled_Opacity;
 static float4 unity_DOTS_Sampled_FillOutlineColor;
+static float  unity_DOTS_Sampled_FillOutlineWidthPx;
 static float4 unity_DOTS_Sampled_FillTranslate;
 static float  unity_DOTS_Sampled_FillAntialias;
 static float  unity_DOTS_Sampled_FillTranslateAnchor;
@@ -81,6 +84,7 @@ void SetupDOTSMapUnlitFillMaterialPropertyCaches()
     unity_DOTS_Sampled_Cutoff              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Cutoff);
     unity_DOTS_Sampled_Opacity             = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
     unity_DOTS_Sampled_FillOutlineColor    = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillOutlineColor);
+    unity_DOTS_Sampled_FillOutlineWidthPx  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillOutlineWidthPx);
     unity_DOTS_Sampled_FillTranslate       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillTranslate);
     unity_DOTS_Sampled_FillAntialias       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillAntialias);
     unity_DOTS_Sampled_FillTranslateAnchor = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillTranslateAnchor);
@@ -96,6 +100,7 @@ void SetupDOTSMapUnlitFillMaterialPropertyCaches()
 #define _Cutoff                 unity_DOTS_Sampled_Cutoff
 #define _Opacity                unity_DOTS_Sampled_Opacity
 #define _FillOutlineColor       unity_DOTS_Sampled_FillOutlineColor
+#define _FillOutlineWidthPx     unity_DOTS_Sampled_FillOutlineWidthPx
 #define _FillTranslate          unity_DOTS_Sampled_FillTranslate
 #define _FillAntialias          unity_DOTS_Sampled_FillAntialias
 #define _FillTranslateAnchor    unity_DOTS_Sampled_FillTranslateAnchor

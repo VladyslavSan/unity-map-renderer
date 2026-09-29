@@ -28,11 +28,10 @@ namespace MapRenderer.Unity.Style.Fill
         public StyleProperty<float> Opacity { get; init; }
 
         /// <summary>
-        /// fill-outline-color: stroke color around the fill polygon boundary. Parsed but inert — no shader
-        /// pass reads <c>_FillOutlineColor</c> (needs the line geometry docs/fill-parity-design.md § 7
-        /// describes). Null when absent, so
+        /// fill-outline-color: the colour of the boundary band's solid 1 logical px rim
+        /// (docs/fill-parity-design.md § 7). Constant or zoom only; null when absent, so
         /// <see cref="MapRenderer.Unity.Rendering.Materials.MaterialFactory.BindFillPaintToApplier"/>
-        /// leaves the uniform unbound.
+        /// leaves the uniform and the width unbound.
         /// </summary>
         public StyleProperty<Color> OutlineColor { get; init; }
 

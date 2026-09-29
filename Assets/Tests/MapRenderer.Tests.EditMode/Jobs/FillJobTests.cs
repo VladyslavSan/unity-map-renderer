@@ -412,6 +412,15 @@ namespace MapRenderer.Tests.EditMode.Jobs
             Assert.AreEqual(2 * EastClippedRing().Length, c.Counts[0].BandVertexCount,
                 "the VERTEX count is unchanged: both band vertices are still written for every ring vertex, " +
                 "deliberately. See FillBandJob's own note on why suppression drops quads and not vertices.");
+
+            // The cut edge gives no normal, so the two seam vertices take their other edge's unit normal
+            // alone: no lean across the seam (+x), and no sqrt(2) miter scaling.
+            double2 top    = TileOutward(c.VertexBand[c.InteriorVertexCount + 2 * 1 + 1]); // (4096,1000): edge 0 only
+            double2 bottom = TileOutward(c.VertexBand[c.InteriorVertexCount + 2 * 2 + 1]); // (4096,3000): edge 2 only
+            Assert.AreEqual(0.0, top.x, 1e-12, "the top seam vertex must not lean across the window line.");
+            Assert.AreEqual(-1.0, top.y, 1e-12, "the top seam vertex is edge 0's unit outward normal (up in Y-down tile space).");
+            Assert.AreEqual(0.0, bottom.x, 1e-12, "the bottom seam vertex must not lean across the window line.");
+            Assert.AreEqual(1.0, bottom.y, 1e-12, "the bottom seam vertex is edge 2's unit outward normal (down in Y-down tile space).");
         }
 
         [Test]

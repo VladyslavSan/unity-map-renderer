@@ -56,8 +56,9 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // albedo (and its alpha into the surface alpha) exactly like Lit.
 // _Opacity        — overall opacity [0,1], multiplied onto alpha in the fragment. Fills render in
 //                   the transparent band, so it blends.
-// _FillOutlineColor — fill-outline-color: read by no pass; declared here so the SRP Batcher
-//                   CBUFFER shape is stable across all passes.
+// _FillOutlineColor — fill-outline-color: the colour of the band's solid rim (see _FillOutlineWidthPx).
+// _FillOutlineWidthPx — the rim's width in device px; 0 = no outline (default). The vertex stage widens the
+//                   band's outward displacement by it, the fragment paints the rim in _FillOutlineColor.
 // _FillTranslate  — fill-translate: xy = pixel offset (world-space or viewport-space per
 //                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
 // _FillAntialias  — fill-antialias: 1=AA on (default), 0=off. Declared, instanced and bound, and read
@@ -77,6 +78,7 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 //                   pattern coordinate is world-space".
 float  _Opacity;
 float4 _FillOutlineColor;
+float  _FillOutlineWidthPx;
 float4 _FillTranslate;
 float  _FillAntialias;
 float  _FillTranslateAnchor;
@@ -113,6 +115,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     // Map paint additions:
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillOutlineColor)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillOutlineWidthPx)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillTranslate)
     UNITY_DOTS_INSTANCED_PROP(float , _FillAntialias)
     UNITY_DOTS_INSTANCED_PROP(float , _FillTranslateAnchor)
@@ -139,6 +142,7 @@ static float  unity_DOTS_Sampled_DetailNormalMapScale;
 // Map paint statics:
 static float  unity_DOTS_Sampled_Opacity;
 static float4 unity_DOTS_Sampled_FillOutlineColor;
+static float  unity_DOTS_Sampled_FillOutlineWidthPx;
 static float4 unity_DOTS_Sampled_FillTranslate;
 static float  unity_DOTS_Sampled_FillAntialias;
 static float  unity_DOTS_Sampled_FillTranslateAnchor;
@@ -163,6 +167,7 @@ void SetupDOTSMapLitMaterialPropertyCaches()
     unity_DOTS_Sampled_DetailNormalMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalMapScale);
     unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
     unity_DOTS_Sampled_FillOutlineColor     = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillOutlineColor);
+    unity_DOTS_Sampled_FillOutlineWidthPx   = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillOutlineWidthPx);
     unity_DOTS_Sampled_FillTranslate        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillTranslate);
     unity_DOTS_Sampled_FillAntialias        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillAntialias);
     unity_DOTS_Sampled_FillTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillTranslateAnchor);
@@ -194,6 +199,7 @@ void SetupDOTSMapLitMaterialPropertyCaches()
 // Map paint redirects:
 #define _Opacity                unity_DOTS_Sampled_Opacity
 #define _FillOutlineColor       unity_DOTS_Sampled_FillOutlineColor
+#define _FillOutlineWidthPx     unity_DOTS_Sampled_FillOutlineWidthPx
 #define _FillTranslate          unity_DOTS_Sampled_FillTranslate
 #define _FillAntialias          unity_DOTS_Sampled_FillAntialias
 #define _FillTranslateAnchor    unity_DOTS_Sampled_FillTranslateAnchor

@@ -57,6 +57,7 @@ Shader "Map/FillUnlit"
         // unchanged) ──
         _Opacity ("Opacity", Range(0, 1)) = 1.0
         _FillOutlineColor ("Fill Outline Color", Color) = (0, 0, 0, 1)
+        _FillOutlineWidthPx ("Fill Outline Width (device px)", Float) = 0.0
         _FillAntialias ("Fill Antialias", Float) = 1.0
         _FillTranslate ("Fill Translate (xy px)", Vector) = (0, 0, 0, 0)
         _FillTranslateAnchor ("Fill Translate Anchor", Float) = 0.0

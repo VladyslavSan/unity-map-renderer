@@ -64,11 +64,11 @@ namespace MapRenderer.Tests.Style
     ]
 }";
 
-        private const string FillTranslateStyleJson = @"{
+        private const string FillTranslateAndOutlineStyleJson = @"{
     ""version"": 8,
     ""layers"": [
         { ""id"": ""ground"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""l"",
-          ""paint"": { ""fill-translate"": [9, -11] } }
+          ""paint"": { ""fill-translate"": [9, -11], ""fill-outline-color"": ""#ff0000"" } }
     ]
 }";
 
@@ -192,13 +192,13 @@ namespace MapRenderer.Tests.Style
         // ── The two translates ───────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>Translate rows.</b> <c>line-translate</c> and <c>fill-translate</c> are px offsets applied
+        /// <b>Translate and outline rows.</b> <c>line-translate</c> and <c>fill-translate</c> are px offsets applied
         /// through the same <c>MapPixelsToWorld</c> call as the widths, so they sit in the identical device
         /// space and scale identically. Both components, including the negative one — a conversion applied to
         /// <c>x</c> only would pass a magnitude-blind check.
         /// </summary>
         [Test]
-        public void TranslateUniforms_ScaleBothComponentsWithDpr()
+        public void TranslateAndOutlineWidthUniforms_ScaleWithDpr()
         {
             Material lineMat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
             Material fillMat = Track(MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load()));
@@ -208,7 +208,7 @@ namespace MapRenderer.Tests.Style
                     FirstLayer<Line.StyleLayer>(LinePaintStyleJson).Paint, lineApplier, lineMat);
                 var fillApplier = new ZoomStyleApplier(fillMat);
                 MaterialFactory.BindFillPaintToApplier(
-                    FirstLayer<Fill.StyleLayer>(FillTranslateStyleJson).Paint, fillApplier, fillMat);
+                    FirstLayer<Fill.StyleLayer>(FillTranslateAndOutlineStyleJson).Paint, fillApplier, fillMat);
 
                 int lineId = ShaderProperties.Line.PropertyId.LineTranslate;
                 int fillId = ShaderProperties.Fill.PropertyId.FillTranslate;
@@ -233,6 +233,34 @@ namespace MapRenderer.Tests.Style
                 // Both are consumed by the same MapPixelsToWorld call the widths are, so they are device px.
                 AssertTranslate(lineMat, lineId, "line-translate", 10f, -14f, 2.0);
                 AssertTranslate(fillMat, fillId, "fill-translate", 18f, -22f, 2.0);
+
+                // The fill outline's rim is 1 LOGICAL px, bound through the same seam: its device-px width is the
+                // dpr itself, at a dyadic and a non-dyadic ratio (a hard-coded 1 or a scale-by-2 passes neither).
+                int outlineId = ShaderProperties.Fill.PropertyId.FillOutlineWidthPx;
+                fillApplier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
+                Assert.That(fillMat.GetFloat(outlineId), Is.EqualTo(1.0f).Within(1e-5f), "fill-outline width at dpr 1.");
+                fillApplier.ApplyZoom(new StyleFrameInputs(Zoom, 1.37, 0.0));
+                Assert.That(fillMat.GetFloat(outlineId), Is.EqualTo(1.37f).Within(1e-5f),
+                    "fill-outline width must be 1 logical px = dpr device px (1.37 here).");
+
+                // No rim unless the outline is a constant colour on a solid layer: absent, data-driven and
+                // pattern layers all leave the width at its default 0.
+                foreach (string paintJson in new[]
+                {
+                    @"""fill-color"": ""#00ff00""",
+                    @"""fill-outline-color"": [""get"", ""c""]",
+                    @"""fill-outline-color"": ""#ff0000"", ""fill-pattern"": ""hatch""",
+                })
+                {
+                    Material otherMat = Track(MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load()));
+                    var otherApplier = new ZoomStyleApplier(otherMat);
+                    MaterialFactory.BindFillPaintToApplier(FirstLayer<Fill.StyleLayer>(
+                        @"{ ""version"": 8, ""layers"": [ { ""id"": ""g"", ""type"": ""fill"", ""source"": ""s"", " +
+                        @"""source-layer"": ""l"", ""paint"": { " + paintJson + " } } ] }").Paint, otherApplier, otherMat);
+                    otherApplier.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
+                    Assert.AreEqual(0f, otherMat.GetFloat(outlineId),
+                        $"paint {{{paintJson}}} must draw no rim, so the outline width stays 0.");
+                }
             }
         }
 

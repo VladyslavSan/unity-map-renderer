@@ -630,6 +630,24 @@ namespace MapRenderer.Tests.Visual
             return scene.Render(SnapPx);
         }
 
+        /// <summary>Renders one opaque fill layer with an outline over the given features.</summary>
+        /// <param name="fillHex">The layer's <c>fill-color</c>.</param>
+        /// <param name="outlineHex">The layer's <c>fill-outline-color</c>.</param>
+        /// <param name="mode">Lit or unlit material set.</param>
+        /// <param name="features">The source's polygon features.</param>
+        /// <returns>The rendered frame.</returns>
+        private static VisualFrame RenderOutlined(
+            string fillHex, string outlineHex, MapRenderer.Unity.Rendering.Materials.RenderMode mode,
+            params string[] features)
+        {
+            using var scene = VisualScene.New()
+                .RenderMode(mode)
+                .Source("shapes", GeoJson.FeatureCollection(GeoJsonTestFixtures.Collection(features)))
+                .Layer(VisualLayer.Fill("shapes-fill").Source("shapes").Color(fillHex).OutlineColor(outlineHex))
+                .Camera(LookAt(), zoom: BandTile.Z);
+            return scene.Render(SnapPx);
+        }
+
         /// <summary>Classifies every pixel against the frame's background and its own brightest pixel — the
         /// fully-covered reference, taken from the SAME frame so shading, opacity and colour management never
         /// have to be modelled.</summary>
@@ -752,6 +770,54 @@ namespace MapRenderer.Tests.Visual
                             $"pixel ({x},{y}) is graded but lies more than 6 px outside the polygon — the band " +
                             "is one device pixel wide, not a halo.");
                 }
+
+            // Outline arm (dpr 1), a white fill with a red outline, lit and unlit: across the left edge, ONE full
+            // rim pixel, one ramp pixel, then background; the fill inside the hard square never moves.
+            foreach (var mode in new[] { MapRenderer.Unity.Rendering.Materials.RenderMode.Lit,
+                                         MapRenderer.Unity.Rendering.Materials.RenderMode.Unlit })
+            {
+                bool unlit = mode == MapRenderer.Unity.Rendering.Materials.RenderMode.Unlit;
+                VisualFrame outlined = RenderOutlined("#ffffff", "#ff0000", mode, PolygonFeature(
+                    new double2(lo, lo), new double2(lo, hi), new double2(hi, hi), new double2(hi, lo)));
+                int row = SnapPx / 2;
+                int edgeX = (int)(lo * SnapPx);
+                Color32 Pixel(VisualFrame f, int x) => f.Pixels.Pixels[row * f.Width + x];
+                Color32 bg = outlined.Pixels.Pixels[0];
+
+                Color32 rim = Pixel(outlined, edgeX - 1);
+                string rimText = $"{mode}: rim pixel is {rim.r},{rim.g},{rim.b}";
+                Assert.That(rim.r, Is.GreaterThan(240).And.LessThanOrEqualTo(255), rimText);
+                if (unlit)
+                {
+                    // Unlit: the colour is its own albedo, so the rim is exactly the outline colour.
+                    Assert.That(rim.g, Is.LessThan(8), rimText);
+                    Assert.That(rim.b, Is.LessThan(8), rimText);
+                }
+                else
+                {
+                    // Lit shading adds a small specular floor to g and b, so "red" is far below the fill's 255.
+                    Assert.That(rim.g, Is.LessThan(100), rimText);
+                    Assert.That(rim.b, Is.LessThan(100), rimText);
+                }
+
+                Color32 ramp = Pixel(outlined, edgeX - 2);
+                Assert.That(ramp.r, Is.GreaterThan(bg.r + 20).And.LessThan(rim.r - 20),
+                    $"{mode}: one partial ramp pixel must follow the rim; got {ramp.r},{ramp.g},{ramp.b} between background {bg.r} and rim {rim.r}.");
+                Color32 beyond = Pixel(outlined, edgeX - 3);
+                Assert.That(math.abs(beyond.r - bg.r) + math.abs(beyond.g - bg.g) + math.abs(beyond.b - bg.b), Is.LessThan(8),
+                    $"{mode}: nothing beyond the ramp: the rim is one logical px, not a halo.");
+
+                Color32 inside = Pixel(outlined, edgeX + 1);
+                Assert.That(inside.g, Is.GreaterThan(240), $"{mode}: the pixel just inside the edge is the fill (white), got {inside.r},{inside.g},{inside.b}.");
+
+                // `frame` is the lit, outline-free render of the same square.
+                if (unlit) continue;
+                int innerHi = (int)(hi * SnapPx) - 1;
+                for (int y = edgeX + 1; y < innerHi; y++)
+                    for (int x = edgeX + 1; x < innerHi; x++)
+                        Assert.AreEqual(frame.Pixels.Pixels[y * frame.Width + x], outlined.Pixels.Pixels[y * frame.Width + x],
+                            $"pixel ({x},{y}) inside the hard square differs from the outline-free frame: the outline must never move the fill.");
+            }
         }
 
         /// <summary>The band's PERPENDICULAR width, in device pixels, read off a rendered silhouette. An outward
@@ -826,6 +892,17 @@ namespace MapRenderer.Tests.Visual
             Assert.Less(width, 1.30,
                 $"the band must be ONE device pixel wide; measured {width:F3} px — wider means the ramp is " +
                 "reaching past the single pixel the mechanism specifies.");
+
+            // With an outline the measure reads w = 2 x (1 + 1/2) = 3.0, in one colour, so only width shows;
+            // on the diagonal it pins the rim's PERPENDICULAR width.
+            string outlinedFeature = diagonal
+                ? PolygonFeature(new double2(c, c - r), new double2(c - r, c), new double2(c, c + r), new double2(c + r, c))
+                : PolygonFeature(new double2(c - r, c - r), new double2(c - r, c + r), new double2(c + r, c + r), new double2(c + r, c - r));
+            VisualFrame withRim = RenderOutlined("#ffffff", "#ffffff", MapRenderer.Unity.Rendering.Materials.RenderMode.Lit, outlinedFeature);
+            double rimWidth = MeasuredRampWidthPx(withRim, hardAreaPx, perimeterPx, withRim.Width / 2, withRim.Height / 2);
+            UnityEngine.Debug.Log($"[FillBoundaryBand] measured outline+ramp width: diagonal={diagonal} w={rimWidth:F4} px");
+            Assert.That(rimWidth, Is.EqualTo(3.0).Within(0.35),
+                $"a 1 logical px outline plus the 1 px ramp must measure 3.0 px perpendicular; got {rimWidth:F3}.");
         }
 
         // ── The lemma, on the composited frame ────────────────────────────────────────────────────────

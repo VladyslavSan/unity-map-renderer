@@ -112,12 +112,14 @@ Shader "Map/Fill"
         _Opacity ("Opacity", Range(0, 1)) = 1.0
 
         // Fill paint properties (MapLibre Style Spec fill layer):
-        // _FillOutlineColor: color of the optional fill outline (declared; no pass reads it).
+        // _FillOutlineColor: color of the fill outline's solid rim. _FillOutlineWidthPx: its width in device px
+        // (0 = no outline; bound from the style by the DPR seam, never authored here).
         // _FillAntialias: 1=AA on (default), 0=off.
         // _FillTranslate: xy = pixel offset (world/viewport per _FillTranslateAnchor). zw unused.
         // _FillTranslateAnchor: 0=map world-space, 1=viewport screen-space.
         // _FillPattern: 0=solid, the fill-color path (default); 1=this is a fill-pattern layer.
         _FillOutlineColor ("Fill Outline Color", Color) = (0, 0, 0, 1)
+        _FillOutlineWidthPx ("Fill Outline Width (device px)", Float) = 0.0
         _FillAntialias ("Fill Antialias", Float) = 1.0
         _FillTranslate ("Fill Translate (xy px)", Vector) = (0, 0, 0, 0)
         _FillTranslateAnchor ("Fill Translate Anchor", Float) = 0.0

@@ -103,6 +103,7 @@ Material:
     - _DstBlendAlpha: 10
     - _EnvironmentReflections: 1
     - _FillAntialias: 1
+    - _FillOutlineWidthPx: 0
     - _FillPattern: 0
     - _FillTranslateAnchor: 0
     - _GlossMapScale: 1

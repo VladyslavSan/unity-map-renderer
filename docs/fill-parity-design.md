@@ -17,7 +17,7 @@ holds each property, and why. Semantics come from the public MapLibre Style Spec
 | `fill-translate`, `fill-translate-anchor` | the fill vertex hook, `MapVertexModify` |
 | `fill-sort-key` | a stable per-layer feature order, applied before meshing |
 | `fill-antialias` | the outward boundary band's geometry, suppressed per layer when false |
-| `fill-outline-color` | parsed and bound to `_FillOutlineColor`, read by no pass — it is line geometry, not fill paint |
+| `fill-outline-color` | a constant or zoom colour recolours the boundary band and widens it by 1 logical px (`_FillOutlineColor`, `_FillOutlineWidthPx`) — § 7 |
 
 A failing colour expression paints white, not black: `StyleProperty.TryEvaluate` returns false, and
 `StyledFillTileBuilder` keeps the vertex colour white.
@@ -241,11 +241,16 @@ Rejected alternatives that still constrain the mechanism:
   from a camera's target texture in preference to the pipeline asset, so a snapshot that renders into its own
   render texture measures MSAA only if that texture's `antiAliasing` is set.)
 
-## 7. `fill-outline-color` is line geometry
+## 7. `fill-outline-color` is a recoloured, widened boundary band
 
-`fill-outline-color` is not a paint-plumbing property: it means real LINE geometry along the polygon boundary —
-what style authors fake with a second `line` layer drawn after the `fill`. It therefore shares the line
-tessellator, not the fill paint path, and is separate work. It is parsed (`Fill.PaintProperties.OutlineColor`,
-null when absent) and bound to `_FillOutlineColor` only when set — a uniform no pass reads either way.
+`fill-outline-color` is drawn by the boundary band (`docs/fill-boundary-antialiasing-design.md`), not by line
+geometry. A constant or zoom colour on a solid layer binds `_FillOutlineColor` and `_FillOutlineWidthPx` (1
+logical px, through the DPR seam). The vertex stage widens the band's outward displacement by that width, and a
+band fragment paints in the outline colour, times the layer opacity and the vertex colour's alpha. A
+constant `fill-color` alpha does not reach the rim; a data-driven `fill-color` alpha does. The layer draws no second
+mesh and no second draw. A data-driven colour, a pattern layer and `fill-antialias: false` draw no outline.
+
+The rim lies outside the boundary and reaches one solid pixel plus the ramp; the spec's outline straddles it.
+Adjoining polygons of a translucent layer show both rims.
 
 `fill-extrusion` is a different layer type and is not covered here.

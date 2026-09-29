@@ -83,6 +83,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // ── Fill-specific (in Fill DOTS block; not in Line) ───────────────────────────────────
 
         [InstancedProp(PropKind.Color,  0f, 0f, 0f, 0f)] public float4 _FillOutlineColor;
+        [InstancedProp(PropKind.Float,  0f)]              public float  _FillOutlineWidthPx;
         [InstancedProp(PropKind.Vector)]                  public float4 _FillTranslate;
         [InstancedProp(PropKind.Float,  1f)]              public float  _FillAntialias;
         [InstancedProp(PropKind.Float,  0f)]              public float  _FillTranslateAnchor;

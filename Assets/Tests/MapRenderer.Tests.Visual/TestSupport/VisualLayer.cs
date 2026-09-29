@@ -40,9 +40,17 @@ namespace MapRenderer.Tests
         // Color()/ColorExpression() still gets a well-formed paint block.
         private string _colorJson = "\"#000000\"";
         private double? _opacity;
+        private string _outlineColorJson;
 
         /// <param name="id">The style-JSON layer id (forwarded to the base).</param>
         internal FillVisualLayer(string id) : base(id) { }
+
+        /// <summary><c>fill-outline-color</c> as a hex literal (WITHOUT quotes). Omitted unless set.</summary>
+        public FillVisualLayer OutlineColor(string hexColor)
+        {
+            _outlineColorJson = $"\"{hexColor}\"";
+            return this;
+        }
 
         /// <summary>Binds this layer to <paramref name="sourceId"/> — stored verbatim, never validated here.</summary>
         public FillVisualLayer Source(string sourceId)
@@ -81,6 +89,8 @@ namespace MapRenderer.Tests
             var paint = new List<string> { $"\"fill-color\":{_colorJson}" };
             if (_opacity.HasValue)
                 paint.Add($"\"fill-opacity\":{_opacity.Value.ToString(CultureInfo.InvariantCulture)}");
+            if (_outlineColorJson != null)
+                paint.Add($"\"fill-outline-color\":{_outlineColorJson}");
 
             return $"{{\"id\":\"{Id}\",\"type\":\"fill\",\"source\":\"{SourceId}\"," +
                    $"\"paint\":{{{string.Join(",", paint)}}}}}";

@@ -99,7 +99,7 @@ if its consumer measures the physical framebuffer, and that is exactly the set t
 other px property is logical, and reaches its consumer *without* a conversion — either as a material uniform
 the shader divides by the logical viewport, or baked CPU-side into geometry/placement.
 
-**Device-space — crosses the seam (`× dpr`).** Exactly eight, all bound through the DPR seam (the
+**Device-space — crosses the seam (`× dpr`).** Exactly eight style properties and one renderer constant, all bound through the DPR seam (the
 `BindDevicePixelFloat`/`BindDevicePixelVector` call sites in `MaterialFactory` and `SymbolRenderLayer.BindTextPaint`):
 
 | property | consumer measures | at the seam |
@@ -109,6 +109,7 @@ the shader divides by the logical viewport, or baked CPU-side into geometry/plac
 | `line-offset` | physical framebuffer | `× dpr` |
 | `line-blur` | physical framebuffer | `× dpr` |
 | `line-translate` / `fill-translate` | physical framebuffer | `× dpr` |
+| `fill-outline-color` rim width (a renderer constant of 1 logical px, not a style row) | physical framebuffer | `× dpr` |
 | `text-halo-width` / `text-halo-blur` | physical framebuffer | `× dpr` |
 
 **Logical-space — never crosses the seam; factor 1.** These never route through any `LogicalToDevicePx`

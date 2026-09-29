@@ -191,6 +191,7 @@ namespace MapRenderer.Tests.Materials
                 (ShaderProperties.PropertyId.BaseColor,                nameof(ShaderProperties.PropertyId.BaseColor),                ShaderProperties.PropertyNames.BaseColor),
                 (ShaderProperties.PropertyId.Opacity,                  nameof(ShaderProperties.PropertyId.Opacity),                  ShaderProperties.PropertyNames.Opacity),
                 (ShaderProperties.Fill.PropertyId.FillOutlineColor,    nameof(ShaderProperties.Fill.PropertyId.FillOutlineColor),    ShaderProperties.Fill.PropertyNames.FillOutlineColor),
+                (ShaderProperties.Fill.PropertyId.FillOutlineWidthPx,  nameof(ShaderProperties.Fill.PropertyId.FillOutlineWidthPx),  ShaderProperties.Fill.PropertyNames.FillOutlineWidthPx),
                 (ShaderProperties.Fill.PropertyId.FillAntialias,       nameof(ShaderProperties.Fill.PropertyId.FillAntialias),       ShaderProperties.Fill.PropertyNames.FillAntialias),
                 (ShaderProperties.Fill.PropertyId.FillTranslate,       nameof(ShaderProperties.Fill.PropertyId.FillTranslate),       ShaderProperties.Fill.PropertyNames.FillTranslate),
                 (ShaderProperties.Fill.PropertyId.FillTranslateAnchor, nameof(ShaderProperties.Fill.PropertyId.FillTranslateAnchor), ShaderProperties.Fill.PropertyNames.FillTranslateAnchor),

@@ -10,6 +10,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
     public static class PropertyNames
     {
         public const string FillOutlineColor    = "_FillOutlineColor";
+        public const string FillOutlineWidthPx  = "_FillOutlineWidthPx";
         public const string FillAntialias       = "_FillAntialias";
         public const string FillTranslate       = "_FillTranslate";
         public const string FillTranslateAnchor = "_FillTranslateAnchor";

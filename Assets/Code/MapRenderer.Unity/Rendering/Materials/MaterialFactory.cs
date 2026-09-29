@@ -59,9 +59,13 @@ namespace MapRenderer.Unity.Rendering.Materials
             else
                 applier.BindOpacity(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
-            // fill-outline-color: bind only when explicitly set (non-null) and non-data-driven.
-            if (paint.OutlineColor != null && !paint.OutlineColor.DependsOnFeature)
+            // fill-outline-color: bind only when explicitly set (non-null), non-data-driven, and not a pattern layer.
+            // The rim is 1 logical px wide, so the width binds through the DPR seam; width 0 (the default) draws no rim.
+            if (paint.OutlineColor != null && !paint.OutlineColor.DependsOnFeature && paint.PatternName == null)
+            {
                 applier.BindColor(paint.OutlineColor, ShaderProperties.Fill.PropertyId.FillOutlineColor);
+                applier.BindDevicePixelFloat(new StyleProperty<float>(1f), ShaderProperties.Fill.PropertyId.FillOutlineWidthPx);
+            }
 
             // fill-antialias is NOT bound: no pass reads _FillAntialias (docs/fill-parity-design.md). The
             // property stays declared in the CBUFFER, which MapFillUnlitMaterialTests pins.

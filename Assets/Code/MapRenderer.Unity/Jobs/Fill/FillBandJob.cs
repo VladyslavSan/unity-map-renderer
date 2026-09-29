@@ -19,6 +19,8 @@ namespace MapRenderer.Unity.Jobs.Fill
     /// <see cref="ClipEnabled"/>, an edge with both endpoints exactly on one window line gets no quad (exact
     /// because <see cref="RingClipJob"/> writes the boundary verbatim), but both band vertices are still written,
     /// so the band vertex count stays twice the ring total and the index count comes from the write cursor.
+    /// Such an edge also gives no normal to the miter at its endpoints, so the outer vertex there does not lean
+    /// across the seam.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct FillBandJob : IJob
@@ -211,9 +213,11 @@ namespace MapRenderer.Unity.Jobs.Fill
                 double2 previous = RingVertices[start + (i + len - 1) % len];
                 double2 next     = RingVertices[start + (i + 1) % len];
 
+                // A cut edge on the window line has no band, so it contributes no normal: at a vertex that
+                // joins it, the miter is the other edge's own normal and does not lean across the seam.
                 double2 miter = Miter(
-                    Outward(current - previous, outwardSign),
-                    Outward(next - current, outwardSign));
+                    LiesAlongOneWindowLine(previous, current) ? double2.zero : Outward(current - previous, outwardSign),
+                    LiesAlongOneWindowLine(current, next) ? double2.zero : Outward(next - current, outwardSign));
 
                 // Inner: the ring vertex itself, bitwise zero band. Outer: the SAME coordinate — the one
                 // device pixel is added by the vertex shader, so nothing here moves.
