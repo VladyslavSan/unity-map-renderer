@@ -181,7 +181,7 @@ namespace MapRenderer.Tests.Text
             // it. A by-value accessor would freeze this at the default struct and the assertions would read 0.
             ref readonly SymbolStoreTelemetrySnapshot live = ref _subsystem.Telemetry;
 
-            Assert.DoesNotThrow(() => _subsystem.CurrentBatch(default, 0.0));
+            Assert.DoesNotThrow(() => _subsystem.CurrentBatch());
 
             Assert.AreEqual(_subsystem.ActiveTileCount, live.ActiveSymbolTiles,
                 "the struct must carry the subsystem's live levels, not a default struct.");
@@ -197,52 +197,11 @@ namespace MapRenderer.Tests.Text
         // ── PlayMode SymbolSubsystemPumpTests holds CurrentBatch_TileLeftCover_FlagsRecordsDeparting (departing
         //    split) and CurrentBatch_TileEvent_RecomputesAndDrivesFade: each drives an async build across frames.
 
-        // ── Alloc tooth: SymbolTileCoverageFilter.FilterActive's Dictionary/List compaction must not allocate once
-        //    warm. A non-zero minCoverage runs the real filter path, not its no-op guard. ──
-        [UnityTest]
-        public IEnumerator CurrentBatch_Warm_WithCoverageCullEnabled_AllocatesNoGCMemory()
-        {
-            UseImmediateGlyphs();
-            var tile = new TileId { Z = 3, X = 0, Y = 0 };
-            var loaded = new List<LoadedTileKey> { Key(tile) };
-            DriveTileBytesReady(tile);
-
-            // A VALID (identity-rebase) frame: `default`'s zero Rebase collapses the tile to a zero-area quad and culls
-            // everything. A tiny POSITIVE threshold runs the real filter path yet keeps any well-formed on-screen tile.
-            var frame = SceneFrame.Mercator(new double2(0.0, 0.0));
-            const double keepAllButRunFilter = 1e-9;
-
-            // Measure only a FULLY quiescent frame (no pending tail, no reconcile in flight, recompute count stable
-            // for 2 frames): a dirty frame legitimately allocates when it captures and kicks a worker.
-            SymbolGatherPlan plan = null;
-            bool quiesced = false; int stable = 0; int lastRecompute = -1;
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                _subsystem.ReconcileLoadedTiles(loaded);
-                _subsystem.PumpBuilds();
-                plan = _subsystem.CurrentBatch(frame, keepAllButRunFilter);
-                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0
-                               && !_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount == lastRecompute;
-                if (settled) { if (++stable >= 2) { quiesced = true; break; } } else stable = 0;
-                lastRecompute = _subsystem.CollectRecomputeCount;
-                yield return null;
-            }
-            Assert.IsTrue(quiesced, "sanity: drove to full reconcile quiescence before the alloc measurement");
-            Assert.Greater(plan.WinnerCount, 0, "sanity: the tile committed label records before the alloc measurement");
-
-            // Warm up once, then measure the steady call. The lambda needs a block body: an expression lambda binds
-            // NUnit's `Assert.That<T>(Func<T>)` overload and throws "the actual value must be a TestDelegate".
-            _subsystem.CurrentBatch(frame, keepAllButRunFilter);
-            AllocationDiagnostics.AssertNotAllocating(() => { _subsystem.CurrentBatch(frame, keepAllButRunFilter); },
-                "a steady-state CurrentBatch (coverage cull + native winner-plan build) must allocate ZERO managed garbage");
-        }
-
         // ═══ Memoized clean-frame reuse of the collected set ═══════════════════════════════════════
 
         // ── Clean frames (no tile event) reuse the collected set byte-identically, with no recompute and zero GC.
         //    Non-local invariant: a clean frame neither schedules nor picks up a reconcile, so the FRONT result
         //    stands; ScheduleReconcileIfDirty's `CollectGeneration == _reconcileScheduledGen` guard holds that.
-        //    minCoverage 0 makes ClassifyActive early-return, so the plan is frame-independent. ──
         [UnityTest]
         public IEnumerator CurrentBatch_CleanFrames_ReuseCollectedSet_ByteIdentical_RecomputesOnce()
         {
@@ -259,7 +218,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                plan = _subsystem.CurrentBatch(default, 0.0);
+                plan = _subsystem.CurrentBatch();
                 bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0
                                && !_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount == lastRecompute;
                 if (settled) { if (++stable >= 2) { quiesced = true; break; } } else stable = 0;
@@ -285,7 +244,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan p = _subsystem.CurrentBatch();
                 Assert.AreEqual(winners, p.WinnerCount, $"clean frame {f}: winner count identical to the quiesced snapshot");
                 for (int i = 0; i < winners; i++)
                 {
@@ -302,9 +261,9 @@ namespace MapRenderer.Tests.Text
             // must allocate ZERO managed garbage. Warm first (above N frames), then measure a full clean-frame loop.
             _subsystem.ReconcileLoadedTiles(loaded);
             _subsystem.PumpBuilds();
-            _subsystem.CurrentBatch(default, 0.0);
+            _subsystem.CurrentBatch();
             AllocationDiagnostics.AssertNotAllocating(
-                () => { _subsystem.ReconcileLoadedTiles(loaded); _subsystem.PumpBuilds(); _subsystem.CurrentBatch(default, 0.0); },
+                () => { _subsystem.ReconcileLoadedTiles(loaded); _subsystem.PumpBuilds(); _subsystem.CurrentBatch(); },
                 "a steady clean-frame reuse loop (reconcile + pump + CurrentBatch, no recompute) must allocate ZERO managed garbage");
         }
 
@@ -518,7 +477,7 @@ namespace MapRenderer.Tests.Text
 
             // Frame 1: Pickup is a no-op (nothing in flight yet); Schedule sees the dirty generation and
             // dispatches — under Inline, synchronously, inside this very call.
-            SymbolGatherPlan afterSchedule = _subsystem.CurrentBatch(default, 0.0);
+            SymbolGatherPlan afterSchedule = _subsystem.CurrentBatch();
 
             Assert.AreEqual(1, spy.ScheduleCount, "the reconcile must dispatch through the injected scheduler.");
             Assert.AreEqual(1, spy.BodyThreadIds.Count, "the dispatched body must actually have run once.");
@@ -534,7 +493,7 @@ namespace MapRenderer.Tests.Text
                 "sanity: nothing has been picked up into the front result yet.");
 
             // Frame 2: Pickup now sees the (already terminal) handle and applies it.
-            SymbolGatherPlan afterPickup = _subsystem.CurrentBatch(default, 0.0);
+            SymbolGatherPlan afterPickup = _subsystem.CurrentBatch();
             Assert.IsFalse(_subsystem.ReconcileInFlight(),
                 "frame 2: the pickup must have applied the Inline-completed reconcile and cleared in-flight.");
             Assert.AreEqual(1, afterPickup.WinnerCount,

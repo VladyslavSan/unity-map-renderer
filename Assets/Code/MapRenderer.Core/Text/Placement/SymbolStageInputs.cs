@@ -42,8 +42,7 @@ namespace MapRenderer.Core.Text.Placement
         public float3 AnchorLocal;
 
         /// <summary>The render-space tile origin
-        /// <see cref="AnchorLocal"/> was baked against — resolved null-safe from <c>TileKey</c> alone (NEVER
-        /// the coverage <c>tileIndex</c>, which is -1 in the demo/test seam). Carried
+        /// <see cref="AnchorLocal"/> was baked against — resolved null-safe from <c>TileKey</c> alone. Carried
         /// to <see cref="CandidateEmit.TileOriginRender"/> so the world renderer can place its presenter
         /// without indexing a batch tile array.</summary>
         public double3 TileOriginRender;

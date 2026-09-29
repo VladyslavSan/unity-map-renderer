@@ -1,9 +1,9 @@
 # Symbol label per-frame cost — design
 
-Companion to [`labels-and-symbols-design.md`](labels-and-symbols-design.md) ("Pipeline flow", and its
-"Tile-coverage pre-cull") and to [`labels-async-reconcile-design.md`](labels-async-reconcile-design.md),
-which owns the dedup/reconcile half of this design in full. This document is the umbrella for the rest:
-what the symbol pipeline bakes once versus recomputes every frame, and why.
+Companion to [`labels-and-symbols-design.md`](labels-and-symbols-design.md) ("Pipeline flow") and to
+[`labels-async-reconcile-design.md`](labels-async-reconcile-design.md), which owns the dedup/reconcile
+half of this design in full. This document is the umbrella for the rest: what the symbol pipeline bakes
+once versus recomputes every frame, and why.
 
 ---
 
@@ -105,11 +105,10 @@ needs one contiguous, indexable buffer.
 Everything the gather produces — quads, glyphs, anchors, fade ids, world points, and every per-block
 `*Start`/`*Count` remap — is a pure function of the winner *set*: `plan.BlockId`, `LocalIndex`,
 `Departing`, and `Blocks` all come from `_frontResult`, the reconcile output, which changes only on a
-front swap (a tile event). The only genuinely per-frame inputs are three per-record byte masks
-(`CoverageFading` / `Dropped`, from `SymbolTileCoverageFilter.ClassifyActive`) plus `Departing`, which is
+front swap (a tile event). The only per-frame input is the `Departing` byte mask, which is
 set-derived but re-written every frame because doing so is free. So the heavy per-pool rebuild runs only
-when the winner-set version changes; every other frame writes just the three byte masks (a few memcpys
-and a subtraction) instead of walking every record.
+when the winner-set version changes; every other frame writes just that mask (one memcpy)
+instead of walking every record.
 
 **The memo key is `SymbolSubsystem._frontSetVersion`**, a monotonic `int` bumped on every change to
 `_frontResult`'s content — the reconcile swap (`PickupCompletedReconcile`) and `SetStyle`/`Dispose`
@@ -193,10 +192,10 @@ Building this raises two open design questions:
    as a synchronous Burst job"), valid only for the inline `.Run()`. An async gather needs pointer views
    whose lifetime is protected across frames, or a shared bake-time mega-buffer that turns the gather into
    pure index arithmetic; this choice is the crux of building the async version.
-2. **The per-frame masks must classify the displayed set, not the newest reconcile front.** With an async
-   gather the live mirror corresponds to an older winner set than the current reconcile front, so
-   `SymbolTileCoverageFilter.ClassifyActive` has to classify the snapshot actually on screen, or the
-   masks index a set the mirror was not built from.
+2. **The per-frame mask must describe the displayed set, not the newest reconcile front.** With an async
+   gather the live mirror corresponds to an older winner set than the current reconcile front, so the
+   `Departing` mask has to come from the snapshot actually on screen, or it indexes a set the mirror was
+   not built from.
 
 The synchronous Burst gather already removes this step from the still-vs-moving comparison, so the async
 version's remaining upside is small. Its cost is not: a third staleness generation stacked on top of the

@@ -537,7 +537,6 @@ namespace MapRenderer.Tests.Visual
                     Application.dataPath, "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes")))
                 .Camera(new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 },
                         zoom: Zoom, tilt: TiltDeg)
-                .Configure(config => config.SymbolTileCoverageCull = 0.0) // far tiles are thin on screen
                 .ExpectSymbolQuads(2);
 
             double clearFar;

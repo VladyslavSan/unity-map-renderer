@@ -49,8 +49,6 @@ namespace MapRenderer.Unity.Rendering.Map
             internal const string DistanceCulled    = "MapRenderer.Symbols.DistanceCulled";
             internal const string HorizonCulled     = "MapRenderer.Symbols.HorizonCulled";
             internal const string ZoomCulled        = "MapRenderer.Symbols.ZoomCulled";
-            internal const string CoverageDropped   = "MapRenderer.Symbols.CoverageDropped";
-            internal const string CoverageFading    = "MapRenderer.Symbols.CoverageFading";
             internal const string Candidates        = "MapRenderer.Symbols.CollisionCandidates";
             internal const string Survivors         = "MapRenderer.Symbols.CollisionSurvivors";
             internal const string PlacedQuads       = "MapRenderer.Symbols.PlacedQuads";
@@ -93,8 +91,6 @@ namespace MapRenderer.Unity.Rendering.Map
         private static ProfilerCounterValue<int>    _distanceCulled    = Count(CounterNames.DistanceCulled);
         private static ProfilerCounterValue<int>    _horizonCulled     = Count(CounterNames.HorizonCulled);
         private static ProfilerCounterValue<int>    _zoomCulled        = Count(CounterNames.ZoomCulled);
-        private static ProfilerCounterValue<int>    _coverageDropped   = Count(CounterNames.CoverageDropped);
-        private static ProfilerCounterValue<int>    _coverageFading    = Count(CounterNames.CoverageFading);
         private static ProfilerCounterValue<int>    _candidates        = Count(CounterNames.Candidates);
         private static ProfilerCounterValue<int>    _survivors         = Count(CounterNames.Survivors);
         private static ProfilerCounterValue<int>    _placedQuads       = Count(CounterNames.PlacedQuads);
@@ -166,7 +162,6 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             _activeSymbolTiles.Value = store.ActiveSymbolTiles;
             _cachedSymbolTiles.Value = store.CachedSymbolTiles;
-            _coverageDropped.Value  = store.CoverageDroppedSymbols;
         }
 
         private void OnSymbolPlacementTelemetry(in SymbolPlacementTelemetrySnapshot placement)
@@ -175,7 +170,6 @@ namespace MapRenderer.Unity.Rendering.Map
             _distanceCulled.Value  = placement.DistanceCulledSymbols;
             _horizonCulled.Value   = placement.HorizonCulledSymbols;
             _zoomCulled.Value      = placement.ZoomCulledSymbols;
-            _coverageFading.Value  = placement.CoverageFadingSymbols;
             _candidates.Value      = placement.CollisionCandidateCount;
             _survivors.Value       = placement.CollisionSurvivorCount;
             _placedQuads.Value     = placement.PlacedQuadCount;

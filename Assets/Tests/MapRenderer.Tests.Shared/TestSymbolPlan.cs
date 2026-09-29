@@ -30,22 +30,15 @@ namespace MapRenderer.Tests
         public TestSymbolPlan(IProjection projection) => _projection = projection;
 
         /// <summary>
-        /// Re-seed from <paramref name="buffer"/> and return the refilled plan. Every record is classified
-        /// Keep — the tile-coverage cull is a separate concern with its own fixtures, and a Drop here would
-        /// silently remove a symbol the caller expects to render.
+        /// Re-seed from <paramref name="buffer"/> and return the refilled plan.
         /// </summary>
         /// <param name="buffer">The build buffer, in emission order — one record per shaped symbol (dense).</param>
         /// <param name="slotCount">Render-layer slot count; must cover every record's
         /// <see cref="ShapedSymbol.MaterialIndex"/>. Fixtures with no layer list pass 1 (slot 0).</param>
-        /// <param name="coverageFadingTiles">Tile keys the coverage cull classified <c>Fade</c> — still
-        /// resident and still drawn, easing out rather than popping.</param>
-        /// <param name="droppedTiles">Tile keys classified <c>Drop</c>: the record stays in the plan, MASKED, so
-        /// <see cref="CollectedCount"/> counts it but nothing stages it.</param>
         /// <param name="departingTiles">Tile keys whose records are DEPARTING (left cover, fading out). It
         /// feeds the <see cref="SymbolGatherPlan.Departing"/> field that production's IsDeparting fills.</param>
         /// <param name="fadeAliases">Cross-zoom fade handovers the reconciler would have found; <c>null</c> is none.</param>
         public SymbolGatherPlan Build(SymbolTileBuffer buffer, int slotCount = 1,
-            HashSet<long> coverageFadingTiles = null, HashSet<long> droppedTiles = null,
             HashSet<long> departingTiles = null, IReadOnlyList<FadeAlias> fadeAliases = null)
         {
             _store.Clear();
@@ -94,19 +87,15 @@ namespace MapRenderer.Tests
             // precondition.
             _store.CollectInto(blockId, localIndex, isDeparting, CrossTileSymbolKey.CanonicalGridMeters, out _);
 
-            var decisions = new List<byte>(blockId.Count);
             for (int i = 0; i < blockId.Count; i++)
             {
                 long tk = _store.OrderedBlocks[blockId[i]].TileKey;
-                decisions.Add(droppedTiles != null && droppedTiles.Contains(tk) ? SymbolTileCoverageFilter.Drop
-                    : coverageFadingTiles != null && coverageFadingTiles.Contains(tk) ? SymbolTileCoverageFilter.Fade
-                    : SymbolTileCoverageFilter.Keep);
                 if (departingTiles != null && departingTiles.Contains(tk)) isDeparting[i] = 1;
             }
 
             // The plan object is reused across calls, so the version must move or GatherIntoMirror's memo
             // would serve the previous frame's mirror.
-            _plan.Build(blockId, localIndex, isDeparting, decisions, _store.OrderedBlocks, fadeAliases, ++_version);
+            _plan.Build(blockId, localIndex, isDeparting, _store.OrderedBlocks, fadeAliases, ++_version);
             return _plan;
         }
 

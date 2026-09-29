@@ -1847,7 +1847,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                _quiescedPlan = _subsystem.CurrentBatch(default, 0.0);
+                _quiescedPlan = _subsystem.CurrentBatch();
                 bool settled = _quiescedPlan.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0
                                && !_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount == lastRecompute;
                 if (settled) { if (++stable >= 2) yield break; } else stable = 0;
@@ -1904,7 +1904,7 @@ namespace MapRenderer.Tests.Text
                 else if (f == 5) _subsystem.ReconcileLoadedTiles(loaded, nowSeconds: 101.0);  // event 2: A re-enters (STALE now)
                 else _subsystem.ReconcileLoadedTiles(f < 5 ? empty : loaded, nowSeconds: 101.0);
                 _subsystem.PumpBuilds();
-                SymbolGatherPlan held = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan held = _subsystem.CurrentBatch();
                 Assert.IsTrue(_subsystem.ReconcileInFlight(), $"frame {f}: the reconcile is gated in flight");
                 Assert.AreEqual(aWinners, held.WinnerCount, $"frame {f}: the stale FRONT A is served unchanged while pending");
                 Assert.AreEqual(0, DepartingSymbolCount(held), $"frame {f}: …still the active set (no premature departing swap)");
@@ -1930,7 +1930,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded, nowSeconds: 101.0); // store stays A-active
                 _subsystem.PumpBuilds();
-                SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan p = _subsystem.CurrentBatch();
                 if (p.WinnerCount > 0 && DepartingSymbolCount(p) == p.WinnerCount) { staleApplied = true; break; }
                 yield return null;
             }
@@ -1945,7 +1945,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded, nowSeconds: 101.0);
                 _subsystem.PumpBuilds();
-                SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan p = _subsystem.CurrentBatch();
                 if (p.WinnerCount > 0 && DepartingSymbolCount(p) == 0) { caughtUp = true; break; }
                 yield return null;
             }
@@ -1989,7 +1989,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
-                _subsystem.CurrentBatch(default, 0.0);
+                _subsystem.CurrentBatch();
                 if (!_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount > recomputeBefore) { faultPicked = true; break; }
                 yield return null;
             }
@@ -1997,7 +1997,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsTrue(_subsystem.ReconcileFaultObserved,
                 "the worker exception was OBSERVED directly (GetResult rethrew into the catch) — not merely inferred from inFlight");
 
-            SymbolGatherPlan held = _subsystem.CurrentBatch(default, 0.0);
+            SymbolGatherPlan held = _subsystem.CurrentBatch();
             Assert.AreEqual(aWinners, held.WinnerCount, "fault → NO swap; the old front A is held (the misaligned partial back never reached Build)");
             Assert.AreEqual(0, DepartingSymbolCount(held), "…and it is still the active set, not the faulted/empty back");
 
@@ -2008,7 +2008,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 1000.0);
                 _subsystem.PumpBuilds();
-                SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan p = _subsystem.CurrentBatch();
                 if (p.WinnerCount == 0) { recovered = true; break; }
                 yield return null;
             }
@@ -2038,7 +2038,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
-                _subsystem.CurrentBatch(default, 0.0);
+                _subsystem.CurrentBatch();
                 yield return null;
             }
             Assert.IsTrue(_subsystem.ReconcileInFlight(), "a reconcile is gated in flight (its back snapshot pins the shared block)");
@@ -2079,7 +2079,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
-                _subsystem.CurrentBatch(default, 0.0);
+                _subsystem.CurrentBatch();
                 yield return null;
             }
             Assert.IsTrue(_subsystem.ReconcileInFlight(), "a reconcile is gated in flight (its back snapshot pins the shared block)");
@@ -2125,7 +2125,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                _subsystem.CurrentBatch(default, 0.0);
+                _subsystem.CurrentBatch();
                 if (SymbolTileBlock.DebugLiveAllocCount == liveWithOneBlock + 1) { deferred = true; break; }
                 yield return null;
             }
@@ -2138,7 +2138,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                _subsystem.CurrentBatch(default, 0.0);
+                _subsystem.CurrentBatch();
                 if (_subsystem.ReadyTailCount() == 0 && !_subsystem.ReconcileInFlight()
                     && SymbolTileBlock.DebugLiveAllocCount == liveWithOneBlock) { freedBackToBaseline = true; break; }
                 yield return null;
@@ -2169,7 +2169,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
-                _subsystem.CurrentBatch(default, 0.0);
+                _subsystem.CurrentBatch();
                 if (_subsystem.ReconcileFaultObserved && !_subsystem.ReconcileInFlight()) { faultObserved = true; break; }
                 yield return null;
             }
@@ -2185,7 +2185,7 @@ namespace MapRenderer.Tests.Text
         }
 
         // ═══ The async production path yields the SAME winner plan as the store's inline CollectInto oracle
-        //          over the same quiesced state (minCoverage 0 ⇒ no coverage classify to perturb order). ═══
+        //          over the same quiesced state. ═══
 
         [UnityTest]
         public IEnumerator ProductionFront_MatchesInlineCollectOracle()
@@ -2194,7 +2194,7 @@ namespace MapRenderer.Tests.Text
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
             DriveTileBytesReady(tile);
             yield return PumpToQuiescence(new List<LoadedTileKey> { Key(tile) });
-            SymbolGatherPlan front = _subsystem.CurrentBatch(default, 0.0);
+            SymbolGatherPlan front = _subsystem.CurrentBatch();
 
             var oBlk = new List<int>(); var oLoc = new List<int>(); var oDep = new List<byte>();
             _subsystem.Store().CollectInto(oBlk, oLoc, oDep, SymbolSubsystem.DedupEnabled, out int _);
@@ -2242,7 +2242,7 @@ namespace MapRenderer.Tests.Text
             var harness = new LpsHarness();
             try
             {
-                SymbolGatherPlan plan = _subsystem.CurrentBatch(default, 0.0); // the subsystem's ONE reused _gatherPlan
+                SymbolGatherPlan plan = _subsystem.CurrentBatch(); // the subsystem's ONE reused _gatherPlan
                 harness.Lps.GatherIntoMirror(plan);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
                 int winnersBefore = plan.WinnerCount;
@@ -2254,7 +2254,7 @@ namespace MapRenderer.Tests.Text
                 {
                     _subsystem.ReconcileLoadedTiles(loaded);
                     _subsystem.PumpBuilds();
-                    SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                    SymbolGatherPlan p = _subsystem.CurrentBatch();
                     harness.Lps.GatherIntoMirror(p);
                     Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, $"frame {f}: no tile event — the gather must stay a memo HIT");
                 }
@@ -2273,7 +2273,7 @@ namespace MapRenderer.Tests.Text
                 // chance to complete) must still be a memo HIT serving the OLD content.
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                SymbolGatherPlan pEvent = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan pEvent = _subsystem.CurrentBatch();
                 harness.Lps.GatherIntoMirror(pEvent);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount,
                     "immediately after the store event the mirror must still be a memo HIT — event-keyed (rather " +
@@ -2292,7 +2292,7 @@ namespace MapRenderer.Tests.Text
                     _subsystem.ReconcileLoadedTiles(loaded);
                     _subsystem.PumpBuilds();
                     bool inFlightBefore = _subsystem.ReconcileInFlight();
-                    SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0); // PickupCompletedReconcile runs inside this call
+                    SymbolGatherPlan p = _subsystem.CurrentBatch(); // PickupCompletedReconcile runs inside this call
                     harness.Lps.GatherIntoMirror(p);
                     if (inFlightBefore) sawInFlight = true;
                     if (harness.Lps.MirrorRebuildCount > 1)
@@ -2311,7 +2311,7 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(2, harness.Lps.MirrorRebuildCount,
                     "exactly ONE heavy rebuild for the single, precisely-timed swap — a missing version bump would leave this flat");
 
-                SymbolGatherPlan finalPlan = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan finalPlan = _subsystem.CurrentBatch();
                 Assert.AreEqual(winnersBefore, finalPlan.WinnerCount, "coupled constraint: WinnerCount must be UNCHANGED across the swap");
 
                 // (c) content genuinely changed — the memo, when it correctly invalidated, picked up the
@@ -2326,7 +2326,7 @@ namespace MapRenderer.Tests.Text
                 {
                     _subsystem.ReconcileLoadedTiles(loaded);
                     _subsystem.PumpBuilds();
-                    SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                    SymbolGatherPlan p = _subsystem.CurrentBatch();
                     harness.Lps.GatherIntoMirror(p);
                     Assert.AreEqual(rebuildAfterSwap, harness.Lps.MirrorRebuildCount, $"post-swap frame {f}: back to a memo HIT");
                 }
@@ -2363,7 +2363,7 @@ namespace MapRenderer.Tests.Text
             var harness = new LpsHarness();
             try
             {
-                SymbolGatherPlan plan = _subsystem.CurrentBatch(default, 0.0);
+                SymbolGatherPlan plan = _subsystem.CurrentBatch();
                 harness.Lps.GatherIntoMirror(plan);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
                 Assert.Greater(plan.WinnerCount, 0, "sanity: the tile produced at least one winner before the restyle");
@@ -2372,7 +2372,7 @@ namespace MapRenderer.Tests.Text
                 StyleDocument restyle = TestStyle.Document(StyleJson);
                 _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
 
-                SymbolGatherPlan afterRestyle = _subsystem.CurrentBatch(default, 0.0); // SAME _gatherPlan object, now empty
+                SymbolGatherPlan afterRestyle = _subsystem.CurrentBatch(); // SAME _gatherPlan object, now empty
                 Assert.DoesNotThrow(() => harness.Lps.GatherIntoMirror(afterRestyle),
                     "a same-object, now-empty plan must rebuild cleanly (no out-of-range read) after a restyle");
                 Assert.AreEqual(2, harness.Lps.MirrorRebuildCount,
@@ -2438,9 +2438,7 @@ namespace MapRenderer.Tests.Text
             var plan = new SymbolGatherPlan();
             try
             {
-                var decisions = new List<byte>(result.BlockId.Count);
-                for (int i = 0; i < result.BlockId.Count; i++) decisions.Add(SymbolTileCoverageFilter.Keep);
-                plan.Build(result.BlockId, result.LocalIndex, result.IsDeparting, decisions, result.OrderedBlocks, result.FadeAliases, winnerSetVersion: 0);
+                plan.Build(result.BlockId, result.LocalIndex, result.IsDeparting, result.OrderedBlocks, result.FadeAliases, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan); // derefs the (still-alive, pinned) block's NativeArrays — a freed block here is a UAF
                 var gathered = new SymbolBatch();
                 harness.Lps.CopyMirrorInto(gathered);

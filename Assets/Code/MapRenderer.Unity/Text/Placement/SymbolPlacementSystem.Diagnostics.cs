@@ -75,7 +75,6 @@ namespace MapRenderer.Unity.Text.Placement
 
             for (int r = 0; r < _mirrorCount; r++)
             {
-                if (_mirrorSymbolDropped[r] != 0) continue; // Dropped: masked out of placement, not an "input" symbol
                 input++;
 
                 int detail = _mirrorDetail[r];
@@ -119,7 +118,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// a per-layer table sorted by record count descending, and the top→bottom screen-band histogram.</summary>
         /// <param name="perLayer">Per-layer tallies from the capture.</param>
         /// <param name="bandOnScreen">On-screen record count per vertical band (index 0 = top).</param>
-        /// <param name="input">Total non-dropped input records.</param>
+        /// <param name="input">Total input records.</param>
         /// <param name="projected">Records that reached projection (gather kept them).</param>
         /// <param name="onScreen">Records that projected on screen, in front of the camera.</param>
         /// <param name="behind">Records projected behind the camera / off viewport.</param>
@@ -133,17 +132,16 @@ namespace MapRenderer.Unity.Text.Placement
             sb.AppendLine("========== LABEL BREAKDOWN ==========");
             sb.AppendLine($"camera: zoom {cam.Zoom:F2}  tilt {math.degrees(cam.Tilt.Radians):F1}°  " +
                           $"heading {math.degrees(cam.Heading.Radians):F1}°   viewport {viewportLogicalPx.x:F0}x{viewportLogicalPx.y:F0} logical");
-            sb.AppendLine($"input records (non-dropped): {input}");
+            sb.AppendLine($"input records: {input}");
             sb.AppendLine($"  ├─ projected (gather kept):  {projected}   ({input - projected} culled pre-projection)");
             sb.AppendLine($"  │    ├─ on screen:           {onScreen}");
             sb.AppendLine($"  │    └─ behind / off-view:   {behind}");
             sb.AppendLine($"  └─ hard-skipped by cull:     {culled}");
             // Per-trigger split of the hard-skips. Each counts only fade-dead records that fired that trigger,
-            // so the five sum to `culled`.
+            // so the four sum to `culled`.
             sb.AppendLine($"       ├─ zoom-gated:      {LastZoomCulledCount}");
             sb.AppendLine($"       ├─ distance (far):  {LastDistanceCulledCount}");
             sb.AppendLine($"       ├─ horizon:         {LastHorizonCulledCount}");
-            sb.AppendLine($"       ├─ coverage-fading: {LastCoverageFadingCulledCount}");
             sb.AppendLine($"       └─ departing:       {LastDepartingCulledCount}");
             sb.AppendLine();
 

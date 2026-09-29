@@ -22,9 +22,6 @@ namespace MapRenderer.Core.Text.Placement
         public int[]     WorldCount = Array.Empty<int>();   // 1 (point anchor) or path length (curved)
         public double3[] RepAnchor  = Array.Empty<double3>(); // the distance-cull point (RepresentativeAnchor)
         public bool[]    SymbolDeparting = Array.Empty<bool>(); // per record → its tile is leaving cover (fade OUT, don't pop)
-        // Separate from SymbolDeparting: a coverage-fading tile is still active (loaded, in cover); only its
-        // on-screen coverage crossed below threshold (SymbolTileCoverageFilter).
-        public bool[]    SymbolCoverageFading = Array.Empty<bool>(); // per record → its tile's coverage crossed below threshold (fade OUT, don't pop)
         public int       Count;                             // number of records (symbols)
 
         // ── point details ──
@@ -79,12 +76,12 @@ namespace MapRenderer.Core.Text.Placement
 
         // ── append helpers (geometric growth, never shrink) — the builder appends; the counts are the live length ──
         public int AddSymbol(SymbolPlacementKind kind, int detail, int worldStart, int worldCount, in double3 repAnchor,
-            bool departing, bool coverageFading)
+            bool departing)
         {
             Grow(ref Kinds, Count); Grow(ref Detail, Count); Grow(ref WorldStart, Count); Grow(ref WorldCount, Count);
-            Grow(ref RepAnchor, Count); Grow(ref SymbolDeparting, Count); Grow(ref SymbolCoverageFading, Count);
+            Grow(ref RepAnchor, Count); Grow(ref SymbolDeparting, Count);
             Kinds[Count] = kind; Detail[Count] = detail; WorldStart[Count] = worldStart; WorldCount[Count] = worldCount;
-            RepAnchor[Count] = repAnchor; SymbolDeparting[Count] = departing; SymbolCoverageFading[Count] = coverageFading;
+            RepAnchor[Count] = repAnchor; SymbolDeparting[Count] = departing;
             return Count++;
         }
 

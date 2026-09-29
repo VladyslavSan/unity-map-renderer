@@ -118,19 +118,11 @@ namespace MapRenderer.Unity.Rendering.Map
         public double StyleTransitionDelaySeconds = Rendering.Layers.StyleTransition.Default.DelaySeconds;
 
         [Header("Symbols")]
-        [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
-                 "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +
-                 "tilt-foreshortened horizon tile pile-up, whose labels are collision-discarded anyway. " +
-                 "Read live every Update → tweak in Play to eyeball it. Default 0.05 (a tile must cover 5% of the " +
-                 "screen to keep its labels). Raise to cull more aggressively; set <= 0 to DISABLE the cull.")]
-        public double SymbolTileCoverageCull = 0.05;
-
         [Range(0f, 1f)]
         [Tooltip("Per-label far-distance cull, as a FRACTION of the camera far plane. Each label whose anchor is " +
                  "farther from the camera than this fraction × the far distance is skipped before project/collide/" +
-                 "build (a previously-visible one fades out in place, same as every other cull). Distinct from the " +
-                 "tile-coverage cull above: that drops a whole TILE by on-screen area, this tests each LABEL by " +
-                 "distance. Read live every Update → tweak in Play to eyeball it. Default 1.0 (cull at the far plane " +
+                 "build (a previously-visible one fades out in place, same as every other cull). Read live every " +
+                 "Update → tweak in Play to eyeball it. Default 1.0 (cull at the far plane " +
                  "— near-inert, since tile selection already frustum-bounds tiles by the same far); lower it to " +
                  "pull distant labels in closer than the full frustum depth. 0 = OFF: the cull distance collapses " +
                  "to zero, which the cull reads as its non-positive disable and keeps ALL labels (so the slider " +

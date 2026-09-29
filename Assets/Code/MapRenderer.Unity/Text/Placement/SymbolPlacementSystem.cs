@@ -239,10 +239,6 @@ namespace MapRenderer.Unity.Text.Placement
         // Index-parallel to _mirrorWorldPoints — the unit surface normal at each point; not yet consumed.
         private NativeList<float3>  _mirrorWorldUps;
         private NativeList<byte>    _mirrorSymbolDeparting;
-        private NativeList<byte>    _mirrorSymbolCoverageFading;
-        /// <summary>The tile-coverage cull's Drop decision as a per-symbol mask. A Dropped winner stays
-        /// resident in the mirror; <c>GatherSymbolPoints</c> hard-skips it first, unconditionally.</summary>
-        private NativeList<byte>    _mirrorSymbolDropped;
         // Mirror-side counts — the shared core reads these instead of any managed source's counts.
         private int _mirrorCount;
         private int _mirrorPointCount;
@@ -252,9 +248,6 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mirrorAnchorCount;
         private int _mirrorFadeCount;
         private int _mirrorWorldPointCount;
-        /// <summary><c>_mirrorCount</c> includes Dropped symbols, so it does not mean "any placement
-        /// work this frame". <c>UpdateCore</c>'s gate reads this field instead, so an all-Dropped frame keeps fades frozen.</summary>
-        private int _mirrorNonDroppedCount;
 
         // ── mirror: staging-output upper bounds (camera-independent — summed from the gathered blocks) ──
         private int _mirrorMaxBoxes;
@@ -299,7 +292,6 @@ namespace MapRenderer.Unity.Text.Placement
                 InputSymbolCount         = LastInputSymbolCount,
                 DistanceCulledSymbols    = LastDistanceCulledCount,
                 HorizonCulledSymbols     = LastHorizonCulledCount,
-                CoverageFadingSymbols    = LastCoverageFadingCulledCount,
                 ZoomCulledSymbols        = LastZoomCulledCount,
                 CollisionCandidateCount = LastCandidateCount,
                 CollisionSurvivorCount  = LastSurvivorCount,
@@ -344,10 +336,6 @@ namespace MapRenderer.Unity.Text.Placement
         /// each Update, the cost being measured. Keep it the raw size: filtering it would silently disarm
         /// <c>SymbolFadeTests.Update_StableCollisionLoser_LeavesNoFadeRecordBehind</c>, which pins this exact count.</summary>
         internal int LiveFadeSymbolCount => _fadeOpacity.Count;
-
-        /// <summary>Symbols skipped on the last Update because their tile's coverage dropped below threshold and
-        /// have now fully faded out. Mirrors <see cref="LastDepartingCulledCount"/> for the coverage trigger.</summary>
-        internal int LastCoverageFadingCulledCount { get; private set; }
 
         /// <summary>The map view this system renders symbols for. Read after <see cref="MapCamera.SyncToCamera"/>
         /// commits the frame transform — <c>MapView.LateUpdate</c> runs sync → rebase → place, in that order.</summary>
@@ -399,8 +387,6 @@ namespace MapRenderer.Unity.Text.Placement
             _mirrorWorldPoints = new NativeList<double3>(Allocator.Persistent);
             _mirrorWorldUps = new NativeList<float3>(Allocator.Persistent);
             _mirrorSymbolDeparting = new NativeList<byte>(Allocator.Persistent);
-            _mirrorSymbolCoverageFading = new NativeList<byte>(Allocator.Persistent);
-            _mirrorSymbolDropped = new NativeList<byte>(Allocator.Persistent);
             _stagePointOffset = new NativeList<int>(Allocator.Persistent);
             _stageAnchorWasPlaced = new NativeList<byte>(Allocator.Persistent);
             _placedLastFrame = new NativeHashSet<long>(PlacedSetInitialCapacity, Allocator.Persistent);
@@ -413,7 +399,7 @@ namespace MapRenderer.Unity.Text.Placement
             _slotVisibleThisFrame = new NativeList<bool>(Allocator.Persistent);
             _slotTranslateThisFrame = new NativeList<float2>(Allocator.Persistent);
             _slotDeclaredOrderThisFrame = new NativeList<int>(Allocator.Persistent);
-            _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, Allocator.Persistent);
+            _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Distance + 1, Allocator.Persistent);
             // _debugFadeIdSeen isn't allocated here — see its field doc; AssertFadeIdsUnique allocates it lazily.
             _stageBoxes = new NativeList<SymbolBox>(Allocator.Persistent);
             _stageQuads = new NativeList<PlacedQuad>(Allocator.Persistent);
@@ -451,19 +437,19 @@ namespace MapRenderer.Unity.Text.Placement
             Texture2D spriteTexture = null)
         {
             using (PmGather.Auto())
-                GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount, which includes Dropped symbols
-            UpdateCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
+                GatherIntoMirror(plan);
+            UpdateCore(frame, atlas, deltaTime, symbolLayers, spriteTexture);
             RefreshTelemetry();   // after the pass, so the levels are this Update's
         }
 
 
         // The per-frame core reads only the native mirror, never a managed source — split out from Update.
         private void UpdateCore(in SceneFrame frame, GlyphAtlasTexture atlas,
-            float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers, int inputSymbolCount,
+            float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers,
             Texture2D spriteTexture = null)
         {
             UpdateCount++;
-            LastInputSymbolCount = inputSymbolCount;
+            LastInputSymbolCount = _mirrorCount;
 
             using (PmUpdate.Auto())
             {
@@ -484,15 +470,13 @@ namespace MapRenderer.Unity.Text.Placement
                 LastDistanceCulledCount = 0;
                 LastDepartingCulledCount = 0;
                 LastHorizonCulledCount = 0;
-                LastCoverageFadingCulledCount = 0;
                 LastZoomCulledCount = 0;
 
                 WorldRenderer.BeginFrame(); // clear every live world slot's accumulators
 
                 int totalQuads = 0;
 
-                // Gate on the EFFECTIVE non-Dropped count (see _mirrorNonDroppedCount's field doc).
-                if (_mirrorNonDroppedCount > 0 && atlas?.Texture != null && _worldTextMaterial != null)
+                if (_mirrorCount > 0 && atlas?.Texture != null && _worldTextMaterial != null)
                 {
                     // One per-frame view transform: SymbolProjectionJob projects anchors with it and StageJob
                     // builds the projected collision boxes from it.
@@ -522,7 +506,6 @@ namespace MapRenderer.Unity.Text.Placement
                         // Gathers every un-culled symbol's world point — O(input), since it culls even when everything is culled.
                         using (PmGatherPoints.Auto())
                         {
-                            // A Dropped tile's symbols stay resident and get hard-skipped below; a Fading tile's still gather.
                             GatherSymbolPoints(in frame, symbolCullDistance, occCentre, globeRadiusSq,
                                                symbolLayers, _camera.CurrentProperties.Zoom);
                         }
@@ -638,12 +621,11 @@ namespace MapRenderer.Unity.Text.Placement
 
             _gatherTrigger.ResizeUninitialized(_mirrorCount);
 
-            // Pass 1 — Cull: priority dropped → departing → coverage → zoom → horizon → distance.
+            // Pass 1 — Cull: priority departing → zoom → horizon → distance.
             using (PmGatherCull.Auto())
                 new CullJob
                 {
-                    SymbolDropped = _mirrorSymbolDropped.AsArray(), SymbolDeparting = _mirrorSymbolDeparting.AsArray(),
-                    SymbolCoverageFading = _mirrorSymbolCoverageFading.AsArray(),
+                    SymbolDeparting = _mirrorSymbolDeparting.AsArray(),
                     RepAnchor = _mirrorRepAnchor.AsArray(), Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(),
                     Points = _mirrorPoints.AsArray(), Curveds = _mirrorCurveds.AsArray(),
                     SlotVisible = _slotVisibleThisFrame.AsArray(),
@@ -675,7 +657,6 @@ namespace MapRenderer.Unity.Text.Placement
                 }.Run();
 
                 LastDepartingCulledCount      += _gatherCulledCounts[(int)GatherTrigger.Departing];
-                LastCoverageFadingCulledCount += _gatherCulledCounts[(int)GatherTrigger.Coverage];
                 LastZoomCulledCount            += _gatherCulledCounts[(int)GatherTrigger.Zoom];
                 LastHorizonCulledCount         += _gatherCulledCounts[(int)GatherTrigger.Horizon];
                 LastDistanceCulledCount        += _gatherCulledCounts[(int)GatherTrigger.Distance];
@@ -913,9 +894,8 @@ namespace MapRenderer.Unity.Text.Placement
             MirrorRebuildCount++;
             int winners = plan?.WinnerCount ?? 0;
 
-            // The three per-frame masks are WritePerFrameMasks' inputs, resized here on the main thread.
-            _mirrorSymbolDeparting.ResizeUninitialized(winners); _mirrorSymbolCoverageFading.ResizeUninitialized(winners);
-            _mirrorSymbolDropped.ResizeUninitialized(winners);
+            // The per-frame mask is WritePerFrameMasks' input, resized here on the main thread.
+            _mirrorSymbolDeparting.ResizeUninitialized(winners);
 
             if (winners == 0)
             {
@@ -976,7 +956,7 @@ namespace MapRenderer.Unity.Text.Placement
 
             _mirrorCount = winners; // set before WritePerFrameMasks, which bounds copies on this frame's count
 
-            // The per-frame masks + _mirrorNonDroppedCount are the only per-frame inputs, written by one shared writer.
+            // The per-frame departing mask is the only per-frame input, written by one shared writer.
             WritePerFrameMasks(plan);
 
             // Stamps the shared source key so a later same-plan-and-version Update memo-hits above; anything else rebuilds.
@@ -1025,11 +1005,8 @@ namespace MapRenderer.Unity.Text.Placement
         // the winner set. A length mismatch here is unsafe, which is why GatherIntoMirror's count check is non-optional.
         private void WritePerFrameMasks(SymbolGatherPlan plan)
         {
-            if (plan == null || _mirrorCount == 0) { _mirrorNonDroppedCount = 0; return; } // clean no-op (incl. the null-plan heavy path)
+            if (plan == null || _mirrorCount == 0) return; // clean no-op (incl. the null-plan heavy path)
             NativeArray<byte>.Copy(plan.Departing.AsArray(), 0, _mirrorSymbolDeparting.AsArray(), 0, _mirrorCount);
-            NativeArray<byte>.Copy(plan.CoverageFading.AsArray(), 0, _mirrorSymbolCoverageFading.AsArray(), 0, _mirrorCount);
-            NativeArray<byte>.Copy(plan.Dropped.AsArray(), 0, _mirrorSymbolDropped.AsArray(), 0, _mirrorCount);
-            _mirrorNonDroppedCount = _mirrorCount - plan.DroppedCount; // UpdateCore gates on this, not _mirrorCount
         }
 
         // Debug-only. A fire means the memo key said "same set" but the count disagrees — a future site landed without bumping WinnerSetVersion.
@@ -1054,7 +1031,6 @@ namespace MapRenderer.Unity.Text.Placement
             dest.WorldCount = ToArray(_mirrorWorldCount, _mirrorCount);
             dest.RepAnchor = ToArray(_mirrorRepAnchor, _mirrorCount);
             dest.SymbolDeparting = ToBoolArray(_mirrorSymbolDeparting, _mirrorCount);
-            dest.SymbolCoverageFading = ToBoolArray(_mirrorSymbolCoverageFading, _mirrorCount);
             dest.Count = _mirrorCount;
 
             dest.Points = ToArray(_mirrorPoints, _mirrorPointCount);
@@ -1220,9 +1196,9 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        /// <summary>The camera's view-projection matrix — the single definition shared by <see cref="Update"/>
-        /// and the coverage pre-cull, so both see the same frame. Column-major, matching <c>SymbolScreenProjection</c>'s convention.</summary>
-        internal static float4x4 ViewProj(Camera camera)
+        /// <summary>The camera's view-projection matrix — the single definition <see cref="Update"/> uses.
+        /// Column-major, matching <c>SymbolScreenProjection</c>'s convention.</summary>
+        private static float4x4 ViewProj(Camera camera)
             => math.mul(ToFloat4x4(camera.projectionMatrix), ToFloat4x4(camera.worldToCameraMatrix));
 
         internal static float4x4 ToFloat4x4(Matrix4x4 m)
@@ -1277,7 +1253,7 @@ namespace MapRenderer.Unity.Text.Placement
             _mirrorPoints.Dispose(); _mirrorCurveds.Dispose();
             _mirrorQuads.Dispose(); _mirrorGlyphs.Dispose(); _mirrorAnchors.Dispose(); _mirrorFadeIds.Dispose();
             _mirrorWorldStart.Dispose(); _mirrorRepAnchor.Dispose(); _mirrorWorldPoints.Dispose(); _mirrorWorldUps.Dispose(); // Stage-2 symbol-level fields
-            _mirrorSymbolDeparting.Dispose(); _mirrorSymbolCoverageFading.Dispose(); _mirrorSymbolDropped.Dispose();
+            _mirrorSymbolDeparting.Dispose();
             _stagePointOffset.Dispose(); _stageAnchorWasPlaced.Dispose();
             _stageBoxes.Dispose(); _stageQuads.Dispose(); _stageCandidates.Dispose(); _stageEmit.Dispose();
             _stageCounts.Dispose(); _stagePath.Dispose(); _stageCumulativeLength.Dispose();

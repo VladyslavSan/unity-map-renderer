@@ -85,7 +85,7 @@ namespace MapRenderer.Unity.Rendering.Map
         public double2 ViewportPx => new double2(Camera.pixelWidth, Camera.pixelHeight);
 
         /// <summary>Logical (DPR-normalized) viewport size — <see cref="ViewportPx"/> ÷ <see cref="DevicePixelRatio"/>,
-        /// the screen-space unit the symbol placement, coverage-cull and altitude-framing code measure in.
+        /// the screen-space unit the symbol placement and altitude-framing code measure in.
         /// <para>Non-local invariant: the division and its unusable-ratio fallback live in <see cref="DeviceScaling"/>,
         /// shared with the paint conversion, so an unconfigured ratio cannot frame and paint differently.
         /// </para></summary>

@@ -111,10 +111,6 @@ namespace MapRenderer.App
                  "the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.")]
         public int SymbolCachedTiles;
 
-        [Tooltip("Tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
-                 "coverage threshold; kept resident but masked out of placement). Tune SymbolTileCoverageCull.")]
-        public int SymbolCoverageDropped;
-
         [Header("Symbol labels — PLACEMENT (published by SymbolPlacementSystem)")]
         [Tooltip("Symbols fed into the last placement Update (before projection cull) — sum over active tiles.")]
         public int SymbolInputCount;
@@ -122,10 +118,6 @@ namespace MapRenderer.App
         [Tooltip("B-3: labels skipped by the pre-projection horizon/distance cull last Update (never projected/" +
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
         public int SymbolDistanceCulled;
-
-        [Tooltip("Tile-coverage pre-cull companion: labels whose tile just crossed below coverage and finished " +
-                 "fading out this Update (they faded, not popped) — the transient tail of the coverage drop.")]
-        public int SymbolCoverageFading;
 
         [Tooltip("Symbols skipped last Update because their layer is out of the live zoom's [minzoom, maxzoom) — " +
                  "the display-time gate moved ahead of projection, so overzoom points (a z14 tile's poi_r* before " +
@@ -224,14 +216,12 @@ namespace MapRenderer.App
         {
             SymbolActiveTiles      = store.ActiveSymbolTiles;
             SymbolCachedTiles      = store.CachedSymbolTiles;
-            SymbolCoverageDropped = store.CoverageDroppedSymbols;
         }
 
         private void OnSymbolPlacementTelemetry(in SymbolPlacementTelemetrySnapshot placement)
         {
             SymbolInputCount      = placement.InputSymbolCount;
             SymbolDistanceCulled = placement.DistanceCulledSymbols;
-            SymbolCoverageFading = placement.CoverageFadingSymbols;
             SymbolZoomCulled     = placement.ZoomCulledSymbols;
             SymbolCollisionCandidates  = placement.CollisionCandidateCount;
             SymbolCollisionSurvivors   = placement.CollisionSurvivorCount;

@@ -297,7 +297,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                active = _subsystem.CurrentBatch(default, 0.0);
+                active = _subsystem.CurrentBatch();
                 if (active.WinnerCount > 0) break;
                 yield return null;
             }
@@ -318,7 +318,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             {
                 _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
-                departing = _subsystem.CurrentBatch(default, 0.0);
+                departing = _subsystem.CurrentBatch();
                 if (departing.WinnerCount > 0 && DepartingSymbolCount(departing) == departing.WinnerCount) { flipped = true; break; }
                 yield return null;
             }
@@ -342,7 +342,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                active = _subsystem.CurrentBatch(default, 0.0);
+                active = _subsystem.CurrentBatch();
                 if (active.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0) { quiesced = true; break; }
                 yield return null;
             }
@@ -360,7 +360,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             {
                 _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
-                departing = _subsystem.CurrentBatch(default, 0.0);
+                departing = _subsystem.CurrentBatch();
                 if (departing.WinnerCount > 0 && DepartingSymbolCount(departing) == departing.WinnerCount) { flipped = true; break; }
                 yield return null;
             }

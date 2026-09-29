@@ -49,13 +49,13 @@ discrete tile event, and that recomputation is **scheduled off the main thread**
    per frame (main thread):                                 │ (finished)
      if a completed reconcile is pending AND its gen is current:
          diff current set A vs B  →  drive appear/disappear through the FADE machine  →  A := B
-     process the CURRENT set: coverage cull → project → collide → fade → draw
+     process the CURRENT set: project → collide → fade → draw
 ```
 
 - **Between event and pickup, render the slightly-stale A.** For labels this is fine — a new tile's labels
   appear a frame or two late; a removed tile's linger and fade. Stable frame rate outranks momentary
   staleness here, as it does for tiles.
-- **Per-frame work is only the camera- and time-dependent pass:** coverage cull (`ClassifyActive`),
+- **Per-frame work is only the camera- and time-dependent pass:**
   projection, collision/placement, the fade state machine, world-quad build. That stays on the main thread (it
   reads the camera and must be current). The dedup is not on the per-frame path at all.
 
@@ -151,8 +151,6 @@ Two properties keep the swap stable:
 
 - **Curved (line) labels never dedup:** the reconcile emits every active curved symbol in scan order, with
   no key and `LineFadeId` as identity, so they are always-winners and cannot churn the dedup.
-- **`ClassifyActive` stays per-frame** (camera-dependent, cheap) and classifies the same front set the plan
-  is built from, in the same `CurrentBatch` call, so a stale front stays self-consistent.
 
 ---
 

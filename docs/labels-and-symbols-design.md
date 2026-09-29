@@ -127,7 +127,7 @@ is load-bearing:
      TileManager.CollectLoadedTileKeys(scratch)         // PULL the current loaded set
      SymbolSubsystem.ReconcileLoadedTiles(scratch, now) // release departed / restore cache-hit symbols
      SymbolSubsystem.PumpBuilds()                        // start ≤N queued builds, coalesce one atlas upload
-     plan = SymbolSubsystem.CurrentBatch(sceneFrame, minCoverage, now)  // this frame's winner plan (+ coverage pre-cull)
+     plan = SymbolSubsystem.CurrentBatch()                              // this frame's winner plan
      SymbolPlacementSystem.Update(sceneFrame, plan, atlas, dt, symbolLayers, iconTexture)
    else:
      nothing to place — a style with no symbol layers skips this step entirely.
@@ -140,16 +140,11 @@ never diverge.
 
 The bridge between the two clocks: `CurrentBatch` returns a `SymbolGatherPlan` — one entry per cross-tile
 dedup winner, in final render order, pointing at its pre-baked `SymbolTileBlock` symbol via `BlockId`/
-`LocalIndex`, plus three per-frame overrides (`Departing`, `CoverageFading`, `Dropped`) applied at plan-fill
-time. Gathering the real per-symbol Structure-of-Arrays happens later, inside `SymbolPlacementSystem`'s native
-mirror, not here.
+`LocalIndex`, plus one per-frame override (`Departing`) applied at plan-fill time. Gathering the real
+per-symbol Structure-of-Arrays happens later, inside `SymbolPlacementSystem`'s native mirror, not here.
 
 The plan is rebuilt **every frame** from the reconciled tile set ("Tile lifecycle"; the reconcile itself is
 async — `docs/labels-async-reconcile-design.md`), reusing its native lists (allocation-free once warm).
-Between the cross-tile dedup and the plan fill, `CurrentBatch` also runs the tile-coverage pre-cull
-("Tile-coverage pre-cull"), which **masks** rather than compacts: every collected winner stays resident
-(`WinnerCount` counts them all) and a `Dropped` winner is hard-skipped downstream, in
-`SymbolPlacementSystem.GatherSymbolPoints`.
 
 The plan carries a **`WinnerSetVersion`**, bumped on every front-content change (reconcile swap / restyle /
 dispose); `SymbolPlacementSystem` mirrors it into native buffers only when the version changes.
@@ -167,9 +162,8 @@ Update(sceneFrame, plan, atlas, dt, symbolLayers, spriteTexture)
  │                                               survivors by FadeId (B-4, Track B below)
  ├─ PmProject
  │   ├─ PmGatherPoints
- │   │   └─ GatherSymbolPoints(...) : Burst CullJob (per-record verdict) + CompactJob — flatten un-Dropped
- │   │                                winners' world points; a culled winner's offset is set to -1 (the
- │   │                                tile-coverage pre-cull already ran upstream, in CurrentBatch)
+ │   │   └─ GatherSymbolPoints(...) : Burst CullJob (per-record verdict) + CompactJob — flatten the
+ │   │                                winners' world points; a culled winner's offset is set to -1
  │   ├─ PmProjectPositions
  │   │   └─ ProjectSymbols(...)     : Burst SymbolProjectionJob — world → screen/depth for all at once
  │   └─ PmStage
@@ -187,26 +181,22 @@ mesh, binds its texture and enables its pooled scene node's MeshRenderer, hiding
 Update (an idle slot is reclaimed after 60 frames).
 ```
 
-Five fade-out triggers happen **before** any projection/staging/collision, classified by `GatherTrigger` in
-`CullJob` (verdict chain: dropped → departing → coverage → zoom → horizon → distance → none) and applied in
+Four fade-out triggers happen **before** any projection/staging/collision, classified by `GatherTrigger` in
+`CullJob` (verdict chain: departing → zoom → horizon → distance → none) and applied in
 `GatherSymbolPoints`:
 
 1. **Departing** (`SymbolDeparting`): the winner's tile is leaving cover ("Retain-as-departing"). Fades out
    unconditionally.
-2. **Coverage-fading** (`SymbolCoverageFading`): the winner's tile just dropped below the coverage threshold
-   and is easing out over the grace window before it is dropped from the plan entirely. Set by the
-   tile-coverage pre-cull; a still-loaded, in-cover tile (distinct from `SymbolDeparting`'s leaving-cover
-   meaning).
-3. **Zoom** (`GatherTrigger.Zoom`): drop a symbol outside its own live zoom range.
-4. **S3 horizon cull** (`GatherTrigger.Horizon`): drop a symbol whose anchor is hidden behind the globe's own
+2. **Zoom** (`GatherTrigger.Zoom`): drop a symbol outside its own live zoom range.
+3. **S3 horizon cull** (`GatherTrigger.Horizon`): drop a symbol whose anchor is hidden behind the globe's own
    bulk (no-op under a planar projection).
-5. **B-3 distance cull** (`GatherTrigger.Distance`): drop an individual symbol beyond a threshold fraction of
+4. **B-3 distance cull** (`GatherTrigger.Distance`): drop an individual symbol beyond a threshold fraction of
    the camera's far plane (`SymbolMaxDistanceFraction × CurrentFarMetres`, computed once per Update).
 
 A triggered winner is **not** hard-dropped while its fade is still alive: gather keeps STAGING it (re-projected
 to its live position) and forces its opacity toward 0 in emit — so it eases OUT in place instead of popping.
 Only once fully faded does gather set its offset to `-1` (the Burst stage job's "skip"). This soft-cull is the
-single mechanism behind all five; the stage, projection and collision jobs know nothing of any trigger.
+single mechanism behind all four; the stage, projection and collision jobs know nothing of any trigger.
 
 **`SymbolPlacementSystem`'s own identity:** it is a plain class (NOT a MonoBehaviour) — the "placed every
 frame" path (`ARCHITECTURE.md` § "Two geometry classes, two paths"), structurally distinct from the static
@@ -222,103 +212,11 @@ Update's own verdict is harvested at the START of the next one. A slot that prod
 atlas, empty batch, everything culled/suppressed) is HIDDEN, not left drawing stale content;
 `WorldSymbolRenderer.EndFrame` owns this per-slot show/hide.
 
-## 1.5 Tile-coverage pre-cull
+## 1.5 Retain-as-departing — fading a tile out when it leaves cover
 
-A coarse step *before* the per-label pipeline: skip a tile's labels entirely when the tile covers less than ~N%
-of the screen. Small-on-screen tiles are the horizon pile-up under tilt — most of their labels get
-collision-culled anyway, so gather → project → stage → collide on them is wasted work. Dropping them whole
-stabilizes per-frame label cost with barely any lost information. Complements the per-**label** B-3 distance
-cull (a horizon *radius*): this is a per-**tile** *screen-area* metric, which catches the tilt-foreshortened
-slivers a radius keeps.
-
-**Where it runs.** The cull runs in `SymbolSubsystem.CurrentBatch`, **after** picking up the async reconciler's
-cross-tile dedup (`docs/labels-async-reconcile-design.md`) and **before** filling the gather plan — before any
-per-label work (glyph/quad copies, sRGB→linear, fade-id hashing) so a tile about to be dropped never pays for it:
-
-```
-CurrentBatch(frame, minCoverage, now)
-    PickupCompletedReconcile(); ScheduleReconcileIfDirty()   // pick up the off-main A-3 dedup
-    SymbolTileCoverageFilter.ClassifyActive(                 // ◄── pre-build cull (this section):
-        blockTileKeys, frontResult.BlockId, frontResult.IsDeparting,    //   PER BLOCK — one classification per
-        projection, frame.SceneOriginRender, viewProj, viewportLogicalPx, //  (source, tile), fanned out to
-        frame.Rebase, minCoverage,                                        //  every winner sharing that block
-        _coverageAbovePrev, _coverageAboveThisFrame, _coverageDepartingUntil, _coverageFadingTiles,
-        now, DepartingGraceSeconds, _tileDecisions, _blockDecision, _planDecision, out culled)
-    swap(_coverageAbovePrev, _coverageAboveThisFrame); PurgeExpiredCoverageDeadlines(now)
-    _gatherPlan.Build(frontResult.BlockId, frontResult.LocalIndex,      // MASKS Dropped winners in place — every
-        frontResult.IsDeparting, _planDecision, frontResult.OrderedBlocks, frontSetVersion) // winner stays
-                                                                         // resident (winner plan); flags CoverageFading
-```
-
-Cull **after** dedup, not before/inside it: culling pre-dedup would change dedup *winners* — a <5%-coverage
-child tile culled ahead of the A-3 pass would let its >5% parent win the finest-zoom-wins tiebreak
-(`z = TileKey>>44`) and render a symbol the child's copy otherwise hides. Cull-after-dedup preserves winners
-and keeps the dedup independent of the cull.
-
-**Scope: active winners only.** A departing winner ("Retain-as-departing", a tile leaving cover retained for a fade-out) is
-left at `Keep` unconditionally and never classified — a departing-only block touches none of this filter's
-cross-frame state (deadline stamp, above-set, fading-set), regardless of its own tile's coverage.
-
-The filter itself is an engine-free Core seam, **`SymbolTileCoverageFilter.ClassifyActive`** — Core, so it
-compiles into `Tools/core-tests` (`SymbolTileCoverageFilterTests`) for a fast, RED-verifiable loop. It
-classifies **per BLOCK, not per winner**: every winner produced from one baked `(source, tile)` block shares
-that block's tile key, so the classifier resolves each unique tile's coverage ONCE (`SymbolTileCoverage`,
-via a reused per-call cache) and fans the decision out to every winner sharing that block — O(blocks) tile
-work plus an O(winners) fan-out. Each tile is classified **Keep / Fade / Drop**:
-
-- **Keep** (`≥ threshold`): stays active; the A-4 fade eases it *in* if it is new. Clears any live fade deadline.
-- **Fade** (`< threshold` but was visible): every winner on the tile stays resident in the plan, MASKED
-  `CoverageFading` → gather's trigger 2 (see the per-frame placement loop) eases it *out* in place instead
-  of popping.
-- **Drop** (`< threshold`, steady/never-visible/grace-expired): every winner on the tile stays resident too —
-  the masking model keeps `WinnerCount` unchanged — but is MASKED `Dropped` and hard-skipped downstream,
-  in `SymbolPlacementSystem.GatherSymbolPoints`, which is where the perf win is realized.
-
-**Fade-then-drop, not pop.** A tile crossing below threshold must fade out like every other cull, so
-the filter keeps a small amount of reused, alloc-free cross-frame state on the subsystem: `_coverageAbovePrev`
-/ `_coverageAboveThisFrame` (ping-pong `HashSet` of tiles that were ≥ threshold, self-bounding — each set is
-cleared+refilled and swapped every call) and `_coverageDepartingUntil` (tileKey → wall-clock fade-out
-deadline). A **fresh** above→below crossing (`_coverageAbovePrev` contains the tile) stamps `now + grace`
-**once**; while below with a live deadline it keeps Fading; once `now ≥ deadline` — or if it was never visible
-— it Drops. Crossing back above clears the deadline (fade in), and a later re-crossing re-arms it. Grace
-(`DepartingGraceSeconds` = fade duration + 0.2 s) is longer than the fade, and the deadlines self-purge
-(`PurgeExpiredCoverageDeadlines`) so an unloaded tile leaves no stranded state. The wall-clock `now` is threaded
-from `MapView.LateUpdate` (`Time.timeAsDouble`, shared with `ReconcileLoadedTiles`).
-
-```
-ScreenCoverage(4 render corners, sceneOrigin, viewProj, viewport)
-    → project each corner to screen (SymbolScreenProjection.TryProjectPoint)
-    → if ANY corner is behind the near plane (or viewport degenerate): return +∞   ("never cull")
-    → else: |shoelace(4 screen corners)| / viewportArea                            (fraction of screen)
-
-IsCulled(coverage, minCoverage)  →  minCoverage > 0 && coverage < minCoverage
-```
-
-`minCoverage ≤ 0` (or a null projection) disables the cull (the kill-switch); `+∞` is never below a finite
-threshold, so a near-plane-straddling tile is always kept. Default `MapViewConfig.SymbolTileCoverageCull =
-0.05` (threaded through `MapView.LateUpdate` → `CurrentBatch`) — a maintainer eyeball-tunable. Telemetry:
-`SymbolSubsystem.LastTileCoverageCulledCount` (the Drop count) + `SymbolPlacementSystem.LastCoverageFadingCulledCount`
-(the fully-faded coverage-fade count, the gather-side companion).
-
-**The transition is preserved, never popped.** A tile crossing below threshold **fades out** over the grace
-window (via `CoverageFading`) — only a tile that was *never* on screen is dropped silently (nothing to pop).
-This matches the rest of the label system, all of which fades rather than pops.
-
-**Open items:** a green/red survived-vs-culled debug overlay (tune the threshold by eye);
-tilt-scaling the threshold; explicit hysteresis *on the threshold itself* (distinct from the fade grace).
-Culling ahead of the cross-tile dedup is rejected (it changes dedup winners — see above). Telemetry is surfaced through
-`SymbolStoreTelemetrySnapshot.CoverageDroppedSymbols` / `SymbolPlacementTelemetrySnapshot.CoverageFadingSymbols`
-→ the `MapTelemetryPanel` (beside the
-distance cull), so the threshold is tunable by watching the live drop/fade counts. `viewProj` and the logical
-viewport are single shared definitions (`SymbolPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
-read by both `CurrentBatch` and `Update`.
-
-## 1.6 Retain-as-departing — fading a tile out when it leaves cover
-
-The B-3 distance / S3 horizon culls fade a winner still *in* the plan, and the tile-coverage pre-cull masks
-Fade/Drop before the plan is filled. A normal **tile unload** is different: the tile leaves cover, its symbols
-leave the collected set, the plan rebuilds without them, and they would pop. Retain-as-departing keeps them
-in the plan for a grace window.
+The zoom, B-3 distance and S3 horizon culls fade a winner still *in* the plan. A normal **tile unload**
+is different: the tile leaves cover, its symbols leave the collected set, the plan rebuilds without
+them, and they would pop. Retain-as-departing keeps them in the plan for a grace window.
 
 When a tile leaves cover, `SymbolTileStore` releases it to the **warm cached side** and, if a grace window
 is set, stamps it **departing** (`key → wall-clock expiry`). While departing:
@@ -443,8 +341,7 @@ huge ground area into a thin horizon band, where labels pile up, get collision-d
 by view depth from the camera beyond `SymbolMaxDistanceFraction × CurrentFarMetres` — the quantity Unity's own
 `farClipPlane` bounds, so the cull matches the GPU clip at every tilt. Labels want their own, tighter distance
 cut than the tile far-plane policy (`GeometryAwareFarPlane` / `RaySphereFarPlane`), because they stop being
-legible well before tiles stop drawing. This is the per-label depth cut companion to the per-tile coverage
-cull ("Tile-coverage pre-cull").
+legible well before tiles stop drawing.
 
 **B-4 — Pipelined placement — the decision is decoupled from the render (`SymbolPlacementSystem`).** The
 collision runs in the frame "loophole" (the worker-thread time after LateUpdate, while the render thread
@@ -623,8 +520,7 @@ follows the projected curve.
 ## Why the per-frame pipeline needs only four globe mechanisms
 
 The per-frame pipeline ("Pipeline flow") is almost entirely **screen-space**. At build time it projects geodetic anchors/paths
-to render space through `IProjection.ProjectPoint` (`SymbolFeatureExtractor.cs`); the tile-coverage filter
-projects a tile's corners the same way (`SymbolTileCoverageFilter.ProjectCorner`); each frame it projects those
+to render space through `IProjection.ProjectPoint` (`SymbolFeatureExtractor.cs`); each frame it projects those
 to screen and does arc-walk / AABB / billboard in pixels. So **billboarding, per-glyph orientation, and
 collision are already projection-generic** — glyph quads are built in 2D screen space
 (`BillboardMath.BuildWorldQuad`), and curved-text rotation is the screen-space tangent of the already-projected
@@ -639,7 +535,7 @@ The Unity camera places the look-at at the world origin in an idealized Y-up ENU
 honor this: `TileToSceneRebased = Rebase·(origin − sceneOrigin)` (`FloatingOrigin.cs`),
 `Rebase = transpose(TangentBasisAt(lookAt))` (`MapView.BuildSceneFrame`, stored on `SceneFrame`). The label seam carries a `float3x3 rebase` into
 the same rotation, applied after translating and before `viewProj` —
-`SymbolScreenProjection.TryProjectPoint` and `SymbolTileCoverageFilter.ProjectCorner` both take it. On Mercator
+`SymbolScreenProjection.TryProjectPoint` takes it. On Mercator
 `Rebase = identity` (inert); under `SphericalProjection` an anchor away from the look-at needs it or it
 projects to the wrong pixel. This is the keystone the other three globe mechanisms below build on — all globe label
 correctness rests on the seam applying `Rebase` correctly.
@@ -706,18 +602,17 @@ horizon-cull grazing margin.
 
 ## Grounding (touch points)
 
-`MapRenderer.Unity/Text/`: `SymbolSubsystem` (queue/pump/store, + the pre-build tile-coverage cull in
-`CurrentBatch`), `SymbolTileStore` (active/cached/departing), `SymbolReconciler` (the off-main
-cross-tile dedup — `docs/labels-async-reconcile-design.md`), `Placement/SymbolPlacementSystem` (`Update`),
+`MapRenderer.Unity/Text/`: `SymbolSubsystem` (queue/pump/store, `CurrentBatch`), `SymbolTileStore`
+(active/cached/departing), `SymbolReconciler` (the off-main cross-tile dedup —
+`docs/labels-async-reconcile-design.md`), `Placement/SymbolPlacementSystem` (`Update`),
 `Placement/SymbolGatherPlan` (the per-frame winner plan), `SymbolFeatureExtractor` (`ProjectPath`,
 `LineAnchorPlacement.Compute`), `CodepointTextShaper`. `MapRenderer.Core/Text/`: `TextQuadLayout`,
 `CurvedTextLayout`, `Placement/SymbolStagingMath` (`StageCurved`, tangent), `Placement/PolylineArcMath`,
-`Placement/CrossTileSymbolKey`, `Placement/LineAnchor`, `Placement/SymbolTileCoverage`,
-`Placement/SymbolTileCoverageFilter` (the pre-build cull), `Placement/SymbolScreenProjection` (the
-projection seam), `Placement/BillboardMath`. `MapRenderer.Unity/Jobs/Symbols/`: `CullJob` (the per-record
-`GatherTrigger` verdict, including the B-3 distance and S3 horizon culls), `CompactJob`, `SymbolProjectionJob`
-(`OutValid`), `StageJob`, `CollisionJob` — the billboard build itself is not a job: `WorldSymbolRenderer`
-calls `BillboardMath.BuildWorldQuad` directly at emit time. `MapRenderer.Core/Coordinates/`: `IProjection`
+`Placement/CrossTileSymbolKey`, `Placement/LineAnchor`, `Placement/SymbolScreenProjection` (the projection
+seam), `Placement/BillboardMath`. `MapRenderer.Unity/Jobs/Symbols/`: `CullJob` (the per-record `GatherTrigger`
+verdict, including the B-3 distance and S3 horizon culls), `CompactJob`, `SymbolProjectionJob` (`OutValid`),
+`StageJob`, `CollisionJob` — the billboard build itself is not a job: `WorldSymbolRenderer` calls
+`BillboardMath.BuildWorldQuad` directly at emit time. `MapRenderer.Core/Coordinates/`: `IProjection`
 (`ProjectPoint`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection`, `WebMercator`,
 `CameraPoseMath`. `MapRenderer.Unity/View/`: `FloatingOrigin`. `MapRenderer.Unity/Rendering/Backend/`:
 `SceneFrame`. Mesh-path prior art: `SubdivideJob`, which shares the engine-free `Core` helper

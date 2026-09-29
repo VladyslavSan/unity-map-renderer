@@ -668,7 +668,7 @@ namespace MapRenderer.Tests
                 system.Update(in frame, plan.Build(buffer), atlasF);
                 Assert.That(plan.CollectedCount, Is.EqualTo(buffer.Symbols.Count),
                     $"P-M precondition: the collect must yield all {buffer.Symbols.Count} symbols (got " +
-                    $"{plan.CollectedCount}) — a dedup/coverage drop must show up here, not as missing ink.");
+                    $"{plan.CollectedCount}) — a dedup drop must show up here, not as missing ink.");
                 int expectedQuads = curvedIds.Length * config.GlyphCount + 2;
                 var perSymbol = new StringBuilder();
                 foreach (OffLookAtSymbolId id in (OffLookAtSymbolId[])Enum.GetValues(typeof(OffLookAtSymbolId)))

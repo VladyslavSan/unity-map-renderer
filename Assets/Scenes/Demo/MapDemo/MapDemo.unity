@@ -448,7 +448,6 @@ MonoBehaviour:
     MaxConcurrentTileLoads: 12
     PriorityStrategy: 0
     FillTileBufferClip: 0
-    SymbolTileCoverageCull: 0.005
     SymbolMaxDistanceFraction: 1
     Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
@@ -553,10 +552,8 @@ MonoBehaviour:
   PreparedCacheEvictions: 0
   SymbolActiveTiles: 0
   SymbolCachedTiles: 0
-  SymbolCoverageDropped: 0
   SymbolInputCount: 0
   SymbolDistanceCulled: 0
-  SymbolCoverageFading: 0
   SymbolZoomCulled: 0
   SymbolCollisionCandidates: 0
   SymbolCollisionSurvivors: 0

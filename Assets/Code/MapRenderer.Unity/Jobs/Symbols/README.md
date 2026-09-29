@@ -18,7 +18,7 @@ These jobs do not all run at the same rate, and confusing the two is the easiest
         ▼
     candidates
         │
-        │  CullJob              per record: dropped → departing → coverage → zoom → horizon
+        │  CullJob              per record: departing → zoom → horizon → distance
         ▼                       (the SAME predicate order as the managed pass, deliberately)
     survivors (sparse, with per-record keep flags)
         │

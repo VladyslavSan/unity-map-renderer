@@ -484,11 +484,6 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolStringTable.cs" />
     <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolFarPlaneCull.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileCoverage.cs" />
-    <!-- Tile-key codec (IR B4): lifted out of SymbolFeatureExtractor so Core consumers keep it -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileKey.cs" />
-    <!-- Moves the coverage cull ahead of the SoA batch build (cull-after-dedup, before Build) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileCoverageFilter.cs" />
     <!-- S3: globe far-side horizon cull, a gather fade-out trigger (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/HorizonCull.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />

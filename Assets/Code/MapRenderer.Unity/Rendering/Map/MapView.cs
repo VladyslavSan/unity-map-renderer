@@ -669,11 +669,10 @@ namespace MapRenderer.Unity.Rendering.Map
                     SymbolSubsystem.PumpBuilds();
                 }
 
-                // The per-frame winner plan: collect, cross-tile dedup and coverage cull, recording each winner's
-                // baked-block slot. It takes the tiles' sceneFrame, so the cull projects as the placement does.
+                // The per-frame winner plan: collect and cross-tile dedup, recording each winner's baked-block slot.
                 SymbolGatherPlan plan;
                 using (PmSymbolBatch.Auto())
-                    plan = SymbolSubsystem.CurrentBatch(sceneFrame, _config.SymbolTileCoverageCull, now);
+                    plan = SymbolSubsystem.CurrentBatch();
                 // Push the far-distance cull fraction live, then gather, project, collide and present each slot
                 // through its own SymbolRenderLayer.
                 SymbolPlacementSystem.SymbolMaxDistanceFraction = _config.SymbolMaxDistanceFraction;

@@ -30,12 +30,6 @@ namespace MapRenderer.Unity.View
         /// Compare it with <see cref="InputSymbolCount"/> to see the gate's reach on an overzoomed view.</summary>
         public int ZoomCulledSymbols { get; init; }
 
-        /// <summary>Companion to <see cref="SymbolStoreTelemetrySnapshot.CoverageDroppedSymbols"/>: symbols
-        /// whose tile just crossed below the coverage threshold and finished easing out this Update (they FADED
-        /// rather than popped) — the transient tail of the store's coverage drop, observed from the placement
-        /// side because the fade is the placement pass's doing.</summary>
-        public int CoverageFadingSymbols { get; init; }
-
         /// <summary>Collision CANDIDATES on the last Update — symbols that survived projection and entered the
         /// greedy pass (a point symbol counts 1; a curved / repeated line symbol counts 1 per along-line anchor).</summary>
         public int CollisionCandidateCount { get; init; }

@@ -66,9 +66,6 @@ namespace MapRenderer.Unity.Text
             internal const string AtlasUpload  = "MapRenderer.Symbol.AtlasUpload";
             internal const string BatchCollect = "MapRenderer.Symbol.BatchBuild.Collect";
             internal const string BatchSoA     = "MapRenderer.Symbol.BatchBuild.SoA";
-            // Collect's two halves: Dedup = main-thread pickup/schedule bookkeeping, Classify = the coverage cull.
-            internal const string BatchCollectDedup    = "MapRenderer.Symbol.BatchBuild.Collect.Dedup";
-            internal const string BatchCollectClassify = "MapRenderer.Symbol.BatchBuild.Collect.Classify";
         }
 
         /// <summary>A worker-phase-complete symbol build awaiting its budgeted main-thread tail
@@ -116,10 +113,6 @@ namespace MapRenderer.Unity.Text
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.BatchCollect);
         private static readonly ProfilerMarker PmBatchSoA =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.BatchSoA);
-        private static readonly ProfilerMarker PmCollectDedup =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.BatchCollectDedup);
-        private static readonly ProfilerMarker PmCollectClassify =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.BatchCollectClassify);
 
         private readonly MapCamera _camera;
 
@@ -228,20 +221,6 @@ namespace MapRenderer.Unity.Text
         private WorkHandle<bool> _reconcileHandle; // pollable across frames — no .Preserve() needed (see WorkHandle<T>)
         private CancellationToken _reconcileToken;
         private bool           _loggedReconcileFault; // log a worker fault ONCE (no per-frame spam)
-
-        // Per-frame coverage-classify state over the FRONT result, all reused (alloc-free once warm). Classify is
-        // per-block, fanned back to symbols through BlockId; it masks rather than compacts, moving nothing.
-        private readonly List<byte> _planDecision = new List<byte>();   // per-symbol Keep/Fade/Drop
-        private readonly List<long> _blockTileKeys = new List<long>();
-        private readonly List<byte> _blockDecision = new List<byte>();
-        // A coverage-fading tile is STILL ACTIVE (in cover, below the coverage threshold) — distinct from a
-        // departing (unloaded) tile. The above-threshold sets PING-PONG (ref-swapped each call) so they self-bound.
-        private HashSet<long> _coverageAbovePrev = new();
-        private HashSet<long> _coverageAboveThisFrame = new();
-        private readonly Dictionary<long, double> _coverageDepartingUntil = new();  // TileKey → fade-out deadline
-        private readonly HashSet<long> _coverageFadingTiles = new();                // vestigial for Build; telemetry
-        private readonly Dictionary<long, byte> _tileDecisions = new();       // classify each tile once/rebuild
-        private readonly List<long> _coverageDepartingPurgeKeys = new();
 
         private SymbolStoreTelemetrySnapshot _telemetry;
 
@@ -366,7 +345,6 @@ namespace MapRenderer.Unity.Text
             {
                 ActiveSymbolTiles      = ActiveTileCount,
                 CachedSymbolTiles      = CachedTileCount,
-                CoverageDroppedSymbols = LastTileCoverageCulledCount,
             };
 
         /// <summary>Rebuild for a new style: group its symbol layers by source and (re)create the shared glyph
@@ -884,58 +862,19 @@ namespace MapRenderer.Unity.Text
             }
         }
 
-        /// <summary>Tile-coverage pre-cull: symbols dropped from the LAST <c>CurrentBatch</c> because their
-        /// tile covered less than <paramref name="minCoverage"/>'s worth of the screen (never entered the SoA build,
-        /// gather, projection, or collision). Telemetry — mirrors <see cref="SymbolPlacementSystem.LastDistanceCulledCount"/>.</summary>
-        internal int LastTileCoverageCulledCount { get; private set; }
-
         /// <summary>Builds this frame's winner plan (<see cref="SymbolGatherPlan"/>) for the placement system.
         /// Apply-stale: the plan can trail a tile event by 1–4 frames (its reconcile runs off-main), so a new
-        /// tile's symbols appear a little late and a removed tile's linger. A tile whose on-screen coverage
-        /// drops below <paramref name="minCoverage"/> fades out rather than popping.</summary>
-        /// <param name="frame">The current scene frame — origin, rebase, for camera-relative culling.</param>
-        /// <param name="minCoverage">Coverage threshold (<c>MapViewConfig.SymbolTileCoverageCull</c>);
-        /// non-positive disables the cull.</param>
-        /// <param name="now">Wall-clock time, for coverage-fade deadline bookkeeping.</param>
-        public SymbolGatherPlan CurrentBatch(in SceneFrame frame, double minCoverage, double now = 0.0)
+        /// tile's symbols appear a little late and a removed tile's linger.</summary>
+        public SymbolGatherPlan CurrentBatch()
         {
-            using (PmBatchCollect.Auto())
+            using (PmBatchCollect.Auto()) // pickup/schedule bookkeeping only; the dedup is off-main
             {
-                using (PmCollectDedup.Auto()) // pickup/schedule bookkeeping only; the dedup is off-main
-                {
-                    PickupCompletedReconcile();
-                    ScheduleReconcileIfDirty();
-                }
-
-                // Classify over the FRONT result (a masking classify moves nothing): a Dropped tile's decision
-                // rides the symbol, a Fading tile's are flagged for the gather to ease out. Runs EVERY frame.
-                float4x4 viewProj = SymbolPlacementSystem.ViewProj(_camera.Camera);
-                double2 viewportLogicalPx = _camera.ViewportLogicalPx;
-                int culled;
-                using (PmCollectClassify.Auto()) // the coverage-cull half — camera-dependent, per BLOCK
-                {
-                    // One tile key per ordered block so the classify runs per block, not per scattered symbol.
-                    var orderedBlocks = _frontResult.OrderedBlocks;
-                    _blockTileKeys.Clear();
-                    if (_blockTileKeys.Capacity < orderedBlocks.Count) _blockTileKeys.Capacity = orderedBlocks.Count;
-                    for (int b = 0; b < orderedBlocks.Count; b++)
-                        _blockTileKeys.Add(orderedBlocks[b].TileKey);
-
-                    SymbolTileCoverageFilter.ClassifyActive(_blockTileKeys, _frontResult.BlockId, _frontResult.IsDeparting,
-                        _camera.Projection, frame.SceneOriginRender, viewProj, viewportLogicalPx, frame.Rebase, minCoverage,
-                        _coverageAbovePrev, _coverageAboveThisFrame, _coverageDepartingUntil, _coverageFadingTiles,
-                        now, DepartingGraceSeconds, _tileDecisions, _blockDecision, _planDecision, out culled);
-                }
-                LastTileCoverageCulledCount = culled;
-
-                // Ping-pong the above-threshold sets (ref-swap, no realloc) and purge elapsed coverage-fade
-                // deadlines. Order matters: the swap/purge happen AFTER ClassifyActive reads them.
-                (_coverageAbovePrev, _coverageAboveThisFrame) = (_coverageAboveThisFrame, _coverageAbovePrev);
-                PurgeExpiredCoverageDeadlines(now);
+                PickupCompletedReconcile();
+                ScheduleReconcileIfDirty();
             }
             using (PmBatchSoA.Auto())
                 _gatherPlan.Build(_frontResult.BlockId, _frontResult.LocalIndex,
-                    _frontResult.IsDeparting, _planDecision, _frontResult.OrderedBlocks, _frontResult.FadeAliases, _frontSetVersion);
+                    _frontResult.IsDeparting, _frontResult.OrderedBlocks, _frontResult.FadeAliases, _frontSetVersion);
 
             RefreshTelemetry();   // the store's levels are final for this frame
             return _gatherPlan;
@@ -1020,19 +959,6 @@ namespace MapRenderer.Unity.Text
             _store.ReleasePins(_frontSnapshot);
             _store.ReleasePins(_backSnapshot);
             _store.Clear();
-        }
-
-        /// <summary>Drops coverage-fade deadlines whose grace window has elapsed. A purged tile stops being
-        /// forced-fading; if it is still below threshold with no live deadline, <c>ClassifyActive</c> drops it
-        /// outright — grace exceeds the fade, so by expiry it has already faded to invisible (never a pop).</summary>
-        private void PurgeExpiredCoverageDeadlines(double now)
-        {
-            if (_coverageDepartingUntil.Count == 0) return;
-            _coverageDepartingPurgeKeys.Clear();
-            foreach (KeyValuePair<long, double> kv in _coverageDepartingUntil)
-                if (now >= kv.Value) _coverageDepartingPurgeKeys.Add(kv.Key);
-            for (int i = 0; i < _coverageDepartingPurgeKeys.Count; i++)
-                _coverageDepartingUntil.Remove(_coverageDepartingPurgeKeys[i]);
         }
 
         /// <summary>Logs once if the glyph atlas overflowed (glyphs dropped) — suggesting a larger atlas.</summary>

@@ -1,18 +1,17 @@
-// Text/Placement/SymbolGatherParityTests.cs — symbol candidate collision, compaction/cull job parity, deferred collision, fade, far-distance cull, gather memoization/order-parity, and drop-mask teeth.
+// Text/Placement/SymbolGatherParityTests.cs — symbol candidate collision, compaction/cull job parity, deferred collision, fade, far-distance cull, gather memoization/order-parity, and halo emit.
 //
-// The collision/compaction/cull job-parity fixtures first, then deferred collision, fade, and the far-distance cull, then the gather memoization/order-parity/drop-mask fixtures, then halo emit.
+// The collision/compaction/cull job-parity fixtures first, then deferred collision, fade, and the far-distance cull, then the gather memoization/order-parity fixtures, then halo emit.
 //
 // Contents:
 //   SymbolCandidateCollisionTests     — the multi-box, all-or-nothing UNIFIED collision (CollisionJob): a curved along-line symbol is ONE candidate spanning N glyph boxes; it places iff EVERY box is free and, when placed, blocks across its WHOLE run — competing with point (1-box)…
 //   SymbolCollisionOrderTests         — the real teeth for SymbolStagingMath.SanitizeSortKey: a NON-FINITE baked symbol-sort-key makes ComparePlacementOrder intransitive (NaN compares false both ways, so the sort-key branch never ties and the…
 //   SymbolCompactJobTests             — CompactJob — the Burst port of SymbolPlacementSystem.GatherSymbolPoints's Compact pass — must produce the SAME _stagePointOffset / kept-point pools / _forceFadeOut membership / per-trigger counters, in the SAME record order, as an independent managed reference.
-//   SymbolCullJobTests                — CullJob — the Burst port of SymbolPlacementSystem.GatherSymbolPoints's Cull pass — must produce the SAME per-record GatherTrigger verdict, in the SAME chain-priority order (dropped → departing → coverage → zoom → horizon → distance → none), as an…
+//   SymbolCullJobTests                — CullJob — the Burst port of SymbolPlacementSystem.GatherSymbolPoints's Cull pass — must produce the SAME per-record GatherTrigger verdict, in the SAME chain-priority order (departing → zoom → horizon → distance → none), as an…
 //   SymbolDeferredCollisionTests      — Deferred collision: the collision is scheduled at the END of a Update and Completed + re-keyed at the START of the next one, so the main thread never blocks on the single-threaded greedy.
 //   SymbolFadeTests                   — the placement layer is a fade state machine.
 //   SymbolFarDistanceCullGatherTests  — The harness injects a FIXED far-plane policy (the cull reads MapCamera.CurrentFarMetres, derived from that policy — NOT the raw Camera.farClipPlane, which is Unity's default until a SyncToCamera runs), so the far distance each assertion asserts against is…
-//   SymbolGatherMemoTests             — GatherIntoMirror memoizes its heavy compaction on WinnerSetVersion — a same-source, same-version frame runs only the three per-frame masks (Departing/CoverageFading/Dropped), not the full pool rebuild.
+//   SymbolGatherMemoTests             — GatherIntoMirror memoizes its heavy compaction on WinnerSetVersion — a same-source, same-version frame runs only the per-frame departing mask, not the full pool rebuild.
 //   SymbolGatherParityTests           — THE ORDER-PARITY TOOTH.
-//   SymbolGatherPlanDropMaskTests     — the symbol-label native bake: the tile-coverage cull's Drop decision is a per-record MASK (Dropped, stamped onto the native mirror as _mirrorSymbolDropped) rather than a physical compaction — a Dropped winner stays RESIDENT in the mirror.
 //   SymbolHaloEmitTests               — The one term that also has a uniform is text-halo-color, whose CONSTANT kind rides _HaloColor so a restyle can ease it (SymbolTextColorCarrier).
 
 using System.Collections.Generic;
@@ -468,31 +467,29 @@ namespace MapRenderer.Tests.Text.Placement
 
         // Record indices — named so the fixture and the expectation table read as one thing.
         private const int KeptNoneA           = 0;
-        private const int DroppedRec          = 1;
-        private const int DepartingDead       = 2;
-        private const int CoverageDead        = 3;
-        private const int ZoomDeadA           = 4;
-        private const int HorizonDead         = 5;
-        private const int DistanceDead        = 6;
-        private const int DepartingAlive      = 7;
-        private const int CoverageCurvedAlive = 8;
-        private const int ZoomCurvedDead      = 9;
-        private const int KeptNoneB           = 10;
-        private const int SymbolCount         = 11;
+        private const int DepartingDead       = 1;
+        private const int ZoomDeadA           = 2;
+        private const int HorizonDead         = 3;
+        private const int DistanceDead        = 4;
+        private const int DepartingAlive      = 5;
+        private const int HorizonCurvedAlive  = 6;
+        private const int ZoomCurvedDead      = 7;
+        private const int KeptNoneB           = 8;
+        private const int SymbolCount         = 9;
 
         // Detail[r] = r keeps the fixture legible and still exercises every read path: PointDetails,
         // CurvedAnchorFadeStart and CurvedAnchorCount are all indexed by Detail, not by r.
         private static readonly GatherTrigger[] Trigger =
         {
-            GatherTrigger.None, GatherTrigger.Dropped, GatherTrigger.Departing, GatherTrigger.Coverage,
-            GatherTrigger.Zoom, GatherTrigger.Horizon, GatherTrigger.Distance, GatherTrigger.Departing,
-            GatherTrigger.Coverage, GatherTrigger.Zoom, GatherTrigger.None,
+            GatherTrigger.None, GatherTrigger.Departing, GatherTrigger.Zoom, GatherTrigger.Horizon,
+            GatherTrigger.Distance, GatherTrigger.Departing, GatherTrigger.Horizon, GatherTrigger.Zoom,
+            GatherTrigger.None,
         };
 
         private static SymbolPlacementKind[] Kinds()
         {
             var a = new SymbolPlacementKind[SymbolCount]; // Point (0) everywhere by default
-            a[CoverageCurvedAlive] = SymbolPlacementKind.Curved;
+            a[HorizonCurvedAlive] = SymbolPlacementKind.Curved;
             a[ZoomCurvedDead]      = SymbolPlacementKind.Curved;
             return a;
         }
@@ -505,12 +502,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // Point-kind FadeIds, indexed by Detail (== r for point records). Only the "fade-triggered" records
-        // (2-7) are ever read — 0/1/10 short-circuit before MarkFadeOutIfAlive; 8/9 are Curved.
+        // (1-5) are ever read — 0/8 short-circuit before MarkFadeOutIfAlive; 6/7 are Curved.
         private static long[] PointFadeIds()
         {
             var a = new long[SymbolCount];
             a[DepartingDead]  = 2001;
-            a[CoverageDead]   = 3001;
             a[ZoomDeadA]      = 4001;
             a[HorizonDead]    = 5001;
             a[DistanceDead]   = 6001;
@@ -525,12 +521,12 @@ namespace MapRenderer.Tests.Text.Placement
             return a;
         }
 
-        // Curved-kind anchor slices, indexed by Detail (== r). CoverageCurvedAlive has 2 anchors (+ 1 trailing
+        // Curved-kind anchor slices, indexed by Detail (== r). HorizonCurvedAlive has 2 anchors (+ 1 trailing
         // centred-fallback id = 3 ids read); ZoomCurvedDead has 1 anchor (+ fallback = 2 ids read).
         private static int[] CurvedAnchorFadeStart()
         {
             var a = new int[SymbolCount];
-            a[CoverageCurvedAlive] = 100;
+            a[HorizonCurvedAlive] = 100;
             a[ZoomCurvedDead]      = 200;
             return a;
         }
@@ -538,17 +534,17 @@ namespace MapRenderer.Tests.Text.Placement
         private static int[] CurvedAnchorCount()
         {
             var a = new int[SymbolCount];
-            a[CoverageCurvedAlive] = 2;
+            a[HorizonCurvedAlive] = 2;
             a[ZoomCurvedDead]      = 1;
             return a;
         }
 
-        // Flat FadeIds pool the curved slices above index into. CoverageCurvedAlive: one anchor alive (8101),
+        // Flat FadeIds pool the curved slices above index into. HorizonCurvedAlive: one anchor alive (8101),
         // the other anchor + the centred fallback dead. ZoomCurvedDead: anchor + fallback both dead.
         private static long[] FadeIds()
         {
             var a = new long[210];
-            a[100] = 8100; a[101] = 8101; a[102] = 8102; // CoverageCurvedAlive: anchor, anchor(alive), fallback
+            a[100] = 8100; a[101] = 8101; a[102] = 8102; // HorizonCurvedAlive: anchor, anchor(alive), fallback
             a[200] = 9100; a[201] = 9101;                 // ZoomCurvedDead: anchor, fallback
             return a;
         }
@@ -556,18 +552,18 @@ namespace MapRenderer.Tests.Text.Placement
         private static Dictionary<long, float> FadeOpacity() => new Dictionary<long, float>
         {
             [7001] = 0.5f, // DepartingAlive's point FadeId — clearly alive
-            [8101] = 0.7f, // CoverageCurvedAlive's one live anchor — clearly alive
+            [8101] = 0.7f, // HorizonCurvedAlive's one live anchor — clearly alive
             // every other FadeId referenced by the fixture is ABSENT ⇒ reads as dead (TryGetValue false).
         };
 
         // WorldStart is irregular (not the cumulative count, not derived from r); point/up differ per component, so a
-        // swapped-source or wrong-array read is visible. Only kept records (0,7,8,10) are read; the rest stay zeroed.
+        // swapped-source or wrong-array read is visible. Only kept records (0,5,6,8) are read; the rest stay zeroed.
         private static int[] WorldStart()
         {
             var a = new int[SymbolCount];
             a[KeptNoneA]           = 6;
             a[DepartingAlive]      = 0;
-            a[CoverageCurvedAlive] = 10;
+            a[HorizonCurvedAlive] = 10;
             a[KeptNoneB]           = 2;
             return a;
         }
@@ -577,7 +573,7 @@ namespace MapRenderer.Tests.Text.Placement
             var a = new int[SymbolCount];
             a[KeptNoneA]           = 2;
             a[DepartingAlive]      = 1;
-            a[CoverageCurvedAlive] = 3;
+            a[HorizonCurvedAlive] = 3;
             a[KeptNoneB]           = 2;
             return a;
         }
@@ -589,7 +585,7 @@ namespace MapRenderer.Tests.Text.Placement
             var a = new double3[WorldPoolSize];
             a[6] = new double3(0, 0, 0); a[7] = new double3(0, 1, 0);       // KeptNoneA v0/v1
             a[0] = new double3(7, 0, 0);                                    // DepartingAlive v0
-            a[10] = new double3(8, 0, 0); a[11] = new double3(8, 1, 0); a[12] = new double3(8, 2, 0); // CoverageCurvedAlive v0-2
+            a[10] = new double3(8, 0, 0); a[11] = new double3(8, 1, 0); a[12] = new double3(8, 2, 0); // HorizonCurvedAlive v0-2
             a[2] = new double3(10, 0, 0); a[3] = new double3(10, 1, 0);     // KeptNoneB v0/v1
             return a;
         }
@@ -608,14 +604,14 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static readonly int[] ExpectedOffset =
         {
-            0, -1, -1, -1, -1, -1, -1, 2, 3, -1, 6,
+            0, -1, -1, -1, -1, 2, 3, -1, 6,
         };
 
         private static readonly double3[] ExpectedPoints =
         {
             new double3(0, 0, 0), new double3(0, 1, 0),                                // KeptNoneA
             new double3(7, 0, 0),                                                      // DepartingAlive
-            new double3(8, 0, 0), new double3(8, 1, 0), new double3(8, 2, 0),           // CoverageCurvedAlive
+            new double3(8, 0, 0), new double3(8, 1, 0), new double3(8, 2, 0),           // HorizonCurvedAlive
             new double3(10, 0, 0), new double3(10, 1, 0),                              // KeptNoneB
         };
 
@@ -633,9 +629,8 @@ namespace MapRenderer.Tests.Text.Placement
         };
 
         private const int ExpectedDeparting = 1; // DepartingDead only — DepartingAlive is kept, not counted
-        private const int ExpectedCoverage  = 1; // CoverageDead only — CoverageCurvedAlive is kept, not counted
         private const int ExpectedZoom      = 2; // ZoomDeadA + ZoomCurvedDead
-        private const int ExpectedHorizon   = 1; // HorizonDead
+        private const int ExpectedHorizon   = 1; // HorizonDead only — HorizonCurvedAlive is kept, not counted
         private const int ExpectedDistance  = 1; // DistanceDead
 
         // ── The independent managed reference — re-implements the Compact loop, NOT a call into the job ────────
@@ -676,8 +671,6 @@ namespace MapRenderer.Tests.Text.Placement
             for (int r = 0; r < SymbolCount; r++)
             {
                 GatherTrigger t = Trigger[r];
-                if (t == GatherTrigger.Dropped) { outOffset[r] = -1; continue; }
-
                 if (t != GatherTrigger.None && !ManagedMarkFadeOutIfAlive(r, kinds, detail, pointFadeIds,
                         curvedAnchorFadeStart, curvedAnchorCount, fadeIds, fadeOpacity, outForceFadeOut, fadeEpsilon))
                 {
@@ -733,7 +726,7 @@ namespace MapRenderer.Tests.Text.Placement
             var nOutPoints = new NativeList<double3>(alloc);
             var nOutUps = new NativeList<float3>(alloc);
             var nForceFadeOut = new NativeHashSet<long>(16, alloc);
-            var nCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, alloc); // ClearMemory (default) → fresh zeros
+            var nCounts = new NativeArray<int>((int)GatherTrigger.Distance + 1, alloc); // ClearMemory (default) → fresh zeros
 
             try
             {
@@ -785,7 +778,7 @@ namespace MapRenderer.Tests.Text.Placement
             var managedPoints = new List<double3>();
             var managedUps = new List<float3>();
             var managedForceFadeOut = new HashSet<long>();
-            var managedCounts = new int[(int)GatherTrigger.Dropped + 1];
+            var managedCounts = new int[(int)GatherTrigger.Distance + 1];
 
             ManagedCompact(kinds, detail, pointFadeIds, curvedAnchorFadeStart, curvedAnchorCount, fadeIds,
                 worldStart, worldCount, worldPoints, worldUps, fadeOpacity, FadeEpsilon,
@@ -798,7 +791,6 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEqual(ExpectedUps, managedUps, "managed reference vs. Expected ups");
             CollectionAssert.AreEquivalent(ExpectedForceFadeOut, managedForceFadeOut, "managed reference vs. Expected forceFadeOut");
             Assert.AreEqual(ExpectedDeparting, managedCounts[(int)GatherTrigger.Departing], "managed Departing count");
-            Assert.AreEqual(ExpectedCoverage, managedCounts[(int)GatherTrigger.Coverage], "managed Coverage count");
             Assert.AreEqual(ExpectedZoom, managedCounts[(int)GatherTrigger.Zoom], "managed Zoom count");
             Assert.AreEqual(ExpectedHorizon, managedCounts[(int)GatherTrigger.Horizon], "managed Horizon count");
             Assert.AreEqual(ExpectedDistance, managedCounts[(int)GatherTrigger.Distance], "managed Distance count");
@@ -812,7 +804,6 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEqual(managedUps, nativeUps, "CompactJob vs. managed reference — ups");
             CollectionAssert.AreEquivalent(managedForceFadeOut, nativeForceFadeOut, "CompactJob vs. managed reference — forceFadeOut");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Departing], nativeCounts[(int)GatherTrigger.Departing], "native Departing count");
-            Assert.AreEqual(managedCounts[(int)GatherTrigger.Coverage], nativeCounts[(int)GatherTrigger.Coverage], "native Coverage count");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Zoom], nativeCounts[(int)GatherTrigger.Zoom], "native Zoom count");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Horizon], nativeCounts[(int)GatherTrigger.Horizon], "native Horizon count");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Distance], nativeCounts[(int)GatherTrigger.Distance], "native Distance count");
@@ -826,7 +817,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// <see cref="CullJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s Cull pass
     /// — must produce the SAME per-record <see cref="GatherTrigger"/> verdict, in the SAME chain-priority order
-    /// (dropped → departing → coverage → zoom → horizon → distance → none), as an independent managed reference.
+    /// (departing → zoom → horizon → distance → none), as an independent managed reference.
     /// </summary>
     [TestFixture]
     public class SymbolCullJobTests
@@ -845,32 +836,27 @@ namespace MapRenderer.Tests.Text.Placement
         private const int    SlotCount = 3;
 
         // Record indices — named so the fixture and the expectation table read as one thing.
-        private const int Dropped        = 0;
-        private const int Departing      = 1;
-        private const int Coverage       = 2;
-        private const int ZoomPoint      = 3;
-        private const int ZoomCurved     = 4;
-        private const int Horizon        = 5;
-        private const int Distance       = 6;
-        private const int Kept           = 7;
-        private const int OrderDropped   = 8; // Dropped AND Departing both set — pins Dropped-first
-        private const int OrderCoverage  = 9; // Coverage AND Zoom both true — pins Coverage-before-Zoom
-        private const int GrownListTail  = 10; // Slot >= SlotCount, stale `false` only reachable via SlotVisible.Length
-        private const int SymbolCount    = 11;
+        private const int Departing      = 0;
+        private const int ZoomPoint      = 1;
+        private const int ZoomCurved     = 2;
+        private const int Horizon        = 3;
+        private const int Distance       = 4;
+        private const int Kept           = 5;
+        private const int OrderDeparting = 6; // Departing AND Zoom both true — pins Departing-before-Zoom
+        private const int GrownListTail  = 7; // Slot >= SlotCount, stale `false` only reachable via SlotVisible.Length
+        private const int SymbolCount    = 8;
 
         private static readonly GatherTrigger[] Expected =
         {
-            GatherTrigger.Dropped, GatherTrigger.Departing, GatherTrigger.Coverage,
+            GatherTrigger.Departing,
             GatherTrigger.Zoom, GatherTrigger.Zoom,
             GatherTrigger.Horizon, GatherTrigger.Distance, GatherTrigger.None,
-            GatherTrigger.Dropped, GatherTrigger.Coverage, GatherTrigger.None,
+            GatherTrigger.Departing, GatherTrigger.None,
         };
 
         // ── Fixture construction ─────────────────────────────────────────────────────────────────────────────
 
-        private static byte[] SymbolDropped() => Flags(Dropped, OrderDropped);
-        private static byte[] SymbolDeparting() => Flags(Departing, OrderDropped);
-        private static byte[] SymbolCoverageFading() => Flags(Coverage, OrderCoverage);
+        private static byte[] SymbolDeparting() => Flags(Departing, OrderDeparting);
 
         private static byte[] Flags(params int[] set)
         {
@@ -907,7 +893,7 @@ namespace MapRenderer.Tests.Text.Placement
             a[Horizon]       = 1; // Points[1].Slot == a VISIBLE slot (must clear the zoom gate to reach Horizon)
             a[Distance]      = 1;
             a[Kept]          = 1;
-            a[OrderCoverage] = 0; // Slot with SlotVisible == false — would ALSO be Zoom if the chain reordered
+            a[OrderDeparting] = 0; // Slot with SlotVisible == false — would ALSO be Zoom if the chain reordered
             a[GrownListTail] = 2; // Points[2].Slot == 4, only in-range if bounded by SlotVisible.Length (bug)
             return a;
         }
@@ -930,13 +916,11 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── The independent managed reference — re-implements the chain, NOT a call into CullJob ─────────
 
-        private static GatherTrigger ManagedVerdict(int r, byte[] dropped, byte[] departing, byte[] coverage,
+        private static GatherTrigger ManagedVerdict(int r, byte[] departing,
             double3[] repAnchor, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
             bool[] slotVisible)
         {
-            if (dropped[r] != 0) return GatherTrigger.Dropped;
             if (departing[r] != 0) return GatherTrigger.Departing;
-            if (coverage[r] != 0) return GatherTrigger.Coverage;
             if (IsOutOfLiveZoom(r, kinds, detail, points, curveds, slotVisible)) return GatherTrigger.Zoom;
             if (HorizonCull.IsHiddenBeyondHorizon(repAnchor[r], SceneOriginRender, Rebase, CameraRelative,
                                                    GlobeCentreRelative, GlobeRadiusSq))
@@ -958,7 +942,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── The Burst arm — CullJob.Run() over the same fixture ───────────────────────────────────────
 
-        private static GatherTrigger[] NativeVerdicts(byte[] dropped, byte[] departing, byte[] coverage,
+        private static GatherTrigger[] NativeVerdicts(byte[] departing,
             double3[] repAnchor, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
             bool[] slotVisible)
         {
@@ -970,7 +954,7 @@ namespace MapRenderer.Tests.Text.Placement
                 return a;
             }
 
-            var nDropped = From(dropped); var nDeparting = From(departing); var nCoverage = From(coverage);
+            var nDeparting = From(departing);
             var nAnchor = From(repAnchor); var nKinds = From(kinds); var nDetail = From(detail);
             var nPoints = From(points); var nCurveds = From(curveds); var nSlotVisible = From(slotVisible);
             var outTrigger = new NativeArray<GatherTrigger>(SymbolCount, alloc);
@@ -978,7 +962,7 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 new CullJob
                 {
-                    SymbolDropped = nDropped, SymbolDeparting = nDeparting, SymbolCoverageFading = nCoverage,
+                    SymbolDeparting = nDeparting,
                     RepAnchor = nAnchor, Kinds = nKinds, Detail = nDetail, Points = nPoints, Curveds = nCurveds,
                     SlotVisible = nSlotVisible,
                     Frame = new SceneFrame { SceneOriginRender = SceneOriginRender, Rebase = Rebase, CameraRelativePosition = CameraRelative },
@@ -991,7 +975,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
             finally
             {
-                nDropped.Dispose(); nDeparting.Dispose(); nCoverage.Dispose(); nAnchor.Dispose(); nKinds.Dispose();
+                nDeparting.Dispose(); nAnchor.Dispose(); nKinds.Dispose();
                 nDetail.Dispose(); nPoints.Dispose(); nCurveds.Dispose(); nSlotVisible.Dispose(); outTrigger.Dispose();
             }
         }
@@ -999,9 +983,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Cull_MatchesManagedReference_EveryVerdictAndOrder()
         {
-            byte[] dropped = SymbolDropped();
             byte[] departing = SymbolDeparting();
-            byte[] coverage = SymbolCoverageFading();
             double3[] repAnchor = RepAnchor();
             SymbolPlacementKind[] kinds = Kinds();
             int[] detail = Detail();
@@ -1011,13 +993,13 @@ namespace MapRenderer.Tests.Text.Placement
 
             var managed = new GatherTrigger[SymbolCount];
             for (int r = 0; r < SymbolCount; r++)
-                managed[r] = ManagedVerdict(r, dropped, departing, coverage, repAnchor, kinds, detail, points, curveds, slotVisible);
+                managed[r] = ManagedVerdict(r, departing, repAnchor, kinds, detail, points, curveds, slotVisible);
 
             // Sanity: the managed reference itself must match the fixture's stated expectation table — otherwise
             // a fixture bug (not a job bug) would silently pass by having both arms agree on the WRONG answer.
             CollectionAssert.AreEqual(Expected, managed, "managed reference vs. the fixture's expectation table");
 
-            GatherTrigger[] native = NativeVerdicts(dropped, departing, coverage, repAnchor, kinds, detail, points, curveds, slotVisible);
+            GatherTrigger[] native = NativeVerdicts(departing, repAnchor, kinds, detail, points, curveds, slotVisible);
             CollectionAssert.AreEqual(managed, native, "CullJob vs. the independent managed reference");
         }
     }
@@ -1538,7 +1520,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
             Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
 
-            // 3) After enough steps it finishes fading and is dropped — counted as departing (not coverage/distance).
+            // 3) After enough steps it finishes fading and is dropped — counted as departing (not distance).
             for (int i = 0; i < 10; i++)
                 h.System.Update(in h.Frame, plan.Build(buffer, departingTiles: departingTiles), h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the departing label is fully skipped");
@@ -1577,45 +1559,6 @@ namespace MapRenderer.Tests.Text.Placement
             h.System.Update(in h.Frame, plan.Build(childBuffer, fadeAliases: aliases), h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "the child draws on the step frame, not one frame later");
             Assert.Greater(MaxAlpha(h.System), 0.95f, "the child starts at the parent's opacity instead of at 0");
-        }
-
-        // ── A coverage-fading record (SymbolCoverageFading: a separate flag from SymbolDeparting, because the tile is
-        //    still ACTIVE, just small on screen) FADES OUT in place, like the departing test above. ──
-        [Test]
-        public void Update_CoverageFadingRecord_FadesOut_InsteadOfPopping()
-        {
-            using var h = new Harness();
-            var buffer = new SymbolTileBuffer();
-            AddPoint(buffer, h.Origin, sortKey: 0f, text: "A", feature: 0); // TileKey = 0L
-
-            // The coverage-fading FLAG is the subject, so these ticks go through the plan: TestSymbolPlan's
-            // coverageFadingTiles sets the per-record SymbolTileCoverageFilter.Fade decision production carries.
-            using var plan = new TestSymbolPlan(h.Projection);
-
-            // 1) Not coverage-fading (no coverageFadingTiles) → places and snaps to full opacity.
-            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas); // Verdict is one Update late
-            h.System.Update(in h.Frame, plan.Build(buffer), h.Atlas);
-            Assert.AreEqual(1, h.System.LastQuadCount, "the label places");
-            Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
-
-            // 2) The SAME symbol's tile crosses below the coverage threshold — classified Fade. It
-            //    must keep drawing while it fades, not vanish for a frame.
-            var fadingTiles = new HashSet<long> { 0L };
-            SymbolGatherPlan fadingPlan = plan.Build(buffer, coverageFadingTiles: fadingTiles);
-            Assert.AreEqual(1, fadingPlan.CoverageFading[0],
-                "sanity: the record is flagged coverage-fading — without this the rest of the test would be " +
-                "asserting an ordinary fade and could not fail for the reason it names.");
-            h.System.Update(in h.Frame, fadingPlan, h.Atlas, deltaTime: 0.1f);
-            Assert.AreEqual(1, h.System.LastQuadCount, "a coverage-fading-but-visible label keeps drawing (fading, not popping)");
-            float dim = MaxAlpha(h.System);
-            Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
-            Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
-
-            // 3) After enough steps it finishes fading and is dropped — counted as coverage-fading (not departing).
-            for (int i = 0; i < 10; i++)
-                h.System.Update(in h.Frame, plan.Build(buffer, coverageFadingTiles: fadingTiles), h.Atlas, deltaTime: 0.1f);
-            Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the coverage-fading label is fully skipped");
-            Assert.Greater(h.System.LastCoverageFadingCulledCount, 0, "…and its skip is attributed to coverage-fading telemetry");
         }
 
         // ── The point fade id is a FIXED-grid identity: it collapses anchors within a few metres and separates
@@ -1897,10 +1840,10 @@ namespace MapRenderer.Tests.Text.Placement
 
     /// <summary>
     /// <see cref="SymbolPlacementSystem.GatherIntoMirror"/> memoizes its compaction on
-    /// <see cref="SymbolGatherPlan.WinnerSetVersion"/>: a same-source, same-version frame runs only the three
-    /// per-frame masks. <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating signal; without
-    /// it these tests pass against an unmemoized gather. The front-swap and restyle invalidation tests live in
-    /// <c>SymbolReconcileAsyncTests</c>, which owns the async pump harness they need.
+    /// <see cref="SymbolGatherPlan.WinnerSetVersion"/>: a same-source, same-version frame runs only the
+    /// per-frame departing mask. <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating
+    /// signal; without it these tests pass against an unmemoized gather. The front-swap and restyle
+    /// invalidation tests live in <c>SymbolReconcileAsyncTests</c>, which owns the async pump harness they need.
     /// </summary>
     /// <remarks>
     /// Non-local invariant: the REFERENCE gather alternates two persistent plans on one reference system, so the
@@ -1948,28 +1891,23 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsTrue(store.CompleteBuild(Key(tile), gen, block), "sanity: block committed");
         }
 
-        // Fills `plan` from `store`'s winner set at `version`, with optional per-tile Fade/Drop/Departing overrides
-        // (default Keep/not-departing), so a test can vary EITHER the winner set OR just the masks.
+        // Fills `plan` from `store`'s winner set at `version`, with an optional per-tile Departing override
+        // (default not-departing), so a test can vary EITHER the winner set OR just the mask.
         private static void BuildPlan(SymbolTileStore store, SymbolGatherPlan plan, int version,
-            long dropTileKey = -1, long fadeTileKey = -1, long departingTileKey = -1)
+            long departingTileKey = -1)
         {
             var blockId = new List<int>();
             var localIndex = new List<int>();
             var isDeparting = new List<byte>();
             store.CollectInto(blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
 
-            var decisions = new List<byte>(blockId.Count);
             var departing = new List<byte>(blockId.Count);
             for (int i = 0; i < blockId.Count; i++)
             {
                 long tk = store.OrderedBlocks[blockId[i]].TileKey;
-                byte decision = tk == dropTileKey ? SymbolTileCoverageFilter.Drop
-                              : tk == fadeTileKey ? SymbolTileCoverageFilter.Fade
-                              : SymbolTileCoverageFilter.Keep;
-                decisions.Add(decision);
                 departing.Add(tk == departingTileKey ? (byte)1 : isDeparting[i]);
             }
-            plan.Build(blockId, localIndex, departing, decisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
+            plan.Build(blockId, localIndex, departing, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
         }
 
         // Owns the LPS + the throwaway Unity resources the fixture creates (mirrors SymbolGatherParityTests'
@@ -1996,47 +1934,6 @@ namespace MapRenderer.Tests.Text.Placement
             public void Dispose()
             {
                 Lps.Dispose();
-                UnityEngine.Object.DestroyImmediate(_camGo);
-                UnityEngine.Object.DestroyImmediate(_rt);
-                UnityEngine.Object.DestroyImmediate(_baseMaterial);
-            }
-        }
-
-        // A REAL look-at + atlas (mirrors SymbolGatherPlanDropMaskTests.Harness) — needed by any test that drives
-        // a full Update (projection/staging/collision/emit), not just GatherIntoMirror/CopyMirrorInto.
-        private sealed class TickHarness : System.IDisposable
-        {
-            public readonly SymbolPlacementSystem System;
-            public readonly SceneFrame Frame;
-            public readonly double3 Origin;
-            public readonly GlyphAtlasTexture Atlas;
-            private readonly GameObject _camGo;
-            private readonly RenderTexture _rt;
-            private readonly Material _baseMaterial;
-
-            public TickHarness()
-            {
-                _camGo = new GameObject("GatherMemo_TickCamera");
-                var uCam = _camGo.AddComponent<Camera>();
-                _rt = new RenderTexture(256, 256, 0);
-                uCam.targetTexture = _rt;
-                var lookAt = new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 };
-                var mapCamera = new MapCamera(uCam, new CameraProperties(lookAt, zoom: 12.0, heading: 0.0, tilt: 0.0), projection: P);
-                Origin = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
-                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
-                var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
-                var glyphAtlas = new GlyphAtlas();
-                glyphAtlas.Append(glyph, 0);
-                Atlas = new GlyphAtlasTexture();
-                Atlas.Upload(glyphAtlas);
-                _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
-                System = new SymbolPlacementSystem(mapCamera, _baseMaterial);
-            }
-
-            public void Dispose()
-            {
-                System.Dispose();
-                Atlas.Dispose();
                 UnityEngine.Object.DestroyImmediate(_camGo);
                 UnityEngine.Object.DestroyImmediate(_rt);
                 UnityEngine.Object.DestroyImmediate(_baseMaterial);
@@ -2130,27 +2027,14 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); storeA.Clear(); storeB.Clear(); }
         }
 
-        // ═══ Masks (Departing/CoverageFading) vary per frame at a FIXED version and must be tracked on a HELD
-        //     mirror. WinnerCount stays fixed, else AssertMemoPlanMatchesMirror fires for the wrong reason. ═══
+        // ═══ The departing mask varies per frame at a FIXED version and must be tracked on a HELD mirror.
+        //     WinnerCount stays fixed, else AssertMemoPlanMatchesMirror fires for the wrong reason. ═══
 
-        // Each test flips ONE mask and asserts the OTHER is unchanged, so a cross-wire that copies one source mask
-        // into both destinations fails. A test that flipped both masks together would pass it.
-
-        private enum GatherMask { Departing, CoverageFading }
-
-        private static bool ReadMask(SymbolBatch batch, GatherMask mask)
-            => mask == GatherMask.Departing ? batch.SymbolDeparting[0] : batch.SymbolCoverageFading[0];
-
-        /// <summary>Shared body: builds a tile, flips exactly the ONE mask named by <paramref name="flipped"/>,
-        /// and asserts the flip is tracked on a held mirror while the OTHER mask stays untouched (a mask
-        /// cross-wire that copies one source into both destinations would fail this).</summary>
-        private static void AssertMaskFlipTrackedWhilePoolsHeld(int tileX, GatherMask flipped)
+        [Test]
+        public void Memo_DepartingFlip_TrackedWhilePoolsHeld()
         {
-            GatherMask unchanged = flipped == GatherMask.Departing ? GatherMask.CoverageFading : GatherMask.Departing;
-            var tile = new TileId { Z = 6, X = tileX, Y = 40 };
+            var tile = new TileId { Z = 6, X = 40, Y = 40 };
             long key = Tk(tile);
-            long fadeTileKey = flipped == GatherMask.CoverageFading ? key : -1;
-            long departingTileKey = flipped == GatherMask.Departing ? key : -1;
             var store = new SymbolTileStore(cacheCap: 8);
             SeedTile(store, tile, PointSymbol(new double3(100, 0, 200), "a", 1, key, 0.1f));
 
@@ -2164,128 +2048,21 @@ namespace MapRenderer.Tests.Text.Placement
                 harness.Lps.GatherIntoMirror(plan);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
 
-                // SAME version (no tile event) — ONLY the flipped mask changes; the other stays untouched.
-                BuildPlan(store, plan, version: 0, fadeTileKey: fadeTileKey, departingTileKey: departingTileKey);
+                // SAME version (no tile event) — ONLY the departing mask changes.
+                BuildPlan(store, plan, version: 0, departingTileKey: key);
                 harness.Lps.GatherIntoMirror(plan);
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "a mask-only change at a fixed version must stay a memo HIT");
 
-                BuildPlan(store, refPlan, version: 0, fadeTileKey: fadeTileKey, departingTileKey: departingTileKey);
+                BuildPlan(store, refPlan, version: 0, departingTileKey: key);
                 refHarness.Lps.GatherIntoMirror(refPlan);
 
                 var got = new SymbolBatch(); harness.Lps.CopyMirrorInto(got);
                 var want = new SymbolBatch(); refHarness.Lps.CopyMirrorInto(want);
                 Assert.IsNull(SymbolBatchDiff.FirstDifference(want, got),
-                    "the per-frame masks must be tracked on a HELD mirror, not frozen from the first rebuild");
-                Assert.IsTrue(ReadMask(got, flipped), $"{flipped} must reflect the flip even on a memo-hit frame");
-                Assert.IsFalse(ReadMask(got, unchanged),
-                    $"{unchanged} must stay UNCHANGED — a mask cross-wire (e.g. {flipped}'s source " +
-                    "copied into both destinations) would wrongly flip this too");
+                    "the departing mask must be tracked on a HELD mirror, not frozen from the first rebuild");
+                Assert.IsTrue(got.SymbolDeparting[0], "the departing mask must reflect the flip even on a memo-hit frame");
             }
             finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
-        }
-
-        [Test]
-        public void Memo_DepartingFlip_TrackedWhilePoolsHeld_CoverageFadingUnchanged()
-            => AssertMaskFlipTrackedWhilePoolsHeld(40, GatherMask.Departing);
-
-        [Test]
-        public void Memo_CoverageFadingFlip_TrackedWhilePoolsHeld_DepartingUnchanged()
-            => AssertMaskFlipTrackedWhilePoolsHeld(41, GatherMask.CoverageFading);
-
-        // ═══ Dropped is invisible through CopyMirrorInto (GatherSymbolPoints hard-skips it), so assert it through a
-        //     real Update on a memo-HIT frame, against a reference that never collected the dropped tile. ═══
-
-        // Full vertex + opacity byte comparison of two world-slot meshes — mirrors
-        // SymbolGatherPlanDropMaskTests.FirstMeshDifference. Returns the first difference, or null if byte-identical.
-        private static string FirstMeshDifference(Mesh a, Mesh b)
-        {
-            WorldMeshReadback.Read(a, out WorldBillboardVertex[] va, out float[] oa);
-            WorldMeshReadback.Read(b, out WorldBillboardVertex[] vb, out float[] ob);
-            if (va.Length != vb.Length) return $"vertex count {va.Length} vs {vb.Length}";
-            for (int i = 0; i < va.Length; i++)
-                if (!va[i].Equals(vb[i])) return $"vertex[{i}] differs";
-            if (oa.Length != ob.Length) return $"opacity count {oa.Length} vs {ob.Length}";
-            for (int i = 0; i < oa.Length; i++)
-                if (oa[i] != ob[i]) return $"opacity[{i}] {oa[i]} vs {ob[i]}";
-            return null;
-        }
-
-        [Test]
-        public void Memo_DropFlip_TrackedWhilePoolsHeld()
-        {
-            var keepTile = new TileId { Z = 12, X = 2500, Y = 1500 };
-            var dropTile = new TileId { Z = 12, X = 2501, Y = 1500 };
-            long keepKey = Tk(keepTile);
-            long dropKey = Tk(dropTile);
-            var dropOffset = new double3(0, 0, 1600); // clears collision with KEEP — mirrors DropMaskTests' DropOffset
-
-            using var hMasked = new TickHarness();
-            using var hRef = new TickHarness();
-            var storeMasked = new SymbolTileStore(cacheCap: 16);
-            var storeRef = new SymbolTileStore(cacheCap: 16);
-            try
-            {
-                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
-                {
-                    SeedTile(store, keepTile, PointSymbol(hMasked.Origin, "keep", 1, keepKey, 0.1f));
-                    SeedTile(store, dropTile, PointSymbol(hMasked.Origin + dropOffset, "drop", 2, dropKey, 0.2f));
-                }
-
-                var planMasked = new SymbolGatherPlan();
-                var planRef = new SymbolGatherPlan();
-                try
-                {
-                    // Frame 1: both tiles Keep on both sides. Ticked twice (the second a memo HIT) because the verdict
-                    // is one Update late; else the drop slot never shows and the HIDDEN assertion below passes vacuously.
-                    BuildPlan(storeMasked, planMasked, version: 0);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildPlan(storeRef, planRef, version: 0);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
-                        "sanity: frame 1 is a heavy rebuild — the duplicate Update is a memo HIT (same plan+version), not a second rebuild");
-
-                    // Frame 2: MASKED flags the drop tile Dropped at the SAME version (a memo HIT); REFERENCE leaves
-                    // the drop tile out of its plan.
-                    BuildPlan(storeMasked, planMasked, version: 0, dropTileKey: dropKey);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
-                        "the Drop flip at a fixed version must be a memo HIT — this is what makes the assertions below meaningful");
-
-                    var refBlockId = new List<int>();
-                    var refLocalIndex = new List<int>();
-                    var refIsDeparting = new List<byte>();
-                    var refDecisions = new List<byte>();
-                    var allBlockId = new List<int>();
-                    var allLocalIndex = new List<int>();
-                    var allIsDeparting = new List<byte>();
-                    storeRef.CollectInto(allBlockId, allLocalIndex, allIsDeparting, quantizeMeters: 1.0, out _);
-                    for (int i = 0; i < allBlockId.Count; i++)
-                    {
-                        if (storeRef.OrderedBlocks[allBlockId[i]].TileKey == dropKey) continue;
-                        refBlockId.Add(allBlockId[i]); refLocalIndex.Add(allLocalIndex[i]);
-                        refIsDeparting.Add(allIsDeparting[i]); refDecisions.Add(SymbolTileCoverageFilter.Keep);
-                    }
-                    planRef.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, storeRef.OrderedBlocks, fadeAliases: null, winnerSetVersion: 1);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-
-                    Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
-                        "masked-Drop's emitted quad count (on a memo-HIT frame) must equal the reference's");
-                    Assert.AreEqual(1, hRef.System.LastQuadCount, "sanity: only the KEEP point ever draws");
-
-                    Assert.IsTrue(hMasked.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshMasked));
-                    Assert.IsTrue(hRef.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshRef));
-                    Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
-                        "the surviving KEEP point's full vertex+opacity content must be byte-identical between a memo-hit masked Drop and the reference");
-
-                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "masked: KEEP must be VISIBLE");
-                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text),
-                        "masked: the Dropped slot must be HIDDEN even though its mirror pools came from a memo hit");
-                }
-                finally { planMasked.Dispose(); planRef.Dispose(); }
-            }
-            finally { storeMasked.Clear(); storeRef.Clear(); }
         }
 
         // ═══ The memo-HIT path allocates ZERO managed garbage; the heavy path's guard is
@@ -2310,7 +2087,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the measured call below must be a memo hit");
 
                 AllocationDiagnostics.AssertNotAllocating(() => { harness.Lps.GatherIntoMirror(plan); },
-                    "a memo-hit GatherIntoMirror must allocate ZERO managed garbage — three NativeArray memcpys + a subtraction");
+                    "a memo-hit GatherIntoMirror must allocate ZERO managed garbage — one NativeArray memcpy");
             }
             finally { plan.Dispose(); store.Clear(); }
         }
@@ -2341,15 +2118,6 @@ namespace MapRenderer.Tests.Text.Placement
         [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
         [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
             "this test baked a block it never disposed — release the snapshot and Clear() the store");
-
-        // Identity projection: every corner projects (clip.w == 1 > 0), so with HugeMinCoverage the filter's
-        // Keep/Fade/Drop is driven only by coverageAbovePrev, with no camera framing needed.
-        private static readonly float4x4 IdViewProj = float4x4.identity;
-        private static readonly float3x3 IdRebase = float3x3.identity;
-        private static readonly double2 Viewport = new double2(100, 100);
-        // Dominates any projected tile-quad coverage (identity projection of z5 Mercator corners tops out ~1e14),
-        // so every tile is deterministically "below threshold" → Keep/Fade/Drop is driven purely by coverageAbovePrev.
-        private const double HugeMinCoverage = 1e30;
 
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
 
@@ -2418,38 +2186,10 @@ namespace MapRenderer.Tests.Text.Placement
             return -1;
         }
 
-        // Classifies the raw CollectInto winner plan with the block-based SymbolTileCoverageFilter.ClassifyActive and
-        // removes every Drop record, so compaction moves elements. This targets winner ORDER, not resident-Drop masking.
-        private static void ClassifyAndCompact(IReadOnlyList<SymbolTileBlock> orderedBlocks,
-            List<int> blockId, List<int> localIndex, List<byte> isDeparting, HashSet<long> coverageAbovePrev,
-            out List<byte> rawDecisions,
-            out List<int> compactBlockId, out List<int> compactLocalIndex, out List<byte> compactIsDeparting,
-            out List<byte> compactDecisions, out int culled)
-        {
-            var blockTileKeys = new List<long>(orderedBlocks.Count);
-            for (int b = 0; b < orderedBlocks.Count; b++) blockTileKeys.Add(orderedBlocks[b].TileKey);
-
-            rawDecisions = new List<byte>();
-            SymbolTileCoverageFilter.ClassifyActive(blockTileKeys, blockId, isDeparting, P,
-                double3.zero, IdViewProj, Viewport, IdRebase, HugeMinCoverage,
-                coverageAbovePrev, new HashSet<long>(), new Dictionary<long, double>(), new HashSet<long>(),
-                now: 20.0, graceSeconds: 1000.0, new Dictionary<long, byte>(), new List<byte>(),
-                rawDecisions, out culled);
-
-            compactBlockId = new List<int>(); compactLocalIndex = new List<int>();
-            compactIsDeparting = new List<byte>(); compactDecisions = new List<byte>();
-            for (int i = 0; i < blockId.Count; i++)
-            {
-                if (rawDecisions[i] == SymbolTileCoverageFilter.Drop) continue;
-                compactBlockId.Add(blockId[i]); compactLocalIndex.Add(localIndex[i]);
-                compactIsDeparting.Add(isDeparting[i]); compactDecisions.Add(rawDecisions[i]);
-            }
-        }
-
         // THE INDEPENDENT ORACLE: a managed restatement of SymbolGatherJob's "select each winner's slice, flatten into
         // one SoA", written apart from it so the two disagree if either has a selection/offset bug.
         private static void BuildExpectedBatch(SymbolBatch expected,
-            List<int> blockId, List<int> localIndex, List<byte> isDeparting, List<byte> decisions,
+            List<int> blockId, List<int> localIndex, List<byte> isDeparting,
             IReadOnlyList<SymbolTileBlock> orderedBlocks)
         {
             expected.Reset();
@@ -2461,7 +2201,6 @@ namespace MapRenderer.Tests.Text.Placement
                 SymbolPlacementKind kind = block.Kinds[raw];
                 int detail = block.Detail[raw];
                 bool departing = isDeparting[i] != 0;
-                bool coverageFading = decisions[i] == SymbolTileCoverageFilter.Fade;
 
                 if (kind == SymbolPlacementKind.Point)
                 {
@@ -2480,7 +2219,7 @@ namespace MapRenderer.Tests.Text.Placement
                         expected.AddWorldUp(block.WorldUps[worldStartSrc + v]);
                     }
                     expected.AddSymbol(SymbolPlacementKind.Point, expectedDetail, expectedWorldStart, worldCount,
-                        block.RepAnchor[raw], departing, coverageFading);
+                        block.RepAnchor[raw], departing);
                 }
                 else
                 {
@@ -2510,56 +2249,42 @@ namespace MapRenderer.Tests.Text.Placement
                         expected.AddWorldUp(block.WorldUps[worldStartSrc + v]);
                     }
                     expected.AddSymbol(SymbolPlacementKind.Curved, expectedDetail, expectedWorldStart, worldCount,
-                        block.RepAnchor[raw], departing, coverageFading);
+                        block.RepAnchor[raw], departing);
                 }
             }
         }
 
-        // Builds the production winner-plan pipeline into `plan` and the oracle over the SAME compacted winner plan;
-        // `gathered` returns the gathered mirror as a batch.
+        // Builds the production winner plan into `plan` and the oracle over the SAME winner plan; `gathered`
+        // returns the gathered mirror as a batch.
         private void RunPipeline(SymbolTileStore store, SymbolPlacementSystem lps, SymbolGatherPlan plan,
-            HashSet<long> coverageAbovePrev, bool skipPermute, int perturbWinner, int perturbLocalIndex,
-            out SymbolBatch oracle, out SymbolBatch gathered, out int culled)
+            int perturbWinner, int perturbLocalIndex, out SymbolBatch oracle, out SymbolBatch gathered)
         {
             var planBlockId = new List<int>();
             var planLocalIndex = new List<int>();
             var planIsDeparting = new List<byte>();
             store.CollectInto(planBlockId, planLocalIndex, planIsDeparting, quantizeMeters: 1.0, out _);
 
-            ClassifyAndCompact(store.OrderedBlocks, planBlockId, planLocalIndex, planIsDeparting, coverageAbovePrev,
-                out List<byte> rawDecisions,
-                out List<int> compactBlockId, out List<int> compactLocalIndex, out List<byte> compactIsDeparting,
-                out List<byte> compactDecisions, out culled);
-
-            // Snapshot BEFORE any perturbation/skip below — the oracle must read the UNPERTURBED winner set so
-            // RED-verify (a)/(b) can diverge it from what the (perturbed) plan feeds the gather.
-            var oracleBlockId = new List<int>(compactBlockId);
-            var oracleLocalIndex = new List<int>(compactLocalIndex);
-            var oracleIsDeparting = new List<byte>(compactIsDeparting);
-            var oracleDecisions = new List<byte>(compactDecisions);
-
-            // RED-verify (b): feed the plan the RAW, uncompacted arrays, which still carry the Dropped winner and so
-            // desync from the oracle's compacted winner set.
-            List<int> feedBlockId = skipPermute ? planBlockId : compactBlockId;
-            List<int> feedLocalIndex = skipPermute ? planLocalIndex : compactLocalIndex;
-            List<byte> feedIsDeparting = skipPermute ? planIsDeparting : compactIsDeparting;
-            List<byte> feedDecisions = skipPermute ? rawDecisions : compactDecisions;
+            // Snapshot BEFORE any perturbation below — the oracle must read the UNPERTURBED winner set so
+            // RED-verify (a) can diverge it from what the (perturbed) plan feeds the gather.
+            var oracleBlockId = new List<int>(planBlockId);
+            var oracleLocalIndex = new List<int>(planLocalIndex);
+            var oracleIsDeparting = new List<byte>(planIsDeparting);
 
             // RED-verify (a): perturb ONE winner's localIndex in the PLAN feed only — the oracle's snapshot above
             // was already taken, so it still reads the correct record.
-            if (perturbWinner >= 0) feedLocalIndex[perturbWinner] = perturbLocalIndex;
+            if (perturbWinner >= 0) planLocalIndex[perturbWinner] = perturbLocalIndex;
 
-            plan.Build(feedBlockId, feedLocalIndex, feedIsDeparting, feedDecisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: 0);
+            plan.Build(planBlockId, planLocalIndex, planIsDeparting, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: 0);
             lps.GatherIntoMirror(plan);
             gathered = new SymbolBatch();
             lps.CopyMirrorInto(gathered);
 
             oracle = new SymbolBatch();
-            BuildExpectedBatch(oracle, oracleBlockId, oracleLocalIndex, oracleIsDeparting, oracleDecisions, store.OrderedBlocks);
+            BuildExpectedBatch(oracle, oracleBlockId, oracleLocalIndex, oracleIsDeparting, store.OrderedBlocks);
         }
 
-        // A 4-tile fixture: A (point + curved, faded), B (point, faded), C (point, DROPPED), D (point, DEPARTING).
-        private SymbolTileStore Seed(out HashSet<long> coverageAbovePrev,
+        // A 4-tile fixture: A (point + curved), B (point), C (point), D (point, DEPARTING).
+        private SymbolTileStore Seed(
             out TileId a, out TileId b, out TileId c, out TileId d)
         {
             // Locals (not the out params) so the seeding lambdas can capture them — C# forbids capturing an
@@ -2584,9 +2309,6 @@ namespace MapRenderer.Tests.Text.Placement
             store.ReconcileActiveSet(
                 new List<SymbolTileStore.Key> { Key(ta), Key(tb), Key(tc) },
                 keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
-
-            // A, B were above threshold last frame → they FADE; C never was → it DROPS.
-            coverageAbovePrev = new HashSet<long> { Tk(ta), Tk(tb) };
             return store;
         }
 
@@ -2624,18 +2346,17 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Gather_MatchesBuildOracle_FieldByField()
         {
-            SymbolTileStore store = Seed(out HashSet<long> above, out _, out _, out _, out _);
+            SymbolTileStore store = Seed(out _, out _, out _, out _);
             var harness = new LpsHarness();
             var plan = new SymbolGatherPlan();
             try
             {
-                RunPipeline(store, harness.Lps, plan, above, skipPermute: false, perturbWinner: -1, perturbLocalIndex: -1,
-                    out SymbolBatch oracle, out SymbolBatch gathered, out int culled);
+                RunPipeline(store, harness.Lps, plan, perturbWinner: -1, perturbLocalIndex: -1,
+                    out SymbolBatch oracle, out SymbolBatch gathered);
 
-                Assert.AreEqual(1, culled, "precondition: tile C is Dropped (so the compaction moves elements)");
-                Assert.AreEqual(4, oracle.Count, "precondition: A.curved + A.point + B.point (active) + D.point (departing)");
+                Assert.AreEqual(5, oracle.Count, "precondition: A.curved + A.point + B.point + C.point (active) + D.point (departing)");
                 Assert.AreEqual(1, oracle.CurvedCount, "precondition: exactly the one curved label (A)");
-                Assert.AreEqual(3, oracle.PointCount, "precondition: A.point + B.point + D.point");
+                Assert.AreEqual(4, oracle.PointCount, "precondition: A.point + B.point + C.point + D.point");
 
                 string diff = SymbolBatchDiff.FirstDifference(oracle, gathered);
                 Assert.IsNull(diff, $"gather must be byte-identical to the independent oracle — first difference: {diff}");
@@ -2647,7 +2368,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Gather_DetectsPerturbedLocalIndex()
         {
-            SymbolTileStore store = Seed(out HashSet<long> above, out TileId a, out _, out _, out _);
+            SymbolTileStore store = Seed(out TileId a, out _, out _, out _);
             var harness = new LpsHarness();
             var plan = new SymbolGatherPlan();
             try
@@ -2658,33 +2379,13 @@ namespace MapRenderer.Tests.Text.Placement
                 var planLocalIndex = new List<int>();
                 var planIsDeparting = new List<byte>();
                 store.CollectInto(planBlockId, planLocalIndex, planIsDeparting, quantizeMeters: 1.0, out _);
-                ClassifyAndCompact(store.OrderedBlocks, planBlockId, planLocalIndex, planIsDeparting, above,
-                    out _, out List<int> compactBlockId, out List<int> compactLocalIndex, out _, out _, out _);
-                int perturbWinner = FindWinner(compactBlockId, compactLocalIndex, store.OrderedBlocks, Tk(a), wantLocalIndex: 0);
+                int perturbWinner = FindWinner(planBlockId, planLocalIndex, store.OrderedBlocks, Tk(a), wantLocalIndex: 0);
                 Assert.AreNotEqual(-1, perturbWinner, "sanity: tile A's point record (raw localIndex 0) is a winner");
 
-                RunPipeline(store, harness.Lps, plan, above, skipPermute: false, perturbWinner: perturbWinner, perturbLocalIndex: 1,
-                    out SymbolBatch oracle, out SymbolBatch gathered, out _);
+                RunPipeline(store, harness.Lps, plan, perturbWinner: perturbWinner, perturbLocalIndex: 1,
+                    out SymbolBatch oracle, out SymbolBatch gathered);
                 Assert.IsNotNull(SymbolBatchDiff.FirstDifference(oracle, gathered),
                     "a perturbed winner localIndex must diverge from the oracle — the parity comparison has teeth");
-            }
-            finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
-        }
-
-        // RED-verify (b): skip compaction for the plan feed — the plan arrays stay full-length (still carrying the
-        // Dropped winner) while the oracle reads the compacted winner set; the gather must diverge from the oracle.
-        [Test]
-        public void Gather_DetectsSkippedFilterPermute()
-        {
-            SymbolTileStore store = Seed(out HashSet<long> above, out _, out _, out _, out _);
-            var harness = new LpsHarness();
-            var plan = new SymbolGatherPlan();
-            try
-            {
-                RunPipeline(store, harness.Lps, plan, above, skipPermute: true, perturbWinner: -1, perturbLocalIndex: -1,
-                    out SymbolBatch oracle, out SymbolBatch gathered, out _);
-                Assert.IsNotNull(SymbolBatchDiff.FirstDifference(oracle, gathered),
-                    "an un-compacted plan desyncs from the filtered winner set — the gather must diverge from the oracle");
             }
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
         }
@@ -2694,15 +2395,14 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void GatherIntoMirror_Warm_AllocatesNoGCMemory()
         {
-            SymbolTileStore store = Seed(out HashSet<long> above, out _, out _, out _, out _);
+            SymbolTileStore store = Seed(out _, out _, out _, out _);
             var harness = new LpsHarness();
             var plan = new SymbolGatherPlan();
             try
             {
-                // Build the plan ONCE (collect + filter + plan.Build may allocate first-touch — outside the measure),
+                // Build the plan ONCE (collect + plan.Build may allocate first-touch — outside the measure),
                 // then materialize the gather so its native lists reach steady capacity.
-                RunPipeline(store, harness.Lps, plan, above, skipPermute: false, perturbWinner: -1, perturbLocalIndex: -1,
-                    out _, out _, out _);
+                RunPipeline(store, harness.Lps, plan, perturbWinner: -1, perturbLocalIndex: -1, out _, out _);
                 harness.Lps.GatherIntoMirror(plan); // extra warm-up (first-touch native growth already done above)
 
                 // Warm the EXACT measured delegate (JIT) outside the measured region — a one-shot lambda's own
@@ -2789,21 +2489,15 @@ namespace MapRenderer.Tests.Text.Placement
                 var blockId = new List<int> { 0, 1, 0, 1, 0, 0, 0, 0 };
                 var localIndex = new List<int> { 0, 0, 1, 1, 2, 3, 4, 5 };
                 var isDeparting = new List<byte> { 0, 0, 0, 0, 0, 0, 0, 0 };
-                var decisions = new List<byte>
-                {
-                    SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep,
-                    SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep,
-                    SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep,
-                };
                 var orderedBlocks = new List<SymbolTileBlock> { blockA, blockB };
 
-                plan.Build(blockId, localIndex, isDeparting, decisions, orderedBlocks, fadeAliases: null, winnerSetVersion: 0);
+                plan.Build(blockId, localIndex, isDeparting, orderedBlocks, fadeAliases: null, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan);
                 var gathered = new SymbolBatch();
                 harness.Lps.CopyMirrorInto(gathered);
 
                 var oracle = new SymbolBatch();
-                BuildExpectedBatch(oracle, blockId, localIndex, isDeparting, decisions, orderedBlocks);
+                BuildExpectedBatch(oracle, blockId, localIndex, isDeparting, orderedBlocks);
 
                 Assert.AreEqual(8, oracle.Count, "precondition: 8 winners collected");
                 Assert.AreEqual(4, oracle.PointCount, "precondition: aPointZeroQuads + aPointNormal1 + bPointNormal + aPointNormal2");
@@ -2864,16 +2558,15 @@ namespace MapRenderer.Tests.Text.Placement
                 var blockId = new List<int> { 0, 0 };
                 var localIndex = new List<int> { 0, 1 };
                 var isDeparting = new List<byte> { 0, 0 };
-                var decisions = new List<byte> { SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep };
                 var orderedBlocks = new List<SymbolTileBlock> { block };
 
-                plan.Build(blockId, localIndex, isDeparting, decisions, orderedBlocks, fadeAliases: null, winnerSetVersion: 0);
+                plan.Build(blockId, localIndex, isDeparting, orderedBlocks, fadeAliases: null, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan);
                 var gathered = new SymbolBatch();
                 harness.Lps.CopyMirrorInto(gathered);
 
                 var oracle = new SymbolBatch();
-                BuildExpectedBatch(oracle, blockId, localIndex, isDeparting, decisions, orderedBlocks);
+                BuildExpectedBatch(oracle, blockId, localIndex, isDeparting, orderedBlocks);
 
                 Assert.AreEqual(2, oracle.PointCount, "precondition: icon + text, both point-placement");
                 Assert.AreEqual(SymbolPairRole.Owner, oracle.Points[0].PairRole, "precondition: the icon resolves as Owner in the baked block");
@@ -2883,415 +2576,6 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.IsNull(diff, $"gather must be byte-identical to the independent oracle on a pair-bearing fixture — first difference: {diff}");
             }
             finally { plan.Dispose(); harness.Dispose(); block.Dispose(); }
-        }
-    }
-
-    // ───────────────────────────────────────────────────────────────────────────────────
-    // SymbolGatherPlanDropMaskTests — the tile-coverage cull's Drop decision is now a per-record mask
-    // ───────────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// The tile-coverage cull's Drop decision is a per-record MASK (<see cref="SymbolGatherPlan.Dropped"/>, mirrored
-    /// as <c>_mirrorSymbolDropped</c>): a Dropped winner stays RESIDENT and is hard-skipped by
-    /// <c>SymbolPlacementSystem.GatherSymbolPoints</c>. Each test compares that path against a reference plan that
-    /// never holds the Dropped winners, down to the survivor's world-mesh vertex and opacity bytes.
-    /// </summary>
-    /// <remarks>
-    /// Non-local invariant: the hard-skip precedes <c>MarkFadeOutIfAlive</c>'s "still alive ⇒ keep staging" check, and
-    /// an all-Dropped frame gates on <c>_mirrorNonDroppedCount</c>, not <c>_mirrorCount</c>, so a live fade freezes.
-    /// Both anchors stay projectable and inside the 256px viewport, so an off-viewport reject in
-    /// <c>SymbolStagingMath.StagePoint</c> never hides a removed hard-skip.
-    /// </remarks>
-    [TestFixture]
-    public class SymbolGatherPlanDropMaskTests
-    {
-        // A leaked SymbolTileBlock keeps DebugLiveAllocCount raised: only Dispose decrements it, never a finalizer,
-        // so this delta is deterministic and catches a test that bakes a block and never disposes it.
-        private long _liveBlocks;
-        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
-        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
-            "this test baked a block it never disposed — release the snapshot and Clear() the store");
-
-        private static readonly WebMercatorProjection P = new WebMercatorProjection();
-
-        // Keeps the DROP symbol clear of the centre-anchored KEEP symbol (a same-point pair suppresses one to 0), yet
-        // inside the 256px viewport.
-        private static readonly double3 DropOffset = new double3(0, 0, 1600);
-
-        private static GlyphAtlasTexture BuildTinyAtlasTexture()
-        {
-            var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12,
-                Bitmap = new byte[16 * 16] };
-            var atlas = new GlyphAtlas();
-            atlas.Append(glyph, 0);
-            var texture = new GlyphAtlasTexture();
-            texture.Upload(atlas);
-            return texture;
-        }
-
-        private static (List<SymbolQuad> Quads, float2 BoundsMin, float2 BoundsMax) OneQuad(float u) => (
-            new List<SymbolQuad>
-            {
-                new SymbolQuad
-                {
-                    TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
-                    UvTopLeft = new float2(u, u), UvBottomRight = new float2(u + 0.2f, u + 0.2f), LineIndex = 0,
-                },
-            },
-            float2.zero, new float2(18f, 18f));
-
-        private static SymbolTileBuffer PointSymbol(double3 anchor, string text, int feature, long tileKey)
-        {
-            var layout = OneQuad(0.1f);
-            return TestSymbolTileBuffer.Point(anchor, layout.Quads, layout.BoundsMin, layout.BoundsMax,
-                text: text, textSizePx: 20f, paddingPx: 2f, featureIndex: feature, tileKey: tileKey, paint: SymbolPaint.Default);
-        }
-
-        private static SymbolTileBuffer CurvedSymbol(double3 anchor, string text, int feature, long tileKey) =>
-            TestSymbolTileBuffer.Curved(
-                glyphs: new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = OneQuad(0.3f).Quads[0] } },
-                anchors: new[] { new LineAnchor(0, 0.5f) },
-                // A ~8m path is sub-pixel at z12 and never stages; this span, with the anchor and glyph at its middle,
-                // places on-screen at this zoom.
-                path: new[] { anchor - new double3(800, 0, 0), anchor + new double3(800, 0, 0) },
-                anchorRender: anchor, placement: SymbolPlacement.LineCenter,
-                text: text, textSizePx: 20f, paddingPx: 2f, sortKey: 1f,
-                maxAngleDeg: 180f, keepUpright: false,
-                featureIndex: feature, tileKey: tileKey, paint: SymbolPaint.Default);
-
-        private static SymbolTileStore.Key Key(TileId t) => new SymbolTileStore.Key("s", t);
-        private static long Tk(TileId t) => SymbolTileKey.Pack(t);
-
-        private static void SeedTile(SymbolTileStore store, TileId tile, SymbolTileBuffer buffer)
-        {
-            int gen = store.BeginBuild(Key(tile));
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P));
-            Assert.IsTrue(store.CompleteBuild(Key(tile), gen, block), "sanity: block committed");
-        }
-
-        // Owns the LPS + the throwaway Unity resources the fixture creates — mirrors SymbolGatherParityTests'
-        // LpsHarness, plus a real look-at so StagePoint's projection/viewport-margin check genuinely passes (SF8).
-        private sealed class Harness : System.IDisposable
-        {
-            public readonly SymbolPlacementSystem System;
-            public readonly SceneFrame Frame;
-            public readonly double3 Origin;
-            public readonly GlyphAtlasTexture Atlas;
-            private readonly GameObject _camGo;
-            private readonly RenderTexture _rt;
-            private readonly Material _baseMaterial;
-
-            public Harness()
-            {
-                _camGo = new GameObject("DropMask_TestCamera");
-                var uCam = _camGo.AddComponent<Camera>();
-                _rt = new RenderTexture(256, 256, 0); // headroom so KEEP (centre) + DROP (offset) both stay in-viewport
-                uCam.targetTexture = _rt;
-                var lookAt = new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 };
-                var mapCamera = new MapCamera(uCam, new CameraProperties(lookAt, zoom: 12.0, heading: 0.0, tilt: 0.0),
-                    projection: P);
-                Origin = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
-                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
-                Atlas = BuildTinyAtlasTexture();
-                _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
-                System = new SymbolPlacementSystem(mapCamera, _baseMaterial);
-            }
-
-            public void Dispose()
-            {
-                System.Dispose();
-                Atlas.Dispose();
-                Object.DestroyImmediate(_camGo);
-                Object.DestroyImmediate(_rt);
-                Object.DestroyImmediate(_baseMaterial);
-            }
-        }
-
-        // The RESIDENT-MASKED path: every winner is in the plan, dropTileKey's winners stamped Drop, the rest Keep
-        // (-1 packs to no tile ⇒ all Keep). Each rebuild of the SAME plan object must pass a fresh `version`.
-        private static void BuildMaskedPlan(SymbolTileStore store, SymbolGatherPlan plan, long dropTileKey, int version)
-        {
-            var blockId = new List<int>();
-            var localIndex = new List<int>();
-            var isDeparting = new List<byte>();
-            store.CollectInto(blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
-
-            var decisions = new List<byte>(blockId.Count);
-            for (int i = 0; i < blockId.Count; i++)
-                decisions.Add(store.OrderedBlocks[blockId[i]].TileKey == dropTileKey ? SymbolTileCoverageFilter.Drop : SymbolTileCoverageFilter.Keep);
-
-            plan.Build(blockId, localIndex, isDeparting, decisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
-        }
-
-        // The REFERENCE path: fills `plan` with ONLY the winners outside excludedTileKey, as if that tile was never
-        // collected (-1 packs to no tile ⇒ everything included).
-        private static void BuildReferencePlan(SymbolTileStore store, SymbolGatherPlan plan, long excludedTileKey, int version)
-        {
-            var blockId = new List<int>();
-            var localIndex = new List<int>();
-            var isDeparting = new List<byte>();
-            store.CollectInto(blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
-
-            var refBlockId = new List<int>();
-            var refLocalIndex = new List<int>();
-            var refIsDeparting = new List<byte>();
-            var refDecisions = new List<byte>();
-            for (int i = 0; i < blockId.Count; i++)
-            {
-                if (store.OrderedBlocks[blockId[i]].TileKey == excludedTileKey) continue;
-                refBlockId.Add(blockId[i]); refLocalIndex.Add(localIndex[i]);
-                refIsDeparting.Add(isDeparting[i]); refDecisions.Add(SymbolTileCoverageFilter.Keep);
-            }
-            plan.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
-        }
-
-        private static float MaxAlpha(SymbolPlacementSystem system, long tileKey)
-            => system.TryGetWorldSlotMesh(tileKey, 0, SymbolKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
-
-        // Full vertex + opacity byte comparison of two world-slot meshes — identity+content, not just a count or
-        // a single max-opacity scalar. Returns the first difference, or null if byte-identical.
-        private static string FirstMeshDifference(Mesh a, Mesh b)
-        {
-            WorldMeshReadback.Read(a, out WorldBillboardVertex[] va, out float[] oa);
-            WorldMeshReadback.Read(b, out WorldBillboardVertex[] vb, out float[] ob);
-            if (va.Length != vb.Length) return $"vertex count {va.Length} vs {vb.Length}";
-            for (int i = 0; i < va.Length; i++)
-                if (!va[i].Equals(vb[i])) return $"vertex[{i}] differs ({va[i]} vs {vb[i]})";
-            if (oa.Length != ob.Length) return $"opacity count {oa.Length} vs {ob.Length}";
-            for (int i = 0; i < oa.Length; i++)
-                if (oa[i] != ob[i]) return $"opacity[{i}] {oa[i]} vs {ob[i]}";
-            return null;
-        }
-
-        [Test]
-        public void MaskedDrop_PointOnly_MatchesReference_SurvivorContentIdentical()
-        {
-            var keepTile = new TileId { Z = 12, X = 2200, Y = 1500 };
-            var dropTile = new TileId { Z = 12, X = 2201, Y = 1500 };
-            long keepKey = Tk(keepTile);
-            long dropKey = Tk(dropTile);
-
-            using var hMasked = new Harness();
-            using var hRef = new Harness();
-            var storeMasked = new SymbolTileStore(cacheCap: 16);
-            var storeRef = new SymbolTileStore(cacheCap: 16);
-            try
-            {
-                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
-                {
-                    SeedTile(store, keepTile, PointSymbol(hMasked.Origin, "keep", 1, keepKey));
-                    // DROP anchor offset so it does NOT collide with KEEP (same-point ⇒ one is suppressed to 0 and the
-                    // "genuinely live before Drop" sanity can't hold); still well inside the 256px viewport (SF8).
-                    SeedTile(store, dropTile, PointSymbol(hMasked.Origin + DropOffset, "dropPoint", 2, dropKey));
-                }
-
-                var planMasked = new SymbolGatherPlan();
-                var planRef = new SymbolGatherPlan();
-                // Each rebuild of the SAME plan object gets a fresh version
-                int maskedVersion = 0;
-                int refVersion = 0;
-                try
-                {
-                    // Frame 1: both tiles Keep on both harnesses, so the drop tile's point has a live full-opacity fade.
-                    // Each Update is duplicated because the verdict is one Update late.
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f, "sanity: the drop tile's point is genuinely live before the Drop");
-
-                    // Frame 2: MASKED flags the drop tile's winner Dropped; REFERENCE excludes it. Duplicated, or
-                    // the counts still read frame 1's pre-Drop verdict and the comparison passes without the mask.
-                    BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildReferencePlan(storeRef, planRef, dropKey, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-
-                    Assert.AreEqual(hRef.System.LastCandidateCount, hMasked.System.LastCandidateCount,
-                        "masked-Drop's candidate count must equal the reference's (the Dropped point is absent from collision)");
-                    Assert.AreEqual(hRef.System.LastSurvivorCount, hMasked.System.LastSurvivorCount,
-                        "masked-Drop's survivor count must equal the reference's");
-                    Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
-                        "masked-Drop's emitted quad count must equal the reference's");
-                    Assert.AreEqual(1, hRef.System.LastQuadCount, "sanity: only the KEEP point ever draws");
-
-                    bool maskedHasKeep = hMasked.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshMasked);
-                    bool refHasKeep = hRef.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshRef);
-                    Assert.IsTrue(maskedHasKeep && refHasKeep, "the surviving KEEP point's world slot must exist on both sides");
-                    Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
-                        "the surviving KEEP point's full vertex+opacity content must be byte-identical whether the Drop tile is masked or absent");
-
-                    // Non-obvious why: an unemitted slot keeps its stale frame-1 mesh (Renderer disabled) until
-                    // idle-reclaim, so the check is masked slot == reference slot, not "absolutely invisible".
-                    bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshMasked);
-                    bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshRef);
-                    Assert.AreEqual(refHasDrop, maskedHasDrop, "the Dropped point's world slot must be present/absent identically masked vs reference");
-                    if (maskedHasDrop && refHasDrop)
-                        Assert.IsNull(FirstMeshDifference(dropMeshRef, dropMeshMasked),
-                            "the Dropped point's world slot content must be byte-identical whether resident-masked or physically absent");
-
-                    // Content equality cannot catch a KEEP↔DROP swap, and MeshRenderer.enabled carries visibility, so
-                    // assert the RENDERED set on BOTH paths: KEEP visible, DROP hidden.
-                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "masked: the surviving KEEP slot must be VISIBLE");
-                    Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "reference: the surviving KEEP slot must be VISIBLE");
-                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "masked: the Dropped slot must be HIDDEN (Renderer disabled), not merely stale-mesh-identical");
-                    Assert.IsFalse(hRef.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "reference: the absent Drop slot must be HIDDEN");
-                }
-                finally { planMasked.Dispose(); planRef.Dispose(); }
-            }
-            finally { storeMasked.Clear(); storeRef.Clear(); }
-        }
-
-        [Test]
-        public void MaskedDrop_CurvedOnly_MatchesReference_SurvivorContentIdentical()
-        {
-            var keepTile = new TileId { Z = 12, X = 2300, Y = 1500 };
-            var dropTile = new TileId { Z = 12, X = 2301, Y = 1500 };
-            long keepKey = Tk(keepTile);
-            long dropKey = Tk(dropTile);
-
-            using var hMasked = new Harness();
-            using var hRef = new Harness();
-            var storeMasked = new SymbolTileStore(cacheCap: 16);
-            var storeRef = new SymbolTileStore(cacheCap: 16);
-            try
-            {
-                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
-                {
-                    SeedTile(store, keepTile, CurvedSymbol(hMasked.Origin, "keepCurved", 1, keepKey));
-                    // DROP anchor offset so it does NOT collide with KEEP (see the point-only test); in-viewport (SF8).
-                    SeedTile(store, dropTile, CurvedSymbol(hMasked.Origin + DropOffset, "dropCurved", 2, dropKey));
-                }
-
-                var planMasked = new SymbolGatherPlan();
-                var planRef = new SymbolGatherPlan();
-                // Each rebuild of the SAME plan object gets a fresh version
-                int maskedVersion = 0;
-                int refVersion = 0;
-                try
-                {
-                    // Frame 1: both tiles Keep; the drop tile's CURVED record must place with a LIVE fade, or a Drop
-                    // folded into MarkFadeOutIfAlive's OR-chain cannot diverge. Each Update is duplicated (verdict lag).
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    Assert.Greater(hMasked.System.LastSurvivorCount, 0, "sanity: at least one curved placement survived frame 1");
-                    Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f,
-                        "the drop tile's curved record must be a genuinely LIVE (placed, positive-opacity) fade before the Drop");
-
-                    // Frame 2: MASKED flags the curved winner Dropped (resident); REFERENCE excludes it. Duplicated,
-                    // or the comparison reads frame 1's stale verdict, not frame 2's Drop-masked collision.
-                    BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildReferencePlan(storeRef, planRef, dropKey, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-
-                    Assert.AreEqual(hRef.System.LastCandidateCount, hMasked.System.LastCandidateCount,
-                        "masked-Drop's candidate count must equal the reference's (the Dropped curved anchors are absent)");
-                    Assert.AreEqual(hRef.System.LastSurvivorCount, hMasked.System.LastSurvivorCount,
-                        "masked-Drop's survivor count must equal the reference's");
-                    Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
-                        "masked-Drop's emitted quad count must equal the reference's");
-
-                    bool maskedHasKeep = hMasked.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshMasked);
-                    bool refHasKeep = hRef.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshRef);
-                    Assert.IsTrue(maskedHasKeep && refHasKeep, "the surviving KEEP curved label's world slot must exist on both sides");
-                    Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
-                        "the surviving KEEP curved label's full vertex+opacity content must be byte-identical whether the Drop tile is masked or absent");
-
-                    // The drop record had a LIVE curved fade, so this proves masking it equals its absence: the
-                    // hard-skip precedes MarkFadeOutIfAlive, so the record is not soft-faded.
-                    bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshMasked);
-                    bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshRef);
-                    Assert.AreEqual(refHasDrop, maskedHasDrop, "the Dropped curved record's world slot must be present/absent identically masked vs reference");
-                    if (maskedHasDrop && refHasDrop)
-                        Assert.IsNull(FirstMeshDifference(dropMeshRef, dropMeshMasked),
-                            "the Dropped curved record's world slot content must be byte-identical whether resident-masked or physically absent");
-
-                    // As in the point test: prove the RENDERED set, not just buffer content — KEEP visible, DROP
-                    // hidden on BOTH paths (MeshRenderer.enabled), so a KEEP↔DROP swap can't pass on stale meshes.
-                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "masked: the surviving KEEP curved slot must be VISIBLE");
-                    Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "reference: the surviving KEEP curved slot must be VISIBLE");
-                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "masked: the Dropped curved slot must be HIDDEN (Renderer disabled)");
-                    Assert.IsFalse(hRef.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "reference: the absent Drop curved slot must be HIDDEN");
-                }
-                finally { planMasked.Dispose(); planRef.Dispose(); }
-            }
-            finally { storeMasked.Clear(); storeRef.Clear(); }
-        }
-
-        // ── All-Dropped regression: an ALL-Dropped frame must freeze live fades, not decay them ────────────────
-        [Test]
-        public void AllDropped_FadeStaysFrozen_ReappearOpacityMatchesReference()
-        {
-            var soloTile = new TileId { Z = 12, X = 2400, Y = 1500 };
-            long soloKey = Tk(soloTile);
-
-            using var hMasked = new Harness();
-            using var hRef = new Harness();
-            var storeMasked = new SymbolTileStore(cacheCap: 16);
-            var storeRef = new SymbolTileStore(cacheCap: 16);
-            try
-            {
-                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
-                    SeedTile(store, soloTile, PointSymbol(hMasked.Origin, "solo", 1, soloKey));
-
-                var planMasked = new SymbolGatherPlan();
-                var planRef = new SymbolGatherPlan();
-                // Each rebuild of the SAME plan object gets a fresh version
-                int maskedVersion = 0;
-                int refVersion = 0;
-                try
-                {
-                    // Frame 1 (default +∞ deltaTime): opacity snaps to 1.0 on both sides. Each Update is duplicated
-                    // because the verdict is one Update late.
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
-                    Assert.Greater(MaxAlpha(hMasked.System, soloKey), 0.99f, "sanity: frame 1 is fully visible");
-
-                    // Frame 2: the only tile is Dropped; the reference excludes it (0 winners, independent of any gate).
-                    // A LARGE deltaTime makes a wrongly-firing decay zero and remove the fade entry.
-                    const float bigDeltaTime = 1.0f;
-                    BuildMaskedPlan(storeMasked, planMasked, soloKey, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas, bigDeltaTime);
-                    BuildReferencePlan(storeRef, planRef, soloKey, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas, bigDeltaTime);
-
-                    // Frame 3: reappear with a SMALL deltaTime, so a frozen fade (1.0) and a decayed one (fading in from
-                    // 0) land at different opacities. Non-obvious why: the Update is duplicated; frame 2 schedules no
-                    // collision (the gate is _mirrorNonDroppedCount > 0), so frame 3's first emit reads an empty
-                    // _placedLastFrame and dips solo one step on both sides; the second Update's harvest recovers it.
-                    const float smallDeltaTime = 0.05f;
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
-                    hMasked.System.Update(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
-                    hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
-
-                    float reappearMasked = MaxAlpha(hMasked.System, soloKey);
-                    float reappearRef = MaxAlpha(hRef.System, soloKey);
-                    Assert.AreEqual(reappearRef, reappearMasked, 1e-6f,
-                        "reappear opacity must match the reference (frozen fade) — an all-Dropped frame must not decay a live fade");
-                    Assert.Greater(reappearRef, 0.99f, "sanity: the reference's fade never decayed (frozen), so it's still ~full opacity");
-                }
-                finally { planMasked.Dispose(); planRef.Dispose(); }
-            }
-            finally { storeMasked.Clear(); storeRef.Clear(); }
         }
     }
 

@@ -495,7 +495,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             using var atlasTexture = BuildTinyAtlasTexture();
-            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5); // matches camera zoom (coverage-cull realism)
+            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5); // matches camera zoom
             // allowOverlap: the 20 symbols sit a few px apart, and without it collision would cull all but one;
             // this tooth wants a stable, fully placed scene every Update.
             SymbolTileBuffer buffer = BuildSymbols(20, frame.SceneOriginRender, tileKey, allowOverlap: true);

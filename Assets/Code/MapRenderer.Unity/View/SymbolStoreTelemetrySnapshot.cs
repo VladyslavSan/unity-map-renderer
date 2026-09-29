@@ -18,11 +18,5 @@ namespace MapRenderer.Unity.View
         /// <summary>Cached (out-of-cover) symbol-tile count — symbols kept warm so a prepared-cache hit re-shows
         /// the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.</summary>
         public int CachedSymbolTiles { get; init; }
-
-        /// <summary>Tile-coverage pre-cull: symbols classified DROP because their tile is steadily below the
-        /// on-screen coverage threshold (never-visible, or the fade-out grace has expired). They stay resident
-        /// in the mirror but are masked out of placement, so they are never staged. Watch this against
-        /// <c>MapViewConfig.SymbolTileCoverageCull</c> to tune it.</summary>
-        public int CoverageDroppedSymbols { get; init; }
     }
 }

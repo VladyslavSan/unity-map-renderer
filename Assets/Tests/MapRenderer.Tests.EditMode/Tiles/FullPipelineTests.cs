@@ -1690,8 +1690,6 @@ namespace MapRenderer.Tests.Tiles
                 SymbolSubsystem.ProfilerMarkerNames.SymbolExtract,
                 SymbolSubsystem.ProfilerMarkerNames.AtlasUpload,
                 SymbolSubsystem.ProfilerMarkerNames.BatchCollect,
-                SymbolSubsystem.ProfilerMarkerNames.BatchCollectClassify,
-                SymbolSubsystem.ProfilerMarkerNames.BatchCollectDedup,
                 SymbolSubsystem.ProfilerMarkerNames.BatchSoA,
                 SymbolPlacementSystem.ProfilerMarkerNames.Gather,
                 SymbolPlacementSystem.ProfilerMarkerNames.Update,

@@ -19,8 +19,7 @@ namespace MapRenderer.Unity.Text.Placement
     /// <summary>
     /// The per-frame winner plan that <see cref="Text.SymbolSubsystem.CurrentBatch"/> produces for the native gather.
     /// One entry per collected winner, in render order: a <see cref="BlockId"/>/<see cref="LocalIndex"/> into a
-    /// pre-baked <see cref="SymbolTileBlock"/>, plus three per-frame masks kept out of the immutable block.
-    /// Non-obvious why: a Drop is a mask, not a compaction, so no parallel array is permuted in lockstep.
+    /// pre-baked <see cref="SymbolTileBlock"/>, plus a per-frame departing mask kept out of the immutable block.
     /// Non-local invariant: <see cref="Blocks"/> holds borrowed refs; the store owns block disposal.
     /// </summary>
     internal sealed class SymbolGatherPlan : VerifiedDisposable
@@ -28,18 +27,10 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeList<int>  BlockId;         // index into Blocks[]
         internal NativeList<int>  LocalIndex;      // raw symbol index within that block (null-slot-safe)
         internal NativeList<byte> Departing;       // per-symbol: the store's IsDeparting flag
-        internal NativeList<byte> CoverageFading;  // per-symbol: SymbolTileCoverageFilter classified this winner Fade
-        // Per-symbol Drop decision (SymbolTileCoverageFilter.ClassifyActive). The winner stays resident and
-        // counted; GatherSymbolPoints skips it as its first, unconditional check.
-        internal NativeList<byte> Dropped;
         internal int WinnerCount;
 
         // The reconciler's cross-zoom fade handovers for this winner set (departing FadeId → active FadeId).
         internal NativeList<FadeAlias> FadeAliases;
-
-        // How many winners this Build stamped Dropped, so SymbolPlacementSystem derives _mirrorNonDroppedCount
-        // by subtraction instead of a per-frame walk.
-        internal int DroppedCount;
 
         // Front-set version: the memo key of SymbolPlacementSystem.GatherIntoMirror. Non-obvious why: the store's
         // CollectGeneration moves at the tile event, but the front moves 1-4 frames later at the swap, so a
@@ -56,20 +47,17 @@ namespace MapRenderer.Unity.Text.Placement
             BlockId        = new NativeList<int>(Allocator.Persistent);
             LocalIndex     = new NativeList<int>(Allocator.Persistent);
             Departing      = new NativeList<byte>(Allocator.Persistent);
-            CoverageFading = new NativeList<byte>(Allocator.Persistent);
-            Dropped        = new NativeList<byte>(Allocator.Persistent);
             FadeAliases    = new NativeList<FadeAlias>(Allocator.Persistent);
         }
 
         /// <summary>Refills this plan in place from the collected winner arrays, without compaction. The arrays
-        /// hold every winner (Keep, Fade, Drop, departing), and <see cref="WinnerCount"/> counts them all.
-        /// <paramref name="decisions"/> holds <c>SymbolTileCoverageFilter.ClassifyActive</c>'s per-symbol decision;
+        /// hold every winner (active and departing), and <see cref="WinnerCount"/> counts them all.
         /// <paramref name="orderedBlocks"/> is the store's block list that <paramref name="blockId"/> indexes.</summary>
         /// <param name="fadeAliases">The reconciler's fade handovers for this winner set; <c>null</c> reads as none.</param>
         /// <param name="winnerSetVersion">The caller's front-set version. Non-local invariant: at a fixed version the
-        /// winner identity and blocks are unchanged; only the three per-symbol masks may change per frame.</param>
+        /// winner identity and blocks are unchanged; only the departing mask may change per frame.</param>
         internal void Build(List<int> blockId, List<int> localIndex,
-            List<byte> isDeparting, List<byte> decisions, IReadOnlyList<SymbolTileBlock> orderedBlocks,
+            List<byte> isDeparting, IReadOnlyList<SymbolTileBlock> orderedBlocks,
             IReadOnlyList<FadeAlias> fadeAliases, int winnerSetVersion)
         {
             FadeAliases.Clear();
@@ -82,8 +70,6 @@ namespace MapRenderer.Unity.Text.Placement
             BlockId.ResizeUninitialized(n);
             LocalIndex.ResizeUninitialized(n);
             Departing.ResizeUninitialized(n);
-            CoverageFading.ResizeUninitialized(n);
-            Dropped.ResizeUninitialized(n);
 
             // Snapshot the ordered blocks into Blocks[] (this frame's own copy — a later collect mutating the
             // store's list can't dangle it).
@@ -91,19 +77,12 @@ namespace MapRenderer.Unity.Text.Placement
             if (Blocks.Length < BlockCount) System.Array.Resize(ref Blocks, BlockCount);
             for (int b = 0; b < BlockCount; b++) Blocks[b] = orderedBlocks[b];
 
-            int droppedCount = 0;
             for (int i = 0; i < n; i++)
             {
                 BlockId[i] = blockId[i];
                 LocalIndex[i] = localIndex[i];
                 Departing[i] = isDeparting[i];
-                byte decision = decisions[i];
-                CoverageFading[i] = (byte)(decision == SymbolTileCoverageFilter.Fade ? 1 : 0);
-                bool dropped = decision == SymbolTileCoverageFilter.Drop;
-                Dropped[i] = (byte)(dropped ? 1 : 0);
-                if (dropped) droppedCount++;
             }
-            DroppedCount = droppedCount;
         }
 
         protected override void DoDispose()
@@ -111,8 +90,6 @@ namespace MapRenderer.Unity.Text.Placement
             BlockId.Dispose();
             LocalIndex.Dispose();
             Departing.Dispose();
-            CoverageFading.Dispose();
-            Dropped.Dispose();
             FadeAliases.Dispose();
         }
     }

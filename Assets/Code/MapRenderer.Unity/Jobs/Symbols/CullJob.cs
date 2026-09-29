@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
 {
     /// <summary>
     /// The <c>GatherSymbolPoints</c> Cull pass in Burst. Per record, it writes the first verdict of the chain
-    /// dropped → departing → coverage → zoom → horizon → distance → none into <see cref="OutTrigger"/>.
+    /// departing → zoom → horizon → distance → none into <see cref="OutTrigger"/>.
     /// Limitation: a Burst compile failure falls back to managed IL silently (<c>FillGraphBurstProbeTests</c>),
     /// so <c>SymbolCullJobTests</c> is a Burst-vs-managed differential only under the batch gate
     /// (<c>./Tools/run-tests.sh</c>), not in the interactive Test Runner.
@@ -18,12 +18,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
     internal struct CullJob : IJobParallelFor
     {
         // ── Input — per-record flags/fields, index-parallel to the mirror ───────────────────────────────────
-        /// <summary>Per-record: 1 = the record's tile was coverage-dropped (hard-skip, no fade). Tested first.</summary>
-        [ReadOnly] public NativeArray<byte>   SymbolDropped;
-        /// <summary>Per-record: 1 = the record is departing (its tile is leaving cover) — the second verdict branch.</summary>
+        /// <summary>Per-record: 1 = the record is departing (its tile is leaving cover) — the first verdict branch.</summary>
         [ReadOnly] public NativeArray<byte>   SymbolDeparting;
-        /// <summary>Per-record: 1 = the record is coverage-fading — the third verdict branch.</summary>
-        [ReadOnly] public NativeArray<byte>   SymbolCoverageFading;
         /// <summary>Per-record representative anchor in render space (pre-RTC) — the point the horizon/distance culls test.</summary>
         [ReadOnly] public NativeArray<double3> RepAnchor;
         /// <summary>Per-record <see cref="SymbolPlacementKind"/> — selects which detail array (<see cref="Points"/>/<see cref="Curveds"/>) the slot is read from.</summary>
@@ -59,9 +55,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
         public void Execute(int index)
         {
             GatherTrigger t;
-            if (SymbolDropped[index] != 0) t = GatherTrigger.Dropped; // never on screen, no fade
-            else if (SymbolDeparting[index] != 0) t = GatherTrigger.Departing;
-            else if (SymbolCoverageFading[index] != 0) t = GatherTrigger.Coverage;
+            if (SymbolDeparting[index] != 0) t = GatherTrigger.Departing;
             else if (IsOutOfLiveZoom(index)) t = GatherTrigger.Zoom;
             else if (HorizonCull.IsHiddenBeyondHorizon(RepAnchor[index], Frame.SceneOriginRender, Frame.Rebase,
                                                         Frame.CameraRelativePosition, GlobeCentreRelative, GlobeRadiusSq))

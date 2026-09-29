@@ -86,7 +86,7 @@ level their pass produces (`LastQuadCount`, `ActiveTileCount`, …), so the refr
 unconditionally, because both are bounded by the cover plus its pad ring over reused scratch arrays. That is the
 whole reason no staleness flag or demand counter exists anywhere in this design.
 
-**Why the symbol snapshot is two.** Store state (active/cached tiles, the coverage drop) and placement results
+**Why the symbol snapshot is two.** Store state (active/cached tiles) and placement results
 (candidates, survivors, quads, fades, mirror rebuilds) have two owners. One carrier for both needs something in
 the middle to assemble it, so the snapshot is split by owner (`SymbolStoreTelemetrySnapshot`,
 `SymbolPlacementTelemetrySnapshot`). That is what makes the rule above true rather than aspirational.

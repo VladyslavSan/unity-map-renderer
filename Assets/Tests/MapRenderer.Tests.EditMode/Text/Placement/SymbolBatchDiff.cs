@@ -36,7 +36,6 @@ namespace MapRenderer.Tests
                 if (o.WorldCount[i] != g.WorldCount[i]) return $"WorldCount[{i}] {o.WorldCount[i]} vs {g.WorldCount[i]}";
                 if (!o.RepAnchor[i].Equals(g.RepAnchor[i])) return $"RepAnchor[{i}]";
                 if (o.SymbolDeparting[i] != g.SymbolDeparting[i]) return $"SymbolDeparting[{i}] {o.SymbolDeparting[i]} vs {g.SymbolDeparting[i]}";
-                if (o.SymbolCoverageFading[i] != g.SymbolCoverageFading[i]) return $"SymbolCoverageFading[{i}] {o.SymbolCoverageFading[i]} vs {g.SymbolCoverageFading[i]}";
             }
             for (int i = 0; i < o.PointCount; i++)
             {

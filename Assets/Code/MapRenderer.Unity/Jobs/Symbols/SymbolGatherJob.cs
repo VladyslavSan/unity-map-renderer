@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
     /// into contiguous native mirror pools, remapping each <c>Detail</c>/<c>*Start</c> field by the pool offset.
     /// It runs through <c>.Run()</c> before <c>UpdateCore</c> reads any element. Pass 1 totals the pool sizes and
     /// resizes the caller's mirror lists once; pass 2 fills. <c>WritePerFrameMasks</c>, not this job, writes
-    /// the per-frame masks (<c>SymbolDeparting</c>/<c>SymbolCoverageFading</c>/<c>SymbolDropped</c>).
+    /// the per-frame <c>SymbolDeparting</c> mask.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct SymbolGatherJob : IJob
@@ -38,7 +38,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
         [ReadOnly] public NativeArray<int> LocalIndex;             // plan.LocalIndex — winner r -> raw record within that block
         public int WinnerCount;
 
-        // ── outputs: the mirror pools (record order == winner order; NOT the three per-frame masks) ──
+        // ── outputs: the mirror pools (record order == winner order; NOT the per-frame departing mask) ──
         public NativeList<SymbolPlacementKind> MKinds;
         public NativeList<int> MDetail;
         public NativeList<int> MWorldCount;
@@ -99,7 +99,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
                 }
             }
 
-            // Resize (mirrors :1072-1084) — every list but the three per-frame masks.
+            // Resize (mirrors GatherIntoMirror's resize) — every list but the per-frame departing mask.
             MKinds.ResizeUninitialized(records); MDetail.ResizeUninitialized(records);
             MWorldCount.ResizeUninitialized(records); MWorldStart.ResizeUninitialized(records);
             MRepAnchor.ResizeUninitialized(records);
@@ -131,7 +131,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
             int maxQuads = 0;
             int maxCandidates = 0;
 
-            // Pass 2 (mirrors :1092-1150): fill, remapping every Detail/*Start by the running pool offset.
+            // Pass 2 (mirrors GatherIntoMirror's fill): fill, remapping every Detail/*Start by the running pool offset.
             for (int r = 0; r < winners; r++)
             {
                 BlockView block = BlockViews[BlockId[r]];

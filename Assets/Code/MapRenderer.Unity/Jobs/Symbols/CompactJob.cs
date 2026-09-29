@@ -7,8 +7,8 @@ using Unity.Mathematics;
 namespace MapRenderer.Unity.Jobs.Symbols
 {
     /// <summary>
-    /// The <c>GatherSymbolPoints</c> Compact pass, a serial Burst <see cref="IJob"/>. IN RECORD ORDER, a Dropped
-    /// record is skipped; a triggered record with a live fade KEEPS staging (its FadeIds go into
+    /// The <c>GatherSymbolPoints</c> Compact pass, a serial Burst <see cref="IJob"/>. IN RECORD ORDER, a triggered
+    /// record with a live fade KEEPS staging (its FadeIds go into
     /// <see cref="ForceFadeOut"/>); a fade-dead one is skipped and tallied in <see cref="Counts"/>; a kept record
     /// is appended at <see cref="OutPoints"/>' length. It has no FMA math, so Burst and managed are bit-identical.
     /// </summary>
@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Jobs.Symbols
 
         // ── Output — per-record destination offset + the flat kept-point pools ──────────────────────────────
         /// <summary>Per-record start into <see cref="OutPoints"/>/<see cref="OutUps"/>; <c>-1</c> for a
-        /// hard-skipped record (Dropped, or triggered and fade-dead).</summary>
+        /// hard-skipped record (triggered and fade-dead).</summary>
         [WriteOnly] public NativeArray<int> StageOffset;
         /// <summary>Kept records' world points, appended in record order — the running length IS
         /// <see cref="StageOffset"/> at the time of append, so this field is read as well as written.</summary>
@@ -66,8 +66,8 @@ namespace MapRenderer.Unity.Jobs.Symbols
         /// point or curved, alive or not (see the Curved-path side-effect note on <c>MarkFadeOutIfAlive</c>).</summary>
         public NativeHashSet<long> ForceFadeOut;
         /// <summary>Per-<see cref="GatherTrigger"/> tally, indexed by <c>(int)trigger</c> (one slot per trigger
-        /// value — see the <c>Counts[(int)t]++</c> comment in <see cref="Execute"/>); the caller adds slots 1-5
-        /// back onto the five <c>Last*CulledCount</c> properties after <c>.Run()</c>.</summary>
+        /// value — see the <c>Counts[(int)t]++</c> comment in <see cref="Execute"/>); the caller adds slots 1-4
+        /// back onto the four <c>Last*CulledCount</c> properties after <c>.Run()</c>.</summary>
         public NativeArray<int> Counts;
 
         public void Execute()
@@ -75,12 +75,10 @@ namespace MapRenderer.Unity.Jobs.Symbols
             for (int r = 0; r < Count; r++)
             {
                 GatherTrigger t = Trigger[r];
-                if (t == GatherTrigger.Dropped) { StageOffset[r] = -1; continue; } // never on screen, no fade, no count
-
                 if (t != GatherTrigger.None && !MarkFadeOutIfAlive(r))
                 {
-                    // Only t ∈ {Departing,Coverage,Zoom,Horizon,Distance} (1-5) reach this branch (Dropped exits
-                    // above; the guard excludes None), so slots 0/6 stay unused.
+                    // Only t ∈ {Departing,Zoom,Horizon,Distance} (1-4) reach this branch (the guard excludes
+                    // None), so slot 0 stays unused.
                     Counts[(int)t]++;
                     StageOffset[r] = -1;
                     continue;
