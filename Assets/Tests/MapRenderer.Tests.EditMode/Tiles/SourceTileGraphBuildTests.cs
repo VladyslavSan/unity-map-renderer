@@ -787,8 +787,13 @@ namespace MapRenderer.Tests.Tiles
             var view = NewClipView();
             try
             {
-                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(10, 10, 4.0),
-                    style: InterpFillStyle());
+                // Every other tile is absent: a tile that first bakes after the change holds a VALID current-revision
+                // entry when evicted, which would count against the stale-entry assertion below.
+                byte[] bytes  = SampleTileFixture.Bytes();
+                var    source = TestDataSource.FromFetch(id => UniTask.FromResult(id.Equals(TrackedTile)
+                    ? new TileResponse(bytes, TileEncoding.Mvt)
+                    : TileResponse.Absent(TileEncoding.Mvt)));
+                view.LoadTestStyle(source, Cam(10, 10, 4.0), style: InterpFillStyle());
                 if (bumpAfterKick)
                 {
                     // Fetches complete off the update, so wait for them: the first tick that starts a build kicks
