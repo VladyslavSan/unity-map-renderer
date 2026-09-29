@@ -1872,7 +1872,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 delayHandle = new SpinUntilGateJob
-                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = DelayGateJobInstrument.HoldMaxIterations }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
@@ -1946,11 +1946,13 @@ namespace MapRenderer.Tests.Tiles
                 meshGate.Set();
                 gate[0] = 1;
                 delayHandle.Complete();
+                int holdIterations = outVals[0]; // final once the job has completed
                 view.Teardown();
                 meshGate.Dispose();
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
+                DelayGateJobInstrument.AssertHeldUntilReleased(holdIterations, DelayGateJobInstrument.HoldMaxIterations);
             }
         }
 
@@ -1982,7 +1984,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 delayHandle = new SpinUntilGateJob
-                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = DelayGateJobInstrument.HoldMaxIterations }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
@@ -2054,10 +2056,12 @@ namespace MapRenderer.Tests.Tiles
             {
                 gate[0] = 1;
                 delayHandle.Complete();
+                int holdIterations = outVals[0]; // final once the job has completed
                 view.Teardown();
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
+                DelayGateJobInstrument.AssertHeldUntilReleased(holdIterations, DelayGateJobInstrument.HoldMaxIterations);
             }
         }
 
@@ -2208,7 +2212,7 @@ namespace MapRenderer.Tests.Tiles
                 long negativesBaseline   = TileBuildGraph.DebugNegativeObservations;
 
                 delayHandle = new SpinUntilGateJob
-                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = DelayGateJobInstrument.HoldMaxIterations }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
                 view.TileManager.WorkScheduler     = new InlineWorkScheduler();
@@ -2258,10 +2262,12 @@ namespace MapRenderer.Tests.Tiles
             {
                 gate[0] = 1;
                 delayHandle.Complete();
+                int holdIterations = outVals[0]; // final once the job has completed
                 view.Teardown();
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
+                DelayGateJobInstrument.AssertHeldUntilReleased(holdIterations, DelayGateJobInstrument.HoldMaxIterations);
             }
         }
 
@@ -2443,7 +2449,7 @@ namespace MapRenderer.Tests.Tiles
                 long negativesBaseline = TileBuildGraph.DebugNegativeObservations;
 
                 delayHandle = new SpinUntilGateJob
-                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = DelayGateJobInstrument.HoldMaxIterations }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
                 view.TileManager.WorkScheduler     = new InlineWorkScheduler();
@@ -2482,6 +2488,7 @@ namespace MapRenderer.Tests.Tiles
                 // no completed sweep has touched delayHandle yet.
                 gate[0] = 1;
                 delayHandle.Complete();
+                int holdIterations = outVals[0]; // final once the job has completed
                 if (go != null)
                 {
                     view.Teardown();
@@ -2490,6 +2497,7 @@ namespace MapRenderer.Tests.Tiles
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
+                DelayGateJobInstrument.AssertHeldUntilReleased(holdIterations, DelayGateJobInstrument.HoldMaxIterations);
             }
         }
 
@@ -2722,7 +2730,7 @@ namespace MapRenderer.Tests.Tiles
                 long graphOutputBaseline = FillGraphOutput.DebugLiveCount;
 
                 delayHandle = new SpinUntilGateJob
-                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = DelayGateJobInstrument.HoldMaxIterations }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
                 // Non-obvious why: no Await is allowed while the gate holds a graph step, so a ThreadPool
@@ -2765,10 +2773,12 @@ namespace MapRenderer.Tests.Tiles
             {
                 gate[0] = 1;
                 delayHandle.Complete();
+                int holdIterations = outVals[0]; // final once the job has completed
                 view.Teardown();
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
+                DelayGateJobInstrument.AssertHeldUntilReleased(holdIterations, DelayGateJobInstrument.HoldMaxIterations);
             }
         }
     }
@@ -2833,7 +2843,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 delayHandle = new SpinUntilGateJob
-                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = DelayGateJobInstrument.HoldMaxIterations }.Schedule();
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
@@ -2913,10 +2923,12 @@ namespace MapRenderer.Tests.Tiles
             {
                 gate[0] = 1;
                 delayHandle.Complete();
+                int holdIterations = outVals[0]; // final once the job has completed
                 view.Teardown();
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
+                DelayGateJobInstrument.AssertHeldUntilReleased(holdIterations, DelayGateJobInstrument.HoldMaxIterations);
             }
         }
 

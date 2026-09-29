@@ -50,6 +50,15 @@ namespace MapRenderer.Tests
     /// <summary>Bounded spin-wait on <see cref="SpinUntilGateJob.Started"/>.</summary>
     internal static class DelayGateJobInstrument
     {
+        /// <summary>The iteration ceiling every hold uses. A hold that spins to it has run out on its own clock.</summary>
+        internal const int HoldMaxIterations = 2_000_000_000;
+
+        /// <summary>Fails when the delay job stopped by reaching <paramref name="maxIterations"/> instead of by its
+        /// gate. <paramref name="iterationsRun"/> is <c>Out[0]</c>, read after the job completed.</summary>
+        internal static void AssertHeldUntilReleased(int iterationsRun, int maxIterations)
+            => Assert.Less(iterationsRun, maxIterations,
+                "the delay job expired by itself: the hold was not a hold");
+
         /// <summary>Blocks the calling thread until <paramref name="started"/>[0] is non-zero, so a caller
         /// only asserts "still spinning" once the job has causally started, and "ran ≥1 iteration" is
         /// guaranteed rather than a timing guess.</summary>
