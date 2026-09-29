@@ -85,10 +85,8 @@ float3 Line_VertexExtrude(
     // Avoid div-by-zero on degenerate (cap) vertices.
     float3 unitDir_OS = (miter > 1e-6) ? (input.extrudeN / miter) : float3(0, 0, 0);
 
-    // ── Width & pixel-based line props resolved in SCREEN space — NO _MetersPerPixel uniform ───────────────
-    // For pixel widths we MEASURE the local world-metres-per-screen-pixel along the across direction (the
-    // px→world scale — foreshortening-correct at any latitude/tilt/projection) instead of reading a per-frame
-    // CPU uniform. width, gap, line-offset and line-translate all convert through it.
+    // ── Pixel-based props ── width, gap and line-offset convert through a frame CONSTANT (pxToWorld); only the
+    // AA pad, the min-width floor and line-translate measure per vertex. See THE TWO RULERS below.
 
     // World-space frame. NORMALIZE strips parent scale so extrusion is scale-invariant.
     //

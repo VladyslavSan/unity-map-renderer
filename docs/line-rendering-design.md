@@ -143,6 +143,20 @@ reaches 0. `LineAaSnapshotTests.JoinTypes_AreDistinguishableOnScreen_ByBisectorR
 perspective view (the controller's steepest pitch), toward and away from the camera, against the projection of
 the world point. A reach that holds a constant pixel count across depth fails the pitched view only.
 
+**The corner miter is baked in world space, and that is exact for the silhouette.**
+`RibbonJob.ComputeMiterNormals` bakes `normalize(n₁+n₂)` scaled by `1/cos(θ_world/2)`. The shader extrudes
+it by `miter · (outerWorld + aaPadWorld)`, with `outerWorld` from the frame constant. The baked miter vertex
+is therefore the intersection of the two legs' world offset lines. A perspective ground view is a projective
+map and a projective map keeps intersections, so the rendered join is the image of the world-width band.
+Mitring by the screen angle would be wrong for a world-width band. The pitched arm of
+`JoinTypes_AreDistinguishableOnScreen_ByBisectorReach` pins it. The flat arm is exact; on the globe it holds
+up to the tangent-plane approximation. Two limitations stay view-dependent:
+
+- The miter-limit and round-limit choice uses the world angle, so the topology it selects is baked. The spike
+  it allows is bounded by `miterLimit · h` in world units.
+- The 0.5 px AA pad at a corner is anisotropic under tilt. It is sub-pixel, expected at most about 1 px at the
+  limit, and no test measures it.
+
 ### Square caps
 
 Square caps bake `across ∓ along` (length √2) and are indistinguishable from a 90° join by
@@ -184,19 +198,11 @@ shader uniform × per-vertex `WidthScale`). The same fold appears in `docs/line-
 
 ## Open questions
 
-1. **The corner miter is baked in world space.** `RibbonJob.ComputeMiterNormals` bakes `normalize(n₁+n₂)`
-   scaled by `1/cos(θ_world/2)`. The premise is *not* that a styled width is a screen quantity — the width
-   model denies that. It is that a **miter factor is a property of the corner as it appears**, and the
-   ground→screen map is anisotropic, so the world half-angle is not the screen one; a band of constant world
-   width still needs its corner mitred by the angle the viewer sees. Under the world-width model this is a
-   genuine but modest error, and a fix must not reintroduce a per-vertex screen-space scale. *A tile mesh is
-   built once and viewed from every angle, so it may bake only view-independent quantities; the two segment
-   tangents qualify, the miter derived from them does not.*
-2. **`ComputeInnerNormal`'s `|cos(θ/2)| < 1e-12` branch returns `mu · miterLimit`** with a `mu` whose
+1. **`ComputeInnerNormal`'s `|cos(θ/2)| < 1e-12` branch returns `mu · miterLimit`** with a `mu` whose
    *direction* is floating-point noise, where `ComputeMiterNormals` returns the inert `n1` fallback for the
    same condition. The branch is narrow (reachable only for `|n₁+n₂| ∈ [1e-12, 2e-12)`) and documented at both
    sites; unifying on the `n1` fallback is an option.
-3. **The round fan's `|side| = 0` locus is not the centreline at a *clamped* join** — the pivot sits up to
+2. **The round fan's `|side| = 0` locus is not the centreline at a *clamped* join** — the pivot sits up to
    `2 · halfWidth` from the corner while the rim is at `1 · halfWidth`. The miter join is in the same
    situation and it is not observed to matter (`Join_NoInteriorSeam` is green at 60°), but it is the
    geometric assumption the AA ramp rests on, and nothing measures it at a clamped corner.
