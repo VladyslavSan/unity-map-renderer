@@ -1825,8 +1825,8 @@ namespace MapRenderer.Tests.Meshing
             throw new FileNotFoundException(name);
         }
 
-        // Root triangles come from EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph, whose doc says why
-        // extraction runs under a flat projection and why the feature index must be the real one.
+        // Root triangles come from EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph (flat projection). Its
+        // feature index must be the real one: over zeros the per-vertex Feature assertion is vacuous.
 
         // -----------------------------------------------------------------------------------------------
         // Runs the REAL Burst job and the managed mirror over the SAME input and asserts identical emitted
@@ -1994,8 +1994,8 @@ namespace MapRenderer.Tests.Meshing
         {
             var id = new TileId { Z = 0, X = 0, Y = 0 };
             var proj = new SphericalProjection();
-            // The REAL per-source-feature index, not all zeros; the fence below does not catch zeros (see its
-            // Limitation), so use real input anyway.
+            // The REAL per-source-feature index, not all zeros: the per-vertex Feature assertion in
+            // AssertOrderedParity guards the merge key's Feature term, and zeros would make it vacuous.
             var (tileVerts, triangleIndices, vertexFeatureIdx, extent) =
                 EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(LoadFixture("sample-tile.bytes"), "countries", id);
 
@@ -2024,13 +2024,13 @@ namespace MapRenderer.Tests.Meshing
             TestContext.WriteLine($"countries z0 (Burst arm, SuppressBoundaryBand=true): " +
                 $"emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
 
-            // A fence with headroom around the measured sharing. Limitation: an all-zero vertexFeatureIdx still
-            // stays above the 35,000 lower bound, so the fence misses Feature dropped from the merge key.
+            // A fence with headroom around the measured sharing. The bounds catch gross over-merge only; Feature
+            // dropped from the merge key is caught by the per-vertex Feature assertion, not by these counts.
             Assert.Less(run.UniqueVertexCount, 55_000,
                 $"sharing must collapse the countries z0 tile's unique vertex count well below its emitted " +
                 $"count: emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
             Assert.Greater(run.UniqueVertexCount, 35_000,
-                $"the fence's lower bound guards a vertex key that over-merges (e.g. dropping Feature): " +
+                $"the fence's lower bound guards a gross over-merge; a dropped Feature term is caught per vertex: " +
                 $"emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
             Assert.Less(run.UniqueVertexCount, run.EmittedCount,
                 "a genuinely curved z0 tile must have SOME shared conforming split-edge midpoints");
