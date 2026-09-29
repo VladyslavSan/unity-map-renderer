@@ -303,14 +303,14 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // Cross-check against the POINT path (pinned by TextVerticalCentringTests): same glyph, same atlas, and
-        // every text-anchor. The curved cell's vertical band must equal the point quad's, and its along-line
-        // position (returned shift + cell x) must equal the point quad's x.
+        // Cross-check against the POINT path (pinned by TextVerticalCentringTests): same glyph, same atlas, every
+        // text-anchor, and no offset, text-offset, or text-radial-offset. The curved cell's vertical band must equal
+        // the point quad's, and its along-line position (returned shift + cell x) must equal the point quad's x.
         // Non-obvious why: the point shift's (lineCount - 1) line-spacing term vanishes only for one line,
         // so LineCount == 1 is a precondition.
         // =========================================================================================
         [Test]
-        public void CurvedCell_MatchesThePointPath_ForTheSameGlyph_UnderEveryAnchor()
+        public void CurvedCell_MatchesThePointPath_ForTheSameGlyph_UnderEveryAnchorAndOffset()
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
@@ -323,15 +323,22 @@ namespace MapRenderer.Tests.Text
 
             // A one-glyph run (run centre == its arc centre) and an unequal-advance run with a trailing space.
             var runs = new[] { new[] { (uint)'5' }, new[] { (uint)'A', (uint)'a', (uint)' ' } };
+            var offsets = new[]
+            {
+                (Offset: float2.zero, Radial: 0f),
+                (Offset: new float2(0.5f, -0.75f), Radial: 0f),
+                (Offset: float2.zero, Radial: 1f),
+            };
             foreach (uint[] codepoints in runs)
             foreach (TextAnchor anchor in System.Enum.GetValues(typeof(TextAnchor)))
+            foreach ((float2 offset, float radial) in offsets)
             {
                 ShapedRun run = MakeRun(codepoints);
                 var options = new TextLayoutOptions
                 {
                     Anchor = anchor,
-                    Offset = float2.zero,
-                    RadialOffset = 0f,
+                    Offset = offset,
+                    RadialOffset = radial,
                     Justify = TextJustify.Center,
                     MaxWidthEm = 10f,
                     LineHeightEm = 1.2f,
@@ -344,7 +351,7 @@ namespace MapRenderer.Tests.Text
                     "block's (lineCount - 1) line-spacing term stops vanishing and the two paths are no longer comparable");
 
                 var curved = new List<CurvedGlyph>();
-                float alongShift = CurvedTextLayout.Layout(run, atlas, curved, 0f, anchor, 1.2f);
+                float alongShift = CurvedTextLayout.Layout(run, atlas, curved, 0f, in options);
                 Assert.AreEqual(pointQuads.Count, curved.Count, $"{anchor}: one curved cell per visible point quad");
                 Assert.Greater(curved.Count, 0);
                 float runCentre = (curved[0].ArcCenter + curved[curved.Count - 1].ArcCenter) * 0.5f;

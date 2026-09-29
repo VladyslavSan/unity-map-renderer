@@ -269,7 +269,7 @@ Owning designs: [`labels-and-symbols-design.md`](labels-and-symbols-design.md),
 | `text-padding` | `supported` | |
 | `text-keep-upright` | `partial` | Constant only. |
 | `text-transform` | `partial` | Constant only; the spec also allows data-driven. |
-| `text-offset` | `partial` | Constant only; the spec also allows zoom and data-driven. Not applied to curved line text. |
+| `text-offset` | `partial` | Constant only; the spec also allows zoom and data-driven. |
 | `text-allow-overlap` | `partial` | Constant only. |
 | `text-overlap` | `not supported` | Not built. |
 | `text-ignore-placement` | `partial` | Constant only. |

@@ -10,8 +10,8 @@ namespace MapRenderer.Core.Text
     /// Lays out a shaped run for CURVED along-line placement: one <see cref="CurvedGlyph"/> per visible glyph,
     /// with its <see cref="CurvedGlyph.ArcCenter"/> and a cell centred on the path (on the arc centre, and
     /// vertically on the anchor's shift from <see cref="TextQuadLayout.VerticalAnchorShiftPx"/>). It is one
-    /// un-wrapped forward pass with no justify or offset. The block anchor sets the across-line shift here and
-    /// returns the along-line shift; the projected line gives position and orientation.
+    /// un-wrapped forward pass with no justify. The block anchor and the text offset set the across-line shift
+    /// here and give the along-line shift; the projected line gives position and orientation.
     /// </summary>
     public static class CurvedTextLayout
     {
@@ -26,12 +26,13 @@ namespace MapRenderer.Core.Text
 
         /// <summary>Caller-buffer overload: clears and writes into <paramref name="output"/>.
         /// <paramref name="letterSpacingEm"/> is <c>text-letter-spacing</c>, added after every glyph's advance
-        /// (including notdef), mirroring <see cref="TextQuadLayout"/>. <paramref name="anchor"/> is
-        /// <c>text-anchor</c>; a non-positive <paramref name="lineHeightEm"/> takes the default line height.</summary>
-        /// <returns>The signed baked-px shift along the line from the run's centre to where the anchor puts it;
-        /// 0 for a centred run.</returns>
+        /// (including notdef), mirroring <see cref="TextQuadLayout"/>. <paramref name="options"/> supplies
+        /// <c>text-anchor</c>, <c>text-offset</c> or <c>text-radial-offset</c>, and the line height; a non-positive
+        /// line height takes the default.</summary>
+        /// <returns>The signed baked-px shift along the line from the run's centre to where the anchor and the
+        /// offset put it; 0 for a centred run without an offset.</returns>
         public static float Layout(ShapedRun run, IGlyphAtlasView atlas, List<CurvedGlyph> output, float letterSpacingEm = 0f,
-            TextAnchor anchor = TextAnchor.Center, float lineHeightEm = 0f)
+            in TextLayoutOptions options = default)
         {
             if (run == null) throw new ArgumentNullException(nameof(run));
             if (atlas == null) throw new ArgumentNullException(nameof(atlas));
@@ -43,9 +44,11 @@ namespace MapRenderer.Core.Text
             float penX = 0f;
             float runWidth = 0f;
             float letterPx = letterSpacingEm * TextQuadLayout.OneEm;
-            (float hAlign, TextQuadLayout.VerticalAnchor vertical) = TextQuadLayout.ResolveAlignFactors(anchor);
-            float lineHeightPx = (lineHeightEm > 0f ? lineHeightEm : TextQuadLayout.DefaultLineHeightEm) * TextQuadLayout.OneEm;
-            float verticalShiftPx = TextQuadLayout.VerticalAnchorShiftPx(vertical, 1, lineHeightPx);
+            (float hAlign, TextQuadLayout.VerticalAnchor vertical) = TextQuadLayout.ResolveAlignFactors(options.Anchor);
+            float lineHeightPx = (options.LineHeightEm > 0f ? options.LineHeightEm : TextQuadLayout.DefaultLineHeightEm)
+                * TextQuadLayout.OneEm;
+            float2 offsetPx = TextQuadLayout.ResolveOffsetEm(hAlign, vertical, in options) * TextQuadLayout.OneEm;
+            float verticalShiftPx = TextQuadLayout.VerticalAnchorShiftPx(vertical, 1, lineHeightPx) + offsetPx.y;
 
             bool reorder = run.Levels is { Count: > 0 };
             Span<int> visual = !reorder ? default
@@ -100,9 +103,10 @@ namespace MapRenderer.Core.Text
                 penX += letterPx;
             }
 
-            if (hAlign == 0.5f || output.Count == 0) return 0f;
+            if (output.Count == 0) return 0f;
             float runCentre = (output[0].ArcCenter + output[output.Count - 1].ArcCenter) * 0.5f;
-            return runCentre - hAlign * runWidth;
+            float anchorShift = hAlign == 0.5f ? 0f : runCentre - hAlign * runWidth;
+            return anchorShift + offsetPx.x;
         }
 
         // Mirrors TextQuadLayout: a cell no larger than the bare buffer border on either axis carries no

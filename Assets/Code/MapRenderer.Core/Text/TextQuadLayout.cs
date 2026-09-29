@@ -127,10 +127,7 @@ namespace MapRenderer.Core.Text
             blockWidth = math.max(blockWidth, currentLineWidth);
             int lineCount = lineIndex + 1;
 
-            float2 offsetShiftEm = options.RadialOffset != 0f
-                ? ComputeRadialOffset(hAlign, vertical, options.RadialOffset)
-                : options.Offset;
-            float2 offsetShift = offsetShiftEm * OneEm;
+            float2 offsetShift = ResolveOffsetEm(hAlign, vertical, in options) * OneEm;
 
             // The per-line justify corrections baked in above plus this block-wide constant give every
             // quad its full anchor + justify + offset shift (see the class doc).
@@ -357,6 +354,13 @@ namespace MapRenderer.Core.Text
                 _ => TextJustify.Center,
             };
         }
+
+        /// <summary>The block translation in ems: the radial offset resolved from the anchor when non-zero,
+        /// else <c>text-offset</c>. Shared by the point and the curved layouts.</summary>
+        internal static float2 ResolveOffsetEm(float hAlign, VerticalAnchor vertical, in TextLayoutOptions options)
+            => options.RadialOffset != 0f
+                ? ComputeRadialOffset(hAlign, vertical, options.RadialOffset)
+                : options.Offset;
 
         /// <summary>
         /// Radial offset (ems) from the anchor: an axis anchor pushes along its axis, a corner anchor splits
