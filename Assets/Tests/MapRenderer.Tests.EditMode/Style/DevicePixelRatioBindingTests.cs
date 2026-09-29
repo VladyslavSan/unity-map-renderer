@@ -20,6 +20,7 @@ using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using Line = MapRenderer.Unity.Style.Line;
 using Fill = MapRenderer.Unity.Style.Fill;
+using Symbol = MapRenderer.Unity.Style.Symbol;
 
 namespace MapRenderer.Tests.Style
 {
@@ -369,6 +370,48 @@ namespace MapRenderer.Tests.Style
                     "read the material, so a conversion done at the material level is inherited by all three — " +
                     "this pins that, rather than leaving it as an argument.");
             }
+        }
+
+        // ── The renderer constant: text dilation ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// <b>Text dilation row.</b> <c>_SdfDilatePx</c> is a logical-px renderer constant that crosses the
+        /// device seam: the layer's material reads it times the live ratio, and a restyle re-targets the one
+        /// binding instead of adding a second. Non-obvious why: it asserts the binding EXISTS, because at the
+        /// shipped value 0 the uniform reads 0 whether or not anything is bound.
+        /// </summary>
+        [Test]
+        public void TextDilation_IsALogicalPxConstant_BoundOnceThroughTheDeviceSeam()
+        {
+            const string json = @"{ ""version"": 8, ""layers"": [
+                { ""id"": ""poi"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
+                  ""layout"": { ""text-field"": ""x"" } } ] }";
+            var styleLayer = (Symbol.StyleLayer)StyleParser.Parse(json).Layers[0];
+            var renderLayer = SymbolRenderLayer.Create(styleLayer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0);
+            try
+            {
+                int id = Shader.PropertyToID("_SdfDilatePx");
+                int BindingCount()
+                {
+                    int count = 0;
+                    foreach (var binding in renderLayer.Applier._devicePixelFloatBindings)
+                        if (binding.Id == id) count++;
+                    return count;
+                }
+
+                Assert.AreEqual(1, BindingCount(), "the layer must bind _SdfDilatePx through the device-pixel seam.");
+                foreach (double dpr in new[] { 1.0, 2.0 })
+                {
+                    renderLayer.ApplyZoom(new StyleFrameInputs(Zoom, dpr, 0.0));
+                    Assert.That(renderLayer.WorldTextMaterial.GetFloat(id),
+                        Is.EqualTo((float)(SymbolRenderLayer.TextDilationLogicalPx * dpr)).Within(1e-5f),
+                        $"_SdfDilatePx at dpr {dpr} must be the logical constant times the ratio.");
+                }
+
+                renderLayer.Restyle(styleLayer, StyleTransition.Default, nowSeconds: 0.0);
+                Assert.AreEqual(1, BindingCount(), "a restyle must re-target the dilation binding, not add another.");
+            }
+            finally { renderLayer.Dispose(); }
         }
 
         // ── The LOGICAL family: padding must NOT be scaled ───────────────────────────────────────

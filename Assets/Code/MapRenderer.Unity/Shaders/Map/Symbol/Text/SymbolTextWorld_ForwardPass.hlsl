@@ -170,7 +170,7 @@ half4 SymbolWorldPassFragment(SymbolWorldVaryings input) : SV_Target
     // at ~0.878 of the field, not 1.0, so a centred ramp can never saturate a minified glyph (screenDist
     // shrinks with screenPxRange) and distant text washes out. Biased outward, any fragment past the iso
     // is opaque at every scale, and the band stays ~1 SCREEN px rather than a fixed slice of the field.
-    half coverage = saturate((screenDist + input.sdfWidenPx.x)
+    half coverage = saturate((screenDist + _SdfDilatePx + input.sdfWidenPx.x)
                              / max(_SdfAaDevicePx + input.sdfWidenPx.y, 1e-3h) + 1.0h);
 
     return half4(input.color.rgb, coverage * input.color.a);

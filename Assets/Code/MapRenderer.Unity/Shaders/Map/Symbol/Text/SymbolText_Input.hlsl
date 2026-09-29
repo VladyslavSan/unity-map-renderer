@@ -44,6 +44,9 @@ float4 _MainTex_TexelSize;
 //   which reads as glyphs morphing under pan. MSAA is off project-wide, so this band is the ONLY
 //   antialiasing text has. Measured at 0.4: centroid steps 0.009..0.287 px against a uniform 0.125 ideal.
 //   Pinned by SymbolTextResamplingTests — and pinned to the shipped .mat, which is the value that ships.
+// _SdfDilatePx      — moves the outline outward, in RASTER px; ink width grows by twice this. It shifts the
+//   EDGE and never widens the ramp, so the phase invariance above holds. Default 0. SymbolRenderLayer binds it
+//   from a logical-px constant times the device-pixel ratio. Text and halo runs both take it.
 // _SdfRangeTexels    — how many ATLAS TEXELS the field's full distance range spans: the texel count of one unit
 //   of normalized distance value (≈ the fontnik radius, 8). The analytic AA scales the signed distance
 //   (distSample - _SdfEdge) by this to recover screen-pixel distance, so the edge is crisp at every zoom
@@ -51,6 +54,7 @@ float4 _MainTex_TexelSize;
 //   how the glyphs were BAKED, so it is only ever changed to match a different glyph source.
 float _SdfEdge;
 float _SdfAaDevicePx;
+float _SdfDilatePx;
 float _SdfRangeTexels;
 
 // The two uniform-carried colour tints (see this file's header). Multipliers over the vertex COLOR stream,

@@ -19,6 +19,11 @@ namespace MapRenderer.Unity.Rendering.Layers
     {
         private static readonly int TextColorId = Shader.PropertyToID("_TextColor");
         private static readonly int HaloColorId = Shader.PropertyToID("_HaloColor");
+        private static readonly int SdfDilatePxId = Shader.PropertyToID("_SdfDilatePx");
+
+        /// <summary>How far every glyph outline grows outward, in LOGICAL px. The one place to tune small-text
+        /// weight; <see cref="BindTextPaint"/> converts it to raster px with the device-pixel ratio.</summary>
+        internal const float TextDilationLogicalPx = 0f;
 
         public MapRenderer.Unity.Style.StyleLayer StyleLayer   { get; private set; }
         public int                               DrawIndex    { get; }
@@ -118,13 +123,14 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// Binds <c>_TextColor</c> and <c>_HaloColor</c> onto <paramref name="applier"/>. Non-local: each is
         /// the uniform arm of a two-carrier split whose other arm is the vertex COLOR stream, so
         /// <c>SymbolFeatureExtractor.EvaluatePaint</c> must stay the exact complement of
-        /// <see cref="SymbolTextColorCarrier"/>. The halo's width and blur are NOT here — they ride the
-        /// vertex stream per feature (<c>WorldSymbolRenderer.Emit</c>).
+        /// <see cref="SymbolTextColorCarrier"/>. The halo's width and blur ride the vertex stream instead
+        /// (<c>WorldSymbolRenderer.Emit</c>). It also binds <c>_SdfDilatePx</c> through the device seam.
         /// </summary>
         private static void BindTextPaint(Material material, ZoomStyleApplier applier, SymbolStyle.PaintProperties paint)
         {
             BindColorTint(material, applier, paint.Color, TextColorId, SymbolTextColorCarrier.RidesUniform(paint.Color));
             BindColorTint(material, applier, paint.HaloColor, HaloColorId, SymbolTextColorCarrier.HaloRidesUniform(paint.HaloColor));
+            applier.BindDevicePixelFloat(new StyleProperty<float>(TextDilationLogicalPx), SdfDilatePxId);
         }
 
         /// <summary>

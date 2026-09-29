@@ -2062,6 +2062,43 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>
+        /// The stem's ink width is the stem, plus the one-pixel coverage ramp, plus twice the dilation:
+        /// dilation moves the edge outward and does not widen the ramp. Read as the coverage sum across the
+        /// row through the stem, at two sub-pixel phases, so the ramp's phase invariance is in the reading.
+        /// </summary>
+        [Test]
+        public void StemInk_IsStemPlusRampPlusTwiceTheDilation()
+        {
+            var atlas = new GlyphAtlas();
+            atlas.Append(BuildStemGlyph(), fontId: 0);
+            var atlasTexture = new GlyphAtlasTexture();
+            atlasTexture.Upload(atlas);
+            try
+            {
+                foreach (float dilationPx in new[] { 0f, 0.75f })
+                foreach (float phasePx in new[] { 0f, 0.3f })
+                {
+                    LayOutProbe(atlas, phasePx, out List<SymbolQuad> quads, out TextLayoutBounds bounds);
+                    Color32[] px = RenderText(atlasTexture, quads, bounds, out int width, dilationPx);
+
+                    int rows = px.Length / width;
+                    double inkWidth = 0.0;
+                    for (int x = 0; x < width; x++)
+                        inkWidth += 1.0 - PixelCoverage.ToLinear(px[(rows / 2) * width + x].r); // black ink on white
+
+                    Assert.That(inkWidth, Is.EqualTo(ProbeStemPx + 1.0 + 2.0 * dilationPx).Within(0.05),
+                        $"stem ink at dilation {dilationPx} px, phase {phasePx} px must be the {ProbeStemPx} px stem " +
+                        $"+ 1 px ramp + 2·dilation; got {inkWidth:F3}. A width that ignores the dilation means " +
+                        "_SdfDilatePx does not reach the coverage; one that also changes with phase means it widened the ramp.");
+                }
+            }
+            finally
+            {
+                atlasTexture.Dispose();
+            }
+        }
+
+        /// <summary>
         /// The band width lives in TWO places — the shader's declared default and the committed material —
         /// and only the material's value ships. The sweep above renders a material built straight from the
         /// shader, so it pins the default; this pins the committed asset to the same value. A value fixed in
@@ -2071,12 +2108,16 @@ namespace MapRenderer.Tests.Text.Placement
         public void ShippedMaterial_CarriesTheSameAaBandAsTheShaderDefault()
         {
             int band = Shader.PropertyToID("_SdfAaDevicePx");
+            int dilation = Shader.PropertyToID("_SdfDilatePx");
             Material shipped = MapMaterialSetTestUtil.Load().SymbolTextWorld;
             var fresh = Track(new Material(Shader.Find("Map/Symbol/TextWorld")));
             Assert.AreEqual(fresh.GetFloat(band), shipped.GetFloat(band), 1e-4f,
                 $"the committed MapSymbolTextWorld material's _SdfAaDevicePx ({shipped.GetFloat(band)}) " +
                 $"must match the shader's declared default ({fresh.GetFloat(band)}) — the sweep above only " +
                 $"proves the DEFAULT antialiases, and the material is what the map actually draws with.");
+            Assert.AreEqual(fresh.GetFloat(dilation), shipped.GetFloat(dilation), 1e-4f,
+                $"the committed material's _SdfDilatePx ({shipped.GetFloat(dilation)}) must match the shader's " +
+                $"declared default ({fresh.GetFloat(dilation)}); the layer's binding overwrites it per frame.");
         }
 
         // ── fixture ───────────────────────────────────────────────────────────────────────────────────
@@ -2170,14 +2211,9 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        /// <summary>
-        /// Renders the probe glyph shifted by <paramref name="phasePx"/> device px and returns the X centroid
-        /// of its ink, weighted by per-pixel darkness against the white background. A centroid over a
-        /// symmetric probe is preferred over an ink MASS: the readback is gamma-encoded, and a monotone
-        /// transfer curve maps a symmetric profile to a symmetric profile but changes a raw sum.
-        /// </summary>
-        private static float RenderAndMeasureInkCentroidX(
-            GlyphAtlas atlas, GlyphAtlasTexture atlasTexture, float phasePx)
+        /// <summary>Shapes and lays out the probe glyph, shifted by <paramref name="phasePx"/> device px.</summary>
+        private static void LayOutProbe(
+            GlyphAtlas atlas, float phasePx, out List<SymbolQuad> quads, out TextLayoutBounds bounds)
         {
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest
@@ -2186,7 +2222,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Metrics = new AtlasMetrics(atlas),
             });
 
-            // text-offset is in EMS and the render below is at scale 1 (textSizePx == OneEm), so dividing the
+            // text-offset is in EMS and the render is at scale 1 (textSizePx == OneEm), so dividing the
             // device-px phase by OneEm lands an exact device-px shift. dpr 1 is asserted at the render.
             var options = new TextLayoutOptions
             {
@@ -2196,10 +2232,21 @@ namespace MapRenderer.Tests.Text.Placement
                 MaxWidthEm = TextLayoutOptions.Default.MaxWidthEm,
                 LineHeightEm = TextLayoutOptions.Default.LineHeightEm,
             };
-            var quads = new List<SymbolQuad>();
-            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, options, quads);
+            quads = new List<SymbolQuad>();
+            bounds = TextQuadLayout.Layout(run, atlas, options, quads);
             Assert.AreEqual(1, quads.Count, "the probe must lay out exactly one glyph quad.");
+        }
 
+        /// <summary>
+        /// Renders the probe glyph shifted by <paramref name="phasePx"/> device px and returns the X centroid
+        /// of its ink, weighted by per-pixel darkness against the white background. A centroid over a
+        /// symmetric probe is preferred over an ink MASS: the readback is gamma-encoded, and a monotone
+        /// transfer curve maps a symmetric profile to a symmetric profile but changes a raw sum.
+        /// </summary>
+        private static float RenderAndMeasureInkCentroidX(
+            GlyphAtlas atlas, GlyphAtlasTexture atlasTexture, float phasePx)
+        {
+            LayOutProbe(atlas, phasePx, out List<SymbolQuad> quads, out TextLayoutBounds bounds);
             Color32[] px = RenderText(atlasTexture, quads, bounds, out int width);
 
             double weighted = 0.0;
@@ -2222,7 +2269,8 @@ namespace MapRenderer.Tests.Text.Placement
         /// render-to-texture Y-flip), which is irrelevant here — the measurement is horizontal.
         /// </summary>
         private static Color32[] RenderText(
-            GlyphAtlasTexture atlasTexture, List<SymbolQuad> quads, TextLayoutBounds bounds, out int width)
+            GlyphAtlasTexture atlasTexture, List<SymbolQuad> quads, TextLayoutBounds bounds, out int width,
+            float dilationPx = 0f)
         {
             using var bag = new ObjectDisposalBag();
             var camGo = bag.Track(new GameObject("TextResampling_TestCamera"));
@@ -2262,8 +2310,9 @@ namespace MapRenderer.Tests.Text.Placement
                 featureIndex: 0,
                 tileKey: tileKey);
 
-            using var system = new SymbolPlacementSystem(
-                mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var textMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
+            textMaterial.SetFloat("_SdfDilatePx", dilationPx);
+            using var system = new SymbolPlacementSystem(mapCamera, textMaterial);
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {

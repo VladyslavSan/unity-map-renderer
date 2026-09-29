@@ -21,6 +21,7 @@ Shader "Map/Symbol/TextWorld"
         _ScreenParamsLogical ("Screen Params Logical (px)", Vector) = (1920, 1080, 0, 0)
         _SdfEdge             ("SDF Edge (iso, fontnik = 0.75)", Range(0, 1)) = 0.75
         _SdfAaDevicePx       ("SDF AA Width, outside the edge (RASTER px; 1 = phase-invariant)", Range(0.05, 2)) = 1.0
+        _SdfDilatePx         ("SDF Edge Dilation, outward (RASTER px; pushed as logical px x dpr)", Range(0, 2)) = 0.0
         _SdfRangeTexels      ("SDF Distance Range (atlas texels; a property of the BAKE, ~8)", Float) = 8.0
 
         // The two CONSTANT-kind colour tints — multipliers over the vertex COLOR stream, identity white.

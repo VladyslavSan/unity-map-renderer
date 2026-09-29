@@ -99,8 +99,9 @@ if its consumer measures the physical framebuffer, and that is exactly the set t
 other px property is logical, and reaches its consumer *without* a conversion — either as a material uniform
 the shader divides by the logical viewport, or baked CPU-side into geometry/placement.
 
-**Device-space — crosses the seam (`× dpr`).** Exactly eight style properties and one renderer constant, all bound through the DPR seam (the
-`BindDevicePixelFloat`/`BindDevicePixelVector` call sites in `MaterialFactory` and `SymbolRenderLayer.BindTextPaint`):
+**Device-space — crosses the seam (`× dpr`).** Exactly eight style properties and two renderer constants, all
+bound through the DPR seam (the `BindDevicePixelFloat`/`BindDevicePixelVector` call sites in `MaterialFactory` and
+`SymbolRenderLayer.BindTextPaint`):
 
 | property | consumer measures | at the seam |
 |---|---|---|
@@ -111,6 +112,7 @@ the shader divides by the logical viewport, or baked CPU-side into geometry/plac
 | `line-translate` / `fill-translate` | physical framebuffer | `× dpr` |
 | `fill-outline-color` rim width (a renderer constant of 1 logical px, not a style row) | physical framebuffer | `× dpr` |
 | `text-halo-width` / `text-halo-blur` | physical framebuffer | `× dpr` |
+| text glyph dilation (`_SdfDilatePx`; a renderer constant in logical px, not a style property) | physical framebuffer | `× dpr` |
 
 **Logical-space — never crosses the seam; factor 1.** These never route through any `LogicalToDevicePx`
 call. `text-size`, `text-padding` and `icon-padding` are evaluated CPU-side (`SymbolFeatureExtractor`) and
