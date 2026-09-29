@@ -414,9 +414,10 @@ fill band is separate geometry partly for this reason.
    adjacent samples, as consistent with a sampling miss as with a geometry error. **Fix the measurement before
    touching the shader.** No production layer is known to be affected: MVT lines are densely noded and a
    top-down map has little depth range per segment.
-2. **A vertex-stage keyword under BRG is unverified.** The fill precedent (`_SURFACE_TYPE_TRANSPARENT`) is a
-   fragment-stage keyword; `_EDGE_ANTIALIASING_OFF` changes the vertex stage. No test renders the toggle
-   through the BRG backend.
+2. **A vertex-stage keyword under BRG is checked by a render.** The fill precedent (`_SURFACE_TYPE_TRANSPARENT`)
+   is a fragment-stage keyword; `_EDGE_ANTIALIASING_OFF` changes the vertex stage. A 4 px line at zoom 1 renders
+   with the keyword through BRG and Entities, and both must leave no blended edge pixels
+   (`BrgBackend_LineParity_MatchesEntities_AaOff`). The hairline strategies are not rendered through BRG.
 
 ---
 

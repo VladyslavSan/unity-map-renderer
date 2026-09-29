@@ -22,6 +22,7 @@ using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRe
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Layers;
+using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
@@ -1040,9 +1041,16 @@ namespace MapRenderer.Tests.Visual
         /// plan without the line props reads them from byte 0 (the transform), so its coverage is near
         /// zero. A blank render Assert.Fails.
         /// </summary>
-        [Test]
-        public void BrgBackend_LineParity_MatchesEntities()
+        [TestCase(false, TestName = "BrgBackend_LineParity_MatchesEntities")]
+        [TestCase(true,  TestName = "BrgBackend_LineParity_MatchesEntities_AaOff")]
+        public void BrgBackend_LineParity_MatchesEntities(bool aaOff)
         {
+            if (aaOff)
+            {
+                AssertBrgHonoursLineAaOff();
+                return;
+            }
+
             const int SnapW = 512;
             const int SnapH = 512;
             var bgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
@@ -1187,6 +1195,161 @@ namespace MapRenderer.Tests.Visual
                 RenderSettings.ambientMode  = prevAmbientMode;
                 RenderSettings.ambientLight = prevAmbientLight;
             }
+        }
+
+        // ── Line AA-off through BRG (vertex-stage keyword) ────────────────────────────────────
+
+        /// <summary>
+        /// <c>_EDGE_ANTIALIASING_OFF</c> changes the line shader's VERTEX stage, unlike the fragment-stage fill
+        /// keyword BRG already carries. A cloned material set turns it on, and a 4 px line at zoom 1 renders on
+        /// both backends. With AA off the ribbon has hard edges, so no pixel is a blend of line and background;
+        /// with AA on the edges blend. Entities and BRG must both stay under the blend floor, and the AA-on BRG
+        /// render is the positive control. Each AA-off render must also draw the line, or none would pass.
+        /// </summary>
+        private static void AssertBrgHonoursLineAaOff()
+        {
+            // Calibrated: AA off measured 0 blend pixels on both backends, AA on about 5.5% of the frame. The AA-off
+            // line covers about 0.7 of the AA-on coverage (the blended edge is extra), so the band is wide.
+            const float BlendFloor = 0.0005f;
+            const float MinCoverage = 0.01f;
+            const float CoverageBandLow = 0.5f;
+            const float CoverageBandHigh = 1.5f;
+
+            using var cameraBag = new ObjectDisposalBag();
+            var lightGo = cameraBag.Track(new GameObject("BrgAaOffLight"));
+            var light   = lightGo.AddComponent<Light>();
+            light.type  = LightType.Directional; light.intensity = 1f;
+            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+            var prevAmbientMode  = RenderSettings.ambientMode;
+            var prevAmbientLight = RenderSettings.ambientLight;
+            RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
+            int prevQuality = QualitySettings.GetQualityLevel();
+            QualitySettings.SetQualityLevel(0, false);
+
+            try
+            {
+                (float blend, float coverage) entitiesOff = RenderLine(RenderBackend.Entities, aaOff: true, cameraBag);
+                (float blend, float coverage) brgOff      = RenderLine(RenderBackend.Brg, aaOff: true, cameraBag);
+                (float blend, float coverage) brgOn       = RenderLine(RenderBackend.Brg, aaOff: false, cameraBag);
+                Debug.Log($"[BrgAaOff] blend/coverage: Entities off={entitiesOff.blend:P3}/{entitiesOff.coverage:P3}, " +
+                          $"BRG off={brgOff.blend:P3}/{brgOff.coverage:P3}, BRG on={brgOn.blend:P3}/{brgOn.coverage:P3}");
+
+                Assert.That(brgOn.blend, Is.GreaterThan(BlendFloor * 10f),
+                    $"positive control: with AA on a line must leave blended edge pixels ({brgOn.blend:P3}), or the " +
+                    "metric cannot tell AA on from AA off.");
+                Assert.That(entitiesOff.blend, Is.LessThanOrEqualTo(BlendFloor),
+                    $"Entities with AA off must render hard edges ({entitiesOff.blend:P3} blended).");
+                Assert.That(brgOff.blend, Is.LessThanOrEqualTo(BlendFloor),
+                    $"BRG with AA off must render hard edges like Entities ({brgOff.blend:P3} blended, floor {BlendFloor:P3}). " +
+                    "A higher value means the vertex-stage keyword did not reach the BRG draw.");
+
+                // Hard edges mean nothing on a frame with no line: each AA-off render must draw one of about the AA-on size.
+                foreach ((string name, float coverage) in new[] { ("Entities", entitiesOff.coverage), ("BRG", brgOff.coverage) })
+                {
+                    Assert.That(coverage, Is.GreaterThan(MinCoverage),
+                        $"{name} with AA off must draw the line ({coverage:P3} of the frame is not background).");
+                    Assert.That(coverage, Is.InRange(brgOn.coverage * CoverageBandLow, brgOn.coverage * CoverageBandHigh),
+                        $"{name} with AA off must cover about what AA on covers ({coverage:P3} against {brgOn.coverage:P3}).");
+                }
+            }
+            finally
+            {
+                QualitySettings.SetQualityLevel(prevQuality, false);
+                RenderSettings.ambientMode  = prevAmbientMode;
+                RenderSettings.ambientLight = prevAmbientLight;
+            }
+        }
+
+        /// <summary>Renders the zoom-1 line style through <paramref name="backend"/> with edge antialiasing on or
+        /// off. Returns the fraction of the frame that blends line and background, and the fraction that is not
+        /// background at all. The set is a clone, so the committed asset is never touched.</summary>
+        private static (float blend, float coverage) RenderLine(RenderBackend backend, bool aaOff, ObjectDisposalBag cameraBag)
+        {
+            using var bag = new ObjectDisposalBag();
+            using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var mapGo = bag.Track(new GameObject("BrgAaOffView"));
+            var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
+
+            MapMaterialSet set = UnityEngine.Object.Instantiate(view.Config.MaterialSet);
+            set.LineMaterial = new Material(set.LineMaterial);
+            if (aaOff)
+            {
+                set.LineMaterial.SetFloat("_EdgeAntialiasing", 0f);
+                set.LineMaterial.EnableKeyword("_EDGE_ANTIALIASING_OFF");
+            }
+            bag.Track(set);
+            bag.Track(set.LineMaterial);
+            view.Config.MaterialSet = set;
+
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 2;
+            view.Config.Backend = backend;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            using var snap = new SnapshotRenderer(512, 512);
+            try
+            {
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 1.0, 0, 0),
+                    style: StyleZoomDependentLine());
+                SettleDeterministically(view);
+                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
+                    $"{backend} aaOff={aaOff}: must settle tiles at zoom 1.");
+                view.LateUpdate();
+
+                int lineLayers = 0;
+                foreach (IRenderLayer layer in view.Layers.Layers)
+                {
+                    if (layer is not LineRenderLayer line) continue;
+                    lineLayers++;
+                    Assert.AreEqual(aaOff, line.Material.IsKeywordEnabled("_EDGE_ANTIALIASING_OFF"),
+                        $"{backend}: every line layer's material must carry the AA-off keyword exactly when aaOff.");
+                }
+                Assert.Greater(lineLayers, 0, "precondition: the style must build a line layer.");
+
+                view.Camera.SyncToCamera();
+                snap.Render(view.Camera.Camera);
+                snap.WritePng($"line-aa-{backend}-{(aaOff ? "off" : "on")}.png");
+                return MeasureLine(snap.Pixels.Pixels);
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>Measures a frame by Manhattan distance 15: <c>blend</c> is the fraction that is neither the
+        /// dominant colour (the background) nor the dominant colour among the rest (the line plateau), and
+        /// <c>coverage</c> is the fraction that is not background.</summary>
+        private static (float blend, float coverage) MeasureLine(Color32[] pixels)
+        {
+            static int Distance(Color32 a, Color32 b) => math.abs(a.r - b.r) + math.abs(a.g - b.g) + math.abs(a.b - b.b);
+            static Color32 Dominant(Color32[] all, Color32? excluding)
+            {
+                var counts = new System.Collections.Generic.Dictionary<int, int>();
+                foreach (Color32 c in all)
+                {
+                    if (excluding.HasValue && Distance(c, excluding.Value) <= 15) continue;
+                    int key = (c.r << 16) | (c.g << 8) | c.b;
+                    counts.TryGetValue(key, out int n);
+                    counts[key] = n + 1;
+                }
+                int best = 0, bestCount = -1;
+                foreach (var pair in counts) if (pair.Value > bestCount) { bestCount = pair.Value; best = pair.Key; }
+                return new Color32((byte)(best >> 16), (byte)(best >> 8), (byte)best, 255);
+            }
+
+            if (pixels.Length == 0) return (0f, 0f);
+            Color32 background = Dominant(pixels, null);
+            Color32 plateau    = Dominant(pixels, background);
+            int blended = 0, drawn = 0;
+            foreach (Color32 c in pixels)
+            {
+                if (Distance(c, background) <= 15) continue;
+                drawn++;
+                if (Distance(c, plateau) > 15) blended++;
+            }
+            return ((float)blended / pixels.Length, (float)drawn / pixels.Length);
         }
 
         // ─── Helpers ─────────────────────────────────────────────────────────────────────────
