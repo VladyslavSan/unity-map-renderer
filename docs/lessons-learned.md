@@ -790,13 +790,19 @@ other, and the rule for guards applies: assert it was satisfiable.
   2026-07-10.)
 
 - **The EDITOR does not reliably rebuild variants when only an included `.hlsl` changes — and batch mode does.**
-  Batch-mode tests compile from source every run, so `./Tools/run-tests.sh` can be **green on a change the
+  A batch run imports changed assets at launch, and `Tools/run-tests.sh` warms the shader cache whenever a
+  `.shader`/`.hlsl` is newer than the run's stamp, so `./Tools/run-tests.sh` can be **green on a change the
   running Editor is not executing**. The two disagreeing is not a contradiction to explain away; it means the
   Editor is stale. Symptom: a shader edit — even a hard `color.rgb = magenta` — has *no visible effect* in the
   Game view. Touching the `.shader` file is **not** sufficient on its own; what worked reliably was **quit
   Unity → delete `Library/ShaderCache` → reopen**. (2026-08-01, S114: cost most of an evening. Three
   successive "the fix doesn't work" reports were all made against stale variants, and each one sent the
   investigation to a different, innocent subsystem.)
+  **Limitation:** one filtered batch run read stale output after an include-only edit (a RED injection in
+  an included `.hlsl` passed) and went RED after a `touch` of the file. Three controlled replays — a new filter,
+  a stamped filter, the same filter sequence — all recompiled and went RED, so the cause is unknown. Treat a
+  green result on an include-only edit as unproven until the injection is seen to fail once: `touch` the file
+  and rerun.
   **Method, not just the fix:** every in-scene shader diagnostic must be **self-verifying** — pair the thing
   you are testing with an unmistakable signal that proves the build is live (a colour the previous build could
   not produce), and never reuse a colour between revisions. Two diagnostics in a row that both rendered green
