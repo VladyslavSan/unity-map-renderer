@@ -14,8 +14,12 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
     {
         /// <summary>Scalar — <c>Material.GetFloat(int)</c>.</summary>
         Float,
-        /// <summary>RGBA colour — <c>Material.GetColor(int)</c>; writes r,g,b,a to four consecutive floats.</summary>
+        /// <summary>RGBA colour — <c>Material.GetColor(int)</c>; writes r,g,b,a to four consecutive floats. The
+        /// material returns it in gamma space, and a linear-space project needs it converted first.</summary>
         Color,
+        /// <summary>RGBA colour of a <c>[HDR]</c> shader property. The material returns it linear already, so
+        /// it is written unchanged.</summary>
+        HdrColor,
         /// <summary>Four-component vector — <c>Material.GetVector(int)</c>; writes x,y,z,w.</summary>
         Vector,
     }
@@ -67,7 +71,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         [InstancedProp(PropKind.Color, 1f, 1f, 1f, 1f)] public float4 _BaseColor;
         [InstancedProp(PropKind.Color, 1f, 1f, 1f, 1f)] public float4 _SpecColor;
-        [InstancedProp(PropKind.Color, 0f, 0f, 0f, 0f)] public float4 _EmissionColor;
+        [InstancedProp(PropKind.HdrColor, 0f, 0f, 0f, 0f)] public float4 _EmissionColor;
         [InstancedProp(PropKind.Float, 0.5f)]            public float  _Cutoff;
         [InstancedProp(PropKind.Float, 0f)]              public float  _Smoothness;
         [InstancedProp(PropKind.Float, 0f)]              public float  _Metallic;

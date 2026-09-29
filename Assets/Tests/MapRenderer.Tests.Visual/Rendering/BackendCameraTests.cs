@@ -1214,6 +1214,7 @@ namespace MapRenderer.Tests.Visual
             const float MinCoverage = 0.01f;
             const float CoverageBandLow = 0.5f;
             const float CoverageBandHigh = 1.5f;
+            const int PlateauGap = 12; // summed over r, g and b
 
             using var cameraBag = new ObjectDisposalBag();
             var lightGo = cameraBag.Track(new GameObject("BrgAaOffLight"));
@@ -1229,9 +1230,9 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                (float blend, float coverage) entitiesOff = RenderLine(RenderBackend.Entities, aaOff: true, cameraBag);
-                (float blend, float coverage) brgOff      = RenderLine(RenderBackend.Brg, aaOff: true, cameraBag);
-                (float blend, float coverage) brgOn       = RenderLine(RenderBackend.Brg, aaOff: false, cameraBag);
+                (float blend, float coverage, Color32 plateau) entitiesOff = RenderLine(RenderBackend.Entities, aaOff: true, cameraBag);
+                (float blend, float coverage, Color32 plateau) brgOff      = RenderLine(RenderBackend.Brg, aaOff: true, cameraBag);
+                (float blend, float coverage, Color32 plateau) brgOn       = RenderLine(RenderBackend.Brg, aaOff: false, cameraBag);
                 Debug.Log($"[BrgAaOff] blend/coverage: Entities off={entitiesOff.blend:P3}/{entitiesOff.coverage:P3}, " +
                           $"BRG off={brgOff.blend:P3}/{brgOff.coverage:P3}, BRG on={brgOn.blend:P3}/{brgOn.coverage:P3}");
 
@@ -1243,6 +1244,14 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(brgOff.blend, Is.LessThanOrEqualTo(BlendFloor),
                     $"BRG with AA off must render hard edges like Entities ({brgOff.blend:P3} blended, floor {BlendFloor:P3}). " +
                     "A higher value means the vertex-stage keyword did not reach the BRG draw.");
+
+                // The same lit colour: BRG packs the material colour by hand, and a gamma value written where the
+                // shader expects linear draws the whole line lighter.
+                int plateauGap = math.abs(entitiesOff.plateau.r - brgOff.plateau.r)
+                               + math.abs(entitiesOff.plateau.g - brgOff.plateau.g)
+                               + math.abs(entitiesOff.plateau.b - brgOff.plateau.b);
+                Assert.That(plateauGap, Is.LessThanOrEqualTo(PlateauGap),
+                    $"BRG must light the line like Entities: plateau {brgOff.plateau} against {entitiesOff.plateau}.");
 
                 // Hard edges mean nothing on a frame with no line: each AA-off render must draw one of about the AA-on size.
                 foreach ((string name, float coverage) in new[] { ("Entities", entitiesOff.coverage), ("BRG", brgOff.coverage) })
@@ -1264,7 +1273,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Renders the zoom-1 line style through <paramref name="backend"/> with edge antialiasing on or
         /// off. Returns the fraction of the frame that blends line and background, and the fraction that is not
         /// background at all. The set is a clone, so the committed asset is never touched.</summary>
-        private static (float blend, float coverage) RenderLine(RenderBackend backend, bool aaOff, ObjectDisposalBag cameraBag)
+        private static (float blend, float coverage, Color32 plateau) RenderLine(RenderBackend backend, bool aaOff, ObjectDisposalBag cameraBag)
         {
             using var bag = new ObjectDisposalBag();
             using var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
@@ -1321,7 +1330,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Measures a frame by Manhattan distance 15: <c>blend</c> is the fraction that is neither the
         /// dominant colour (the background) nor the dominant colour among the rest (the line plateau), and
         /// <c>coverage</c> is the fraction that is not background.</summary>
-        private static (float blend, float coverage) MeasureLine(Color32[] pixels)
+        private static (float blend, float coverage, Color32 plateau) MeasureLine(Color32[] pixels)
         {
             static int Distance(Color32 a, Color32 b) => math.abs(a.r - b.r) + math.abs(a.g - b.g) + math.abs(a.b - b.b);
             static Color32 Dominant(Color32[] all, Color32? excluding)
@@ -1339,7 +1348,7 @@ namespace MapRenderer.Tests.Visual
                 return new Color32((byte)(best >> 16), (byte)(best >> 8), (byte)best, 255);
             }
 
-            if (pixels.Length == 0) return (0f, 0f);
+            if (pixels.Length == 0) return (0f, 0f, default);
             Color32 background = Dominant(pixels, null);
             Color32 plateau    = Dominant(pixels, background);
             int blended = 0, drawn = 0;
@@ -1349,7 +1358,7 @@ namespace MapRenderer.Tests.Visual
                 drawn++;
                 if (Distance(c, plateau) > 15) blended++;
             }
-            return ((float)blended / pixels.Length, (float)drawn / pixels.Length);
+            return ((float)blended / pixels.Length, (float)drawn / pixels.Length, plateau);
         }
 
         // ─── Helpers ─────────────────────────────────────────────────────────────────────────

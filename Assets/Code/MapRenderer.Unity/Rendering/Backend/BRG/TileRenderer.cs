@@ -329,6 +329,9 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             _instanceBuffer.SetData(_cpuBuffer, 0, 0, floatsNeeded);
         }
 
+        /// <summary>True when the project renders in linear colour space, so a gamma material colour needs converting.</summary>
+        private static readonly bool LinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
+
         /// <summary>
         /// Packs all DOTS-instanced material properties from <paramref name="mat"/> into the CPU SoA
         /// buffer for instance <paramref name="index"/> out of <paramref name="count"/> total instances.
@@ -347,10 +350,12 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 switch (entry.Kind)
                 {
                     case PropKind.Color:
+                    case PropKind.HdrColor:
                     {
                         Color c = mat.HasProperty(entry.PropId)
                             ? mat.GetColor(entry.PropId)
                             : new Color(entry.Default.x, entry.Default.y, entry.Default.z, entry.Default.w);
+                        if (entry.Kind == PropKind.Color && LinearColorSpace) c = c.linear;
                         int b4 = soaBase + index * 4;
                         _cpuBuffer[b4 + 0] = c.r;
                         _cpuBuffer[b4 + 1] = c.g;
