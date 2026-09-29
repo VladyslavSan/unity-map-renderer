@@ -20,7 +20,14 @@ namespace MapRenderer.Tests.Lifetime
     {
         public int DisposeCount { get; private set; }
 
-        protected override void DoDispose() => DisposeCount++;
+        /// <summary>When set, <see cref="DoDispose"/> throws after it counts its run.</summary>
+        public bool ThrowInDoDispose { get; set; }
+
+        protected override void DoDispose()
+        {
+            DisposeCount++;
+            if (ThrowInDoDispose) throw new InvalidOperationException("DoDispose failed.");
+        }
 
         /// <summary>Public wrapper so the test can exercise the protected <see cref="ThrowIfDisposed"/> guard.</summary>
         public void AssertNotDisposed() => ThrowIfDisposed();
@@ -44,6 +51,14 @@ namespace MapRenderer.Tests.Lifetime
 
             Assert.AreEqual(1, d.DisposeCount,
                 "DoDispose must run exactly once no matter how many times Dispose() is called.");
+
+            // A DoDispose that throws is not re-entered either. TileManager.DoDispose tears records down before
+            // it removes them from its table, and this is what keeps the half-torn table from being read again.
+            var thrower = new TestVerifiedDisposable { ThrowInDoDispose = true };
+            Assert.Throws<InvalidOperationException>(() => thrower.Dispose());
+            Assert.DoesNotThrow(() => thrower.Dispose(), "a second Dispose after a throwing DoDispose must return quietly.");
+            Assert.AreEqual(1, thrower.DisposeCount, "a throwing DoDispose must still run exactly once.");
+            Assert.IsTrue(thrower.IsDisposed);
         }
 
         [Test]
