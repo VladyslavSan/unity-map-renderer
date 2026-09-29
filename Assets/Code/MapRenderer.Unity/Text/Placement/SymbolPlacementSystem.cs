@@ -183,6 +183,10 @@ namespace MapRenderer.Unity.Text.Placement
         /// <summary>Not readonly — allocated in the ctor.</summary>
         private NativeHashMap<long, byte> _droppedHalvesLastFrame;
 
+        /// <summary>True when the next <see cref="UpdateCore"/> applies the mirror plan's fade aliases. A mirror
+        /// rebuild with a non-empty list sets it, so a held mirror never re-applies them.</summary>
+        private bool _aliasesPending;
+
         /// <summary>Every visible symbol's screen geometry this frame, projected by the Burst
         /// <c>SymbolProjectionJob</c>. <c>_stagePointOffset[r]</c> is symbol r's start (-1 = culled).</summary>
         private NativeList<double3> _symbolPoints;
@@ -466,6 +470,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // Completes the previous Update's scheduled collision, re-keying survivors into _placedLastFrame.
                 using (PmCollideHarvest.Auto())
                     HarvestCollision();
+                ApplyFadeAliases();
 
                 double2 viewportLogicalPx = _camera.ViewportLogicalPx;
                 // The world ruler for map-pitched curved symbols — converts device pixels to logical pixels once, here.
@@ -728,6 +733,30 @@ namespace MapRenderer.Unity.Text.Placement
             LastSurvivorCount = _survivorCountOut[0];
         }
 
+        // Hands a departing copy's fade state to the active winner that replaces it across a zoom step, so the
+        // child starts at the parent's opacity instead of at 0. The parent decays through the unseen sweep.
+        private void ApplyFadeAliases()
+        {
+            if (!_aliasesPending) return;
+            _aliasesPending = false;
+
+            NativeList<FadeAlias> aliases = _mirrorPlan.FadeAliases;
+            for (int a = 0; a < aliases.Length; a++)
+            {
+                long from = aliases[a].From;
+                long to   = aliases[a].To;
+                if (from == to) continue;
+
+                if (_fadeOpacity.TryGetValue(from, out float fromOpacity))
+                {
+                    _fadeOpacity.TryGetValue(to, out float toOpacity); // absent reads as 0
+                    _fadeOpacity[to] = math.max(toOpacity, fromOpacity);
+                }
+                if (_placedLastFrame.Contains(from)) _placedLastFrame.Add(to);
+                if (_droppedHalvesLastFrame.TryGetValue(from, out byte droppedMask)) _droppedHalvesLastFrame[to] = droppedMask;
+            }
+        }
+
         // Runs collision as a Burst job over the stage output, scheduled but not completed here — Complete moves
         // to next Update's harvest, so the main thread never blocks. Outputs are read by that next Update, not this one.
         private void ScheduleCollision(int candidateCount, int boxCount)
@@ -952,6 +981,7 @@ namespace MapRenderer.Unity.Text.Placement
 
             // Stamps the shared source key so a later same-plan-and-version Update memo-hits above; anything else rebuilds.
             _mirrorPlan = plan; _mirrorVersion = plan?.WinnerSetVersion ?? long.MinValue;
+            _aliasesPending = plan != null && plan.FadeAliases.Length > 0;
         }
 
         // Rebuilds the reusable view table from plan.Blocks — non-owning pointer views over each block's own array.
@@ -1160,7 +1190,8 @@ namespace MapRenderer.Unity.Text.Placement
 
         /// <summary>Point fade identity — hashed from the cross-tile key on the shared canonical grid, the same
         /// grid the store dedup uses, so a symbol's fade cell and dedup cell are one identity. Fixed and
-        /// zoom-independent, so the same symbol from a swapped tile keeps a stable id and doesn't pop.</summary>
+        /// zoom-independent while the copies quantize alike; a zoom step can move the cell, and a fade alias then
+        /// carries the departing copy's state to the new id.</summary>
         /// <param name="textId">Interned <c>ShapedSymbol.TextId</c> (0 for an icon-only symbol).</param>
         /// <param name="iconImageId">Interned <c>ShapedSymbol.IconImageId</c>; folded in via a
         /// guard-skip so a text symbol's id is unchanged.</param>

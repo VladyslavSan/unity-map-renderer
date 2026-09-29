@@ -1331,23 +1331,26 @@ namespace MapRenderer.Tests.Text
 
         // ═══ The SEAMLESS same-cell HOLD across a zoom step (the fixed-grid pivot) ════════════
 
-        // ── THE pivot-defining tooth: an ACTIVE point symbol at z=9 and a DEPARTING point symbol with the SAME text
-        //    and IDENTICAL AnchorRender at z=8 key on the SAME fixed CanonicalGridMeters cell — so the departing
-        //    copy is claim-skipped (a seamless hold across the zoom step), NOT emitted as a fading duplicate.
-        //    Non-obvious why: a per-zoom grid would put the two bands in different cells, so every zoom step
-        //    would emit a fading duplicate. ──
-        [Test]
-        public void DepartingCrossBand_ClaimSkipped_UnderFixedGrid()
+        /// <summary>A DEPARTING copy of a symbol baked at z=8, with an ACTIVE copy at z=9. An identical anchor
+        /// shares the active copy's 4 m cell, so the exact-cell claim skips it. A copy that MVT quantization moved
+        /// by whole coarse tile units misses that cell, so the reconciler's nearness match skips it instead and
+        /// hands its fade over. Beyond the radius, or with another text, it is a different symbol and stays.</summary>
+        [TestCase(0.0, "Hold", 1, TestName = "DepartingCrossBand_ClaimSkipped_UnderFixedGrid")]
+        [TestCase(1.0, "Hold", 1, TestName = "DepartingCrossBand_OneCoarseUnitAway_MatchedByNearness")]
+        [TestCase(3.0, "Hold", 2, TestName = "DepartingCrossBand_BeyondTheRadius_StaysADistinctSymbol")]
+        [TestCase(1.0, "Other", 2, TestName = "DepartingCrossBand_NearButDifferentText_StaysADistinctSymbol")]
+        public void DepartingCrossBand_SkipsOnlyTheSameSymbol(double offsetCoarseUnits, string departingText, int expectedCount)
         {
-            // 5000 m is large enough that a per-zoom grid WOULD split z8 (~305.7 m/px) vs z9 (~152.9 m/px) for this
-            // same anchor (round(5000/305.7)=16 ≠ round(5000/152.9)=33) — so the fixed grid is what makes the hold work.
+            // The z8 tile unit at extent 4096 is about 38 m, well over the 4 m grid, so one unit always crosses a cell.
+            double coarseUnitMetres = 2.0 * WebMercator.WorldExtent / (256.0 * 4096.0);
             double3 anchor = new double3(5000.0, 0, 5000.0);
+            double3 departingAnchor = new double3(anchor.x + offsetCoarseUnits * coarseUnitMetres, 0, anchor.z);
             var tileActive = new TileId { Z = 9, X = 256, Y = 256 };
             var tileDeparting = new TileId { Z = 8, X = 128, Y = 128 };
             var activeBuffer = new SymbolTileBuffer();
             var active = ParityPoint(activeBuffer, anchor, 0, "Hold", null, 1, tileActive);
             var departingBuffer = new SymbolTileBuffer();
-            ParityPoint(departingBuffer, anchor, 0, "Hold", null, 2, tileDeparting);
+            ParityPoint(departingBuffer, departingAnchor, 0, departingText, null, 2, tileDeparting);
 
             var store = new SymbolTileStore(cacheCap: 8);
             var kActive = new SymbolTileStore.Key("src", tileActive);
@@ -1360,11 +1363,31 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, store.DepartingTileCount, "the z=8 tile is departing");
 
             List<ShapedSymbol> output = CollectWithActiveCount(store, 1.0, out int activeCount); // gate ON (magnitude ignored)
-            Assert.AreEqual(1, output.Count, "the departing copy shares the active cell (fixed grid) → claim-skipped, no fading duplicate");
-            Assert.AreEqual(1, activeCount, "…and nothing is appended after the active split");
+            Assert.AreEqual(expectedCount, output.Count,
+                expectedCount == 1
+                    ? "the departing copy is the same symbol as the active one → skipped, no fading duplicate"
+                    : "a different symbol keeps its fading copy");
+            Assert.AreEqual(1, activeCount, "the active split holds one winner either way");
             // ShapedSymbol is a struct, so there is no reference identity. FeatureIndex, the one field that
             // differs, tells the active (1) copy from the departing (2) one.
-            Assert.AreEqual(active.FeatureIndex, output[0].FeatureIndex, "the surviving copy is the active (z=9) one");
+            Assert.AreEqual(active.FeatureIndex, output[0].FeatureIndex, "the first output is the active (z=9) copy");
+
+            // The fade alias runs from the departing copy's baked fade id to the active winner's. Only a matched
+            // copy gets one: an identical anchor is claim-skipped by its cell, and a distinct symbol keeps its own fade.
+            var snapshot = new SymbolSnapshot();
+            var reconciled = new SymbolReconcileResult();
+            store.CaptureSnapshot(snapshot);
+            try { new SymbolReconciler().Run(snapshot, reconciled); }
+            finally { store.ReleasePins(snapshot); }
+            bool matchedByNearness = expectedCount == 1 && offsetCoarseUnits > 0.0;
+            Assert.AreEqual(matchedByNearness ? 1 : 0, reconciled.FadeAliases.Count, "alias count");
+            if (matchedByNearness)
+            {
+                static long FadeIdOf(SymbolTileBlock block) => block.Points[block.Detail[0]].FadeId;
+                Assert.AreEqual(FadeIdOf(reconciled.OrderedBlocks[1]), reconciled.FadeAliases[0].From, "alias From: the z=8 copy's fade id");
+                Assert.AreEqual(FadeIdOf(reconciled.OrderedBlocks[0]), reconciled.FadeAliases[0].To, "alias To: the z=9 winner's fade id");
+                Assert.AreNotEqual(reconciled.FadeAliases[0].From, reconciled.FadeAliases[0].To, "the two copies have different fade ids");
+            }
             store.Clear();
         }
 

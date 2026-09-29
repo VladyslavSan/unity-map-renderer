@@ -15,11 +15,12 @@ dictionary to pick one winner per identity. Two facts make a per-frame recompute
 
 1. **The dedup answer is a pure function of the loaded tile set.** The same tiles give bit-identical winners.
    Camera pan, rotate, and tilt do not change it.
-2. **Parent/child tile overlap does not happen.** The active cover is a quadtree cut: it can mix zooms (the
-   default screen-space LOD does), but no active tile has an active ancestor or descendant.
-   Coarse-under-fine display is future work. So the only real duplication is edge/buffer duplication
+2. **Active parent/child tile overlap does not happen.** The active cover is a quadtree cut: it can mix zooms
+   (the default screen-space LOD does), but no active tile has an active ancestor or descendant.
+   Coarse-under-fine display is future work. So the active duplication is edge/buffer duplication
    between neighbouring tiles plus cross-source duplication. Both are **static per tile set**, independent
-   of camera pose and of fractional zoom.
+   of camera pose and of fractional zoom. A departing parent coexists with its active children for the grace
+   window; the departing pass handles that pair (see the zoom step below).
 
 A per-frame dedup would therefore recompute a constant every frame, and on a moving camera that constant
 would be the largest single label cost.
@@ -79,12 +80,17 @@ departing membership OR a tile's label content dirties the set:
 
 **There is no zoom trigger.** The dedup grid is a **fixed render-space grid**
 (`CrossTileSymbolKey.CanonicalGridMeters`, 4 m), so the dedup answer is a pure function of the tile set with
-zero zoom dependence: neither fractional zoom nor a zoom step dirties it. The fixed grid is correct because
-parent/child overlap does not happen; merging distinct-but-close features is the collision pass's job.
+zero zoom dependence: neither fractional zoom nor a zoom step dirties it. The fixed grid is correct for
+active copies because active parent/child overlap does not happen; merging distinct-but-close features is the
+collision pass's job.
 **Rejected: keying the grid on integer tile zoom.** That still swaps grids per zoom band, which breaks the
-seamless same-cell hold across a zoom step; the fixed grid keeps that hold. A zoom step still swaps the tile
-*set*, so it dirties the state through the tile add/remove events above. When parent/child overlap arrives,
-the grid goes back to zoom-scaled (see "Open questions").
+same-cell hold across a zoom step; the fixed grid keeps it where the copies quantize alike. Below about z13
+the parent's and the child's MVT quantization differ by more than the 4 m cell, so the copies can fall in different
+cells. The departing pass then matches a departing point to an active winner of the same layer, text and icon
+within `CrossZoomMatchUnits` coarser-zoom tile units, and emits a fade alias from the departing fade id to the
+winner's. The placement system applies the alias once per winner set: the winner starts at the departing copy's
+opacity, so the label holds instead of blinking. A match never displaces or reorders an active winner.
+A zoom step still swaps the tile *set*, so it dirties the state through the tile add/remove events above.
 
 Each event marks the state dirty (bumps the generation). Many events between two pickups coalesce into one
 reconcile.
@@ -164,6 +170,7 @@ Two properties keep the swap stable:
 
 ## 5. Open questions
 
-- **When parent/child overlap arrives:** the dedup grid must go back to zoom-scaled + finest-zoom-wins.
-  The change is local to the one `CrossTileSymbolKey.CanonicalGridMeters` use and the store's grid input (a
-  seam comment marks it). It is *not* integer-zoom keying (rejected; see "Invalidation events").
+- **When active parent/child overlap arrives:** the active pass would need finest-zoom-wins across cells, and
+  nearness is not transitive, so it cannot reuse the departing pass's match. Until then, two active winners of
+  one symbol in different cells (a buffer copy across a screen-space LOD zoom boundary) still show twice. It is
+  *not* integer-zoom keying (rejected; see "Invalidation events").

@@ -35,9 +35,10 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>The single canonical dedup+fade grid, in metres: <c>SymbolReconciler</c>'s <c>DedupKey</c>
-        /// and the fade id quantize to it. It is fixed, not zoom-scaled, because the cover is a quadtree cut, so
-        /// duplicates are only neighbour-edge and cross-source copies. Limitation: a cover that overlapped a
-        /// parent and its child would need a zoom-scaled grid.</summary>
+        /// and the fade id quantize to it. It is fixed, not zoom-scaled, because the active cover is a quadtree cut,
+        /// so active duplicates are only same-zoom neighbour-edge and cross-source copies. A departing copy from
+        /// another zoom is matched by nearness in the reconciler's departing pass, which hands its fade state to
+        /// the active copy. Limitation: two active zooms can still show a duplicate.</summary>
         public const double CanonicalGridMeters = 4.0;
 
         /// <summary>

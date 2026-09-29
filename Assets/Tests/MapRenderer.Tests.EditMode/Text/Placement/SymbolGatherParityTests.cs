@@ -1545,6 +1545,40 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Greater(h.System.LastDepartingCulledCount, 0, "…and its skip is attributed to departing telemetry");
         }
 
+        // ── At a zoom step the departing parent's point and the active child's point are one symbol with two fade
+        //    ids. A fade alias hands the parent's opacity to the child, so the label does not blink. ──
+        [Test]
+        public void Update_ZoomStepHandover_ChildInheritsTheDepartingCopysOpacity()
+        {
+            using var h = new Harness();
+            var parentBuffer = new SymbolTileBuffer();
+            AddPoint(parentBuffer, h.Origin, sortKey: 0f, text: "A", feature: 0);
+            // One coarse tile unit away: another 4 m cell, so the child gets its own fade id.
+            var childBuffer = new SymbolTileBuffer();
+            AddPoint(childBuffer, h.Origin + new double3(40.0, 0, 0), sortKey: 0f, text: "A", feature: 0);
+
+            using var plan = new TestSymbolPlan(h.Projection);
+            static long FirstWinnerFadeId(SymbolGatherPlan p)
+            {
+                SymbolTileBlock block = p.Blocks[p.BlockId[0]];
+                return block.Points[block.Detail[p.LocalIndex[0]]].FadeId;
+            }
+
+            // 1) The parent alone: places, and snaps to full opacity.
+            long parentFadeId = FirstWinnerFadeId(plan.Build(parentBuffer));
+            h.System.Update(in h.Frame, plan.Build(parentBuffer), h.Atlas); // Verdict is one Update late
+            h.System.Update(in h.Frame, plan.Build(parentBuffer), h.Atlas);
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "precondition: the parent is at full opacity");
+
+            // 2) The zoom step: only the child is a winner now, carrying an alias from the parent's fade id.
+            long childFadeId = FirstWinnerFadeId(plan.Build(childBuffer));
+            Assert.AreNotEqual(parentFadeId, childFadeId, "precondition: the two copies have different fade ids");
+            var aliases = new List<FadeAlias> { new FadeAlias { From = parentFadeId, To = childFadeId } };
+            h.System.Update(in h.Frame, plan.Build(childBuffer, fadeAliases: aliases), h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(1, h.System.LastQuadCount, "the child draws on the step frame, not one frame later");
+            Assert.Greater(MaxAlpha(h.System), 0.95f, "the child starts at the parent's opacity instead of at 0");
+        }
+
         // ── A coverage-fading record (SymbolCoverageFading: a separate flag from SymbolDeparting, because the tile is
         //    still ACTIVE, just small on screen) FADES OUT in place, like the departing test above. ──
         [Test]
@@ -1935,7 +1969,7 @@ namespace MapRenderer.Tests.Text.Placement
                 decisions.Add(decision);
                 departing.Add(tk == departingTileKey ? (byte)1 : isDeparting[i]);
             }
-            plan.Build(blockId, localIndex, departing, decisions, store.OrderedBlocks, version);
+            plan.Build(blockId, localIndex, departing, decisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
         }
 
         // Owns the LPS + the throwaway Unity resources the fixture creates (mirrors SymbolGatherParityTests'
@@ -2233,7 +2267,7 @@ namespace MapRenderer.Tests.Text.Placement
                         refBlockId.Add(allBlockId[i]); refLocalIndex.Add(allLocalIndex[i]);
                         refIsDeparting.Add(allIsDeparting[i]); refDecisions.Add(SymbolTileCoverageFilter.Keep);
                     }
-                    planRef.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, storeRef.OrderedBlocks, winnerSetVersion: 1);
+                    planRef.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, storeRef.OrderedBlocks, fadeAliases: null, winnerSetVersion: 1);
                     hRef.System.Update(in hRef.Frame, planRef, hRef.Atlas);
 
                     Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
@@ -2515,7 +2549,7 @@ namespace MapRenderer.Tests.Text.Placement
             // was already taken, so it still reads the correct record.
             if (perturbWinner >= 0) feedLocalIndex[perturbWinner] = perturbLocalIndex;
 
-            plan.Build(feedBlockId, feedLocalIndex, feedIsDeparting, feedDecisions, store.OrderedBlocks, winnerSetVersion: 0);
+            plan.Build(feedBlockId, feedLocalIndex, feedIsDeparting, feedDecisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: 0);
             lps.GatherIntoMirror(plan);
             gathered = new SymbolBatch();
             lps.CopyMirrorInto(gathered);
@@ -2763,7 +2797,7 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 var orderedBlocks = new List<SymbolTileBlock> { blockA, blockB };
 
-                plan.Build(blockId, localIndex, isDeparting, decisions, orderedBlocks, winnerSetVersion: 0);
+                plan.Build(blockId, localIndex, isDeparting, decisions, orderedBlocks, fadeAliases: null, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan);
                 var gathered = new SymbolBatch();
                 harness.Lps.CopyMirrorInto(gathered);
@@ -2833,7 +2867,7 @@ namespace MapRenderer.Tests.Text.Placement
                 var decisions = new List<byte> { SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep };
                 var orderedBlocks = new List<SymbolTileBlock> { block };
 
-                plan.Build(blockId, localIndex, isDeparting, decisions, orderedBlocks, winnerSetVersion: 0);
+                plan.Build(blockId, localIndex, isDeparting, decisions, orderedBlocks, fadeAliases: null, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan);
                 var gathered = new SymbolBatch();
                 harness.Lps.CopyMirrorInto(gathered);
@@ -2987,7 +3021,7 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < blockId.Count; i++)
                 decisions.Add(store.OrderedBlocks[blockId[i]].TileKey == dropTileKey ? SymbolTileCoverageFilter.Drop : SymbolTileCoverageFilter.Keep);
 
-            plan.Build(blockId, localIndex, isDeparting, decisions, store.OrderedBlocks, version);
+            plan.Build(blockId, localIndex, isDeparting, decisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
         }
 
         // The REFERENCE path: fills `plan` with ONLY the winners outside excludedTileKey, as if that tile was never
@@ -3009,7 +3043,7 @@ namespace MapRenderer.Tests.Text.Placement
                 refBlockId.Add(blockId[i]); refLocalIndex.Add(localIndex[i]);
                 refIsDeparting.Add(isDeparting[i]); refDecisions.Add(SymbolTileCoverageFilter.Keep);
             }
-            plan.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, store.OrderedBlocks, version);
+            plan.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, store.OrderedBlocks, fadeAliases: null, winnerSetVersion: version);
         }
 
         private static float MaxAlpha(SymbolPlacementSystem system, long tileKey)

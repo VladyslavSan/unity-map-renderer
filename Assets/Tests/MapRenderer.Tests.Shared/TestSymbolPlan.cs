@@ -43,9 +43,10 @@ namespace MapRenderer.Tests
         /// <see cref="CollectedCount"/> counts it but nothing stages it.</param>
         /// <param name="departingTiles">Tile keys whose records are DEPARTING (left cover, fading out). It
         /// feeds the <see cref="SymbolGatherPlan.Departing"/> field that production's IsDeparting fills.</param>
+        /// <param name="fadeAliases">Cross-zoom fade handovers the reconciler would have found; <c>null</c> is none.</param>
         public SymbolGatherPlan Build(SymbolTileBuffer buffer, int slotCount = 1,
             HashSet<long> coverageFadingTiles = null, HashSet<long> droppedTiles = null,
-            HashSet<long> departingTiles = null)
+            HashSet<long> departingTiles = null, IReadOnlyList<FadeAlias> fadeAliases = null)
         {
             _store.Clear();
 
@@ -105,7 +106,7 @@ namespace MapRenderer.Tests
 
             // The plan object is reused across calls, so the version must move or GatherIntoMirror's memo
             // would serve the previous frame's mirror.
-            _plan.Build(blockId, localIndex, isDeparting, decisions, _store.OrderedBlocks, ++_version);
+            _plan.Build(blockId, localIndex, isDeparting, decisions, _store.OrderedBlocks, fadeAliases, ++_version);
             return _plan;
         }
 

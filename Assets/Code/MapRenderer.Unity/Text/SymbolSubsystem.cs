@@ -935,7 +935,7 @@ namespace MapRenderer.Unity.Text
             }
             using (PmBatchSoA.Auto())
                 _gatherPlan.Build(_frontResult.BlockId, _frontResult.LocalIndex,
-                    _frontResult.IsDeparting, _planDecision, _frontResult.OrderedBlocks, _frontSetVersion);
+                    _frontResult.IsDeparting, _planDecision, _frontResult.OrderedBlocks, _frontResult.FadeAliases, _frontSetVersion);
 
             RefreshTelemetry();   // the store's levels are final for this frame
             return _gatherPlan;

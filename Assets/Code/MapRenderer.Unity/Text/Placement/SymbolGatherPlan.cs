@@ -8,6 +8,14 @@ using MapRenderer.Core.Text.Placement;
 
 namespace MapRenderer.Unity.Text.Placement
 {
+    /// <summary>A cross-zoom fade handover found by the reconciler: the departing copy's fade identity
+    /// <see cref="From"/> passes its opacity state to the matched active winner's identity <see cref="To"/>.</summary>
+    internal struct FadeAlias
+    {
+        public long From;
+        public long To;
+    }
+
     /// <summary>
     /// The per-frame winner plan that <see cref="Text.SymbolSubsystem.CurrentBatch"/> produces for the native gather.
     /// One entry per collected winner, in render order: a <see cref="BlockId"/>/<see cref="LocalIndex"/> into a
@@ -25,6 +33,9 @@ namespace MapRenderer.Unity.Text.Placement
         // counted; GatherSymbolPoints skips it as its first, unconditional check.
         internal NativeList<byte> Dropped;
         internal int WinnerCount;
+
+        // The reconciler's cross-zoom fade handovers for this winner set (departing FadeId → active FadeId).
+        internal NativeList<FadeAlias> FadeAliases;
 
         // How many winners this Build stamped Dropped, so SymbolPlacementSystem derives _mirrorNonDroppedCount
         // by subtraction instead of a per-frame walk.
@@ -47,18 +58,24 @@ namespace MapRenderer.Unity.Text.Placement
             Departing      = new NativeList<byte>(Allocator.Persistent);
             CoverageFading = new NativeList<byte>(Allocator.Persistent);
             Dropped        = new NativeList<byte>(Allocator.Persistent);
+            FadeAliases    = new NativeList<FadeAlias>(Allocator.Persistent);
         }
 
         /// <summary>Refills this plan in place from the collected winner arrays, without compaction. The arrays
         /// hold every winner (Keep, Fade, Drop, departing), and <see cref="WinnerCount"/> counts them all.
         /// <paramref name="decisions"/> holds <c>SymbolTileCoverageFilter.ClassifyActive</c>'s per-symbol decision;
         /// <paramref name="orderedBlocks"/> is the store's block list that <paramref name="blockId"/> indexes.</summary>
+        /// <param name="fadeAliases">The reconciler's fade handovers for this winner set; <c>null</c> reads as none.</param>
         /// <param name="winnerSetVersion">The caller's front-set version. Non-local invariant: at a fixed version the
         /// winner identity and blocks are unchanged; only the three per-symbol masks may change per frame.</param>
         internal void Build(List<int> blockId, List<int> localIndex,
             List<byte> isDeparting, List<byte> decisions, IReadOnlyList<SymbolTileBlock> orderedBlocks,
-            int winnerSetVersion)
+            IReadOnlyList<FadeAlias> fadeAliases, int winnerSetVersion)
         {
+            FadeAliases.Clear();
+            if (fadeAliases != null)
+                for (int a = 0; a < fadeAliases.Count; a++) FadeAliases.Add(fadeAliases[a]);
+
             int n = blockId.Count;
             WinnerCount = n;
             WinnerSetVersion = winnerSetVersion;
@@ -96,6 +113,7 @@ namespace MapRenderer.Unity.Text.Placement
             Departing.Dispose();
             CoverageFading.Dispose();
             Dropped.Dispose();
+            FadeAliases.Dispose();
         }
     }
 }

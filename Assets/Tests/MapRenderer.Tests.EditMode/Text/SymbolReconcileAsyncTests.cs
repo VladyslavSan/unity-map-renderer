@@ -2207,6 +2207,20 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(oLoc[i], front.LocalIndex[i], $"localIndex[{i}] mismatch");
                 Assert.AreEqual(oDep[i], front.Departing[i], $"departing[{i}] mismatch");
             }
+
+            // The fade aliases ride the same result; a second reconcile is their oracle. This fixture has no
+            // cross-zoom pair, so both lists are empty here and a dropped list would not show.
+            var oracleSnapshot = new SymbolSnapshot();
+            var oracleResult = new SymbolReconcileResult();
+            _subsystem.Store().CaptureSnapshot(oracleSnapshot);
+            try { new SymbolReconciler().Run(oracleSnapshot, oracleResult); }
+            finally { _subsystem.Store().ReleasePins(oracleSnapshot); }
+            Assert.AreEqual(oracleResult.FadeAliases.Count, front.FadeAliases.Length, "fade alias count (async front vs oracle)");
+            for (int i = 0; i < front.FadeAliases.Length; i++)
+            {
+                Assert.AreEqual(oracleResult.FadeAliases[i].From, front.FadeAliases[i].From, $"fadeAlias[{i}].From mismatch");
+                Assert.AreEqual(oracleResult.FadeAliases[i].To, front.FadeAliases[i].To, $"fadeAlias[{i}].To mismatch");
+            }
         }
 
         // ═══ A REAL front swap through the production subsystem must invalidate the gather memo; the unit test
@@ -2426,7 +2440,7 @@ namespace MapRenderer.Tests.Text
             {
                 var decisions = new List<byte>(result.BlockId.Count);
                 for (int i = 0; i < result.BlockId.Count; i++) decisions.Add(SymbolTileCoverageFilter.Keep);
-                plan.Build(result.BlockId, result.LocalIndex, result.IsDeparting, decisions, result.OrderedBlocks, winnerSetVersion: 0);
+                plan.Build(result.BlockId, result.LocalIndex, result.IsDeparting, decisions, result.OrderedBlocks, result.FadeAliases, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan); // derefs the (still-alive, pinned) block's NativeArrays — a freed block here is a UAF
                 var gathered = new SymbolBatch();
                 harness.Lps.CopyMirrorInto(gathered);

@@ -91,10 +91,13 @@ namespace MapRenderer.Unity.Text
         public readonly List<byte> IsDeparting = new List<byte>();
         /// <summary>One block per scanned tile, in blockId order (active tiles first, then departing).</summary>
         public readonly List<SymbolTileBlock> OrderedBlocks = new List<SymbolTileBlock>();
+        /// <summary>Fade handovers from a departing copy to the nearby active winner that replaces it across a
+        /// zoom step. The placement system applies them once per winner set.</summary>
+        public readonly List<FadeAlias> FadeAliases = new List<FadeAlias>();
         /// <summary>Count of ACTIVE winners written first; every symbol at index ≥ this is departing.</summary>
         public int ActiveCount;
 
-        /// <summary>Clears ALL FOUR lists AND resets <see cref="ActiveCount"/> — the reconciler calls this
+        /// <summary>Clears ALL lists AND resets <see cref="ActiveCount"/> — the reconciler calls this
         /// FIRST every run so a reused result never leaks a prior run's symbols (the SHRINK correctness core).</summary>
         public void Clear()
         {
@@ -102,6 +105,7 @@ namespace MapRenderer.Unity.Text
             LocalIndex.Clear();
             IsDeparting.Clear();
             OrderedBlocks.Clear();
+            FadeAliases.Clear();
             ActiveCount = 0;
         }
     }
