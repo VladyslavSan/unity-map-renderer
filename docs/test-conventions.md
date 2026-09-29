@@ -95,7 +95,7 @@ Three lanes. Take the **first** one whose entry condition holds.
 - **Fast lane — `Tools/core-tests`.** Entry condition: every type the file names comes from
   `MapRenderer.Core`, `MapRenderer.Unity.Style` (the style model — it lives in `MapRenderer.Unity` but
   stays engine-free, so the fast loop compiles it from there), the BCL, `NUnit`, or `Unity.Mathematics`.
-  - Runs in about 0.1 s through `dotnet test`, with no Editor and no project lock. 104 files are in it.
+  - Runs in about 0.1 s through `dotnet test`, with no Editor and no project lock. 105 files are in it.
   - It compiles the real `MapRenderer.Core` sources plus the EditMode test file **verbatim** — one source,
     two runners. `Unity.Mathematics` is a shim under `Tools/core-tests/Shim/`.
   - `MapRenderer.Unity` outside its `Style` namespace (including `Jobs`), `Unity.Collections` and
@@ -103,8 +103,7 @@ Three lanes. Take the **first** one whose entry condition holds.
     `Filters/FeatureSelectorNativeFilterTests.cs` names no `UnityEngine` type and is still engine-bound.
   - **The `<Compile Include>` entry in `Tools/core-tests/core-tests.csproj` moves in the SAME commit as
     the file.** Nothing tells you otherwise: the file compiles and passes in EditMode either way.
-    `Expressions/EvalArgBuffersReclamationTests.cs` is engine-free, its `Core` dependency is already in the
-    fast lane, and it has no csproj entry — so it runs only in the slow lane, and nothing reports that.
+    A file that is engine-free but has no csproj entry runs only in the slow lane, and nothing reports that.
 
 - **PlayMode.** Entry condition: the behaviour needs **real frames** — a player loop or `yield return null`
   across real frames. Waiting for a `ThreadPool` completion is not an entry condition: an EditMode loop
@@ -130,11 +129,12 @@ Three lanes. Take the **first** one whose entry condition holds.
     `Is.Not.AllocatingGCMemory()` is Recorder-based and is the only live meter in EditMode; it is not
     available in the fast lane.
   - **A fast-lane file runs in BOTH lanes, so an assertion can be live in one and vacuous in the other.**
-    `Style/StylePropertyTests.cs` is the live case: its three zero-allocation teeth measure in
-    `dotnet test` and assert nothing in the EditMode run. If a tooth needs a meter, keep the file in one
-    lane.
-  - **Nothing in the repo detects this: both lanes report green.** A vacuous assertion still passes, so
-    the hazard has no red signal of its own — see UMR-182, which tracks fixing the instance above.
+    A zero-allocation tooth that reads `GC.GetAllocatedBytesForCurrentThread()` measures in `dotnet test`
+    and asserts nothing in the EditMode run. If a tooth needs that meter, keep it in a file under
+    `Tools/core-tests/`, such as `StyleZoomInterpolateAllocTests.cs`.
+  - **This one API is fenced.** `Structure/StructureTests.cs` fails when a file the fast lane compiles from
+    `Assets/` names `GetAllocatedBytesForCurrentThread`. Any other API whose behaviour differs between the
+    runtimes is not: both lanes report green, because a vacuous assertion still passes.
 
 ## 4. Size — pack by topic and lane, not by subject
 

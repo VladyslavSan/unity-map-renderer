@@ -707,7 +707,7 @@ namespace MapRenderer.Tests.Structure
         /// <summary>Strips block comments and then everything from <c>//</c> (which covers <c>///</c>) to end
         /// of line, so a symbol merely NAMED in prose is not counted as a reference. Deliberately narrow — a
         /// grep guard, not a C# parser (a <c>"http://…"</c> literal would eat the rest of its line).</summary>
-        private static string StripComments(string text)
+        internal static string StripComments(string text)
         {
             string noBlocks = Regex.Replace(text, @"/\*.*?\*/", "", RegexOptions.Singleline);
             string[] lines = noBlocks.Split('\n');
@@ -2791,6 +2791,44 @@ namespace MapRenderer.Tests.Structure
                 $"'{token}' must appear exactly once across Assets/Code (excluding ThirdParty) — " +
                 "HttpTransport is the one production site that issues and maps an HTTP request.");
             Assert.IsNull(offender, $"the '{token}' occurrence must be in HttpTransport.cs, not '{offender}'.");
+        }
+    }
+
+    /// <summary>
+    /// A file that <c>Tools/core-tests</c> compiles verbatim from <c>Assets/</c> runs in both lanes. The thread
+    /// allocation counter measures under <c>dotnet test</c> and returns a constant 0 in the Unity runner, so a
+    /// tooth on it asserts <c>0 == 0</c> there. Both lanes report green, so only this fence can see it.
+    /// </summary>
+    [TestFixture]
+    public class CoreTestsLaneFenceTests
+    {
+        private const string DeadMeter = "GetAllocatedBytesForCurrentThread";
+
+        [Test]
+        public void DualLaneFiles_NeverReadTheThreadAllocationCounter()
+        {
+            string coreTestsDir = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Tools", "core-tests");
+            string csproj = Path.Combine(coreTestsDir, "core-tests.csproj");
+            FileAssert.Exists(csproj);
+
+            string xml = Regex.Replace(File.ReadAllText(csproj), @"<!--.*?-->", "", RegexOptions.Singleline);
+            var offenders = new List<string>();
+            int filesRead = 0;
+            foreach (Match include in Regex.Matches(xml, @"<Compile Include=""(\.\./\.\./Assets/[^""*]+\.cs)"""))
+            {
+                string path = Path.GetFullPath(Path.Combine(coreTestsDir, include.Groups[1].Value));
+                FileAssert.Exists(path);
+                filesRead++;
+                if (SymbolExtractorStructureTests.StripComments(File.ReadAllText(path)).Contains(DeadMeter))
+                    offenders.Add(include.Groups[1].Value);
+            }
+
+            Assert.GreaterOrEqual(filesRead, 30,
+                $"precondition (positive control): the include scan must find the fast lane's Assets files; found {filesRead}.");
+            Assert.IsEmpty(offenders,
+                $"these files are compiled into BOTH lanes and read {DeadMeter}, which is a constant 0 in EditMode, so " +
+                "the assertion is vacuous there. Move the tooth to a file under Tools/core-tests, or use " +
+                "Is.Not.AllocatingGCMemory() in an EditMode-only file: " + string.Join(", ", offenders));
         }
     }
 }

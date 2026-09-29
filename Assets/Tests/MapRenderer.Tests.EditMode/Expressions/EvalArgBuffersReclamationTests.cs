@@ -1,5 +1,5 @@
-// EditMode only: reaches the internal EvalArgBuffers via Core's InternalsVisibleTo("MapRenderer.Tests.EditMode").
-// NOT registered in core-tests.csproj (that runner's assembly is not granted Core internals access).
+// Engine-free: runs in both lanes. EditMode reaches the internal EvalArgBuffers through Core's InternalsVisibleTo;
+// core-tests compiles Core and the tests into one assembly, so the type is visible there too.
 
 using System.Collections.Generic;
 using NUnit.Framework;

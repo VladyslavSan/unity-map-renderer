@@ -239,6 +239,7 @@
          class kept verbatim. MathOpTests stays its own file: its `using System;` would rebind the other
          fixtures' bare `ValueType` against System.ValueType (CS0104). -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ExpressionsTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/EvalArgBuffersReclamationTests.cs" />
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
 
     <!-- S10: filters (legacy + expression) — Core sources -->
