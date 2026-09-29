@@ -1,7 +1,7 @@
 # Job scheduling — the Burst work as a job graph (design / SSOT)
 
-**Status:** the model below ships. A multi-stage tile build is a `JobHandle` dependency chain scheduled from
-the main thread and polled at the tile pump. This doc is the SSOT for how Burst work is chained, for the
+A multi-stage tile build is a `JobHandle` dependency chain scheduled from the main thread and polled at the
+tile pump. This doc is the SSOT for how Burst work is chained, for the
 `.Run()`/`.Schedule()` discriminator, for the disposal and cancellation invariant an in-flight `JobHandle`
 imposes, and for which parts of `docs/tile-pipeline-design.md`'s build seam this design owns.
 
@@ -19,7 +19,7 @@ off-main), `docs/async-architecture.md` §"Disposal & cancellation contract" (th
 A library of Burst jobs is not a pipeline. A job dispatched through `.Run()` executes on the calling thread,
 so a chain of ten of them is a synchronous function call wearing job structs. What makes such a chain
 synchronous is the read-back between the stages, not any stage's nature. One thing turns the library into a
-pipeline: **holding an uncompleted `JobHandle` across a Update.**
+pipeline: **holding an uncompleted `JobHandle` across an Update.**
 
 The web target makes that structural rather than cosmetic. Its only execution resources are the main thread
 and Burst workers; every managed offload mechanism is inert there, while a scheduled Burst chain does reach
@@ -40,7 +40,7 @@ with the workers idle. Two independent consequences follow:
 | how completion reaches the consumer | polled once per Update on `JobHandle.IsCompleted`, at the pump that already polls `WorkHandle.IsCompleted`. No callback, no UniTask hop. `Complete()` runs before any output is read. |
 | the tile build's shape | three polled steps per tile: **prologue** (managed, `IWorkScheduler`, shrinking) → **measure graph** (Burst; all geometry) → **write graph** (main allocates one exact-size `MeshData` per layer, Burst streams into it). |
 | `.Run()` vs `.Schedule()` | the ordered discriminator in § "The dispatch discriminator — `.Run()` or `.Schedule()`" — call-site placement first, then latency tolerance, then span. Never a per-site judgement call. |
-| `IWorkScheduler` | survives, shrunk to the bodies that are still managed, and is deleted per site as each body becomes a job. It never wraps a job. |
+| `IWorkScheduler` | kept, shrunk to the bodies that are still managed, and deleted per site as each body becomes a job. It never wraps a job. |
 | platform | one graph shape, zero `#if`. The single platform decision point is `WorkSchedulerFactory`, and it governs only the residual managed bodies. |
 | cancellation | never disposes and never interrupts. A released tile's `(buffers, MeshDataArrays, handle, decode reference)` unit moves to a pen that completes it, then disposes it. A lifetime token gates the *next main-thread step*, never a running job. |
 | safety | every graph edge is a container hand-off the Editor safety system checks at `Schedule` time. The parallel-slice exceptions are confined to two job types and fenced by a structure test (§ "Safety — making the Editor's check sufficient"). |
@@ -80,9 +80,9 @@ measure-graph output. Allocation and sizing therefore sit on the main thread *be
 **What it costs.** Up to two extra Updates of latency per tile: the prologue completes on Update N, measure is
 scheduled on N and observed on N+1, write is scheduled on N+1 and consumed on N+2. This is a standing
 accepted cost. It is invisible against network fetch and is the same order as the one-frame deferral the
-symbol collision already accepts. The uniform three-step path holds for every tile; a small-tile fast path
-(prologue on main at kick) is a later knob, worth revisiting only if a trace shows tiles arriving visibly
-late relative to fetch.
+symbol collision already accepts. The uniform three-step path holds for every tile. A small-tile fast path
+(prologue on main at kick) is not built; the condition for adding one is a trace that shows tiles arriving
+visibly late relative to fetch.
 
 **What shrinks.** The prologue is the whole remaining reason `IWorkScheduler` exists on the tile path. Each
 managed step that becomes a job moves out of the prologue and into the measure graph. When the prologue is
@@ -231,7 +231,7 @@ in-flight step in order; teardown completes everything in the pen. `Complete()` 
 not-yet-started job inline, so neither drain has a PlayerLoop dependency to dead-end on, and neither needs
 the timeout a managed body's drain needs.
 
-The bridge into the UniTask I/O chain is unchanged: fetch→decode still ends in a
+The bridge into the UniTask I/O chain is one type: fetch→decode ends in a
 `UniTask<SharedDisposable<IDecodedTile>>` the pump observes, and no `Task`↔`UniTask` interop exists.
 
 ## 7. The dispatch discriminator — `.Run()` or `.Schedule()`
@@ -261,9 +261,9 @@ completed a frame later. The decoder's `MvtDecodeJob.Run()` and selection's `Mvt
 sit at rule 1 and stay there until their bodies are jobs.
 
 **Dispatch granularity is part of rule 1.** A `.Run()` inside a managed loop pays a job-struct copy and a
-dispatch per iteration. Selection runs one `RunByRef` per layer-selection rather than one per feature; on the
-largest committed fixture (11,941 feature-filter evaluations) that is the difference between ~5.2 ms and
-~0.47 ms per tile, and it comes from the dispatch count, not from any per-call saving.
+dispatch per iteration. Selection runs one `RunByRef` per layer-selection rather than one per feature. A layer with thousands of
+feature-filter evaluations then pays one dispatch instead of thousands, and the saving comes from the
+dispatch count, not from any per-call saving.
 
 ### The count rule — a graph-fed job carries no count field
 
@@ -275,8 +275,8 @@ The rule exists because the alternative accretes. A `NativeArray` job field left
 Unity's schedule-time container validation, so a job that wants an *optional* count cannot express it as an
 optional container — it has to add a boolean selecting between "explicit count" and "array length". Each such
 boolean is locally sound and globally a tax: the next job added to a graph gets the next one.
-`RingAssemblyJob.RingCountFromOffsetsLength` is the last survivor, kept only by unit-test construction sites
-with no production duplication behind it.
+`RingAssemblyJob.RingCountFromOffsetsLength` is the one remaining example, used only by unit-test construction
+sites with no production duplication behind it.
 
 ### Holding a graph in flight inside a test
 
@@ -311,7 +311,7 @@ The four exits:
 | **consumed** | `IsCompleted` at the pump → `Complete()` → upload each layer's mesh → `TileBuildGraph.Dispose()`, which frees the buffers and releases the decode reference. Never a read before `Complete()`. |
 | **released in flight** | the graph moves to `PendingDisposalQueue`'s graph pen; the pen polls `IsCompleted` per Update, then `Complete()`s and disposes. |
 | **cancelled mid-work** | **there is no in-job cancellation.** A scheduled job is finite and not interruptible, so there is nothing to interrupt. The token gates the *next main-thread step*: the pump does not schedule measure after a cancelled prologue, does not allocate or schedule write after a cancelled measure, and does not upload after a cancelled write. The unit then goes to the pen. |
-| **teardown** | cancel (which gates future steps), then `Complete()` every pen entry and dispose. Bounded by in-flight CPU, so no timeout. Order unchanged: destroy meshes → dispose backend. |
+| **teardown** | cancel (which gates future steps), then `Complete()` every pen entry and dispose. Bounded by in-flight CPU, so no timeout. Order: destroy meshes → dispose backend. |
 
 Two consequences worth naming:
 
@@ -376,8 +376,8 @@ hand-listed file set, and asserts it found files to scan so a moved directory ca
 - The **consumer-set fence** counts which files declare a sizing-owned buffer struct as a field, matching the
   type plus any identifier so a renamed field cannot walk past it, and asserts that set against a pinned
   allowlist of seven. It reds on an eighth consumer and names it. **No fence can check the bound itself** —
-  that is dataflow, not lexical text. What the fence catches is a *stale consumer set*, which is how the
-  third recurrence of the borrowed-bound defect stayed hidden.
+  that is dataflow, not lexical text. What the fence catches is a *stale consumer set*, which is how a
+  borrowed-bound defect stays hidden across recurrences.
 
 Test assemblies are out of this fence's scope, which is what lets the in-flight test instrument use a
 disabled restriction legitimately.
@@ -389,12 +389,13 @@ element-wise one cannot. A race can still pass by luck, which is why rule 2 conf
 two places, and why the safety system rather than this tooth is the primary guard.
 
 **Rule 4 — the worker-index sample, the instrument that tells "off-main" from "inline".** A graph's last node
-records `[NativeSetThreadIndex]` into a `NativeReference<int>`, and telemetry counts graphs that completed on
+is to record `[NativeSetThreadIndex]` into a `NativeReference<int>`, and telemetry is to count graphs that completed on
 thread 0 versus on a worker. A web build whose builds all report 0 is running inline — Burst off, or workers
 absent — and says so in the diagnostics panel instead of merely rendering slowly. **A probe that cannot tell
 "ran inline" from "ran on a worker" returns no verdict**, and this is the only reading that may be used to
-claim off-main execution: a `BuildStep` trail proves scheduling order, never placement. Nothing in
-`Assets/Code` declares `[NativeSetThreadIndex]`, so no instrument observes off-main execution on the web.
+claim off-main execution: a `BuildStep` trail proves scheduling order, never placement. **Limitation:** the sample is specified and not
+built. Nothing in `Assets/Code` declares `[NativeSetThreadIndex]`, so no instrument observes off-main
+execution on the web yet.
 
 ## 10. Where the wall-clock win is — off-main versus parallel
 
@@ -403,8 +404,8 @@ differently:
 
 | win | mechanism | who gets it |
 |---|---|---|
-| **the main thread stops paying for geometry** | every graph node leaves the calling thread; on web that thread is the render thread. The prologue does not leave it on web until it is nativized. | web (large); desktop already had it through the ThreadPool |
-| **across tiles** | N tiles' graphs in flight fan out over workers with no code — the job system does it | web (new); desktop (pool threads → job workers) |
+| **the main thread stops paying for geometry** | every graph node leaves the calling thread; on web that thread is the render thread. The prologue does not leave it on web until it is nativized. | web (large); desktop too, where the graph's jobs run on job workers |
+| **across tiles** | N tiles' graphs in flight fan out over workers with no code — the job system does it | web and desktop alike (job workers) |
 | **within a stage** | `IJobParallelFor`/`IJobParallelForDefer` where the stage is element-wise | both |
 
 What is parallel and what is serial by nature:
@@ -417,7 +418,7 @@ What is parallel and what is serial by nature:
 | tile→geo, project | vertex | **yes** — `IJobParallelFor` over a deferred array |
 | globe subdivide | layer | serial — budgeted `NativeList` appends |
 | line subdivide + ribbon | ring | sizing (serial) → `IJobParallelForDefer` ribbon → serial aggregate |
-| stream write | vertex | measured and **not** parallelised — the per-job span did not clear the fan-out gate |
+| stream write | vertex | **not** parallelised — its per-job span does not clear the fan-out gate (§ "The dispatch discriminator", rule 3) |
 
 **Batch size follows per-item cost variance, not item count.** Vertex-wise stages batch at 1024, because
 `TileToGeoJob`/`ProjectPointsJob` cost far more per 1024 vertices than a batch hand-off costs. Earcut and
@@ -437,7 +438,7 @@ at startup; rule 4's sample is what would make the cliff visible rather than inf
 
 ## 11. The seam — `IWorkScheduler`, `WorkHandle<T>`, `WorkSchedulerFactory`
 
-**The seam survives, shrunk, and is deleted per site rather than replaced.** A managed body cannot be a job,
+**The seam is kept, shrunk, and deleted per site rather than replaced.** A managed body cannot be a job,
 and on the web a managed body runs inline on main whatever wraps it — the seam is the honest expression of
 that. What the graph changes is that the seam stops *carrying* the Burst work: a prologue produces native
 inputs and returns, and the pump schedules the Burst work over those inputs. **The seam never wraps a job.**
@@ -451,7 +452,7 @@ Four production sites remain:
 | `SymbolSubsystem`'s parked-build drain | symbol extraction over managed builders and the sprite atlas | stays; symbol internals are out of scope |
 | `SymbolSubsystem.ScheduleReconcileIfDirty` | a `Dictionary` dedup | stays |
 
-`KickSourcelessBackground` has already left the seam: a background tile's prologue is small enough to run on
+`KickSourcelessBackground` does not use the seam: a background tile's prologue is small enough to run on
 the main thread at kick, and its graph is scheduled directly.
 
 `WorkHandle<T>` is the prologue's handle. `WorkSchedulerFactory` is the one `#if`. When the prologue is empty,
@@ -475,8 +476,8 @@ bytes, and splitting a layer would multiply that cost while spending the whole c
 
 | tile-pipeline part | owner | how |
 |---|---|---|
-| the two-phase `LoadedTile` state (§ "The build seam this design hands over") | **this design** | `BuildStep`, with a third value for the prologue; a step transition of an admitted tile is uncharged (§ "The tile build — three polled steps" above) |
-| `ILayerGeometry` replacing `IRenderLayer.WriteInto` — a managed measure/write mesher interface (§ "The build seam this design hands over") | **superseded** | the graph builder plus the stream-write job *are* the measure/write split. There is no managed mesher interface in the middle, and `WriteInto` is gone. |
+| the two-phase `LoadedTile` state (§ "The build seam this design hands over") | **this design** | `BuildStep`, whose `Prologue` value covers the managed step; a step transition of an admitted tile is uncharged (§ "The tile build — three polled steps" above) |
+| `ILayerGeometry` replacing `IRenderLayer.WriteInto` — a managed measure/write mesher interface (§ "The build seam this design hands over") | **superseded** | the graph builder plus the stream-write job *are* the measure/write split. There is no managed mesher interface in the middle, and no `WriteInto`. |
 | exact-size allocation (§ "The build seam this design hands over"); the allocation counter (`MeshDataArraysAllocatedLastKick`, not described there); consume and backend unchanged | **this design** | one `MeshDataArray` per non-empty layer, sized to that layer's measured count |
 | `PreparedTileCache` value `Mesh` → `Mesh[]` (§ "Rejected alternatives") | **moot** | it existed only because one layer could become K > 1 meshes. One mesh per layer keeps the current value shape correct, and the cache is untouched by this design. |
 | a consume-overshoot tooth (`docs/tile-pipeline-design.md` does not describe it) | **moot** | it asserted a per-Update consume bound *and* "the layer produces ≥ 3 meshes"; the second half is false once a layer is one mesh |
@@ -523,11 +524,10 @@ chunking was meant to close is **not** addressed and is not claimed to be.
 - **A bespoke graph/node description type.** It would duplicate `JobHandle` and hide the safety system's edge
   check behind a layer that cannot see it.
 - **Fused per-tile jobs** — one job per stage over all fill layers, each layer addressed through an offset
-  table — instead of per-layer graph builders. Measured 2026-09-02 (Editor, safety checks on, Burst enabled,
-  warmed): creating a `JobHandle` edge costs ~0.3 µs and the cost is flat in the number of edges, with
-  `ScheduleBatchedJobs` under 10 µs at every count. At the production admit rate that is roughly three orders
-  of magnitude of headroom against a per-layer graph's ~10–15 nodes per fill layer. Per-layer builders stand;
-  the fused variant buys nothing and costs the per-layer parity oracle.
+  table — instead of per-layer graph builders. Creating a `JobHandle` edge costs well under a microsecond,
+  the cost is flat in the number of edges, and `ScheduleBatchedJobs` stays cheap at every count. At the
+  production admit rate a per-layer graph's ~10–15 nodes per fill layer leave orders of magnitude of
+  headroom. Per-layer builders stand; the fused variant buys nothing and costs the per-layer parity oracle.
 - **A completion callback or UniTask bridge for `JobHandle`.** The job system has no callback, and an awaiter
   over `IsCompleted` is a poll with a hop added.
 - **One graph with a main-thread memcpy at consume.** Reverts the worker-writes-`MeshData` win for a copy
@@ -559,7 +559,7 @@ chunking was meant to close is **not** addressed and is not claimed to be.
 `MapRenderer.Unity/Jobs/Fill/`: `FillMeshGraph.Schedule` (the fill chain, both arms, the batch constants),
 `SizingJob`, `FillGatherJob`, `EarcutBatchJob`, `AggregateJob`, `FillBandJob`, `GlobeFillSubdivider` /
 `GlobeFillScatterJob` (the curved arm), `FillGraphOutput` (the one column set + terminal handle),
-`RingAssemblyJob` (the surviving count selector), `TriangulationBuffers`. `FillMeshPipeline` survives only as
+`RingAssemblyJob` (the count selector), `TriangulationBuffers`. `FillMeshPipeline` is only
 the home of `LayerInput`, `HoleRingComparer` and the decode-sizing pair.
 `MapRenderer.Unity/Jobs/Lines/`: `LineMeshGraph.Schedule` (the line chain, no arm split), `RingGatherJob` (the ring
 gate and line's own length filter), `SubdivideJob`, `RibbonSizingJob`, `RibbonBatchJob`,

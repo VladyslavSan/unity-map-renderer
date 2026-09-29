@@ -602,7 +602,7 @@ has-a-background check), so a second source-less kind would need its own such br
   `SymbolRenderLayer`'s includes the halo bind, and the label subsystem consumes the layer set's materials
   instead of cloning its own.
 - **Shadows: `fill-extrusion` casts; everything else only receives.** Scope is per-render-KIND and global.
-  Per-style-layer control is not part of this model (an open item, UMR-98), and neither is a `_CastShadows`
+  Per-style-layer control is not part of this model, and neither is a `_CastShadows`
   material toggle (a per-material switch whose only job is to turn casting off IS per-layer control).
 
   | Geometry | Casts | Receives | Why |

@@ -84,7 +84,7 @@ both `ITileFeatureSource` implementations route through), and materialization ru
   features Waist 1 decoded. Decoding a whole tile adds no geodetic conversion work.
 - **The cost of decoding what no style renders is bounded and small.** On the committed `openmaptiles`
   fixtures against `liberty.json`, source-layers no style layer names account for **0.0 %–1.1 %** of a
-  tile's geometry (only `mountain_peak` appears at all). Measured 2026-08-09.
+  tile's geometry (only `mountain_peak` appears at all), measured over the committed fixtures.
 - **What it avoids is an order of magnitude larger.** Materializing per (style layer, consumer) instead of
   per (source-layer, decode) re-decodes the same source-layer once per style layer that names it —
   **2.7×–15.5×** duplication on the same corpus, with `transportation` named by 61 `liberty.json` layers.
@@ -92,7 +92,7 @@ both `ITileFeatureSource` implementations route through), and materialization ru
   style-independent.
 
 The accepted price is **peak resident memory**. A decoded tile holds a median of **~552 KB** and a peak of
-**967 KB** of Waist-1 buffers across its **8–12** source-layers (measured 2026-08-09, same corpus). Nothing
+**967 KB** of Waist-1 buffers across its **8–12** source-layers (measured on the same corpus). Nothing
 caps concurrent kicks: `MapViewConfig.MaxMeshBuildsPerTick` (default 2) rate-limits how many kicks *start*
 per update, not how many are in flight, and a parked symbol build's reference can outlive the kick that
 created it. Residency is therefore self-limiting in practice and unbounded in principle — quantified, with

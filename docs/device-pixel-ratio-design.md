@@ -1,7 +1,7 @@
 # Device-pixel ratio — one logical-pixel convention for the whole map (design / SSOT)
 
-**Status:** the model below ships, including where the ratio comes from (§ 7). This doc is the *why*.
-The *contract* — the standing requirements a conforming implementation must hold — is the normative
+This doc is the *why*, including where the ratio comes from (§ 7). The *contract* — the standing
+requirements a conforming implementation must hold — is the normative
 [`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md), and is not restated here.
 
 **Read with:** `docs/line-rendering-design.md` § "The width model" (the frame-constant ruler the line width family rides),
@@ -286,9 +286,9 @@ row per property. A new px-valued property is added to the table, and the table 
   to check; sharing the production expression would make it verify itself. The single-home rule is therefore
   scoped to **production** sources, and the hand-written copies in test code stay.
 
-- **Converting `Unity/Style/Line/LineOffset`.** It is a CPU mirror of the shader's offset formula with zero
-  production callers. Converting it would give a test-only path a production basis and imply a caller that
-  does not exist; it belongs to the test-only-production-code cleanup, not to this seam.
+- **Converting `Unity/Style/Line/LineOffset`.** It is a CPU mirror of the shader's offset formula with no
+  production caller. Converting it would give a test-only path a production basis and imply a caller that
+  does not exist.
 
 - **Threading an initial ratio through `RenderLayerSet.Build`.** It would churn `RenderLayerFactory`'s
   Create/TryCreate overloads and every call site. `MapView.SetStyle` re-applies the ratio immediately after
