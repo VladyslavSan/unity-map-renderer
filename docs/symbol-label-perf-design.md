@@ -55,11 +55,11 @@ glyph identities and tile-space geometry, as opposed to its screen-space layout)
 ## 5. Dedup duplication is static per tile-set, not per camera pose
 
 The cross-tile dedup (`SymbolReconciler`, A-3; `SymbolTileStore.CollectInto` is its synchronous test shim)
-exists because two tiles can carry the same label — edge/buffer duplication between neighbouring tiles and
-cross-source duplication. A coarse parent
+exists because two blocks can own the same label. The extractor's `[0, extent)` clip already drops
+edge/buffer copies between neighbouring tiles, so one point has one owner. A coarse parent
 tile and a fine child tile overlapping in view does not happen while the cover is a quadtree cut, so the
-parent/child finest-zoom-wins tiebreak this dedup performs has nothing to arbitrate. The duplication that
-does occur is **static per tile-set**: it does not depend on camera pose or on fractional zoom, only on
+parent/child finest-zoom-wins tiebreak this dedup performs has nothing to arbitrate. Any duplication that
+remains is **static per tile-set**: it does not depend on camera pose or on fractional zoom, only on
 which tiles are loaded. So the deduped winner set is a pure function of the loaded tile set, and
 recomputing it every frame recomputes the same answer for nothing.
 

@@ -395,7 +395,7 @@ collapse to one id. The dedup runs off-main, inside `SymbolReconciler` (`Diction
 the integer-keyed form of the same grid — see `docs/labels-async-reconcile-design.md`); at **collection**
 time, when the same id appears in more than one tile, one copy wins deterministically (finest zoom, then
 lowest tile key). Same id across a tile swap ⇒ the winner **persists** ⇒ opacity stays 1 ⇒ no fade cycle, a
-true no-op — and the symbol count drops by the duplicate factor. Curved (line) labels are not deduped; each
+true no-op — and a symbol that two blocks own is drawn once. Curved (line) labels are not deduped; each
 keeps a per-anchor `LineFadeId`.
 
 **A-4 — Placement state machine + fade.** The placement layer holds a persistent opacity per fade id

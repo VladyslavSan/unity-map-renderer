@@ -17,8 +17,10 @@ dictionary to pick one winner per identity. Two facts make a per-frame recompute
    Camera pan, rotate, and tilt do not change it.
 2. **Active parent/child tile overlap does not happen.** The active cover is a quadtree cut: it can mix zooms
    (the default screen-space LOD does), but no active tile has an active ancestor or descendant.
-   Coarse-under-fine display is future work. So the active duplication is edge/buffer duplication
-   between neighbouring tiles plus cross-source duplication. Both are **static per tile set**, independent
+   Coarse-under-fine display is future work. The extractor's single-world clip drops every point anchor
+   outside a tile's own `[0, extent)`, so a buffer-strip or world copy never reaches the dedup, and one point
+   is owned by exactly one tile at any zoom mix. The dedup arbitrates what the clip leaves: two blocks that
+   each own an anchor of one identity in one cell. That set is **static per tile set**, independent
    of camera pose and of fractional zoom. A departing parent coexists with its active children for the grace
    window; the departing pass handles that pair (see the zoom step below).
 
@@ -172,5 +174,6 @@ Two properties keep the swap stable:
 
 - **When active parent/child overlap arrives:** the active pass would need finest-zoom-wins across cells, and
   nearness is not transitive, so it cannot reuse the departing pass's match. Until then, two active winners of
-  one symbol in different cells (a buffer copy across a screen-space LOD zoom boundary) still show twice. It is
+  one symbol in different cells would show twice. The cover never produces such a pair today: the extractor
+  clip leaves one copy of a point across a screen-space LOD zoom boundary. It is
   *not* integer-zoom keying (rejected; see "Invalidation events").
