@@ -2,7 +2,7 @@
 
 Liberty's three road-shield layers (`highway-shield-non-us`, `highway-shield-us-interstate`,
 `road_shield_us`) place a road number inside a pre-sized sprite badge (`road_1..road_6`,
-`us-interstate_1..6`, `us-highway_…`/`us-state_…`, keyed by `ref_length`). This doc states the design
+`us-interstate_1..3`, `us-highway_…`/`us-state_…`, keyed by `ref_length`). This doc states the design
 that makes that render correctly: how `symbol-placement` and alignment resolve for these layers, how a
 centred icon+text pair places and drops as one symbol, how the sprite-atlas fetch race is closed, and how
 the number sits inside the badge.
@@ -50,8 +50,8 @@ outputs directly.
 
 **Build zoom, not display zoom.** The extractor evaluates placement **once, at the tile's build zoom**,
 and the result is frozen into the emitted labels for that tile's lifetime. Layer *visibility* is
-re-evaluated at display zoom against the live camera (`SymbolFeatureExtractor`), because tiles are
-overzoomed rather than rebuilt; placement is not. This matches every other build-zoom-evaluated
+re-evaluated at display zoom against the live camera (`SymbolPlacementSystem`; `SymbolFeatureExtractor`
+deliberately does not gate it), because tiles are overzoomed rather than rebuilt; placement is not. This matches every other build-zoom-evaluated
 property (`text-size`, `symbol-sort-key`; see `docs/maplibre-style-spec-support-matrix.md`), but shields
 straddle a step boundary, so this is the one property where the staleness is visible.
 
@@ -69,8 +69,8 @@ Style Spec's "the label is placed at the point where the geometry is located" is
 line; mid-arc is this renderer's choice, made because it does not pile shields onto tile edges the way a
 first-vertex anchor would. A future parity screenshot disagreeing with upstream is the one line to change.
 
-**Anchor-clip semantics.** Anchors are computed on the **buffered source path exactly as decoded** by
-`MvtGeometry.Decode`, not on a path clipped to the tile — the same input the curved path already uses, so
+**Anchor-clip semantics.** Anchors are computed on the **buffered source path exactly as decoded** into the
+tile's `TileGeometryBuffers`, not on a path clipped to the tile — the same input the curved path already uses, so
 the anchor topology matches D4's line-anchor topology. The existing single-world clip (a resolved
 anchor outside `[0, extent)` is a world-copy/buffer duplicate) applies **per resolved anchor**, unchanged.
 
@@ -88,7 +88,8 @@ Two accepted consequences:
 Under line placement the same clip applies per anchor, which is milder: anchors at `spacing·(k+0.5)`
 falling in the buffer drop, in-tile ones survive — the cross-tile shield limit in "Deferred / open".
 
-**Fence: LineString only, never Polygon.** Liberty's `place` / `airport` / `poi_transit` symbol layers
+**Fence: under point placement, Point and LineString only, never Polygon.** (Line placement additionally
+accepts a Polygon's exterior rings: `SymbolFeatureExtractor`, the geometry gate.) Liberty's `place` / `airport` / `poi_transit` symbol layers
 carry no geometry-type filter and rely on their source layer being point-only. Accepting LineString under
 point placement does not add labels to those layers, because their OpenMapTiles source layers carry no
 line geometry — but accepting Polygon would add labels to any of them whose source layer carries polygons.
@@ -132,8 +133,8 @@ tile re-kick path exists for an already-built, still-in-cover tile.
 
 **The mechanism.** `SymbolSubsystem.SetStyle` starts the fetch and keeps its result as a `.Preserve()`d
 `UniTask`. Readiness is `SpritesSettled`: the fetch task has left `Pending`. `TryBeginBuild` (main thread)
-checks it; if not settled, the build **parks** — its decode and captured context go onto a second
-`ConcurrentQueue` instead of running the extract. `PumpBuilds` (main thread, every frame) drains that queue
+checks it; if not settled, the build **parks** — its worker step puts its decode and captured context onto
+a second `ConcurrentQueue` instead of running the extract. `PumpBuilds` (main thread, every frame) drains that queue
 once `SpritesSettled`, constructing each build's layer processors with the now-live sprite atlas and
 dispatching the worker phase exactly as the kick would have.
 
@@ -144,8 +145,10 @@ Properties that make this correct:
   `SetStyle` returns. A "wait for the atlas to be non-null" predicate would hang forever on a 404 — the
   obvious wrong version of this fix.
 - **Every thread-boundary decision stays on main.** Readiness is read only in `TryBeginBuild` and
-  `PumpBuilds`; the pool side only enqueues into a `ConcurrentQueue`, the same safe-publication carrier the
-  existing handoff queue already is. No volatile flag, no lock.
+  `PumpBuilds`. `TryBeginBuild` stamps a park-mode worker pass, and the pool side only enqueues into a
+  `ConcurrentQueue` (`TryParkBuild`), the same safe-publication carrier the existing handoff queue already is.
+  No volatile flag. The one lock, `_parkGate`, makes the cancellation check, the decode-reference acquire and
+  the enqueue exclusive with the purge in `SetStyle`/`DoDispose`.
 - **Cancellation is unchanged.** Parked entries carry the build's cancellation token and reserved store
   slot, and are drained wherever the existing handoff queue is drained.
 - **The cost is a bounded, one-off latency,** not a stall: labels for tiles kicked during the fetch window
@@ -182,7 +185,7 @@ pinned by `SymbolSpriteReadinessTests` (in `Text/SymbolReconcileAsyncTests.cs`: 
 including the deadline fallback; `[Unity]` — `SymbolSubsystem` is engine-bound and hops to the main thread
 before constructing a `Texture2D`), with the `GatedSpriteSource` test double in `TestSupport/`. Paths are
 under `Assets/Tests/MapRenderer.Tests.EditMode/`. Alignment resolution (D3) is
-pinned alongside `Core/Text/AlignmentResolution.cs`. Acceptance detail — exact assertions, counts and
+pinned by `AlignmentResolutionTests` (in `Text/TextVerticalCentringTests.cs`). Acceptance detail — exact assertions, counts and
 injected defects — lives with those tests, not here.
 
 ---
@@ -194,7 +197,7 @@ injected defects — lives with those tests, not here.
 | **Point placement on Polygon** (centroid / pole of inaccessibility) | A chosen gap (D2) — would add labels to unguarded `place` / `airport` / `poi_transit` layers. |
 | **Display-zoom re-evaluation of `symbol-placement`** | Open. The D1 accepted limitation — the visible step-boundary pop. Belongs with the wider camera-property re-evaluation work. |
 | **Mid-arc anchors over the tile-clipped path** | Open. Would recover the buffer-dominated short paths D2 loses, but needs a polyline clip and would desync D2's anchors from the same `LineAnchorPlacement` topology D4 relies on. |
-| **Rebuilding tiles on a sprite-atlas change** | Open only as a general mechanism. D6 makes it unnecessary for the startup race, since the atlas changes at most once per style; a general "invalidate these tiles" API does not exist today. |
+| **Rebuilding tiles on a sprite-atlas change** | Open only as a general mechanism. D6 makes it unnecessary for the startup race, since the atlas changes at most once per style. The bake-revision rebuild in `TileManager` fires only on a fill-clip change and covers meshes, not symbol blocks; a general "invalidate these tiles" API does not exist today. |
 | **`icon-text-fit`** | Not needed by liberty (pre-sized `road_N` sprites) and unrelated to this design. |
 | **Cross-tile shield dedup along a line** | Open. A road crossing a tile boundary gets independent anchors per tile, so a shield can repeat or gap near the seam — the same class of limitation as the existing cross-tile line-label behaviour. |
 | **A curved (along-line) label paired with an icon** | A paired instance only exists on the point path (`docs/labels-and-symbols-design.md` § "Three icon emit shapes, not two": "Pairing stays out structurally"). |
@@ -237,6 +240,7 @@ opaque badge paints over the number it exists to frame.
 layer's band instead of a bare per-layer value:
 
 ```csharp
+// Argument guards omitted; the shipped QueueFor also rejects a negative index and an undeclared sub-slot.
 public enum LayerSubSlot { Base = 0, Above = 1 }      // ordering role WITHIN one layer's band
 public const int SubSlotsPerLayer = 2;                // == the enum's value count == the queue stride
 public const int QueueCeiling     = 5000;             // Unity clamps renderQueue to [0, 5000]
@@ -254,14 +258,12 @@ public static int QueueFor(int drawIndex, LayerSubSlot subSlot = LayerSubSlot.Ba
 - A future kind that needs a third sub-slot adds an enum value and bumps `SubSlotsPerLayer`; no caller
   re-derives the arithmetic.
 
-`RenderLayerSet.Build` keeps its single generic write per layer and asks the layer which sub-slot its
-primary `Material` occupies, via `IRenderLayer.MaterialSubSlot` (`Base` for fill/line/background, `Above`
-for a symbol layer). `SymbolRenderLayer` writes its icon material explicitly at
-`QueueFor(drawIndex, LayerSubSlot.Base)`.
-
-**Rejected: moving the text-queue write into `SymbolRenderLayer` alongside the icon.** It reads tidier but
-makes `RenderLayerSet.Build`'s write dead for one layer kind and lets the two drift; the uniform "`Build`
-assigns every slot's queue" contract is worth keeping.
+`RenderLayerSet.Build` keeps one generic call per layer, `IRenderLayer.SetDrawOrder(drawIndex)`. A
+single-material layer writes its `Material` at `QueueFor(drawIndex, MaterialSubSlot)`, and
+`IRenderLayer.MaterialSubSlot` is `Base` for fill, line, background and fill-extrusion and `Above` for a
+symbol layer. `SymbolRenderLayer.SetDrawOrder` stamps both its materials, the text at `Above` and the icon at
+`Base`. `Create` also writes the icon at `Base`, so the material has a valid queue before `Build` calls
+`SetDrawOrder`.
 
 **Rejected: a capability interface probed with `is`.** Draw order is a property every layer has, not a
 capability some have; hiding a global ordering invariant behind a type test is the wrong shape even though
@@ -293,9 +295,9 @@ For any two declared layers *i < j*, every queue value of layer *i* is strictly 
 value of layer *j*, for every layer kind. A symbol layer's icon queue is always strictly less than its own
 text queue. The composite draw order of a fill/line/background-only style does not depend on the stride.
 
-Pinned by `LayerDrawOrderTests` (`Tools/core-tests` and both Unity runners) and the `[Unity]` render-queue
-assertions in `LayerOrderSnapshotTests` (in `Assets/Tests/MapRenderer.Tests.Visual/Rendering/RenderLayerTests.cs`),
-which assert only relative order and do not depend on the stride value.
+Pinned by `LayerDrawOrderTests` (`Tools/core-tests` and the Unity EditMode runner) and the render-queue
+assertions in `RenderLayerSetTests` (in `Assets/Tests/MapRenderer.Tests.EditMode/Rendering/RenderingTests.cs`),
+which derive every expected queue from `LayerDrawOrder.QueueFor` and assert relative order, never a stride literal.
 
 ---
 
@@ -372,7 +374,8 @@ The roles are a *proposal*, not a fact: per-label shaping isolation can drop a l
 tolerates a missing slot, so a rider can go missing. `SymbolPairing` is the one engine-free resolver that
 decides the truth from a list: index *i* is a paired owner iff `labels[i+1]` exists, is non-null, is a
 rider, and matches on `PairId`. A half-built pair dissolves into two ordinary labels — never an owner bound
-to a stranger. Both the baker and the reconciler call this one resolver, so they cannot disagree.
+to a stranger. The baker calls this one resolver and stamps the resolved roles into the block; the reconciler reads
+those baked roles, so the two cannot disagree.
 
 Downstream, the pairing is already resolved: a staged point record carries only its resolved `PairRole`,
 and an owner's rider is the next point record — which holds because the reconciler emits them adjacently
@@ -409,7 +412,7 @@ icon-only label produces a byte-identical stage record and a candidate with `Box
 
 **Performance.** A pair costs strictly less per frame than two independent candidates would: one fewer
 sort element, one fewer grid query set, one fewer fade lookup, one fewer fade ease. No new per-frame
-managed allocation, pass, buffer or job.
+managed allocation, pass or job; the `CandidateEmit` pool is a reused native list.
 
 Pinned by `SymbolPairingTests` (in `Text/Placement/SymbolStagingMathTests.cs`; the `SymbolPairing`
 resolver, compiled by `Tools/core-tests` too), `SymbolPairWiringTests` (in
@@ -506,6 +509,7 @@ the text half's screen rect, never whether the pair places.
 
 Pinned in `Assets/Tests/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs` by the
 `TextVerticalCentringTests` class (content-independence, line-height independence, the `Top`/`Bottom`
-goldens, and the constant re-derived from the fixture's own glyph metrics rather than restated) and the
-`CurvedTextCentringTests` class (icon and text ink centres coincide within half a baked pixel — the shield
-claim itself).
+goldens, the constant re-derived from the fixture's own glyph metrics rather than restated, and
+`CentreAnchor_TextInkCentre_CoincidesWithCentredIconInkCentre` within half a baked pixel — the shield
+claim itself) and the `CurvedTextCentringTests` class (a curved cell's ink band straddles the path anchor,
+and the shift is one constant per symbol).

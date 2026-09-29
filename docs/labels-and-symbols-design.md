@@ -2,8 +2,8 @@
 
 The symbol/label subsystem: how a label travels from tile bytes to a drawn (or culled) glyph, and the design
 of each part — placement smoothness, curved along-line text, and projection (globe) support. Code lives in
-`MapRenderer.Unity/Text/` (subsystem, per-frame placement) and `MapRenderer.Core/Text/` (engine-free shaping,
-layout, metrics).
+`MapRenderer.Unity/Text/` (subsystem, per-frame placement) and `MapRenderer.Core/Text/` (engine-free layout,
+metrics and placement math).
 
 1. **[Pipeline flow](#1-pipeline-flow)** — the two-clock architecture; tile lifecycle → per-frame placement → cull → fade.
 2. **[Smoothness & robustness](#2-smoothness--robustness)** — pull/reconcile, cross-tile identity, the fade state machine, the perf mechanisms.
@@ -38,21 +38,20 @@ TileManager.Update(cameraProperties, selectionConfig)        // once per frame, 
 
 `TileManager`'s per-tile mesh-build kick (`KickMeshBuild`) drives the symbol pass: it asks `SymbolWorkerFactory` (an `ISymbolTileWorkerFactory`, implemented by `SymbolSubsystem`) for an
 `ISymbolTileWorkerPass` via `TryBeginBuild`, then hands that pass the decoded tile through
-`RunWorkerAndHandoff`. `SymbolSubsystem` does **not** build inline there — `RunWorkerAndHandoff` **enqueues**
-the MVT bytes. The
-decode → feature-extract (off the main thread) → glyph-shape → atlas-append is drained a bounded number per
-frame by `PumpBuilds`. Decode + per-layer extract run through
+`RunWorkerAndHandoff`. `SymbolSubsystem` does **not** build inline there — `RunWorkerAndHandoff` runs the
+worker phase (the per-layer extract over the decoded tile, off the main thread; inline on WebGL) and
+**enqueues** the ready tail on `_handoffQueue`. The worker phase runs through
 `Rendering.Tile.Processing.TileLayerProcessorRunner.RunSymbolWorkerPass` (the symbol cadence's own decode-once
 worker-pass entry) over one `TileSymbolLayerProcessor` per symbol style layer, each writing into the build's
-shared label list; the main-thread tail (`RunTailAsync`) first collects every processor's required glyph
-ranges and awaits them (the build's ONE suspension point), then runs the per-layer `CompleteOnMain` loop —
-synchronous, no atlas mutation — started by `PumpBuilds`' once-per-frame drain of the pool→main
-`ConcurrentQueue` handoff (`_handoffQueue`). Finished per-tile labels land in
-`SymbolTileStore`, which:
+shared label list. `PumpBuilds` drains the pool→main `ConcurrentQueue` once per frame and starts a bounded
+number of main-thread tails per frame. The main-thread tail (`RunTailAsync`) first collects every processor's
+required glyph ranges and awaits them (the build's ONE suspension point), then runs the per-layer
+`CompleteOnMain` loop — shaping and layout, synchronous, no atlas mutation — and bakes the tile's
+`SymbolTileBlock`. Finished per-tile blocks land in `SymbolTileStore`, which:
 
 - keeps an **active** set (in cover) and a **cached** set (out of cover, kept warm for cache-hit re-entry);
-- bumps a monotonic **`Version`** on every set-changing mutation — the key the fast clock uses to know whether
-  anything actually changed.
+- bumps a monotonic **`CollectGeneration`** on every collect-relevant mutation — the key the reconcile
+  scheduler uses to know whether anything actually changed.
 
 **Per-label build isolation.** One label whose build throws must NOT blank the whole tile's symbols. The
 per-label body in `StyledSymbolTileBuilder.Shape` (shape → layout → `output.Add`) is wrapped in a
@@ -60,7 +59,7 @@ per-label body in `StyledSymbolTileBuilder.Shape` (shape → layout → `output.
 label (`SkippedSymbolCount` telemetry, throttled once-per-session warn) and lets the rest build + commit.
 The designed throw is a run that needs bidi resolving and holds more than `BidiResolver.MaxCodepoints` code
 points: the shaper rejects it, and the label is skipped and counted. **Known gaps:** **Pass 1** (glyph fetch/`GlyphPbfDecoder.Decode`) is unguarded — a
-corrupt glyph-PBF for one label would blank a tile through the same mechanism; the isolation covers Pass 2
+corrupt glyph-PBF range would blank a tile through the same mechanism; the isolation covers Pass 2
 (shape/layout) only. Separately, because of the `when` guard above, a pre-cancelled token reaching a Pass-2
 label that throws a non-`OperationCanceledException` bug fails the guard, so the exception propagates and
 drops the whole build instead of being skipped — a hole in the per-label isolation guarantee, with no
@@ -107,7 +106,7 @@ anchor clip, **not** closed by it.
 So a `ShapedSymbol` exists per `(tile, feature)` once its tile's bytes are decoded and shaped, held in the
 build's `SymbolTileBuffer` — one dense `Symbols` list plus the pooled columns (`Quads`, `Glyphs`, `Anchors`,
 `Path`/`PathUp`) each symbol's own span indexes into. It carries `AnchorRender` (point) or a `Path`/`Anchors`
-span (curved), its `TileKey` (packed z/x/y), text, material index, and style-evaluated sizes. Nothing here
+span (curved), its `TileKey` (packed z/x/y), interned text id, material index, and style-evaluated sizes. Nothing here
 depends on the camera.
 
 ## 1.2 Per-frame driver — `MapView.LateUpdate`
@@ -129,7 +128,7 @@ is load-bearing:
      SymbolSubsystem.ReconcileLoadedTiles(scratch, now) // release departed / restore cache-hit symbols
      SymbolSubsystem.PumpBuilds()                        // start ≤N queued builds, coalesce one atlas upload
      plan = SymbolSubsystem.CurrentBatch(sceneFrame, minCoverage, now)  // this frame's winner plan (+ coverage pre-cull)
-     SymbolPlacementSystem.Update(sceneFrame, plan, atlas, dt, layerMaterials, iconTexture)
+     SymbolPlacementSystem.Update(sceneFrame, plan, atlas, dt, symbolLayers, iconTexture)
    else:
      nothing to place — a style with no symbol layers skips this step entirely.
 ```
@@ -160,7 +159,7 @@ dispose); `SymbolPlacementSystem` mirrors it into native buffers only when the v
 Everything camera-dependent lives here, over reused buffers (no per-frame GC). Stages:
 
 ```
-Update(sceneFrame, plan, atlas, dt, materials, spriteTexture)
+Update(sceneFrame, plan, atlas, dt, symbolLayers, spriteTexture)
  │
  ├─ PmGather        → GatherIntoMirror(plan)  : mirror the winner plan's native rows into per-Update
  │                                               buffers, memoized on WinnerSetVersion
@@ -183,8 +182,9 @@ Update(sceneFrame, plan, atlas, dt, materials, spriteTexture)
  └─ PmCollide → ScheduleCollision(...)  : schedule THIS Update's Burst CollisionJob (greedy, sort-key-driven,
                                           uniform-grid) — its verdict is harvested next Update's PmCollideHarvest
 
-then, every Update regardless: WorldSymbolRenderer.EndFrame(...) builds + submits every non-empty material
-slot's mesh (Graphics.RenderMesh), hiding any slot left empty this Update.
+then, every Update regardless: WorldSymbolRenderer.EndFrame(...) builds every non-empty (tile, slot, kind)
+mesh, binds its texture and enables its pooled scene node's MeshRenderer, hiding any slot left empty this
+Update (an idle slot is reclaimed after 60 frames).
 ```
 
 Five fade-out triggers happen **before** any projection/staging/collision, classified by `GatherTrigger` in
@@ -323,8 +323,8 @@ in the plan for a grace window.
 When a tile leaves cover, `SymbolTileStore` releases it to the **warm cached side** and, if a grace window
 is set, stamps it **departing** (`key → wall-clock expiry`). While departing:
 
-- `CollectInto` still emits its winners — appended **after** the active ones — and reports the split via
-  `out activeCount`. A departing point winner whose cross-tile identity is already claimed by an active winner is
+- The dedup (`SymbolReconciler`; `SymbolTileStore.CollectInto` is its test shim) still emits its winners —
+  appended **after** the active ones — and reports the split via `ActiveCount`. A departing point winner whose cross-tile identity is already claimed by an active winner is
   skipped (the active copy shows → seamless tile-to-tile transfer, no fade).
 - `SymbolGatherPlan.Build` copies each winner's `IsDeparting` flag straight into its `Departing` mask, which
   gather treats as an unconditional fade-out trigger.
@@ -341,7 +341,7 @@ eases out correctly even while the camera pans. The wall-clock is threaded from 
 the prepared-mesh cache being enabled — cache off ⇒ `Release` drops the labels immediately (grace set to 0), so
 an unloaded tile still pops. The cache is on by default, so production and the demo get the fade. **Open
 decoupling:** the fade only needs the labels for the grace window (~0.5 s), independent of the cache-hit
-retention (minutes), so `_departing` could *own* the released entry for the grace window when the cache is
+retention (bounded by the cache's count and byte budgets, not by time), so `_departing` could *own* the released entry for the grace window when the cache is
 off (a second, short-lived retention path) instead of borrowing the cached FIFO.
 
 ---
@@ -372,9 +372,8 @@ tiles are loaded. Track B is performance; Track C is capacity.
 ## Track A — placement state machine
 
 **A-1 — Pull / reconcile foundation.** *Data delivery* and *lifecycle* are separate. Membership is
-**pulled**: each frame the subsystem asks `TileManager` for the current loaded `(source,tile)` set + a
-**version stamp** (bumped only when the set changes) and reconciles — a tile in the set with no labels yet →
-build; a tile-with-labels no longer in the set → hand to the fade-out path (A-4), not an instant drop;
+**pulled**: each frame the subsystem asks `TileManager` for the current loaded `(source,tile)` set and
+reconciles — a tile in the set with no labels yet → build; a tile-with-labels no longer in the set → hand to the fade-out path (A-4), not an instant drop;
 present-and-built → no-op. Self-healing (a missed change is corrected next frame) with no reentrancy. Tile
 data still arrives by a push — the per-tile build kick (`TryBeginBuild`, "Tile lifecycle") — but that push
 carries data only, never lifecycle. The `SymbolTileStore` is the reconcile's backing store; the reconcile
@@ -385,7 +384,7 @@ positions along the line spaced by `symbol-spacing` at a reference scale — and
 position. Per frame, each *anchor* is projected and the glyphs are laid out around it by walking only the
 *local* neighbourhood of the projected line. The anchor does not slide on zoom because it is a fixed world
 point, not a screen offset. `line-center` = one anchor at the world midpoint. A stable anchor also gives a
-stable id: `LineFadeId` is `(tile, feature, anchorIndex)`, so build-time anchors keep it constant across
+stable id: `LineFadeId` is `(tile, layer, feature, anchorIndex)`, so build-time anchors keep it constant across
 frames, which the A-5 total order relies on.
 
 **A-3 — Cross-tile symbol identity + dedup (seamless no-op replacement).** A point symbol's cross-tile id is
@@ -638,7 +637,7 @@ All four are byte-identical on Mercator.
 The Unity camera places the look-at at the world origin in an idealized Y-up ENU orbit frame
 (`MapCamera.SyncToCamera`), so `ViewProj` expects points in the **rebased look-at frame**. Mesh tiles
 honor this: `TileToSceneRebased = Rebase·(origin − sceneOrigin)` (`FloatingOrigin.cs`),
-`Rebase = transpose(TangentBasisAt(lookAt))` (`SceneFrame.cs`). The label seam carries a `float3x3 rebase` into
+`Rebase = transpose(TangentBasisAt(lookAt))` (`MapView.BuildSceneFrame`, stored on `SceneFrame`). The label seam carries a `float3x3 rebase` into
 the same rotation, applied after translating and before `viewProj` —
 `SymbolScreenProjection.TryProjectPoint` and `SymbolTileCoverageFilter.ProjectCorner` both take it. On Mercator
 `Rebase = identity` (inert); under `SphericalProjection` an anchor away from the look-at needs it or it
@@ -765,7 +764,7 @@ a change may not quietly cross one.
     to fit its paired text box).
   - **SDF / recolorable sprites** — the `"sdf": true` sprite variant + `icon-color`/`icon-halo-*`. Leaving
     these out keeps the icon shader trivial (a straight `tex2D` sample, no SDF median-distance, no halo).
-    `icon-color`/`icon-halo-*` may be parsed and carried, but stay inert without an SDF path.
+    `icon-color`/`icon-halo-*` are not modelled: `PropertyNames` does not define them, so a style value is ignored.
   - `icon-translate` and `icon-image` **stretchable** (`content`/`stretchX/Y`).
 - **Not fenced:** `icon-line-placement` (icons along a line / `symbol-placement: line` with an icon) works in
   both resolved shapes ("Map-aligned line icons + `icon-rotate`"): a `viewport`-resolved line icon emits as
@@ -808,13 +807,14 @@ The sheet binds **`FilterMode.Bilinear`**, and `SpriteSheet` **repacks it at dec
 gets a one-texel transparent border**. The two are one decision and neither is correct alone.
 
 **Why not nearest-neighbour.** An icon's magnification is `icon-size × dpr / pixelRatio`. The sheet is
-fetched @1x. The product is in general not an integer: Android's `dpr` and a style-driven `icon-size` are
+fetched at `@2x` from a device-pixel ratio of 1.5 up (`SpriteSourceFactory.TwoXThreshold`), and at 1x below
+it or on a 404. The product is in general not an integer: Android's `dpr` and a style-driven `icon-size` are
 fractional. And nearest-neighbour is exact *only* at integer magnification. Off it, each source texel covers `N` or
 `N+1` device pixels and **which** depends on the quad's sub-pixel phase, so panning re-quantises an icon's interior
 every frame: the pixels inside the icon warp while zooming or panning.
 
 It is resampling, not geometry, because of one structural fact: `BillboardMath.BuildWorldQuad` gives all
-four corners the **same bitwise `anchorLocal`** plus static per-corner `OffsetPx`, so a quad is **rigid** in
+four corners the **same bitwise `anchorLocal`** plus static per-corner `Offset`, so a quad is **rigid** in
 screen space. An anchor precision error therefore *translates* an icon and can never deform its interior —
 which rules out the entire geometry/precision family and leaves resampling.
 
@@ -869,10 +869,10 @@ That single decision keeps every other consumer independent of the padding:
 * `FillPattern.TryResolve` reads the relocated content rect, which is what a point-sampled
   `frac()`-wrapped pattern must have. `LogicalSizePixels` and every pattern period do not depend on the
   padding.
-* The **collision box stays on the content**: `IconQuadLayout.ToLayoutResult(quad, skirtPx)` and
-  `CurvedGlyph.CellSkirt` remove the skirt again for placement. A padded box would grow every icon's
-  collision footprint by ~1 logical px per side (up to ~9 % of a 22 px icon's area), silently changing which
-  labels win and which fade.
+* The **collision box stays on the content**: `SymbolBox.Build` and `SymbolBox.BuildRotatedGlyph` take a
+  skirt (`CurvedGlyph.CellSkirt` on a curved cell) and remove it again for placement. A padded box would grow
+  every icon's collision footprint by ~1 logical px per side (about 9 % of a 22 px icon's width, 19 % of its
+  area), silently changing which labels win and which fade.
 
 So there are two representations with two consumers: the **padded** `SymbolQuad` (geometry + UVs) goes to
 render only; the **content** box goes to collision and placement only. The skirt is carried as one baked-px
@@ -882,8 +882,9 @@ the grow and the un-grow cannot drift.
 **The packer.** `ShelfRectPacker` — next-fit-decreasing-height shelf packing, chosen over MaxRects/skyline
 because a few hundred cells that grow two texels do not need the extra 3–5 % occupancy, and a shelf layout's
 disjointness is provable from its shape. Determinism is a hard requirement (the sheet must not differ
-between machines or runs): cells sort by height desc, width desc, then the group's lexicographically-smallest
-name by `string.CompareOrdinal`, which makes the order total and independent of dictionary insertion order.
+between machines or runs): cells sort by height desc, width desc, then input order, and the groups arrive sorted by their
+lexicographically-smallest name (`string.CompareOrdinal`), which makes the order total and independent of
+dictionary insertion order.
 Names sharing one source rect are **grouped** so aliases stay aliased and are copied once. Sheet width is the
 first of `{W₀, 2W₀, 4W₀, …}` (with `W₀ = max(sourceWidth, widest cell)`) whose packed height fits 8192. If
 nothing fits, `Plan` returns the source sheet unchanged with `Padding = 0` and `SpriteSheet` logs a warning
@@ -930,7 +931,7 @@ texture and never touches it).
   tiling seam. The role is not derivable from the sprite JSON — it depends on which style layers reference
   the sprite as `fill-pattern`.
 * **P2 — minified icons.** `label_village` / `label_town` / `label_city` dots run at `icon-size` 0.2–0.5, i.e.
-  magnification 0.30–0.75. The ramp's on-screen width is `1 texel × magnification` device px, so below 1× the
+  magnification 0.2–0.5 whenever `dpr` equals the loaded sheet's `pixelRatio`. The ramp's on-screen width is `1 texel × magnification` device px, so below 1× the
   whole ramp is sub-pixel and padding cannot fix it. That needs mips-with-per-sprite-guard-bands or a
   downsampled sprite variant.
 
@@ -946,20 +947,20 @@ the sub-pixel phase sweeps in `SymbolIconResamplingTests`:
 
 | Concern | Text | Icon |
 |---|---|---|
-| Atlas index (Core, engine-free) | `GlyphAtlas`/`GlyphAtlasEntry` (dynamic) | **`SpriteIndex`** (parsed once; name→`SpriteEntry{x,y,w,h,pixelRatio,sdf}`) |
-| Style parse (Core) | `Symbol.LayoutProperties`/`PaintProperties` (`text-*`) | **`icon-*`** on the same `Symbol.StyleLayer` (Layout/Paint; `PropertyNames`) |
+| Atlas index (engine-free) | `GlyphAtlas`/`GlyphAtlasEntry` (Core, dynamic) | **`SpriteIndex`** (Unity, `Text/Sprites`; parsed once; name→`SpriteEntry{x,y,w,h,pixelRatio,sdf}`) |
+| Style parse (Unity, `Style/Symbol`) | `Symbol.LayoutProperties`/`PaintProperties` (`text-*`) | **`icon-*`** on the same `Symbol.StyleLayer` (Layout/Paint; `PropertyNames`) |
 | Extract (Unity) | `SymbolFeatureExtractor` → `SymbolFeature` (text) | same extractor emits **icon** `SymbolFeature`s (icon fields) |
-| Layout → quad (Core) | `TextQuadLayout`/`CurvedTextLayout` → `SymbolQuad[]` | **`IconQuadLayout`** → one `SymbolQuad` (sprite UVs) |
+| Layout → quad (engine-free) | `TextQuadLayout`/`CurvedTextLayout` (Core) → `SymbolQuad[]` | **`IconQuadLayout`** (Unity, `Text/`) → one `SymbolQuad` (sprite UVs) |
 | Atlas texture (Unity) | `GlyphAtlasTexture` + `GlyphManager` | **`SpriteSheet`** (PNG→`Texture2D`) + a sprite source (JSON+PNG fetch) |
-| Per-frame batch (Core) | `SymbolBatch` (`Kind{Point,Curved}`) | icon records in the batch (see "The load-bearing decision (I5)") |
+| Per-frame records (Unity) | the native mirror in `SymbolPlacementSystem` (`SymbolBatch` is its managed reference SoA, read by tests) | icon records in the same mirror (see "The load-bearing decision (I5)") |
 | Draw (Unity) | `SymbolRenderLayer` + `SymbolTextWorld.shader` (SDF) | **`SymbolIconWorld.shader`** (RGBA) + a sprite-texture bind |
 
 The build-time half rides the same per-layer tile pipeline (`TileSymbolLayerProcessor`); the per-frame half is
 the same `SymbolPlacementSystem.Update`. Collision is the same global grid — an icon is just another candidate box.
 
-## 5.4 The load-bearing decision (I5): how icons ride `SymbolBatch`
+## 5.4 The load-bearing decision (I5): how icons ride the staging path
 
-`SymbolBatch`, the Burst stage job, and the billboard build all switch on `SymbolPlacementKind{Point,Curved}`
+The native mirror, the Burst stage job and `SymbolBatch` (the managed reference the mirror follows) all switch on `SymbolPlacementKind{Point,Curved}`
 — how a symbol is *placed* — which is a **different axis** than `SymbolKind{Text,Icon}` — what atlas its
 glyphs are drawn *from* (`SymbolPlacementKind.cs`). The icon draw must bind a different texture (the sprite
 sheet) than the glyph atlas, and the design keeps that a property of the second axis: **an icon rides
@@ -971,7 +972,7 @@ single axis-aligned quad, the degenerate point-text case.
 
 **Rejected: a new `SymbolPlacementKind.Icon`.** A point-like record whose quad's UVs index the sprite sheet,
 routed to a separate material slot/draw with the sprite texture bound, is the cleanest separation on
-paper, but it touches every `SymbolPlacementKind` switch (stage job, billboard build, the gather mirror)
+paper, but it touches every `SymbolPlacementKind` switch (the stage job and the gather mirror)
 for a distinction the draw step alone needs. The atlas discriminator carries the same information at the
 one site that reads it.
 
@@ -979,11 +980,11 @@ one site that reads it.
 
 Each tag names a mechanism, not a plan step:
 
-- **I1** — `SpriteIndex` (Core): parses sprite JSON into name → `SpriteEntry`. Backed by a committed,
+- **I1** — `SpriteIndex` (Unity, engine-free): parses sprite JSON into name → `SpriteEntry`. Backed by a committed,
   network-free fixture (`Assets/Fixtures/sprites/sample-sprite.{json,png}`).
-- **I2** — `icon-*` style parse (Core): the scope fences' IN keys land on
+- **I2** — `icon-*` style parse (Unity): the scope fences' IN keys land on
   `Symbol.LayoutProperties`/`PaintProperties`, data-driven where the spec allows it.
-- **I3** — extract (Unity) + layout (Core): `SymbolFeatureExtractor` emits an icon `SymbolFeature` per point feature
+- **I3** — extract + layout (Unity): `SymbolFeatureExtractor` emits an icon `SymbolFeature` per point feature
   whose `icon-image` resolves to a known sprite (unknown → skipped, not fatal); `IconQuadLayout` builds the
   single `SymbolQuad` from the resolved `SpriteEntry` + `icon-size`(×`pixelRatio`) + `icon-anchor` +
   `icon-offset` (`SymbolFeature.Kind{Text,Icon}`). Along-line icons are the line branch's shapes ("Three
@@ -1001,7 +1002,7 @@ Each tag names a mechanism, not a plan step:
 **Invariant across I1–I5:** a text-only style is byte-identical to the icon path being absent — the icon path
 is inert whenever no `icon-image` resolves.
 
-**Verification split.** I1–I3 (Core) and I4/I5a are fully headless-verified, including orientation, staging,
+**Verification split.** I1–I3 and I4/I5a are fully headless-verified, including orientation, staging,
 and Burst/managed parity. I5b (the shader + draw partition) is compile- and snapshot-verified for text
 byte-identity and for binding the sprite texture/material — the actual rasterized icon (sprite, size, opacity,
 orientation, at the right anchor) is a maintainer eyeball, the same class of gap as the S5 globe eyeball
@@ -1013,8 +1014,8 @@ carries a `sprite` URL, so that eyeball needs no extra setup.
 ## 5.6 Grounding (touch points)
 
 Core: `Text/Placement/SymbolFeature` (icon fields), `Text/SymbolQuad` (the reused sprite/glyph-agnostic quad),
-`Text/TextQuadLayout` (prior art for `IconQuadLayout`), `Text/Sprites/SpriteIndex`+`SpriteEntry`.
-The padded repack ("Sampling the sheet") uses
+`Text/TextQuadLayout` (prior art for `IconQuadLayout`). Unity, engine-free: `Text/IconQuadLayout`,
+`Text/Sprites/SpriteIndex`+`SpriteEntry`. The padded repack ("Sampling the sheet") uses
 `Text/Sprites/{SpriteBlit,SpritePadPlan,ShelfRectPacker,SpriteSheetPadder,SpriteSheetComposer}` — rect
 planning and RGBA32 pixel composition, both engine-free, so the load-bearing border rule is checked
 byte-for-byte on the fast `dotnet test` loop rather than behind a GPU readback. Unity: `Style/Symbol/PropertyNames`,
@@ -1085,17 +1086,17 @@ while `icon-rotate` is clockwise-positive, so the two senses are opposite and on
 inputs) and flips only there, at the boundary where it becomes a staging rotation.
 
 The frame itself: `BillboardMath.BuildWorldQuad` rotates corners in the quad's **y-up local** frame and then
-negates Y, which lands `OffsetPx` in a **y-DOWN screen** frame — a rotation read through a mirrored axis
+negates Y, which lands `Offset` in a **y-DOWN screen** frame — a rotation read through a mirrored axis
 reverses, so a positive `rotationRadians` appears counter-clockwise on screen. The tempting paper derivation
 (`N·R(θ)·N = R(-θ)` ⇒ clockwise) is self-contradictory: it reads the negation as supplying the clockwise
-sense *and* leaves `OffsetPx` y-up, when the negation is what makes `OffsetPx` y-down. **Do not re-derive
+sense *and* leaves `Offset` y-up, when the negation is what makes `Offset` y-down. **Do not re-derive
 this on paper.** The authority is a rendered tooth,
 `SymbolIconRenderSnapshotTests.AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen`: it measures ink
 *centroid* (not a bounding box) at a **45° road**, calibrating the buffer's sense against a rotation whose
 physical direction is known — the road swinging counter-clockwise on the map, which a map-aligned icon
 follows. It uses `icon-rotate: 90` because **90° is the smallest angle at which +φ and −φ differ**, and
 180° — liberty's only live value, its own inverse — can never show a sign inversion.
-`SymbolStagingMathTests` part (d) pins the same sense on the point path at the `OffsetPx` level, stated in
+`SymbolStagingMathTests` part (d) pins the same sense on the point path at the `Offset` level, stated in
 the true (y-down) frame.
 
 Open: `SymbolBearing.MapAlignedSign` is the *other* sign on this composition and is **chosen, not
@@ -1410,9 +1411,10 @@ falloff is the band just beyond.
 
 **`_SdfEdge` is 0.75, the fontnik iso.** A lower edge dilates every stroke — at 0.60, `0.15 × 8 = 1.2`
 texels per edge, ~2.4 texels of extra stroke — which reads as bold and is easy to mistake for a font-weight
-bug. The edge is not a per-source calibration: the live openfreemap PBFs and the committed fixture are the
-same fontnik bake (global max 255, median glyph interior peak 224 ≈ 0.878, p10 219). The note in
-`GlyphPbfDecodeTests` carries the measurement so the calibration argument is not re-derived.
+bug. The edge is not a per-source calibration: the live openfreemap `Noto Sans Regular` `0-255` range file is
+byte-identical to the committed fixture. Over its 189 bitmap-bearing glyphs the global max is 255, the median
+glyph interior peak is 224 (≈ 0.878) and p10 is 217. `GlyphPbfDecodeTests`'s
+`SdfInteriorPeak_StandardFontnikGlyphsClimbWellAbove075` pins the global max at 240 or more.
 
 **Naming.** `_SdfAaDevicePx` and `_SdfRangeTexels` state the unit and whether the value is a look knob at
 all (`_SdfRangeTexels` is not — it describes how the glyphs were BAKED). DEVICE px is qualified because this

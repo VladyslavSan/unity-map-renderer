@@ -181,9 +181,9 @@ namespace MapRenderer.Unity.Rendering.Layers
         }
 
         /// <summary>Re-stamps BOTH materials — <see cref="Material"/> at <see cref="LayerSubSlot.Above"/>
-        /// AND <see cref="WorldIconMaterial"/> at <see cref="LayerSubSlot.Base"/>, whose <see cref="Create"/>
-        /// write gets no <see cref="RenderLayerSet.Build"/> free ride. Missing the icon here is how a reorder
-        /// puts a symbol layer's text and icon in different bands.</summary>
+        /// AND <see cref="WorldIconMaterial"/> at <see cref="LayerSubSlot.Base"/>.
+        /// <see cref="Create"/> also writes the icon queue, so it is valid before <see cref="RenderLayerSet.Build"/>
+        /// calls this method. Missing the icon here puts the text and icon of a reordered layer in different bands.</summary>
         /// <param name="declaredOrder">This layer's index in the new document's declared layer order.</param>
         public void SetDrawOrder(int declaredOrder)
         {

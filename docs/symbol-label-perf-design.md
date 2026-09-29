@@ -37,9 +37,10 @@ Burst job"), and the one-frame-late collision verdict ("The collision verdict ap
 
 ## 3. The tile-build-time bake
 
-Each tile's blittable symbol representation is baked once, on the existing bytes-ready build hook
-(already off the main thread), and held on the tile's `SymbolTileStore` entry with the same lifecycle as
-its symbols: built on bytes-ready, kept warm in the prepared cache, dropped on eviction. This removes the
+Each tile's blittable symbol representation is baked once, on the main thread, at the end of the build's
+main-thread tail (`SymbolSubsystem.RunTailAsync`, where the glyph quads first exist), and held on the tile's
+`SymbolTileStore` entry with the same lifecycle as its symbols: built at tile commit, kept warm in the
+prepared cache, dropped on eviction. This removes the
 per-label glyph-quad copy, colour conversion, and fade-id hashing from the per-frame path entirely — it
 happens once per tile, not once per tile per frame.
 
@@ -53,8 +54,9 @@ glyph identities and tile-space geometry, as opposed to its screen-space layout)
 
 ## 5. Dedup duplication is static per tile-set, not per camera pose
 
-The cross-tile dedup (`SymbolTileStore.CollectInto`, A-3) exists because two tiles can carry the same
-label — edge/buffer duplication between neighbouring tiles and cross-source duplication. A coarse parent
+The cross-tile dedup (`SymbolReconciler`, A-3; `SymbolTileStore.CollectInto` is its synchronous test shim)
+exists because two tiles can carry the same label — edge/buffer duplication between neighbouring tiles and
+cross-source duplication. A coarse parent
 tile and a fine child tile overlapping in view does not happen while the cover is a quadtree cut, so the
 parent/child finest-zoom-wins tiebreak this dedup performs has nothing to arbitrate. The duplication that
 does occur is **static per tile-set**: it does not depend on camera pose or on fractional zoom, only on
@@ -83,7 +85,7 @@ The async reconcile (`labels-async-reconcile-design.md`) removes the per-frame d
 smaller set of per-frame costs downstream of it, inside `SymbolPlacementSystem`'s per-frame update:
 compacting the deduped winner set into the native render mirror (the *gather*), projecting and staging
 labels on screen, running collision, and emitting quads. Each subsection below is a self-contained
-mechanism; the collision-setup lever is the only one still open.
+mechanism; the collision-setup lever (10.3) and the `_seenFade` container (10.7) are the two still open.
 
 **Cost estimates for these loops are hypotheses, not answers.** Weighting a raw item count by a plausible
 per-item cost does not predict the cost of this pipeline's loops. Split a combined profiler marker into its
@@ -116,10 +118,11 @@ was considered and rejected as the key: it moves at the tile *event*, while the 
 at the swap, so a `CollectGeneration`-keyed memo would keep hitting straight through the swap window and
 serve a stale mirror. The version must be bumped at the swap, not at the event.
 
-**Cross-overload invalidation is bidirectional.** One `_mirrorSource`(object)/`_mirrorVersion`(long) pair
-covers both the demo `Update(batch)` path and the production plan path, so a demo update between two
-production gathers invalidates the production memo and vice versa — one `ReferenceEquals`-and-version
-comparison rather than two parallel sentinels.
+**The memo key is the pair (plan instance, version).** `_mirrorPlan` (a `SymbolGatherPlan`) and
+`_mirrorVersion` (a `long`) are stamped at the end of a rebuild, and the memo hits only on a
+`ReferenceEquals` match plus an equal version. A second plan instance therefore always rebuilds, even at an
+equal version. The single production entry `SymbolPlacementSystem.Update(in SceneFrame, SymbolGatherPlan, …)`
+is the only production caller of `GatherIntoMirror`.
 
 **A release-build backstop.** The memo predicate also checks `plan.WinnerCount == _mirrorCount`, not just
 source and version — if a front-mutation site is ever added without a version bump, this falls
@@ -128,12 +131,15 @@ Editor, a silent out-of-bounds read in a release player). A debug-only assert fi
 backstop engages.
 
 **Why this is not the rejected motion-keyed skip ("Constraints"):** the memo key is a tile event (the front swap),
-not camera stillness. Cost is O(set delta), always applied, identical whether the camera is still or
-moving — there is no camera-state predicate and no "skip when nothing changed" branch.
+not camera stillness. A front swap costs a full rebuild of the winner set and every other frame costs only
+the mask writes, whether the camera is still or moving — there is no camera-state predicate and no "skip
+when nothing changed" branch.
 
-GPU snapshots do not exercise this memo — every snapshot fixture drives the demo `Update(batch)` overload,
-never the production plan path. Whether the memo actually hits is not headless-observable; it is a
-Play-mode profiling question ("The memo is structurally dead under continuous motion").
+GPU snapshots do not exercise this memo — the snapshot fixtures build their plan through `TestSymbolPlan`,
+whose `Build` bumps the version on every call, so every `Update` rebuilds. `SymbolReconcileAsyncTests`
+(`Memo_RealFrontSwap_Invalidates` and its siblings) pins the memo headlessly through `MirrorRebuildCount`.
+How often it hits under real camera motion is a Play-mode profiling question ("The memo is structurally
+dead under continuous motion").
 
 **Why a retained mirror cannot be corrupted between frames.** The memo key above answers "is the mirror
 stale?"; it does not by itself answer "can a second writer corrupt it while it is retained?" — that holds
@@ -182,11 +188,11 @@ work under continuous motion.
 
 Building this raises two open design questions:
 
-1. **Burst cannot hold a managed array of `SymbolTileBlock`s** (each owning several `NativeArray`s). An
-   async gather needs either a flattened pointer table (a `NativeArray` of block descriptors carrying
-   `[NativeDisableUnsafePtrRestriction]` pointers and lengths) or a shared bake-time mega-buffer that
-   turns the gather into pure index arithmetic. The synchronous gather needs neither, so it uses neither;
-   this choice is the crux of building the async version.
+1. **Burst cannot hold a managed array of `SymbolTileBlock`s** (each owning several `NativeArray`s). The
+   synchronous gather passes a per-frame `BlockView` table of non-owning pointer views ("The gather runs
+   as a synchronous Burst job"), valid only for the inline `.Run()`. An async gather needs pointer views
+   whose lifetime is protected across frames, or a shared bake-time mega-buffer that turns the gather into
+   pure index arithmetic; this choice is the crux of building the async version.
 2. **The per-frame masks must classify the displayed set, not the newest reconcile front.** With an async
    gather the live mirror corresponds to an older winner set than the current reconcile front, so
    `SymbolTileCoverageFilter.ClassifyActive` has to classify the snapshot actually on screen, or the
@@ -232,15 +238,15 @@ inline: an async gather scheduled instead of run would need frame N+1's `BuildBl
 a table an in-flight job is still reading, which means double-buffering both containers.
 
 Growing an externally-owned `NativeList<T>` from inside a Burst job has in-repo precedent —
-`GlobeFillSubdivideJob<TProj>.Execute` calls `Add` on a `NativeList<GlobeFillVertex>` allocated by its
-caller (`FillMeshGraph`) — and `SymbolGatherJob`'s growth is single-shot and bounded (computed in its own
-pass 1), not per-element, so it does not need `StageJob`'s fixed-length-output approach.
+`GlobeFillSubdivideJob<TProj>` adds (in `Emit`, called from `Execute`) to a `NativeList<GlobeFillVertex>`
+allocated by its caller (`FillMeshGraph`) — and `SymbolGatherJob`'s growth is single-shot and bounded
+(computed in its own pass 1), not per-element, so it does not need `StageJob`'s fixed-length-output approach.
 
 **Byte-identical**, confirmed by a differential oracle (`SymbolGatherParityTests`) that independently
 reimplements the gather's compaction/remap spine — winner order, the `(blockId, localIndex)` mapping, the
-running-offset arithmetic — against the production job. That independence has one limit: the oracle and
-the production baker share the same per-label field-building helpers, so a bug inside those helpers would
-produce matching wrong values on both sides; the test covers the compaction spine, not those helpers.
+running-offset arithmetic — against the production job. That independence has one limit: the oracle
+reads the block columns the production baker filled, so it is independent of the gather but not of the bake.
+A bug in the bake would produce matching wrong values on both sides; `SymbolTileBlockBakerTests` pins the bake.
 
 **An Editor profile overstates this job's advantage in a player build.** Much of the job's advantage
 comes from erasing `AtomicSafetyHandle` checks, which only `ENABLE_UNITY_COLLECTIONS_CHECKS` builds (the
@@ -254,16 +260,19 @@ over the visible records, because the two arms consume it differently:
 - **The point arm inlines `Placed.Contains(s.FadeId)`** directly in Burst.
 - **The curved arm resolves at the top of `Execute()`**, filling an `AnchorWasPlaced` byte array, because
   it cannot inline: `SymbolStagingMath.StageCurved` takes a `ReadOnlySpan<byte>` and lives in
-  `MapRenderer.Core`, whose assembly references only `Unity.Mathematics` — a `NativeHashSet` in that
-  signature would pull `Unity.Collections` into the engine-free `Tools/core-tests` project. The per-arm
+  `MapRenderer.Core`, whose assembly references `Unity.Mathematics` and `UniTask` but not
+  `Unity.Collections` — a `NativeHashSet` in that signature would pull `Unity.Collections` into the
+  engine-free `Tools/core-tests` project. The per-arm
   split is the only design that keeps `Core` engine-free and both arms' resolution off the main thread.
 
-`.Run()` (not `Schedule()`) is load-bearing here: a later managed step in the same frame mutates
-`_placedLastFrame`, so a scheduled job reading it would race.
+`.Run()` (not `Schedule()`) is load-bearing here: the emit and collision steps read the stage output in the
+same update, and the next update's harvest (`HarvestCollision`, the sole writer) rewrites `_placedLastFrame`,
+so a scheduled job that reads it could still be running.
 
-Three of the four per-label placement containers are native for a Burst reader: `_placedLastFrame` is
-read by `StageJob`, and `_fadeOpacity` and `_forceFadeOut` by `CompactJob`. `_seenFade` is native but has
-no Burst reader: only `EaseFade` and `DecayUnseenFadeSymbols` touch it, on the main thread. It is the one
+Three of the four per-label placement containers are native for a Burst consumer: `_placedLastFrame` is
+read by `StageJob`, `_fadeOpacity` is read and `_forceFadeOut` written by `CompactJob`. `_seenFade` is native
+but has no Burst consumer: only `EaseFade`, `DecayUnseenFadeSymbols` and the per-frame `Clear()` touch it, on
+the main thread. It is the one
 container that does not follow the rule below (open). **The general rule:** a container
 moves to native storage only when the Burst consumer that reads it lands in the same change. A container
 touched only by managed main-thread code pays `NativeHashMap` safety-handle overhead against a
@@ -276,7 +285,8 @@ Play-mode profile shows it).
 Deferring the collision verdict by a frame ("The collision verdict applies one frame late") means a
 later update stages with a non-empty `_placedLastFrame`, so the A-5 incumbency term enters
 `ComparePlacementOrder` on every update after the first. This is safe because incumbency-carry-forward has a
-measured one-step fixed point: feeding a generation's collision survivors forward as the next generation's incumbents, repeatedly, converges to
+measured one-step fixed point: feeding a generation's collision survivors forward as the next generation's
+incumbents, repeatedly, converges to
 the same winner set at every subsequent generation — it does not oscillate. Inverting the incumbency term
 (sorting incumbents last) does make the winner set churn hard, which confirms the fixed point is a real
 property of the algorithm and not an artifact of a test that cannot fail.
