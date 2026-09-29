@@ -369,7 +369,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// The layer entity's name comes from the per-layer style-layer id when one is supplied — even when
         /// two layers share one material — and falls back to the (shared, generic) material name only when no
-        /// layer names are supplied at all (back-compat).
+        /// layer names are supplied at all (back-compat). A restyle drops a retired slot's name.
         /// </summary>
         [Test]
         public void AddTileLayer_NamingPolicy_UsesLayerIdWhenSupplied_FallsBackToMaterialNameOtherwise()
@@ -398,6 +398,19 @@ namespace MapRenderer.Tests.Visual
                 int h = r.AddTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
                     "With no layer names, the entity name falls back to the material name (back-compat).");
+            }
+
+            // ── A restyle that retires a slot drops its name; a surviving slot keeps its own ──
+            using (var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
+            {
+                r.SetLayerMaterials(new Material[] { null, mat }, null);
+                int hRetired  = r.AddTileLayer(mesh, o, 0, tid);
+                int hSurvivor = r.AddTileLayer(mesh, o, 1, tid);
+
+                Assert.AreEqual("road-primary", r.GetLayerEntityName(hSurvivor),
+                    "A surviving slot keeps its style-layer name across SetLayerMaterials.");
+                Assert.AreNotEqual("water", r.GetLayerEntityName(hRetired),
+                    "A retired slot must not keep the stale style-layer name it had before the restyle.");
             }
         }
 

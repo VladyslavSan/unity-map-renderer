@@ -168,7 +168,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             string layerName = (uint)materialIndex < (uint)_layerNames.Count
                 && !string.IsNullOrEmpty(_layerNames[materialIndex])
                     ? _layerNames[materialIndex]
-                    : mat.name;
+                    : mat != null ? mat.name : string.Empty;
 
             MeshNode node = _layerPool.Get();
             node.AttachAt(container, layerName);
@@ -210,6 +210,10 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
             _layerMaterials.Clear();
             for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
+
+            // A retired slot keeps no style-layer name: its material is null and nothing draws into it.
+            for (int i = 0; i < _layerNames.Count && i < layerMaterials.Count; i++)
+                if (layerMaterials[i] == null) _layerNames[i] = null;
 
             if (_layerVisible.Count > layerMaterials.Count)
                 _layerVisible.RemoveRange(layerMaterials.Count, _layerVisible.Count - layerMaterials.Count);

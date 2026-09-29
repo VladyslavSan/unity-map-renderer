@@ -1300,7 +1300,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// The layer GameObject's name comes from the per-layer style-layer id when one is supplied — even
         /// when two layers share one material — and falls back to the (shared, generic) material name only
-        /// when no layer names are supplied at all (back-compat).
+        /// when no layer names are supplied at all (back-compat). A restyle drops a retired slot's name.
         /// </summary>
         [Test]
         public void AddTileLayer_NamingPolicy_UsesLayerIdWhenSupplied_FallsBackToMaterialNameOtherwise()
@@ -1330,6 +1330,20 @@ namespace MapRenderer.Tests.Visual
                 r.AddTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.Container(tid).GetChild(0).name,
                     "With no layer names, the GameObject name falls back to the material name (back-compat).");
+            }
+
+            // ── A restyle that retires a slot drops its name; a surviving slot keeps its own ──
+            using (var r = new GameObjectTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
+            {
+                r.SetLayerMaterials(new Material[] { null, mat }, null);
+                r.AddTileLayer(mesh, o, 0, tid);
+                r.AddTileLayer(mesh, o, 1, tid);
+
+                Transform container = r.Container(tid);
+                Assert.AreEqual("road-primary", container.GetChild(1).name,
+                    "A surviving slot keeps its style-layer name across SetLayerMaterials.");
+                Assert.AreNotEqual("water", container.GetChild(0).name,
+                    "A retired slot must not keep the stale style-layer name it had before the restyle.");
             }
         }
 
