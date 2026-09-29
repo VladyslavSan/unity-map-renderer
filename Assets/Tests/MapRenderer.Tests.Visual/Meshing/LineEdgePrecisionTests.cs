@@ -2598,27 +2598,14 @@ namespace MapRenderer.Tests.Visual
             private readonly SnapshotRenderer _snap;
             private readonly List<Object>     _disposables = new List<Object>();
 
-            private readonly int          _prevQuality;
-            private readonly AmbientMode  _prevAmbientMode;
-            private readonly Color        _prevAmbientLight;
+            private readonly LitAmbientScope _lit;
 
             public SeamScene(TileBufferClip clip, float alpha, Color background, float viewHalfWidth)
             {
-                _prevQuality      = QualitySettings.GetQualityLevel();
-                _prevAmbientMode  = RenderSettings.ambientMode;
-                _prevAmbientLight = RenderSettings.ambientLight;
-                QualitySettings.SetQualityLevel(0, false);
-                RenderSettings.ambientMode  = AmbientMode.Flat;
-                RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
+                // Straight down: both tiles shade alike.
+                _lit = new LitAmbientScope(Quaternion.Euler(90f, 0f, 0f));
 
                 _sceneGo = new GameObject("TileSeamScene");
-
-                var lightGo = new GameObject("DirLight");
-                lightGo.transform.SetParent(_sceneGo.transform);
-                lightGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f); // straight down: both tiles shade alike
-                var light = lightGo.AddComponent<Light>();
-                light.type      = LightType.Directional;
-                light.intensity = 1f;
 
                 // A mid-grey base keeps the double-painted strip well clear of saturation, which would flatten
                 // the 1.5× ratio T3 measures.
@@ -2679,9 +2666,7 @@ namespace MapRenderer.Tests.Visual
                 foreach (var d in _disposables) if (d != null) Object.DestroyImmediate(d);
                 if (_sceneGo  != null) Object.DestroyImmediate(_sceneGo);
                 if (_cameraGo != null) Object.DestroyImmediate(_cameraGo);
-                QualitySettings.SetQualityLevel(_prevQuality, false);
-                RenderSettings.ambientMode  = _prevAmbientMode;
-                RenderSettings.ambientLight = _prevAmbientLight;
+                _lit.Dispose();
             }
         }
 

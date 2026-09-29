@@ -10,9 +10,9 @@ namespace MapRenderer.Tests
     /// Pins the process-global lighting the lit map shaders read: quality level 0, a flat 0.9 ambient and one
     /// directional light. Dispose restores what it replaced.
     ///
-    /// <para>Non-obvious why: without it a lit render reads whatever ambient probe, ambient mode and lights the
-    /// earlier tests left behind. That shifted a tilted cap's reach by over a pixel at its near end, which sees a
-    /// different view angle than the plateau it is measured against.</para>
+    /// <para>Non-obvious why: the lights in the scene differ between runs. The batch runner's default directional
+    /// light exists when a test runs alone and is gone after <c>SceneIntegrityTests</c>. A lit render shaded
+    /// differently in each case, which moved a tilted cap's reach by over a pixel at its near end.</para>
     /// </summary>
     internal sealed class LitAmbientScope : IDisposable
     {
@@ -23,7 +23,8 @@ namespace MapRenderer.Tests
         /// <summary>The directional light this scope created.</summary>
         public GameObject LightGameObject { get; }
 
-        public LitAmbientScope()
+        /// <param name="lightRotation">Direction of the light; the default is a 60° pitch turned 30° in yaw.</param>
+        public LitAmbientScope(Quaternion? lightRotation = null)
         {
             _quality      = QualitySettings.GetQualityLevel();
             _ambientMode  = RenderSettings.ambientMode;
@@ -34,7 +35,7 @@ namespace MapRenderer.Tests
             RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
 
             LightGameObject = new GameObject("LitAmbientScope_DirLight");
-            LightGameObject.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+            LightGameObject.transform.rotation = lightRotation ?? Quaternion.Euler(60f, 30f, 0f);
             var light = LightGameObject.AddComponent<Light>();
             light.type      = LightType.Directional;
             light.intensity = 1f;
