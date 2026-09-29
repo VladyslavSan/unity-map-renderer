@@ -499,19 +499,15 @@ chunking was meant to close is **not** addressed and is not claimed to be.
 2. **A float32 narrowing downstream of that boundary erases the divergence.** Several hundred ULP of a double
    at tile-local magnitude is ~six orders of magnitude below one float32 ULP there. That is why a narrowed
    position keeps a bit-exact assertion rather than a softened bound.
-3. **A wall is emitted for every edge of a clipped ring, cut edges included.** What is extruded is the
-   clipped polygon, and no per-edge "this edge is a cut" provenance exists anywhere in the chain. At opacity
-   1 a cut wall faces into the other half of the building and is back-face-culled or depth-rejected. It is
-   not invisible where it matters: at the edge of the loaded cover, and while a
-   neighbour is still loading, this shows a closed truncated building where suppressing cut edges would show
-   a hollow shell. **Translucent fill-extrusion reopens this** (`docs/depth-and-render-regimes-design.md`
-   § "The general model — sub-areas", item E), by the SAME draw-order mechanism that section names: if the
-   far tile draws first, its cut wall passes the depth test and blends into the frame, and the nearer tile's
-   later, partial-alpha draw does not erase it — a visible seam band. If the near tile draws first, the far
-   tile's cut wall fails the depth test outright and never shows. Opacity 1 is unaffected, since `SrcAlpha`
-   is 1 there — the SAME blend equation still fully overwrites, with no such residual either way.
-   Suppressing it needs a new per-output-edge column out of `RingClipJob` — a contract change across all
-   its call sites.
+3. **No wall is emitted for an edge the clip introduced.** `RingClipJob` reports, per output vertex, whether
+   the edge that starts there lies on the window line because the clip cut the ring (`OutEdgeCut`: 1 = cut,
+   0 = an input edge; a ring copied verbatim, and an input edge that already lies on the window line, read 0).
+   `WallQuadJob` skips a cut edge. A cut wall faces into the other half of the building, where the neighbour
+   tile draws the rest of the building; with translucent fill-extrusion it would blend into the frame as a seam band
+   (`docs/depth-and-render-regimes-design.md` § "The general model — sub-areas", item E). The cost is a
+   hollow shell: a building the window cuts is open at the cover edge, and while a neighbour is still
+   loading, at every opacity. The column is correct for any caller of `VisitedRingCopy.Schedule`; a caller
+   that does not read it passes `default`.
 4. **Every stream view of one `Mesh.MeshData` shares one safety handle.** Two writable views cannot be two
    job fields: scheduling throws an aliasing error. A stream-write job therefore holds the whole
    `Mesh.MeshData` as **one** field and resolves every stream and index view inside `Execute()`.

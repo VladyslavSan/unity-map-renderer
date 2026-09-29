@@ -30,12 +30,21 @@ namespace MapRenderer.Unity.Jobs.Geometry
         public NativeList<int>     OutRingOffsets;
         public NativeList<int>     OutRingFeatureIdx;
 
+        /// <summary>Parallel to <see cref="OutVertices"/>: all 0, because nothing is clipped here. Always
+        /// constructed; written only when <see cref="WriteEdgeCut"/> is set.</summary>
+        public NativeList<byte> OutEdgeCut;
+
+        /// <summary>True when the caller reads <see cref="OutEdgeCut"/>.</summary>
+        public bool WriteEdgeCut;
+
         public void Execute()
         {
             OutVertices.Clear();
             OutRingOffsets.Clear();
             OutRingFeatureIdx.Clear();
             OutRingOffsets.Add(0);
+            bool wantCut = WriteEdgeCut;
+            if (wantCut) OutEdgeCut.Clear();
 
             for (int k = 0; k < RingVisitOrder.Length; k++)
             {
@@ -44,7 +53,10 @@ namespace MapRenderer.Unity.Jobs.Geometry
                 int rLen   = RingOffsets[ri + 1] - rStart;
 
                 for (int i = 0; i < rLen; i++)
+                {
                     OutVertices.Add(Vertices[rStart + i]);
+                    if (wantCut) OutEdgeCut.Add(0);
+                }
 
                 OutRingOffsets.Add(OutVertices.Length);
                 OutRingFeatureIdx.Add(RingFeatureIdx[ri]);

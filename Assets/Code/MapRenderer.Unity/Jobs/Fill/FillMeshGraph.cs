@@ -76,7 +76,7 @@ namespace MapRenderer.Unity.Jobs.Fill
             // window value cannot say so — an unset double2 is (0,0), the tile's origin corner.
             bool clipEnabled = input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax);
             JobHandle derived = VisitedRingCopy.Schedule(
-                source, visit, maxRingLen, clipEnabled, clipMin, clipMax, outVerts, outOffsets, outFeatIdx, deps);
+                source, visit, maxRingLen, clipEnabled, clipMin, clipMax, outVerts, outOffsets, outFeatIdx, default, deps);
 
             // ── Ring assembly. ────────────────────────────────────────────────────────────────────────
             var polys = PolygonDescriptors.Allocate(maxPolygons, maxHoles);

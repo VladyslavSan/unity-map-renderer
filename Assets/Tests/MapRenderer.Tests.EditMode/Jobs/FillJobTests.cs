@@ -502,6 +502,10 @@ namespace MapRenderer.Tests.Jobs
                     },
                     outRing);
 
+                // Every edge of the result lies on the window line and was introduced by the clip.
+                CollectionAssert.AreEqual(new byte[] { 1, 1, 1, 1 }, result.Cuts(0),
+                    "the buffered rect encloses the window, so all 4 output edges are cut edges.");
+
                 // Winding: Sutherland–Hodgman is orientation-preserving. A flip here silently breaks earcut,
                 // the parity oracles and stock Cull Back.
                 Assert.Greater(Shoelace2(BufferedRect), 0.0, "fixture sanity: the input ring is CCW.");
@@ -535,6 +539,62 @@ namespace MapRenderer.Tests.Jobs
                     Assert.AreEqual(interior[i].x, outRing[i].x, 0.0, $"vertex {i}.x must be BIT-identical.");
                     Assert.AreEqual(interior[i].y, outRing[i].y, 0.0, $"vertex {i}.y must be BIT-identical.");
                 }
+
+                CollectionAssert.AreEqual(new byte[] { 0, 0, 0, 0 }, result.Cuts(0),
+                    "a ring copied verbatim introduces no edge, so every flag reads 0.");
+            }
+            finally { result.Dispose(); }
+        }
+
+        /// <summary>Exact cut flags on two rings the window cuts. In the first, the right edge lies ON the window
+        /// line (x = 4096) but is an input edge, so it reads 0 where the edge the clip introduced along the top
+        /// reads 1. In the second, a vertex pokes out past x = 4096, so the clip repeats a vertex and the
+        /// surviving edge takes over the flag of the one that vanished.</summary>
+        [Test]
+        public void Clip_FlagsOnlyTheEdgesTheClipIntroduced_NotAnInputEdgeOnTheWindowLine()
+        {
+            var flush = new[]
+            {
+                new double2(3000.0, 3000.0),
+                new double2(4096.0, 3000.0),
+                new double2(4096.0, 4500.0),
+                new double2(3000.0, 4500.0),
+            };
+            var poking = new[]
+            {
+                new double2(3000.0, 3000.0),
+                new double2(4096.0, 3000.0),
+                new double2(4500.0, 3500.0),
+                new double2(4096.0, 4000.0),
+                new double2(3000.0, 4000.0),
+            };
+
+            var result = RunClip(new[] { flush, poking }, TileBufferClip.KeepTileUnits(0.0));
+            try
+            {
+                double2[] outRing = result.Ring(0);
+                byte[] cuts = result.Cuts(0);
+                Assert.AreEqual(4, outRing.Length, "fixture sanity: the cut ring is a 4-vertex rectangle.");
+
+                for (int i = 0; i < outRing.Length; i++)
+                {
+                    double2 a = outRing[i];
+                    double2 b = outRing[(i + 1) % outRing.Length];
+                    bool alongTop = a.y == 4096.0 && b.y == 4096.0; // the only edge the clip introduced
+                    Assert.AreEqual(alongTop ? 1 : 0, cuts[i],
+                        $"edge {a} → {b}: flag must be {(alongTop ? "cut" : "genuine")}, including the input " +
+                        "edge that lies on x = 4096.");
+                }
+
+                // The clip emits (4096,3000) and (4096,4000) twice each. The edge up x = 4096 is the
+                // introduced one, and (4096,4000) starts an input edge.
+                double2[] pokingRing = result.Ring(1);
+                byte[] pokingCuts = result.Cuts(1);
+                CollectionAssert.AreEqual(
+                    new[] { new double2(3000.0, 3000.0), new double2(4096.0, 3000.0),
+                            new double2(4096.0, 4000.0), new double2(3000.0, 4000.0) }, pokingRing);
+                CollectionAssert.AreEqual(new byte[] { 0, 1, 0, 0 }, pokingCuts,
+                    "(4096,3000) starts the clip-introduced edge on x = 4096; the repeated emits must keep it 1.");
             }
             finally { result.Dispose(); }
         }
@@ -904,9 +964,18 @@ namespace MapRenderer.Tests.Jobs
             public NativeList<double2> Vertices;
             public NativeList<int>     RingOffsets;
             public NativeList<int>     RingFeatureIdx;
+            public NativeList<byte>    EdgeCut;
 
             public int RingCount   => RingOffsets.Length - 1;
             public int VertexCount => Vertices.Length;
+
+            public byte[] Cuts(int ri)
+            {
+                int start = RingOffsets[ri];
+                var cuts  = new byte[RingOffsets[ri + 1] - start];
+                for (int i = 0; i < cuts.Length; i++) cuts[i] = EdgeCut[start + i];
+                return cuts;
+            }
 
             public double2[] Ring(int ri)
             {
@@ -921,6 +990,7 @@ namespace MapRenderer.Tests.Jobs
                 Vertices.Dispose();
                 RingOffsets.Dispose();
                 RingFeatureIdx.Dispose();
+                EdgeCut.Dispose();
             }
         }
 
@@ -954,9 +1024,12 @@ namespace MapRenderer.Tests.Jobs
             int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
             var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent);
             var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent);
+            var cutA    = new NativeArray<byte>(bufferCap, Allocator.Persistent);
+            var cutB    = new NativeArray<byte>(bufferCap, Allocator.Persistent);
 
             var result = new ClipResult
             {
+                EdgeCut        = new NativeList<byte>(math.max(1, totalVerts), Allocator.Persistent),
                 Vertices       = new NativeList<double2>(math.max(1, totalVerts), Allocator.Persistent),
                 RingOffsets    = new NativeList<int>(rings.Length + 1, Allocator.Persistent),
                 RingFeatureIdx = new NativeList<int>(math.max(1, rings.Length), Allocator.Persistent),
@@ -977,13 +1050,17 @@ namespace MapRenderer.Tests.Jobs
                 ClipMax           = clipMax,
                 BufferA          = bufferA,
                 BufferB          = bufferB,
+                CutA              = cutA,
+                CutB              = cutB,
+                WriteEdgeCut      = true,
                 OutVertices       = result.Vertices,
                 OutRingOffsets    = result.RingOffsets,
                 OutRingFeatureIdx = result.RingFeatureIdx,
+                OutEdgeCut        = result.EdgeCut,
             }.Run();
 
             verts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
-            bufferA.Dispose(); bufferB.Dispose(); visitOrderArr.Dispose();
+            bufferA.Dispose(); bufferB.Dispose(); cutA.Dispose(); cutB.Dispose(); visitOrderArr.Dispose();
             return result;
         }
 

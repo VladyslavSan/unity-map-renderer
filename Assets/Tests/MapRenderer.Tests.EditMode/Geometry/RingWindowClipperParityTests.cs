@@ -128,6 +128,10 @@ namespace MapRenderer.Tests.Geometry
                 var visitOrder = new NativeArray<int>(corpus.Count, Allocator.Persistent);
                 for (int i = 0; i < corpus.Count; i++) visitOrder[i] = i;
 
+                // Edge-cut fields must be constructed even when WriteEdgeCut is off (a job field cannot be default).
+                var cutOut = new NativeList<byte>(1, Allocator.Persistent);
+                var cutA   = new NativeArray<byte>(1, Allocator.Persistent);
+                var cutB   = new NativeArray<byte>(1, Allocator.Persistent);
                 new RingClipJob
                 {
                     Vertices          = vertices,
@@ -140,9 +144,10 @@ namespace MapRenderer.Tests.Geometry
                     BufferB          = bufferB,
                     OutVertices       = outVerts,
                     OutRingOffsets    = outOffsets,
-                    OutRingFeatureIdx = outFeature
+                    OutRingFeatureIdx = outFeature,
+                    OutEdgeCut        = cutOut, CutA = cutA, CutB = cutB,
                 }.Run();
-                visitOrder.Dispose();
+                visitOrder.Dispose(); cutOut.Dispose(); cutA.Dispose(); cutB.Dispose();
 
                 var result = new Dictionary<int, List<double2>>();
                 for (int r = 0; r < outFeature.Length; r++)

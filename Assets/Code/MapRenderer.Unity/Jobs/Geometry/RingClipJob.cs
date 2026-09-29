@@ -47,12 +47,29 @@ namespace MapRenderer.Unity.Jobs.Geometry
         public NativeList<int>     OutRingOffsets;
         public NativeList<int>     OutRingFeatureIdx;
 
+        /// <summary>Parallel to <see cref="OutVertices"/>: 1 when the edge that starts at that vertex was introduced
+        /// by the clip and lies on the window line, 0 when it comes from the input ring. A ring copied verbatim,
+        /// and an input edge that already lies on the window line, read 0. Always constructed; written only
+        /// when <see cref="WriteEdgeCut"/> is set.</summary>
+        public NativeList<byte> OutEdgeCut;
+
+        /// <summary>Scratch flags parallel to <see cref="BufferA"/>/<see cref="BufferB"/> (same capacity when
+        /// <see cref="WriteEdgeCut"/> is set), swapped with them.</summary>
+        public NativeArray<byte> CutA;
+
+        /// <summary>The flag counterpart of <see cref="BufferB"/>: the buffer the current clip pass writes.</summary>
+        public NativeArray<byte> CutB;
+
+        /// <summary>True when the caller reads <see cref="OutEdgeCut"/>.</summary>
+        public bool WriteEdgeCut;
+
         public void Execute()
         {
             OutVertices.Clear();
             OutRingOffsets.Clear();
             OutRingFeatureIdx.Clear();
             OutRingOffsets.Add(0);
+            if (WriteEdgeCut) OutEdgeCut.Clear();
 
             for (int k = 0; k < RingVisitOrder.Length; k++)
             {
@@ -64,7 +81,10 @@ namespace MapRenderer.Unity.Jobs.Geometry
                 if (BboxInsideWindow(rStart, rLen))
                 {
                     for (int i = 0; i < rLen; i++)
+                    {
                         OutVertices.Add(Vertices[rStart + i]);
+                        if (WriteEdgeCut) OutEdgeCut.Add(0);
+                    }
                     OutRingOffsets.Add(OutVertices.Length);
                     OutRingFeatureIdx.Add(RingFeatureIdx[ri]);
                     continue;
@@ -78,7 +98,10 @@ namespace MapRenderer.Unity.Jobs.Geometry
                 if (clippedLen == 0) continue; // wholly outside the window — drop, never reaches assembly
 
                 for (int i = 0; i < clippedLen; i++)
+                {
                     OutVertices.Add(BufferA[i]);
+                    if (WriteEdgeCut) OutEdgeCut.Add(CutA[i]);
+                }
                 OutRingOffsets.Add(OutVertices.Length);
                 OutRingFeatureIdx.Add(RingFeatureIdx[ri]);
             }
@@ -108,7 +131,10 @@ namespace MapRenderer.Unity.Jobs.Geometry
         private int ClipRing(int rStart, int rLen)
         {
             for (int i = 0; i < rLen; i++)
+            {
                 BufferA[i] = Vertices[rStart + i];
+                if (WriteEdgeCut) CutA[i] = 0; // every input edge is genuine
+            }
             int len = rLen;
 
             // axis 0 = x, axis 1 = y; keepAbove = the >= min half-plane, else the <= max one.
@@ -132,25 +158,30 @@ namespace MapRenderer.Unity.Jobs.Geometry
             int outLen = 0;
             double2 prev = BufferA[len - 1];
             bool prevInside = Inside(prev, axis, boundary, keepAbove);
+            byte prevCut = WriteEdgeCut ? CutA[len - 1] : (byte)0;
 
             for (int i = 0; i < len; i++)
             {
                 double2 cur = BufferA[i];
                 bool curInside = Inside(cur, axis, boundary, keepAbove);
+                byte curCut = WriteEdgeCut ? CutA[i] : (byte)0;
 
                 if (curInside)
                 {
+                    // Entry point: its outgoing edge is the inside part of prev→cur, so it inherits prev's flag.
                     if (!prevInside)
-                        outLen = Emit(outLen, Intersect(prev, cur, axis, boundary));
-                    outLen = Emit(outLen, cur);
+                        outLen = Emit(outLen, Intersect(prev, cur, axis, boundary), prevCut);
+                    outLen = Emit(outLen, cur, curCut);
                 }
                 else if (prevInside)
                 {
-                    outLen = Emit(outLen, Intersect(prev, cur, axis, boundary));
+                    // Exit point: the edge that leaves it runs along the window line to the next entry — a cut.
+                    outLen = Emit(outLen, Intersect(prev, cur, axis, boundary), 1);
                 }
 
                 prev       = cur;
                 prevInside = curInside;
+                prevCut    = curCut;
             }
 
             // Close the ring: Emit drops a repeated on-plane vertex, but the wrap-around can still leave
@@ -161,14 +192,27 @@ namespace MapRenderer.Unity.Jobs.Geometry
             NativeArray<double2> consumed = BufferA;
             BufferA = BufferB;
             BufferB = consumed;
+            if (WriteEdgeCut)
+            {
+                NativeArray<byte> consumedCut = CutA;
+                CutA = CutB;
+                CutB = consumedCut;
+            }
             return outLen;
         }
 
-        /// <summary>Appends unless it would repeat the previous vertex (a zero-length edge).</summary>
-        private int Emit(int outLen, double2 v)
+        /// <summary>Appends unless it would repeat the previous vertex (a zero-length edge). A repeat takes over
+        /// the previous vertex's outgoing flag, because the zero-length edge disappears and this vertex's
+        /// edge is the one that remains.</summary>
+        private int Emit(int outLen, double2 v, byte cut)
         {
-            if (outLen > 0 && BufferB[outLen - 1].Equals(v)) return outLen;
+            if (outLen > 0 && BufferB[outLen - 1].Equals(v))
+            {
+                if (WriteEdgeCut) CutB[outLen - 1] = cut;
+                return outLen;
+            }
             BufferB[outLen] = v;
+            if (WriteEdgeCut) CutB[outLen] = cut;
             return outLen + 1;
         }
 

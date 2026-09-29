@@ -551,6 +551,15 @@ namespace MapRenderer.Tests.Meshing
             AppendLineTo(cmds, ref cx, ref cy, (x0 + size, y0), (x0 + size, y0 + size), (x0, y0 + size));
             return cmds.ToArray();
         }
+        private static uint[] TriangleRing(int x0, int y0, int size)
+        {
+            var cmds = new List<uint>();
+            int cx = 0;
+            int cy = 0;
+            AppendMoveTo(cmds, ref cx, ref cy, x0, y0);
+            AppendLineTo(cmds, ref cx, ref cy, (x0 + size, y0), (x0, y0 + size));
+            return cmds.ToArray();
+        }
         private static uint[] SquareWithHoleRing(int x0, int y0, int size, int holeX0, int holeY0, int holeSize)
         {
             var cmds = new List<uint>();
@@ -728,9 +737,10 @@ namespace MapRenderer.Tests.Meshing
         /// <c>KeepTileUnits(0.0)</c>; walls that skipped the clip would be raised by both neighbouring tiles.
         /// </summary>
         /// <remarks>
-        /// Clipped: <c>whollyOutside</c> drops and <c>straddling</c> keeps 4 edges, so 16 wall vertices / 24
-        /// indices; unclipped: 32 / 48, the control that pins the <c>RingSelectJob</c> arm. The differing roof
-        /// counts prove the drop branch is reached. 16, not 8: every clipped edge gets a wall, cut edges too.
+        /// Clipped: <c>whollyOutside</c> drops and <c>straddling</c> keeps 4 edges, of which the 2 the clip
+        /// introduced get no wall, so 8 wall vertices / 12 indices; unclipped: 32 / 48, the control that pins the
+        /// <c>RingSelectJob</c> arm. The differing roof counts prove the drop branch is reached. The 2 surviving
+        /// walls must be the uncut edges: they equal 2 of the 4 walls of the same square built inside the window.
         /// See docs/job-scheduling-design.md § "Invariants that constrain what is built next".
         /// </remarks>
         [Test]
@@ -750,12 +760,24 @@ namespace MapRenderer.Tests.Meshing
                 "wholly-outside feature's ring was not dropped by RingClipJob and this fixture is not " +
                 "exercising the clip branch it exists to observe.");
 
-            // (1) The clipped arm: whollyOutside dropped entirely, straddling clipped to 4 edges.
-            Assert.AreEqual(16, enabled.WallVertexCount,
+            // (1) The clipped arm: whollyOutside dropped entirely, straddling clipped to 4 edges, 2 of them cuts.
+            Assert.AreEqual(8, enabled.WallVertexCount,
                 "clipped walls: whollyOutside's ring is dropped (0 walls) and straddling clips to a 4-vertex " +
-                "ring ⇒ 4 edges × 4 vertices = 16. 32 means the walls ignored the clip; 8 means the cut " +
-                "edges were suppressed (the rejected alternative — see this test's doc).");
-            Assert.AreEqual(24, enabled.WallIndexCount, "clipped walls: 4 edges × 6 indices = 24.");
+                "ring whose right and top edges the clip introduced ⇒ 2 walls × 4 vertices = 8. 32 means the " +
+                "walls ignored the clip; 16 means the cut edges still got walls.");
+            Assert.AreEqual(12, enabled.WallIndexCount, "clipped walls: 2 walls × 6 indices = 12.");
+
+            // The survivors are the UNCUT edges (bottom, left). The triangle has only those two edges plus a
+            // diagonal, so a wall on a cut edge (right, top) has no key to match in it.
+            var triangle = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon,
+                geometry: TriangleRing(3900, 3900, 196));
+            BuildCounts inside = BuildWallCounts(new IFeature[] { triangle }, paint, projection,
+                TileBufferClip.KeepTileUnits(0.0));
+            Assert.AreEqual(3, inside.WallQuadKeys.Count, "control: a triangle inside the window has 3 walls.");
+            Assert.AreEqual(2, enabled.WallQuadKeys.Count);
+            foreach (string quad in enabled.WallQuadKeys)
+                CollectionAssert.Contains(inside.WallQuadKeys, quad,
+                    "a surviving wall must be a genuine (uncut) edge of the footprint, not a wall on the window line.");
 
             // (2) The disabled-arm control: the RingSelectJob arm is untouched by this fix.
             Assert.AreEqual(32, disabled.WallVertexCount,
@@ -764,7 +786,7 @@ namespace MapRenderer.Tests.Meshing
 
             // No other byte-level test runs the extrusion wall chain's clip arm on a ring the window
             // actually cuts, so this digest is the one place a regression there would be caught.
-            Assert.AreEqual("ht+QXDJ7GL6JqHOb620LWmcJgy0vwwkVOLQ8vsmYlYg=", enabled.WallsDigest,
+            Assert.AreEqual("YgZj5oLHgMUgoyNC1qaLFoKun8Z1fOE810AKzHTnMTs=", enabled.WallsDigest,
                 "the enabled arm's wall PositionNormal.Position bits + Indices must stay bit-identical");
         }
 
@@ -778,6 +800,7 @@ namespace MapRenderer.Tests.Meshing
             public int WallVertexCount;
             public int WallIndexCount;
             public string WallsDigest;
+            public List<string> WallQuadKeys; // one key per wall: its 4 vertex positions, bit-exact
         }
 
         /// <summary>Runs the extrusion graph over one fixture at one clip setting and returns its counts.</summary>
@@ -812,6 +835,7 @@ namespace MapRenderer.Tests.Meshing
                     WallVertexCount = ext.Walls.VertexCount,
                     WallIndexCount  = ext.Walls.IndexCount,
                     WallsDigest     = WallsDigest(ext.Walls),
+                    WallQuadKeys    = WallQuadKeys(ext.Walls),
                 };
             }
             finally
@@ -822,6 +846,25 @@ namespace MapRenderer.Tests.Meshing
                 ext.Dispose();
                 geometry.Dispose();
             }
+        }
+
+        /// <summary>One key per wall (4 consecutive vertices): their positions' bit patterns, in order.</summary>
+        private static List<string> WallQuadKeys(StyledFillExtrusionTileBuilder.WallColumns walls)
+        {
+            var keys = new List<string>();
+            for (int v = 0; v + 3 < walls.VertexCount; v += 4)
+            {
+                var key = new System.Text.StringBuilder();
+                for (int k = 0; k < 4; k++)
+                {
+                    Vector3 p = walls.PositionNormal[v + k].Position;
+                    key.Append(BitConverter.SingleToInt32Bits(p.x)).Append(',')
+                       .Append(BitConverter.SingleToInt32Bits(p.y)).Append(',')
+                       .Append(BitConverter.SingleToInt32Bits(p.z)).Append(';');
+                }
+                keys.Add(key.ToString());
+            }
+            return keys;
         }
 
         /// <summary>SHA-256 over <c>walls.PositionNormal[i].Position</c>'s bits and <c>walls.Indices</c> —

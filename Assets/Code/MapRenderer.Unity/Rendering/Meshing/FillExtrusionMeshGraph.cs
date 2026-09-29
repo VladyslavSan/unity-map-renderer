@@ -12,7 +12,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
     /// Schedules one fill-extrusion layer's roof (<see cref="FillMeshGraph.Schedule"/>, unchanged) and wall
-    /// chain, one quad per edge of every clipped ring, cut edges included. Roof and walls read
+    /// chain, one quad per edge of every clipped ring except the edges the clip introduced. Roof and walls read
     /// <c>input.Geometry</c> <c>[ReadOnly]</c> only, so both schedule on the caller's deps and may run
     /// concurrently; neither calls <c>Complete()</c>. See docs/job-scheduling-design.md
     /// § "Invariants that constrain what is built next".
@@ -65,10 +65,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
             var flatTile    = NewBuffer<double2>(math.max(1, totalVerts));
             var flatOffsets = NewBuffer<int>(visit.Length + 1);
             var flatFeatIdx = NewBuffer<int>(math.max(1, visit.Length));
+            var flatEdgeCut = NewBuffer<byte>(math.max(1, totalVerts)); // 1 = an edge the clip introduced
 
             bool clipEnabled = input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax);
             JobHandle gathered = VisitedRingCopy.Schedule(
-                source, visit, maxRingLen, clipEnabled, clipMin, clipMax, flatTile, flatOffsets, flatFeatIdx, deps);
+                source, visit, maxRingLen, clipEnabled, clipMin, clipMax, flatTile, flatOffsets, flatFeatIdx, flatEdgeCut, deps);
 
             var geo   = NewBuffer<GeoCoordinate>(math.max(1, totalVerts));
             var world = NewBuffer<double3>(math.max(1, totalVerts));
@@ -99,7 +100,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             JobHandle walled = new StyledFillExtrusionTileBuilder.WallQuadJob
             {
-                RingOffsets = flatOffsets, RingFeatureIdx = flatFeatIdx,
+                RingOffsets = flatOffsets, RingFeatureIdx = flatFeatIdx, EdgeCut = flatEdgeCut,
                 Geo = geo, World = world, Up = up,
                 FeatureColors = featureColors, FeatureBake = featureBake, Globe = globeArm,
                 OutPositionNormal = walls.PositionNormal, OutExtrude = walls.Extrude,
@@ -110,13 +111,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
             // Geo[idx].Latitude for the sec φ factor.
             JobHandle flatOffsetsDisposed = ScheduleDispose(flatOffsets, walled);
             JobHandle flatFeatIdxDisposed = ScheduleDispose(flatFeatIdx, walled);
+            JobHandle flatEdgeCutDisposed = ScheduleDispose(flatEdgeCut, walled);
             JobHandle geoDisposed         = ScheduleDispose(geo, walled);
             JobHandle worldDisposed       = ScheduleDispose(world, walled);
             JobHandle upDisposed          = ScheduleDispose(up, walled);
 
             JobHandle scratchDisposed = JobHandle.CombineDependencies(
                 JobHandle.CombineDependencies(flatTileDisposed, flatOffsetsDisposed, flatFeatIdxDisposed),
-                JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed));
+                JobHandle.CombineDependencies(
+                    JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed), flatEdgeCutDisposed));
 
             JobHandle terminal = JobHandle.CombineDependencies(roof.Handle, walled, scratchDisposed);
 

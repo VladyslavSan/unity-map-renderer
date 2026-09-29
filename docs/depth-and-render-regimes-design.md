@@ -181,9 +181,9 @@ sub-areas:
   ordered by TRIANGLE order within it. If the farther surface draws first, it blends into the frame and the
   nearer one's later, partial-alpha draw does not erase it — the farther surface shows through, correctly.
   If the farther surface draws after, the depth test rejects it outright — it does not show through at all.
-  The SAME mechanism also reopens the cut-wall seam a tile boundary leaves inside one building
-  (`docs/job-scheduling-design.md` § 13, item 3): if the far tile draws first, the cut wall can show as a
-  band at the seam; at opacity 1 it never shows. Full OIT (an order-independent resolution) is out.
+  The SAME mechanism would reopen the cut-wall seam a tile boundary leaves inside one building, so no wall
+  is built on a clip-introduced edge (`docs/job-scheduling-design.md` § 13, item 3); the price is a hollow
+  shell at the cover edge. Full OIT (an order-independent resolution) is out.
 - **F. Style linter (DX, non-mutating).** Load-time detection of likely-mistake orderings (a non-3D layer
   above a 3D layer; `fill-extrusion` at the bottom) → developer-console warning. Changes **no** output.
 

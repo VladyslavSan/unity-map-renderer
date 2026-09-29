@@ -51,12 +51,15 @@ namespace MapRenderer.Tests.Meshing
             var outVerts   = new NativeList<double2>(Allocator.Persistent);
             var outOffsets = new NativeList<int>(Allocator.Persistent);
             var outFeatIdx = new NativeList<int>(Allocator.Persistent);
+            var cutOut = new NativeList<byte>(1, Allocator.Persistent); // constructed, unread: WriteEdgeCut stays off
             new RingSelectJob
             {
                 Vertices = geometry.Vertices, RingOffsets = geometry.RingOffsets, RingFeatureIdx = geometry.RingFeatureIdx,
                 RingVisitOrder = visitOrder,
                 OutVertices = outVerts, OutRingOffsets = outOffsets, OutRingFeatureIdx = outFeatIdx,
+                OutEdgeCut = cutOut,
             }.Run();
+            cutOut.Dispose();
             derived = TileGeometryBuffers.AdoptDerivedLists(
                 geometry.Tile, geometry.Extent, geometry.FeatureGeometryType, outVerts, outOffsets, outFeatIdx);
             Assert.Greater(derived.RingCount, 0, "precondition: the derived buffer has rings to assemble");

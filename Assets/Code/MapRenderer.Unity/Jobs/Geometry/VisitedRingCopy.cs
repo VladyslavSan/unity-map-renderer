@@ -36,36 +36,52 @@ namespace MapRenderer.Unity.Jobs.Geometry
         /// ping-pong buffers are raw <c>Allocator.Persistent</c> arrays, disposed by the returned
         /// handle — they sit outside the caller's own <c>NewBuffer</c>/<c>ScheduleDispose</c> pairing count.</summary>
         /// <param name="maxRingLen">From <see cref="Measure"/>; sizes the clip arm's ping-pong buffers.</param>
+        /// <param name="outEdgeCut">Optional, parallel to <paramref name="outVertices"/>: 1 for an edge the clip
+        /// introduced. <c>default</c> when unread; a placeholder is used and freed.</param>
         /// <param name="deps">Upstream dependency both arms schedule against.</param>
         internal static JobHandle Schedule(
             TileGeometryBuffers source, NativeArray<int> visit, int maxRingLen,
             bool clipEnabled, double2 clipMin, double2 clipMax,
             NativeList<double2> outVertices, NativeList<int> outRingOffsets, NativeList<int> outRingFeatureIdx,
-            JobHandle deps)
+            NativeList<byte> outEdgeCut, JobHandle deps)
         {
+            // A job field must be constructed, so a caller that reads no flags gets placeholders, freed with the rest.
+            bool wantCut = outEdgeCut.IsCreated;
+            NativeList<byte> cutOut = wantCut ? outEdgeCut : new NativeList<byte>(1, Allocator.Persistent);
+
             if (clipEnabled)
             {
                 int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
                 var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
+                // The flag scratch follows the ping-pong buffers one to one.
+                int cutCap = wantCut ? bufferCap : 1;
+                var cutA = new NativeArray<byte>(cutCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var cutB = new NativeArray<byte>(cutCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
                 JobHandle copied = new RingClipJob
                 {
                     Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
                     RingVisitOrder = visit, ClipMin = clipMin, ClipMax = clipMax,
-                    BufferA = bufferA, BufferB = bufferB,
+                    BufferA = bufferA, BufferB = bufferB, CutA = cutA, CutB = cutB, WriteEdgeCut = wantCut,
                     OutVertices = outVertices, OutRingOffsets = outRingOffsets, OutRingFeatureIdx = outRingFeatureIdx,
+                    OutEdgeCut = cutOut,
                 }.Schedule(deps);
 
-                return JobHandle.CombineDependencies(copied, bufferA.Dispose(copied), bufferB.Dispose(copied));
+                JobHandle buffersFreed = JobHandle.CombineDependencies(copied, bufferA.Dispose(copied), bufferB.Dispose(copied));
+                JobHandle cutsFreed = JobHandle.CombineDependencies(buffersFreed, cutA.Dispose(copied), cutB.Dispose(copied));
+                return wantCut ? cutsFreed : JobHandle.CombineDependencies(cutsFreed, cutOut.Dispose(copied));
             }
 
-            return new RingSelectJob
+            JobHandle selected = new RingSelectJob
             {
                 Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
                 RingVisitOrder = visit,
                 OutVertices = outVertices, OutRingOffsets = outRingOffsets, OutRingFeatureIdx = outRingFeatureIdx,
+                OutEdgeCut = cutOut, WriteEdgeCut = wantCut,
             }.Schedule(deps);
+            return wantCut ? selected : cutOut.Dispose(selected);
         }
     }
 }

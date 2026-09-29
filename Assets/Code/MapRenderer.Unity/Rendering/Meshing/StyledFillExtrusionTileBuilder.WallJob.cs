@@ -9,17 +9,20 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static partial class StyledFillExtrusionTileBuilder
     {
         /// <summary>
-        /// One quad (4 vertices, 6 indices) per edge of the pre-earcut rings, read from the projected
-        /// <see cref="Geo"/>/<see cref="World"/>/<see cref="Up"/> columns; its <c>NativeList</c> fields resolve
-        /// inside <see cref="Execute"/>, and the input fixes the output size. <see cref="Up"/> is already unit;
-        /// <c>math.normalize</c> after the <c>(float3)</c> cast only removes the narrowing error.
-        /// <see cref="Globe"/> is set on the calling thread, because a job cannot read the managed projection.
+        /// One quad (4 vertices, 6 indices) per edge of the pre-earcut rings, except <see cref="EdgeCut"/> edges,
+        /// read from the projected <see cref="Geo"/>/<see cref="World"/>/<see cref="Up"/> columns. Its <c>NativeList</c>
+        /// fields resolve inside <see cref="Execute"/>, and the input fixes the output size. <see cref="Up"/> is already
+        /// unit; <c>math.normalize</c> only removes the narrowing error. <see cref="Globe"/> is set on the calling thread.
         /// </summary>
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         internal struct WallQuadJob : IJob
         {
             [ReadOnly] public NativeList<int>           RingOffsets;     // flat, start+sentinel; length = ringCount+1
             [ReadOnly] public NativeList<int>           RingFeatureIdx;  // flat, length = ringCount
+
+            /// <summary>Per flat vertex: 1 when the edge that starts there was introduced by the tile-buffer
+            /// clip. No wall is emitted for it, because the building continues in the neighbour tile.</summary>
+            [ReadOnly] public NativeList<byte>          EdgeCut;
             [ReadOnly] public NativeList<GeoCoordinate> Geo;             // per flat vertex — TileToGeoJob output
             [ReadOnly] public NativeList<double3>       World;           // per flat vertex, origin-relative
             [ReadOnly] public NativeList<double3>       Up;              // per flat vertex, already unit at the source (see the type doc) — this job still normalizes it
@@ -48,6 +51,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     for (int i = 0; i < len; i++)
                     {
                         int idxA = start + i;
+                        if (EdgeCut[idxA] != 0) continue; // a clip-introduced edge is no wall
                         int idxB = start + (i + 1) % len;
 
                         float3 posA = (float3)World[idxA];
