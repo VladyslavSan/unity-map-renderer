@@ -75,14 +75,25 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>Teardown: parks on every still-in-flight entry, then disposes it — must not leak on Dispose.</summary>
-        public void FlushAll()
+        /// <summary>Teardown: parks on every still-in-flight entry, then disposes it. It disposes every entry
+        /// that settles, then throws once if any did not settle in time.</summary>
+        /// <param name="timeoutMs">How long to park on each entry. An entry that does not settle is left
+        /// undisposed, because its task still owns what it will produce.</param>
+        /// <exception cref="System.TimeoutException">A prologue build or a fetch did not settle.</exception>
+        public void FlushAll(int timeoutMs = 10000)
         {
+            int hungPrologues = 0;
+            int hungFetches = 0;
+
             for (int i = 0; i < _prologue.Count; i++)
             {
                 var handle = _prologue[i];
                 UniTask<Processing.TilePrologueOutput> buildTask = handle.ToUniTask();
-                buildTask.WaitOffPlayerLoop(10000);
+                if (!buildTask.WaitOffPlayerLoop(timeoutMs))
+                {
+                    hungPrologues++;
+                    continue;
+                }
 
                 if (handle.IsSucceeded)
                     handle.GetResult().Dispose();
@@ -98,11 +109,22 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int i = 0; i < _fetch.Count; i++)
             {
                 var task = _fetch[i];
-                task.WaitOffPlayerLoop(10000);
+                if (!task.WaitOffPlayerLoop(timeoutMs))
+                {
+                    hungFetches++; // a pending task has no outcome to observe yet
+                    continue;
+                }
+
                 DiscardFetchOutcome(task);
             }
 
             _fetch.Clear();
+
+            if (hungPrologues + hungFetches > 0)
+                throw new System.TimeoutException(
+                    $"PendingDisposalQueue.FlushAll: {hungPrologues} prologue build(s) and {hungFetches} fetch(es) " +
+                    $"did not settle within {timeoutMs}ms. Their native buffers are not released. A hung task " +
+                    "cannot be re-parked, so teardown fails loud instead of retrying.");
         }
 
         /// <summary>Observes a completed fetch task's outcome exactly once and throws it away — for a tile

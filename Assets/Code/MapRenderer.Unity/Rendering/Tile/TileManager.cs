@@ -2038,20 +2038,26 @@ namespace MapRenderer.Unity.Rendering.Tile
             _loaded.Clear();
 
             // The teardown loop above just re-filled the pens — flush AFTER it, or this drains pens that refill and never empty.
-            _pending.FlushAll();
+            // A pen entry that never settles makes FlushAll throw once every entry is flushed; the rest of teardown still runs.
+            try
+            {
+                _pending.FlushAll();
+            }
+            finally
+            {
+                // Destroy every Mesh the PreparedTileCache still holds — SAME ordering as the teardown loop.
+                _prepared.Dispose();
 
-            // Destroy every Mesh the PreparedTileCache still holds — SAME ordering as the teardown loop.
-            _prepared.Dispose();
+                // Dispose the backend AFTER destroying all tile meshes, so it never references a freed Mesh.
+                _instanced?.Dispose();
+                _instanced = null;
 
-            // Dispose the backend AFTER destroying all tile meshes, so it never references a freed Mesh.
-            _instanced?.Dispose();
-            _instanced = null;
+                // After the teardown pass above, which releases fetches through this registry.
+                _sources.Dispose();
 
-            // After the teardown pass above, which releases fetches through this registry.
-            _sources.Dispose();
-
-            // Dispose the CTS LAST — the pen flush above has already completed, so no worker is parked.
-            _lifetimeCts.Dispose();
+                // Dispose the CTS LAST — the pen flush above has completed, so no worker is parked (bar a hung one it reported).
+                _lifetimeCts.Dispose();
+            }
         }
     }
 }

@@ -1336,6 +1336,20 @@ namespace MapRenderer.Tests.Structure
                 "asserted on character offsets because both counts are 1 either way. A clear that runs " +
                 "FIRST empties the map, so the pass then walks nothing and every unsettled record's mesh " +
                 "build and fetch is dropped without ever reaching the funnel.");
+
+            // The pen flush may throw for an entry that never settles; the rest of teardown must still run.
+            // So it sits in a `try` whose `finally` holds the last disposal, the CTS.
+            Match tryKeyword = Regex.Match(body, @"\btry\b");
+            Assert.IsTrue(tryKeyword.Success, "TileManager.DoDispose must wrap the pen flush in a try.");
+            string tryBody = ExtractBlockAfter(body, tryKeyword.Index + tryKeyword.Length, path, out int tryEndIndex);
+            StringAssert.Contains("_pending.FlushAll()", tryBody,
+                "the try in TileManager.DoDispose must hold the pen flush, which can throw a TimeoutException.");
+            Match finallyKeyword = Regex.Match(body.Substring(tryEndIndex + 1), @"^\s*finally\b");
+            Assert.IsTrue(finallyKeyword.Success,
+                "the flush's try in TileManager.DoDispose must be followed by a finally, or a hung entry skips the rest of teardown.");
+            string finallyBody = ExtractBlockAfter(body, tryEndIndex + 1 + finallyKeyword.Length, path, out _);
+            StringAssert.Contains("_lifetimeCts.Dispose()", finallyBody,
+                "the finally must dispose the lifetime CTS last, so a thrown flush cannot leak it.");
         }
 
         /// <summary><c>SetSources</c> must clear every slot-keyed collection

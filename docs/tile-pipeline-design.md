@@ -105,7 +105,8 @@ Work abandoned mid-flight has no result yet to dispose, so it is stashed and dis
 `PendingDisposalQueue` owns three pens — a prologue build, a graph build, a fetch — filled from the single
 site that abandons a record, `TileManager.RenderTeardownRecord`, polled once per Update and flushed at
 teardown. Both drain methods complete the graph arm's job handles synchronously, so both are main-thread
-only. The pens are a lifetime concern rather than a lifecycle one, which is why they are the part that
+only. The teardown wait is bounded per entry: an entry that does not settle is reported by one
+`TimeoutException`, after every settled entry is disposed, and its result is not released. The pens are a lifetime concern rather than a lifecycle one, which is why they are the part that
 leaves.
 
 ## 4. The per-frame budgets

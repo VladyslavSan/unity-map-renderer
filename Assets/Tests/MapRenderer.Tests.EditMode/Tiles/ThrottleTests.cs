@@ -167,6 +167,31 @@ namespace MapRenderer.Tests.Tiles
                 }
             }
         }
+
+        /// <summary><c>FlushAll</c> must SURFACE an entry that does not settle inside its timeout, and only
+        /// after it has flushed every other entry. A hung fetch is stashed BEFORE a completed one, and a hung
+        /// prologue is stashed as well: a throw at the first hang, or a swallowed timeout, both fail here.</summary>
+        /// <remarks>RED: make <c>FlushAll</c> ignore <c>WaitOffPlayerLoop</c>'s result and never throw (reds
+        /// <c>Throws</c>), or throw at the first hang (reds the disposed count).</remarks>
+        [Test]
+        public void FlushAll_SurfacesEntriesThatDoNotSettle_AfterFlushingTheOthers()
+        {
+            var queue = new PendingDisposalQueue();
+            var tile = new TileId { Z = 0, X = 0, Y = 0 };
+
+            queue.StashPrologue(new WorkHandle<TilePrologueOutput>(new UniTaskCompletionSource<TilePrologueOutput>()));
+            queue.StashFetch(new UniTaskCompletionSource<SharedDisposable<IDecodedTile>>().Task.Preserve());
+
+            var probe = new LeaseProbeDecoder();
+            var settled = new SharedDisposable<IDecodedTile>(probe.Decode(tile, SampleTileFixture.Bytes()));
+            queue.StashFetch(UniTask.FromResult(settled).Preserve());
+
+            var ex = Assert.Throws<TimeoutException>(() => queue.FlushAll(timeoutMs: 50));
+            StringAssert.Contains("1 prologue build(s) and 1 fetch(es)", ex.Message,
+                "the timeout must name what did not settle, not just that something did not.");
+            Assert.AreEqual(1, probe.DisposedCount,
+                "the fetch that DID settle, stashed after the hung one, must still be released before the throw.");
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
