@@ -94,7 +94,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
 
             var fake = new FakeTileFeatureSource(MakeFixtureTile);
 
-            var style = StyleParser.Parse($@"{{
+            var style = TestStyle.Document($@"{{
                 ""version"": 8,
                 ""layers"": [
                     {{ ""id"": ""fixture-fill"", ""type"": ""fill"", ""source"": ""s"",

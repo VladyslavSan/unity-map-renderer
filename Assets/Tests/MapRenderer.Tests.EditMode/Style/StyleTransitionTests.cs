@@ -54,7 +54,7 @@ namespace MapRenderer.Tests.Style
     ]
 }}";
 
-        private static StyleDocument FillStyle(string paintJson) => StyleParser.Parse(string.Format(FillTemplate, paintJson));
+        private static StyleDocument FillStyle(string paintJson) => TestStyle.Document(string.Format(FillTemplate, paintJson));
 
         private static RenderLayerSet BuildFillSet(StyleDocument style, double initialZoom = 0.0)
         {
@@ -428,8 +428,8 @@ namespace MapRenderer.Tests.Style
           ""paint"": { ""text-opacity"": " + opacity + @" } }
     ]
 }";
-            var oldStyle = StyleParser.Parse(Doc("1"));
-            var newStyle = StyleParser.Parse(Doc("0.5"));
+            var oldStyle = TestStyle.Document(Doc("1"));
+            var newStyle = TestStyle.Document(Doc("0.5"));
 
             Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
                 "a text-opacity change must fail the gate — it always bakes into the vertex stream, so it " +
@@ -456,8 +456,8 @@ namespace MapRenderer.Tests.Style
           ""paint"": { ""text-color"": """ + textColor + @""" } }
     ]
 }";
-            var oldStyle = StyleParser.Parse(Doc("#000000"));
-            var newStyle = StyleParser.Parse(Doc("#ffffff"));
+            var oldStyle = TestStyle.Document(Doc("#000000"));
+            var newStyle = TestStyle.Document(Doc("#ffffff"));
             var set = BuildSymbolSet(oldStyle);
 
             Assert.IsTrue(set.TryRestyleInPlace(oldStyle, newStyle, StyleTransition.Default, 0.0),
@@ -488,8 +488,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SourceChangeRestyle_TakesTheRebuildPath()
         {
-            var oldStyle = StyleParser.Parse(string.Format(SourceChangeTemplate, "a"));
-            var newStyle = StyleParser.Parse(string.Format(SourceChangeTemplate, "different-host"));
+            var oldStyle = TestStyle.Document(string.Format(SourceChangeTemplate, "a"));
+            var newStyle = TestStyle.Document(string.Format(SourceChangeTemplate, "different-host"));
             using var set = BuildFillSet(oldStyle);
             Material before = set[0].Material;
 
@@ -556,7 +556,7 @@ namespace MapRenderer.Tests.Style
 
         private static RenderLayerSet BuildTwoLayerSet(double initialZoom = 0.0)
         {
-            var style = StyleParser.Parse(TwoLayerStyleJson);
+            var style = TestStyle.Document(TwoLayerStyleJson);
             var set = new RenderLayerSet();
             set.Build(style, initialZoom, MapMaterialSetTestUtil.Load());
             return set;
@@ -838,7 +838,7 @@ namespace MapRenderer.Tests.Style
 }}";
 
         private static StyleDocument SingleSymbolStyle(string textColorHex)
-            => StyleParser.Parse(string.Format(SingleSymbolTemplate, textColorHex));
+            => TestStyle.Document(string.Format(SingleSymbolTemplate, textColorHex));
 
         // #996633 -> #2288DD: no shared channel, none at 0/1.
         private const float OldR = 0x99 / 255f;
@@ -961,7 +961,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SymbolLayers_ApplyZoom_DoesNotAllocateGCMemory()
         {
-            var style = StyleParser.Parse(ThreeSymbolLayersJson);
+            var style = TestStyle.Document(ThreeSymbolLayersJson);
             using var set = new RenderLayerSet();
             set.Build(style, 8.0, MapMaterialSetTestUtil.Load());
                 Assert.AreEqual(3, set.Count, "precondition: all three symbol layers must take a slot.");
@@ -1001,7 +1001,7 @@ namespace MapRenderer.Tests.Style
         private const double ZoomInsideBound = 4.9;
         private const float  AuthoredOpacity = 0.5f;
 
-        private static StyleDocument BoundedFillStyle() => StyleParser.Parse($@"{{
+        private static StyleDocument BoundedFillStyle() => TestStyle.Document($@"{{
     ""version"": 8, ""name"": ""T"",
     ""sources"": {{ ""maplibre"": {{ ""type"": ""vector"", ""tiles"": [""https://example.invalid/{{z}}/{{x}}/{{y}}.pbf""] }} }},
     ""layers"": [ {{ ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
@@ -1169,7 +1169,7 @@ namespace MapRenderer.Tests.Style
         // ── Fixtures ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>Three fill layers over ONE vector source, at slots [a, b, c].</summary>
-        private static StyleDocument ThreeFillsAbc() => StyleParser.Parse(@"{
+        private static StyleDocument ThreeFillsAbc() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1184,7 +1184,7 @@ namespace MapRenderer.Tests.Style
         /// taken; the SOURCE set is identical, which is what makes the retry-absorption hazard live. The filter is
         /// <c>["has","NAME"]</c> — every country feature in the sample tile carries NAME, so <c>b</c> stays
         /// drawable and the mesh count does not silently change.</summary>
-        private static StyleDocument ThreeFillsAbc_FilterChangedOnB() => StyleParser.Parse(@"{
+        private static StyleDocument ThreeFillsAbc_FilterChangedOnB() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1196,7 +1196,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>F2 — a fill-extrusion layer BEFORE a fill layer, same source/source-layer. With
         /// <c>MapMaterialSet.FillExtrusionMaterial</c> null, <c>Build</c> skips the extrusion layer.</summary>
-        private static StyleDocument ExtrusionThenFillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument ExtrusionThenFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [

@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Visual
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""BrgTest"",
             ""sources"": {
@@ -77,7 +77,7 @@ namespace MapRenderer.Tests.Visual
         // The last-declared layer composites on top; the geolines overlap the countries fill across the tile.
 
         /// <summary>Style A: line(blue, renderQueue lower) under fill(red, renderQueue higher). Fill is on top.</summary>
-        private static StyleDocument StyleLineThenFill() => StyleParser.Parse(@"{
+        private static StyleDocument StyleLineThenFill() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""LineThenFill"",
             ""sources"": {
@@ -102,7 +102,7 @@ namespace MapRenderer.Tests.Visual
         }");
 
         /// <summary>Style B: fill(red, renderQueue lower) under line(blue, renderQueue higher). Line is on top.</summary>
-        private static StyleDocument StyleFillThenLine() => StyleParser.Parse(@"{
+        private static StyleDocument StyleFillThenLine() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""FillThenLine"",
             ""sources"": {
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 3: zoom-dependent line width style ──────────────────────────────────────────────
         // A zoom-interpolated line-width, so the high zoom renders more coverage than the low zoom.
 
-        private static StyleDocument StyleZoomDependentLine() => StyleParser.Parse(@"{
+        private static StyleDocument StyleZoomDependentLine() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""ZoomLine"",
             ""sources"": {
@@ -1646,7 +1646,7 @@ namespace MapRenderer.Tests.Visual
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""GoTest"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ {
@@ -1731,7 +1731,7 @@ namespace MapRenderer.Tests.Visual
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""EntTest"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ {

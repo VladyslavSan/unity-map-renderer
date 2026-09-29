@@ -1495,7 +1495,7 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument LineOnlyStyle() => StyleParser.Parse(@"{
+        private static StyleDocument LineOnlyStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": {
                 ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
@@ -1689,7 +1689,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        private static StyleDocument ThreeSourceStyle() => StyleParser.Parse(@"{
+        private static StyleDocument ThreeSourceStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""T7ThreeSources"",
             ""sources"": {
                 ""a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
@@ -1704,7 +1704,7 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         // Removes "b" — the MIDDLE slot — so "c" shifts from slot 2 to slot 1.
-        private static StyleDocument TwoSourceStyle_BRemoved() => StyleParser.Parse(@"{
+        private static StyleDocument TwoSourceStyle_BRemoved() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""T7TwoSources"",
             ""sources"": {
                 ""a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },

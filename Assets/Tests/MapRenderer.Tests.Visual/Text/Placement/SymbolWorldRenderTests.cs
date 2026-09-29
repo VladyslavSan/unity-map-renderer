@@ -809,7 +809,7 @@ namespace MapRenderer.Tests.Visual
                       ""paint"": { ""text-halo-color"": " + haloColorJson + @", ""text-halo-width"": 20, ""text-halo-blur"": 0 } }
                 ]
             }";
-            StyleDocument style = StyleParser.Parse(styleJson);
+            StyleDocument style = TestStyle.Document(styleJson);
             return (Symbol.StyleLayer)style.Layers[0];
         }
 

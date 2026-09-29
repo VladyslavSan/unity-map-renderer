@@ -786,7 +786,7 @@ namespace MapRenderer.Tests.Visual
         /// </summary>
         private static float MeasureStyledLineWidthPx(SweptScene scene, SnapshotRenderer snap)
         {
-            StyleDocument style = StyleParser.Parse(LineStyleJson);
+            StyleDocument style = TestStyle.Document(LineStyleJson);
             var lineLayer = (Line.StyleLayer)style.Layers[0];
 
             using var bag = new ObjectDisposalBag();
@@ -868,7 +868,7 @@ namespace MapRenderer.Tests.Visual
         private static float MeasureTextHeightPx(SweptScene scene, SnapshotRenderer snap)
         {
             var (glyphAtlas, quads, bounds) = BuildGlyphA();
-            StyleDocument style = StyleParser.Parse(SymbolStyleJson);
+            StyleDocument style = TestStyle.Document(SymbolStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, SweptZoom, drawIndex: 0);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned.");

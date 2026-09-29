@@ -41,7 +41,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
             FileAssert.Exists(path);
-            return StyleParser.Parse(File.ReadAllText(path));
+            return TestStyle.Document(File.ReadAllText(path));
         }
 
         /// <summary>Composite (zoom + feature) fill-color — unlike <see cref="InterpFillStyle"/>'s pure
@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-composite-style.json");
             FileAssert.Exists(path);
-            return StyleParser.Parse(File.ReadAllText(path));
+            return TestStyle.Document(File.ReadAllText(path));
         }
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
@@ -344,7 +344,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""stall2"",
             ""sources"": {

@@ -90,7 +90,7 @@ namespace MapRenderer.Tests.Rendering
         private static RenderLayerSet ThreeFillLayerSet()
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(ThreeFillsStyleJson), 0.0, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(ThreeFillsStyleJson), 0.0, MapMaterialSetTestUtil.Load());
             Assert.AreEqual(3, set.Count, "fixture: the style must produce exactly three slots.");
             return set;
         }
@@ -361,7 +361,7 @@ namespace MapRenderer.Tests.Rendering
 
         private static List<Material> NullThenRealMaterial(out RenderLayerSet ownerSet)
         {
-            var style = StyleParser.Parse(OneFillStyleJson);
+            var style = TestStyle.Document(OneFillStyleJson);
             ownerSet  = new RenderLayerSet();
             ownerSet.Build(style, 0.0, MapMaterialSetTestUtil.Load());
             return new List<Material> { null, ownerSet[0].Material };
@@ -458,7 +458,7 @@ namespace MapRenderer.Tests.Rendering
         private static RenderLayerSet ThreeFillLayerSet()
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(ThreeFillsStyleJson), 0.0, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(ThreeFillsStyleJson), 0.0, MapMaterialSetTestUtil.Load());
             Assert.AreEqual(3, set.Count, "fixture: the transport style must produce exactly three slots.");
             return set;
         }
@@ -607,7 +607,7 @@ namespace MapRenderer.Tests.Rendering
             var set = new RenderLayerSet();
             try
             {
-                set.Build(StyleParser.Parse(AllKindsStyleJson), 0.0, MapMaterialSetTestUtil.Load());
+                set.Build(TestStyle.Document(AllKindsStyleJson), 0.0, MapMaterialSetTestUtil.Load());
                 Assert.AreEqual(5, set.Count,
                     "fixture: background, fill, line, fill-extrusion and symbol must each take a slot.");
 
@@ -650,7 +650,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void ComputeEmitOrder_RemoveItemWithoutRebuild_DropsEvictedItem()
         {
-            var style = StyleParser.Parse(OneFillStyleJson);
+            var style = TestStyle.Document(OneFillStyleJson);
             using var set = new RenderLayerSet();
             set.Build(style, 0.0, MapMaterialSetTestUtil.Load());
 
@@ -725,7 +725,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void TryGetFetchSource_FillExtrusionLayer_ReturnsTrueWithItsSource()
         {
-            StyleDocument style = StyleParser.Parse(FillExtrusionStyleJson);
+            StyleDocument style = TestStyle.Document(FillExtrusionStyleJson);
             Assert.AreEqual(1, style.Layers.Count);
             StyleLayer layer = style.Layers[0];
             Assert.AreEqual(StyleLayerType.FillExtrusion, layer.LayerType);
@@ -768,7 +768,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void Create_FillExtrusionLayer_TakingItsSlot_RestyleEasesOpacityWithNoContractChange()
         {
-            StyleDocument style = StyleParser.Parse(FillExtrusionStyleJson);
+            StyleDocument style = TestStyle.Document(FillExtrusionStyleJson);
             var settings = SettingsWithFillExtrusionMaterial();
             StyleLayer layer = style.Layers[0];
 
@@ -792,7 +792,7 @@ namespace MapRenderer.Tests.Rendering
 
                 // Default, not Instant: an Instant retarget re-pushes every constant binding regardless of
                 // value, which would mask a stray white write here that a real transition would not.
-                StyleDocument halfOpacityStyle = StyleParser.Parse(FillExtrusionStyleJsonWithOpacity(0.5f));
+                StyleDocument halfOpacityStyle = TestStyle.Document(FillExtrusionStyleJsonWithOpacity(0.5f));
                 extrusionLayer.Restyle(halfOpacityStyle.Layers[0], StyleTransition.Default, nowSeconds: 0.0);
                 extrusionLayer.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.0)); // past the 0.3s duration — settled
                 AssertAlwaysBlendState(created.Material, "after the 0.5 transition settles");
@@ -805,7 +805,7 @@ namespace MapRenderer.Tests.Rendering
                 // A SECOND restyle, 0.5 -> 1, starting where the first left off: no separate opaque contract
                 // to switch to means nothing can pop mid-ease — the blend state is unchanged, and only the
                 // uniform moves. Mid-transition (0.15s into the 0.3s window) must read STRICTLY between.
-                StyleDocument constantOneStyle = StyleParser.Parse(FillExtrusionStyleJsonWithOpacity(1f));
+                StyleDocument constantOneStyle = TestStyle.Document(FillExtrusionStyleJsonWithOpacity(1f));
                 extrusionLayer.Restyle(constantOneStyle.Layers[0], StyleTransition.Default, nowSeconds: 1.0);
                 extrusionLayer.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 1.15));
                 AssertAlwaysBlendState(created.Material, "mid-transition from 0.5 to 1");
@@ -905,7 +905,7 @@ namespace MapRenderer.Tests.Rendering
         private static RenderLayerSet Build(string json)
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(json), 0.0, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(json), 0.0, MapMaterialSetTestUtil.Load());
             return set;
         }
 
@@ -916,7 +916,7 @@ namespace MapRenderer.Tests.Rendering
         public void SkippedLayers_ReplacedNotAppended_OnRestyle()
         {
             using RenderLayerSet set = Build(CircleInterleavedStyleJson);
-            set.Build(StyleParser.Parse(SourcelessSymbolStyleJson), 0.0, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(SourcelessSymbolStyleJson), 0.0, MapMaterialSetTestUtil.Load());
 
             Assert.AreEqual(1, set.SkippedLayers.Count, "a restyle replaces the summary — the old style's skips are gone.");
             Assert.AreEqual(LayerSkipReason.GenuinelyUnpainted, set.SkippedLayers[0].Reason);
@@ -1005,10 +1005,10 @@ namespace MapRenderer.Tests.Rendering
             Track(go);
             try
             {
-                RestyleHarness.SpinToCompleted(view.SetStyle(StyleParser.Parse(ValidFilterInterleavedStyleJson), "v1"));
+                RestyleHarness.SpinToCompleted(view.SetStyle(TestStyle.Document(ValidFilterInterleavedStyleJson), "v1"));
                 Assert.AreEqual(3, view.View.Layers.Count, "all three layers must render while every filter compiles.");
 
-                RestyleHarness.SpinToCompleted(view.SetStyle(StyleParser.Parse(UnsupportedFilterInterleavedStyleJson), "v2"));
+                RestyleHarness.SpinToCompleted(view.SetStyle(TestStyle.Document(UnsupportedFilterInterleavedStyleJson), "v2"));
 
                 Assert.AreEqual(2, view.View.Layers.Count, "fill-a and line-c must both still take a slot after the rebuild.");
                 Assert.AreEqual("fill-a", view.View.Layers[0].StyleLayer.Id);
@@ -1192,7 +1192,7 @@ namespace MapRenderer.Tests.Rendering
                 // consumer goes before its source.
                 var extrusionLessMaterials = Track(WithoutExtrusionMaterial());
                 using RenderLayerSet extrusionSkipped = new RenderLayerSet();
-                extrusionSkipped.Build(StyleParser.Parse(ExtrusionSkippedOtherPresentStyleJson), 0.0, extrusionLessMaterials);
+                extrusionSkipped.Build(TestStyle.Document(ExtrusionSkippedOtherPresentStyleJson), 0.0, extrusionLessMaterials);
                 Assert.AreEqual(1, extrusionSkipped.Count, "drive precondition: only the line layer survives.");
 
                 Assert.AreNotEqual(
@@ -1283,7 +1283,7 @@ namespace MapRenderer.Tests.Rendering
         public void TryGetFetchSource_RefusesALayerThatCanNeverDraw_ForAnyReason(
             string styleJson, string[] expectedFetched, string message)
         {
-            StyleDocument doc = StyleParser.Parse(styleJson);
+            StyleDocument doc = TestStyle.Document(styleJson);
             var fetched = new List<string>();
             foreach (StyleLayer sl in doc.Layers)
                 if (RenderLayerFactory.TryGetFetchSource(sl, out string sid))
@@ -1376,7 +1376,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void FillRenderLayer_EmptySelection_ReturnsNull_RealSelection_ReturnsABuild()
         {
-            var style = StyleParser.Parse(@"{
+            var style = TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [ { ""id"": ""f"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""sl"",
@@ -1390,7 +1390,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void FillExtrusionRenderLayer_EmptySelection_ReturnsNull_RealSelection_ReturnsABuild()
         {
-            var style = StyleParser.Parse(@"{
+            var style = TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [ { ""id"": ""fe"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""sl"",
@@ -1407,7 +1407,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void LineRenderLayer_EmptySelection_ReturnsNull_RealSelection_ReturnsABuild()
         {
-            var style = StyleParser.Parse(@"{
+            var style = TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [ { ""id"": ""l"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""sl"",
@@ -1461,7 +1461,7 @@ namespace MapRenderer.Tests.Rendering
         private static RenderLayerSet Build(string json)
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(json), 0.0, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(json), 0.0, MapMaterialSetTestUtil.Load());
             return set;
         }
 
@@ -1577,7 +1577,7 @@ namespace MapRenderer.Tests.Rendering
                 "this tooth needs SymbolIconWorld assigned on the production set to observe the icon queue write.");
 
             using var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(TwoSymbolLayersStyleJson), 0.0, settings);
+            set.Build(TestStyle.Document(TwoSymbolLayersStyleJson), 0.0, settings);
 
             Assert.AreEqual(2, set.Count, "one render layer per declared symbol layer.");
             for (int i = 0; i < set.Count; i++)
@@ -1611,7 +1611,7 @@ namespace MapRenderer.Tests.Rendering
         {
             var settings = MapMaterialSetTestUtil.Load();
             using var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(TwoSymbolLayersStyleJson), 0.0, settings);
+            set.Build(TestStyle.Document(TwoSymbolLayersStyleJson), 0.0, settings);
 
             var layer0 = (SymbolRenderLayer)set[0];
             var layer1 = (SymbolRenderLayer)set[1];
@@ -1627,7 +1627,7 @@ namespace MapRenderer.Tests.Rendering
         {
             // RenderLayerFactory maps a StyleLayer subtype → IRenderLayer: raster maps to null (no slot), and
             // background/symbol produce a render layer.
-            StyleDocument style = StyleParser.Parse(RasterAndFillStyleJson);
+            StyleDocument style = TestStyle.Document(RasterAndFillStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 
             int drawIndex = 0;
@@ -1651,7 +1651,7 @@ namespace MapRenderer.Tests.Rendering
         [Test]
         public void Factory_Create_ReturnsTheAxisBearingPlaceholders_ForSymbolAndBackground()
         {
-            StyleDocument style = StyleParser.Parse(InterleavedStyleJson);
+            StyleDocument style = TestStyle.Document(InterleavedStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 
             int drawIndex = 0;

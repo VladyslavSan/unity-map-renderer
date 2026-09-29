@@ -788,7 +788,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgLinePropReadback_PackedValuesMatchMaterial()
         {
-            var style  = StyleParser.Parse(LineStyleJson);
+            var style  = TestStyle.Document(LineStyleJson);
             using var set = new RenderLayerSet();
             set.Build(style, 0.0, MapMaterialSetTestUtil.Load());
 

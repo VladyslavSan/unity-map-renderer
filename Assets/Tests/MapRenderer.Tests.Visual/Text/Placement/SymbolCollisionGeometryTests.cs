@@ -704,7 +704,7 @@ namespace MapRenderer.Tests.Visual
                         translatePx.y.ToString(CultureInfo.InvariantCulture) + @"] } }
                 ] }";
                 renderLayer = SymbolRenderLayer.Create(
-                    (StyleLayer)MapRenderer.Unity.Style.StyleParser.Parse(styleJson).Layers[0], settings,
+                    (StyleLayer)MapRenderer.Tests.TestStyle.Document(styleJson).Layers[0], settings,
                     initialZoom: 14.0, drawIndex: 0);
                 var layers = new List<SymbolRenderLayer> { renderLayer };
 

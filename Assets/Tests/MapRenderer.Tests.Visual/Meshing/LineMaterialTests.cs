@@ -914,7 +914,7 @@ namespace MapRenderer.Tests.Visual
 
             // ── Build the geolines line mesh on the globe via the real StyledLineTileBuilder. ──
             using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, SampleTileFixture.Bytes());
-            var style = StyleParser.Parse(LineStyleJson());
+            var style = TestStyle.Document(LineStyleJson());
             var styleLayer = (Line.StyleLayer)style.Layers[0];
             var paint  = styleLayer.Paint;
             var layout = styleLayer.Layout;

@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Lifetime
 
         // The LINE layer is vestigial for this file's purposes, but is kept: both tests still exercise a
         // two-layer style, matching every other cover fixture in this test family.
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""TeardownCancel"",
             ""sources"": {

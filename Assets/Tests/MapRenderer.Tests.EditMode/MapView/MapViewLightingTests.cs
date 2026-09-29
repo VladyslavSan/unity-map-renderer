@@ -1188,7 +1188,7 @@ namespace MapRenderer.Tests.MapViews
         }
 
         /// <summary>A one-fill style over the sample tile with <paramref name="lightAndSky"/>'s root keys.</summary>
-        private static StyleDocument MapStyle(string lightAndSky) => StyleParser.Parse(
+        private static StyleDocument MapStyle(string lightAndSky) => TestStyle.Document(
             "{\"version\":8,\"name\":\"T\"," + lightAndSky.Substring(1, lightAndSky.Length - 2) + "," +
             "\"sources\":{\"s\":{\"type\":\"vector\",\"tiles\":[\"https://example.invalid/{z}/{x}/{y}.pbf\"]}}," +
             "\"layers\":[{\"id\":\"fill0\",\"type\":\"fill\",\"source\":\"s\",\"source-layer\":\"countries\"}]}");

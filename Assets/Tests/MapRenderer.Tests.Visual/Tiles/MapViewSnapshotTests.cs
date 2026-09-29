@@ -38,7 +38,7 @@ namespace MapRenderer.Tests.Visual
 
 
         // Minimal one-fill-layer style for snapshot testing (constant red, countries source-layer).
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""SnapTest"",
             ""sources"": {

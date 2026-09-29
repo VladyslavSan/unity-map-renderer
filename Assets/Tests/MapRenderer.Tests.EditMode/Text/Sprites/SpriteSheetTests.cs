@@ -78,7 +78,7 @@ namespace MapRenderer.Tests.Text.Sprites
                 };
 
                 // No symbol layers at all — the case an early return on "no symbol layers" would swallow.
-                var style = StyleParser.Parse(SymbolFreePatternStyle);
+                var style = TestStyle.Document(SymbolFreePatternStyle);
                 subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
 
                 Assert.IsFalse(subsystem.HasSymbolLayers,
@@ -172,7 +172,7 @@ namespace MapRenderer.Tests.Text.Sprites
                 ("missing", new GatedSpriteSource(_ => UniTask.FromResult(SpriteResponse.Absent()))),
             };
 
-            var style = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+            var style = TestStyle.Document("{\"version\":8,\"layers\":[]}");
             subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
 
             for (var settle = SettleTimeout.Start(); settle.Running && subsystem.SpriteAtlas == null; ) yield return null;
@@ -199,7 +199,7 @@ namespace MapRenderer.Tests.Text.Sprites
                 ("broken", new GatedSpriteSource(_ => throw new InvalidOperationException("simulated fetch failure"))),
             };
 
-            var style = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+            var style = TestStyle.Document("{\"version\":8,\"layers\":[]}");
             subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
 
             for (var settle = SettleTimeout.Start(); settle.Running && subsystem.SpriteAtlas == null; ) yield return null;
@@ -671,7 +671,7 @@ namespace MapRenderer.Tests.Text.Sprites
                 ""layers"": [ { ""id"": ""bg"", ""type"": ""background"",
                                 ""paint"": { ""background-color"": ""#ff0000"" } } ]
             }";
-            var task = view.SetStyle(StyleParser.Parse(styleJson), "ratio-wiring").Preserve();
+            var task = view.SetStyle(TestStyle.Document(styleJson), "ratio-wiring").Preserve();
             task.WaitOffPlayerLoop(5000);
             task.GetAwaiter().GetResult();
 

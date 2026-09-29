@@ -389,7 +389,7 @@ namespace MapRenderer.Tests.Text.Placement
             var builder = new StyledSymbolTileBuilder(glyphManager);
 
             using MvtTile mvt = MvtDecoder.Decode(Tile, _tileBytes);
-            var style = StyleParser.Parse(StyleJson);
+            var style = TestStyle.Document(StyleJson);
             var symbolLayers = new List<Symbol.StyleLayer>();
             foreach (StyleLayer layer in style.Layers)
                 if (layer is Symbol.StyleLayer symbol) symbolLayers.Add(symbol);

@@ -68,7 +68,7 @@ namespace MapRenderer.Tests.Visual
         /// Layer 1 (top):    blue (#0000FF as rgba).
         /// Both layers resolve against the fixture tile (which has a "countries" MVT layer).
         /// </summary>
-        private static StyleDocument TwoFillLayerStyle() => StyleParser.Parse(@"{
+        private static StyleDocument TwoFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""TwoFill"",
             ""sources"": {
@@ -151,7 +151,7 @@ namespace MapRenderer.Tests.Visual
         // ─── Interleaved fill/line draw order follows STYLE order, not type (regression) ──────────
         // A [fill, line, fill] line must draw BETWEEN the fills; bucketing by type would put it on top of both.
 
-        private static StyleDocument FillLineFillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillLineFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""FillLineFill"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
@@ -210,7 +210,7 @@ namespace MapRenderer.Tests.Visual
         // ─── #3: ≥2 distinct baked vertex colors (DECISIVE) ──────────────────────────────────────
         // Matches on "CONTINENT", which the z0 fixture encodes (the demo style's ADM0_A3 it does not).
 
-        private static StyleDocument ContinentFillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument ContinentFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""ContinentFill"",
             ""sources"": {
@@ -353,7 +353,7 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = Track(new GameObject("MapView"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            var style = StyleParser.Parse(styleJson);
+            var style = TestStyle.Document(styleJson);
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
@@ -411,7 +411,7 @@ namespace MapRenderer.Tests.Visual
         public void ZoomStyleApplier_ZoomDependentStops_ChangesFloatUniformWithZoom()
         {
             // Parse a fill layer with zoom-dependent opacity (stops: 0→0.3, 6→1.0).
-            var styleDoc = StyleParser.Parse(@"{
+            var styleDoc = TestStyle.Document(@"{
                 ""version"": 8, ""name"": ""T"",
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""x""] } },
                 ""layers"": [{
@@ -485,7 +485,7 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = Track(new GameObject("MapView"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            var style = StyleParser.Parse(styleJson);
+            var style = TestStyle.Document(styleJson);
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
@@ -534,7 +534,7 @@ namespace MapRenderer.Tests.Visual
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
             FileAssert.Exists(path);
-            var style = StyleParser.Parse(File.ReadAllText(path));
+            var style = TestStyle.Document(File.ReadAllText(path));
 
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = Track(new GameObject("MapView"));

@@ -98,7 +98,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Resolve_FillsVectorSourceFromTileJson_RealLibertyShapes()
         {
-            var style = StyleParser.Parse(LoadStreamingFixtureText("liberty.json"));
+            var style = TestStyle.Document(LoadStreamingFixtureText("liberty.json"));
             var openmaptiles = style.GetSource("openmaptiles");
 
             // Precondition (real liberty shape): vector source, indirect via `url`, no inline tiles.
@@ -138,7 +138,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Resolve_InlineTilesShortCircuits_RealLibertyShapes()
         {
-            var style = StyleParser.Parse(LoadStreamingFixtureText("liberty.json"));
+            var style = TestStyle.Document(LoadStreamingFixtureText("liberty.json"));
             var ne2 = style.GetSource("ne2_shaded");
 
             Assert.IsNotNull(ne2, "liberty has an 'ne2_shaded' source");
@@ -249,7 +249,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void BoundsMalformed_IsATypedFlag_NotARawReread()
         {
-            SourceDefinition Source(string boundsJson) => StyleParser.Parse($@"{{
+            SourceDefinition Source(string boundsJson) => TestStyle.Document($@"{{
                 ""sources"": {{ ""v"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""]
                     {(boundsJson == null ? "" : $@", ""bounds"": {boundsJson}")} }} }}
             }}").Sources["v"];
@@ -328,7 +328,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void MaxZoomDefault_Is18ForGeoJson_22ForVectorAndOthers()
         {
-            SourceDefinition GeoJson(string maxZoomJson = null) => StyleParser.Parse($@"{{
+            SourceDefinition GeoJson(string maxZoomJson = null) => TestStyle.Document($@"{{
                 ""sources"": {{ ""g"": {{ ""type"": ""geojson"", ""data"": {{ ""type"": ""FeatureCollection"",
                     ""features"": [] }}{(maxZoomJson == null ? "" : $@", ""maxzoom"": {maxZoomJson}")} }} }}
             }}").Sources["g"];
@@ -337,7 +337,7 @@ namespace MapRenderer.Tests.Style
                 "an absent maxzoom on a geojson source must default to the spec's 18, not the vector default");
             Assert.AreEqual(12, GeoJson("12").MaxZoom, "an explicit maxzoom is read as-is");
 
-            SourceDefinition vector = StyleParser.Parse(@"{
+            SourceDefinition vector = TestStyle.Document(@"{
                 ""sources"": { ""v"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } }
             }").Sources["v"];
             Assert.AreEqual(StyleParser.DefaultSourceMaxZoom, vector.MaxZoom,
@@ -351,7 +351,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void BufferParsing_ClampsToSpecRange_AndIsNullWhenAbsentOrNotANumber()
         {
-            SourceDefinition GeoJsonWithBuffer(string bufferJson) => StyleParser.Parse($@"{{
+            SourceDefinition GeoJsonWithBuffer(string bufferJson) => TestStyle.Document($@"{{
                 ""sources"": {{ ""g"": {{ ""type"": ""geojson"", ""data"": {{ ""type"": ""FeatureCollection"",
                     ""features"": [] }}, ""buffer"": {bufferJson} }} }}
             }}").Sources["g"];
@@ -362,13 +362,13 @@ namespace MapRenderer.Tests.Style
             Assert.IsNull(GeoJsonWithBuffer(@"""x""").Buffer,
                 "a non-number value falls back to null (the same as an absent key), not a thrown parse or a coerced 0");
 
-            SourceDefinition absent = StyleParser.Parse(@"{
+            SourceDefinition absent = TestStyle.Document(@"{
                 ""sources"": { ""g"": { ""type"": ""geojson"", ""data"": { ""type"": ""FeatureCollection"",
                     ""features"": [] } } }
             }").Sources["g"];
             Assert.IsNull(absent.Buffer, "an absent buffer key is null — an AUTHORED value only");
 
-            SourceDefinition vector = StyleParser.Parse(@"{
+            SourceDefinition vector = TestStyle.Document(@"{
                 ""sources"": { ""v"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""],
                     ""buffer"": 64 } }
             }").Sources["v"];
@@ -682,7 +682,7 @@ namespace MapRenderer.Tests.Style
 
             // Style load warns once per composite property, naming layer and property. The zoom-only and
             // feature-only keys are the negative controls; the legacy function is the second composite.
-            StyleDocument doc = StyleParser.Parse("{\"version\":8,\"sources\":{},\"layers\":[{\"id\":\"countries-fill\"," +
+            StyleDocument doc = TestStyle.Document("{\"version\":8,\"sources\":{},\"layers\":[{\"id\":\"countries-fill\"," +
                 "\"type\":\"fill\",\"paint\":{\"fill-color\":" + compositeExpr + "," +
                 "\"fill-outline-color\":[\"interpolate\",[\"linear\"],[\"zoom\"],0,[\"rgba\",0,0,0,1],8,[\"rgba\",255,255,255,1]]," +
                 "\"fill-antialias\":[\"match\",[\"get\",\"CONTINENT\"],\"Asia\",true,false]," +
@@ -695,7 +695,7 @@ namespace MapRenderer.Tests.Style
 
             // One malformed property costs only itself: the layer stays, the property takes its default, and
             // one error names layer and property. A sibling in the same block is untouched.
-            StyleDocument bad = StyleParser.Parse("{\"version\":8,\"sources\":{},\"layers\":[" +
+            StyleDocument bad = TestStyle.Document("{\"version\":8,\"sources\":{},\"layers\":[" +
                 "{\"id\":\"countries-fill\",\"type\":\"fill\",\"paint\":{}}," +
                 "{\"id\":\"bad-line\",\"type\":\"line\",\"paint\":{\"line-color\":\"#f00\"," +
                 "\"line-width\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,1,5,2]}}]}");
@@ -926,7 +926,7 @@ namespace MapRenderer.Tests.Style
         public void ParseLayer_Visibility_SetsVisible(string layoutJson, bool expected)
         {
             string layout = layoutJson == null ? "" : $"\"layout\": {layoutJson},";
-            StyleDocument doc = StyleParser.Parse($@"{{
+            StyleDocument doc = TestStyle.Document($@"{{
     ""version"": 8, ""name"": ""T"",
     ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
     ""layers"": [ {{ ""id"": ""f0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""f0"", {layout}
@@ -1023,7 +1023,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void StyleLayer_ExposesParsedLayout()
         {
-            var style = MapRenderer.Unity.Style.StyleParser.Parse(@"{
+            var style = MapRenderer.Tests.TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://e.invalid/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [ { ""id"": ""f"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""l"",
@@ -1642,7 +1642,7 @@ namespace MapRenderer.Tests.Style
               ]
             }";
 
-            var doc = StyleParser.Parse(json);
+            var doc = TestStyle.Document(json);
 
             Assert.AreEqual(1, doc.Layers.Count);
             Assert.AreEqual(StyleLayerType.FillExtrusion, doc.Layers[0].LayerType);
@@ -2040,7 +2040,7 @@ namespace MapRenderer.Tests.Style
     public class SymbolStyleLayerTests
     {
         // Author JSON with single quotes for readability, then swap to real quotes.
-        private static StyleDocument Parse(string json) => StyleParser.Parse(json.Replace('\'', '"'));
+        private static StyleDocument Parse(string json) => TestStyle.Document(json.Replace('\'', '"'));
 
         private const string StyleJson = @"{
             'version': 8,
@@ -3309,7 +3309,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void StyleParser_PopulatesLightAndSky()
         {
-            var doc = StyleParser.Parse(
+            var doc = TestStyle.Document(
                 "{\"version\":8,\"layers\":[],\"light\":{\"intensity\":0.7}," +
                 "\"sky\":{\"fog-color\":\"#123456\"}}");
 
@@ -3323,7 +3323,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void StyleParser_AbsentLightAndSky_UseDefaults()
         {
-            var doc = StyleParser.Parse("{\"version\":8,\"layers\":[]}");
+            var doc = TestStyle.Document("{\"version\":8,\"layers\":[]}");
 
             Assert.IsNotNull(doc.Light);
             Assert.AreEqual(0.5f, doc.Light.Intensity.Evaluate(0.0), 1e-6f);
@@ -3343,7 +3343,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void StringForm_ParsesToOneDefaultEntry()
         {
-            var doc = StyleParser.Parse("{\"version\":8,\"sprite\":\"https://example.invalid/sprite\",\"layers\":[]}");
+            var doc = TestStyle.Document("{\"version\":8,\"sprite\":\"https://example.invalid/sprite\",\"layers\":[]}");
 
             Assert.AreEqual(1, doc.Sprites.Count);
             Assert.AreEqual("default", doc.Sprites[0].Id);
@@ -3353,7 +3353,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ArrayForm_KeepsEveryIdInDeclaredOrder()
         {
-            var doc = StyleParser.Parse(
+            var doc = TestStyle.Document(
                 "{\"version\":8,\"sprite\":[" +
                 "{\"id\":\"default\",\"url\":\"https://example.invalid/a\"}," +
                 "{\"id\":\"extra\",\"url\":\"https://example.invalid/b\"}" +
@@ -3369,7 +3369,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ArrayForm_MalformedEntry_IsDroppedNotThrown()
         {
-            var doc = StyleParser.Parse(
+            var doc = TestStyle.Document(
                 "{\"version\":8,\"sprite\":[" +
                 "{\"id\":\"good\",\"url\":\"https://example.invalid/a\"}," +
                 "{\"id\":\"missingUrl\"}," +
@@ -3387,7 +3387,7 @@ namespace MapRenderer.Tests.Style
         [TestCase("{\"version\":8,\"sprite\":42,\"layers\":[]}", TestName = "Sprite_YieldsAnEmptyList(MalformedType)")]
         public void Sprite_YieldsAnEmptyList(string styleJson)
         {
-            var doc = StyleParser.Parse(styleJson);
+            var doc = TestStyle.Document(styleJson);
 
             Assert.AreEqual(0, doc.Sprites.Count);
         }

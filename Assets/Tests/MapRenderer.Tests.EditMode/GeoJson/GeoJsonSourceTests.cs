@@ -174,7 +174,7 @@ namespace MapRenderer.Tests.GeoJsons
 
             try
             {
-                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
+                var style = TestStyle.Document(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
                 Assert.AreEqual(1, style.GetSource("geo").Data.Dataset.Features.Count,
                     "the inline `data` must already carry its parsed dataset before SetStyle runs — " +
                     "StyleParser.Parse, not BuildSourceSpecs, does the one-time parse");
@@ -206,7 +206,7 @@ namespace MapRenderer.Tests.GeoJsons
             try
             {
                 SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(@"""https://example.com/data.geojson""")), "geojson-url"));
+                    TestStyle.Document(StyleWithInlineData(@"""https://example.com/data.geojson""")), "geojson-url"));
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(1, docFetches, "a URL `data` must fetch exactly once through the document loader");
@@ -359,7 +359,7 @@ namespace MapRenderer.Tests.GeoJsons
             Track(go);
             try
             {
-                SpinToCompleted(view.SetStyle(StyleParser.Parse(StyleWithInlineData(
+                SpinToCompleted(view.SetStyle(TestStyle.Document(StyleWithInlineData(
                     @"{""type"":""FeatureCollection"",""features"":[]}")), "geojson-empty"));
                 PumpUntilSettled(view);
 
@@ -393,7 +393,7 @@ namespace MapRenderer.Tests.GeoJsons
 
             try
             {
-                var badDataStyle = StyleParser.Parse(StyleWithInlineData(@"{""type"":""Nonsense""}"));
+                var badDataStyle = TestStyle.Document(StyleWithInlineData(@"{""type"":""Nonsense""}"));
                 SourceDefinition badDef = badDataStyle.GetSource("geo");
                 var parseError = Assert.Throws<GeoJsonFormatException>(
                     () => GeoJsonParser.Parse(@"{""type"":""Nonsense""}"),
@@ -410,7 +410,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "the whole style down");
                 AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a malformed inline dataset");
 
-                var numberDataStyle = StyleParser.Parse(StyleWithInlineData("42"));
+                var numberDataStyle = TestStyle.Document(StyleWithInlineData("42"));
                 SourceDefinition numberDef = numberDataStyle.GetSource("geo");
                 Assert.IsNull(numberDef.Data.Url, "a bare number `data` sets no arm — not a URL");
                 Assert.IsNull(numberDef.Data.Dataset, "…nor a dataset");
@@ -452,7 +452,7 @@ namespace MapRenderer.Tests.GeoJsons
             view1.View.DocumentLoaderOverride = (uri, ct) => throw new System.IO.FileNotFoundException("no such document", uri);
             try
             {
-                Assert.DoesNotThrow(() => SpinToCompleted(view1.SetStyle(StyleParser.Parse(mixedStyle), "loader-throws")),
+                Assert.DoesNotThrow(() => SpinToCompleted(view1.SetStyle(TestStyle.Document(mixedStyle), "loader-throws")),
                     "a loader failure on one geojson source must not fault SetStyle for the whole style");
                 PumpUntilSettled(view1);
                 Assert.AreEqual(1, view1.WiredFeatureSourceCount(),
@@ -466,7 +466,7 @@ namespace MapRenderer.Tests.GeoJsons
             view2.View.DocumentLoaderOverride = (uri, ct) => UniTask.FromResult(@"{""type"":""Nonsense""}");
             try
             {
-                Assert.DoesNotThrow(() => SpinToCompleted(view2.SetStyle(StyleParser.Parse(mixedStyle), "loader-bad-body")),
+                Assert.DoesNotThrow(() => SpinToCompleted(view2.SetStyle(TestStyle.Document(mixedStyle), "loader-bad-body")),
                     "a fetched body that is not valid GeoJSON must not fault SetStyle for the whole style");
                 PumpUntilSettled(view2);
                 Assert.AreEqual(1, view2.WiredFeatureSourceCount(),
@@ -488,7 +488,7 @@ namespace MapRenderer.Tests.GeoJsons
             try
             {
                 // First style: background only, commits synchronously — establishes the "previous style".
-                SpinToCompleted(view.SetStyle(StyleParser.Parse(@"{
+                SpinToCompleted(view.SetStyle(TestStyle.Document(@"{
                     ""version"": 8,
                     ""layers"": [ { ""id"": ""bg"", ""type"": ""background"",
                                     ""paint"": { ""background-color"": ""#ff0000"" } } ]
@@ -508,7 +508,7 @@ namespace MapRenderer.Tests.GeoJsons
 
                 using var cts = new CancellationTokenSource();
                 UniTask setStyleTask = view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(@"""https://example.com/data.geojson""")),
+                    TestStyle.Document(StyleWithInlineData(@"""https://example.com/data.geojson""")),
                     "second", cts.Token).Preserve();
 
                 Assert.AreEqual(1, docFetches, "the URL data must be fetched exactly once per SetStyle");
@@ -567,7 +567,7 @@ namespace MapRenderer.Tests.GeoJsons
         // ── SourceKey carries the inline-data identity ────────────────────────────────────────────────
 
         private static SourceDefinition GeoJsonDef(string dataJson, string bufferJson = null)
-            => StyleParser.Parse(StyleWithInlineData(dataJson, bufferJson)).GetSource("geo");
+            => TestStyle.Document(StyleWithInlineData(dataJson, bufferJson)).GetSource("geo");
 
         /// <summary><b>Different data (unit)</b> — two definitions identical except for the inline <c>data</c>
         /// produce DIFFERENT keys. Without the field they are value-equal on all six other fields (an inline
@@ -720,7 +720,7 @@ namespace MapRenderer.Tests.GeoJsons
             Track(go);
             try
             {
-                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
+                var style = TestStyle.Document(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
                 view.View.Layers.Build(style, 0.0, view.Config.MaterialSet);
 
                 var built = new List<SourceType>();
@@ -771,7 +771,7 @@ namespace MapRenderer.Tests.GeoJsons
             Track(go);
             try
             {
-                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
+                var style = TestStyle.Document(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
                 view.View.Layers.Build(style, 0.0, view.Config.MaterialSet);
 
                 int created = 0;
@@ -821,7 +821,7 @@ namespace MapRenderer.Tests.GeoJsons
             Track(go);
             try
             {
-                var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax), "0"));
+                var style = TestStyle.Document(StyleWithInlineData(RectangleAt(RectMin, RectMax), "0"));
                 view.View.Layers.Build(style, 0.0, view.Config.MaterialSet);
 
                 int created = 0;
@@ -868,12 +868,12 @@ namespace MapRenderer.Tests.GeoJsons
             try
             {
                 SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax))), "first"));
+                    TestStyle.Document(StyleWithInlineData(RectangleAt(RectMin, RectMax))), "first"));
                 PumpUntilSettled(view);
                 Assert.IsNotNull(view.GetTileMeshes(WorldTile), "precondition: the first dataset rendered");
 
                 SpinToCompleted(view.SetStyle(
-                    StyleParser.Parse(StyleWithInlineData(RectangleAt(OtherMin, OtherMax))), "second"));
+                    TestStyle.Document(StyleWithInlineData(RectangleAt(OtherMin, OtherMax))), "second"));
                 PumpUntilSettled(view);
 
                 Mesh[] meshes = view.GetTileMeshes(WorldTile);
@@ -1179,7 +1179,7 @@ namespace MapRenderer.Tests.GeoJsons
         private static ITileFeatureSource WiredGeoJsonSource(
             MapView view, string dataJson, string bufferJson = null)
         {
-            var style = StyleParser.Parse(StyleWithInlineData(dataJson, bufferJson));
+            var style = TestStyle.Document(StyleWithInlineData(dataJson, bufferJson));
             UniTask<List<TileManager.SourceSpec>> task =
                 view.View.BuildSourceSpecs(style, CancellationToken.None).Preserve();
             Assert.IsTrue(task.WaitOffPlayerLoop(10000), "BuildSourceSpecs must complete within the timeout");

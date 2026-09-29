@@ -98,7 +98,7 @@ namespace MapRenderer.Tests.Tiles
                 long graphBaseline = TileBuildGraph.DebugLiveCount;
                 long fetchBaseline = SharedDisposable<IDecodedTile>.DebugLiveCount;
 
-                var style = StyleParser.Parse(@"{
+                var style = TestStyle.Document(@"{
                     ""version"": 8, ""name"": ""TeardownFlushOrder"",
                     ""sources"": {
                         ""main"":  { ""type"": ""vector"", ""tiles"": [""https://example.com/main/{z}/{x}/{y}.pbf""] },
@@ -215,7 +215,7 @@ namespace MapRenderer.Tests.Tiles
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         /// <summary>Fill-only style: countries polygon layer.</summary>
-        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""S55Test"",
             ""sources"": {
@@ -233,7 +233,7 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         /// <summary>Fill + line style: countries fill and geolines linestring layer.</summary>
-        private static StyleDocument FillAndLineStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillAndLineStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""S55TestLine"",
             ""sources"": {
@@ -808,7 +808,7 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""LoadMeasurement"",
             ""sources"": {
@@ -1183,7 +1183,7 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""stress"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
@@ -1340,7 +1340,7 @@ namespace MapRenderer.Tests.Tiles
             Track(go);
             try
             {
-                view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
                 yield return PumpUntilSettled(view);
 
                 int loaded = view.LoadedTileCount();
@@ -1407,7 +1407,7 @@ namespace MapRenderer.Tests.Tiles
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
-                view.LoadTestStyle(null, Cam(0, 0, 0), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 0), TestStyle.Document(BackgroundOnlyStyle()));
 
                 int kickTick = -1;
                 int tick = 0;
@@ -1521,7 +1521,7 @@ namespace MapRenderer.Tests.Tiles
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
-                view.LoadTestStyle(null, Cam(0, 0, 2), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 2), TestStyle.Document(BackgroundOnlyStyle()));
 
                 int kicked = 0;
                 for (var settle = SettleTimeout.Start(); settle.Running && kicked == 0; )
@@ -1618,7 +1618,7 @@ namespace MapRenderer.Tests.Tiles
                 JobHandle.ScheduleBatchedJobs();
                 view.TileManager.GraphDepsForTest = delayHandle;
 
-                view.LoadTestStyle(null, Cam(0, 0, 0), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 0), TestStyle.Document(BackgroundOnlyStyle()));
 
                 int kicked = 0;
                 for (var settle = SettleTimeout.Start(); settle.Running && kicked == 0; )
@@ -1708,7 +1708,7 @@ namespace MapRenderer.Tests.Tiles
                 long baselineGraphs = TileBuildGraph.DebugLiveCount;
                 long baselinePayloads = MeshDataPayload.DebugLiveAllocCount;
 
-                view.LoadTestStyle(null, Cam(0, 0, 0), StyleParser.Parse(TwoBackgroundLayersStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 0), TestStyle.Document(TwoBackgroundLayersStyle()));
 
                 // AllTilesSettled() reads vacuously true on an empty cover, so pump until the tile is loaded
                 // and kicked before relying on it.
@@ -1776,7 +1776,7 @@ namespace MapRenderer.Tests.Tiles
                 "background must never fetch — the source-less pipeline has no Scheduler/Source at all."));
             try
             {
-                view.LoadTestStyle(neverCalled, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(neverCalled, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
                 yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled());
@@ -1797,7 +1797,7 @@ namespace MapRenderer.Tests.Tiles
             view.Config.MaxMeshBuildsPerTick = 1; // force per-tick throttling
             try
             {
-                view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
 
                 // Admission runs on the SAME Update as the cover recompute that creates these records, so the
                 // first record can be kicked on tick 1. The per-Update CAP must bind on that tick too.
@@ -1830,7 +1830,7 @@ namespace MapRenderer.Tests.Tiles
             Track(go);
             try
             {
-                view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
                 // One LateUpdate to run the cover recompute (creates records; PumpPending, running BEFORE
                 // the recompute in the same call, sees none of them yet — so nothing is kicked either way).
                 view.LateUpdate();
@@ -1863,7 +1863,7 @@ namespace MapRenderer.Tests.Tiles
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 },
                 zoom, heading, tilt);
 
-        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""TileLoadPriority"",
             ""sources"": {
@@ -2442,7 +2442,7 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument FillAndSymbolStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillAndSymbolStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""layers"": [
@@ -2840,7 +2840,7 @@ namespace MapRenderer.Tests.Tiles
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", fileName);
             FileAssert.Exists(path);
-            return StyleParser.Parse(File.ReadAllText(path));
+            return TestStyle.Document(File.ReadAllText(path));
         }
 
         /// <summary>Real fill-layer mesh build (mirrors PreparedCacheTests.GroundTruthColorAtZoom, minus

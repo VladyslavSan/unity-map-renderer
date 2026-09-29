@@ -764,7 +764,7 @@ namespace MapRenderer.Tests.Globe
             try { TestDecodedTiles.DisposeAll(); }
             finally { base.OnTearDown(); }
         }
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""Test"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
@@ -861,7 +861,7 @@ namespace MapRenderer.Tests.Globe
             try { TestDecodedTiles.DisposeAll(); }
             finally { base.OnTearDown(); }
         }
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""Test"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
@@ -1031,7 +1031,7 @@ namespace MapRenderer.Tests.Globe
         {
             var id = new TileId { Z = z, X = x, Y = y };
 
-            StyleDocument style = StyleParser.Parse(File.ReadAllText(
+            StyleDocument style = TestStyle.Document(File.ReadAllText(
                 Path.Combine(Application.dataPath, "StreamingAssets", "Fixtures", "liberty.json")));
             LineStyleLayer layer = null;
             foreach (var l in style.Layers)
@@ -1380,7 +1380,7 @@ namespace MapRenderer.Tests.Globe
         {
             var id = new TileId { Z = z, X = x, Y = y };
 
-            StyleDocument style = StyleParser.Parse(File.ReadAllText(
+            StyleDocument style = TestStyle.Document(File.ReadAllText(
                 Path.Combine(Application.dataPath, "StreamingAssets", "Fixtures", "liberty.json")));
             LineStyleLayer layer = null;
             foreach (var l in style.Layers)

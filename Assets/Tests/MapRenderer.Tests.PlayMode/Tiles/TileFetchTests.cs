@@ -44,7 +44,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""fetch-fault"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
@@ -196,7 +196,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument FillAndSymbolStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillAndSymbolStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""layers"": [
@@ -207,7 +207,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             ]
         }");
 
-        private static StyleDocument TwoSourceStyle() => StyleParser.Parse(@"{
+        private static StyleDocument TwoSourceStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""layers"": [

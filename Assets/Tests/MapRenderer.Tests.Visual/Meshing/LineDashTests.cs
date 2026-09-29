@@ -155,7 +155,7 @@ namespace MapRenderer.Tests.Visual
                 $"physical viewport height must stay {Size} at dpr {devicePixelRatio}.");
 
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(DashStyleJson(dashArrayJson)), Zoom, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(DashStyleJson(dashArrayJson)), Zoom, MapMaterialSetTestUtil.Load());
             Assert.That(set.Count, Is.EqualTo(1), "the dashed-road style must yield exactly one render layer.");
             Assert.IsNotNull(set[0].Material, "Map/Line base material must be configured for this fixture.");
 

@@ -45,7 +45,7 @@ namespace MapRenderer.Tests.Style
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
 
         private static T FirstLayer<T>(string json) where T : StyleLayer
-            => (T)StyleParser.Parse(json).Layers[0];
+            => (T)TestStyle.Document(json).Layers[0];
 
         // ── Bake-path fixture (mirrors SymbolFeatureExtractorTests) ─────────────────────────────
 
@@ -362,7 +362,7 @@ namespace MapRenderer.Tests.Style
         private static RenderLayerSet Build(string json)
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(json), 0.0, MapMaterialSetTestUtil.Load());
+            set.Build(TestStyle.Document(json), 0.0, MapMaterialSetTestUtil.Load());
             return set;
         }
 
@@ -374,8 +374,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void RemovalRestyle_KeepsSurvivorsAndRetiresOnlyTheRemovedLayer()
         {
-            var oldStyle = StyleParser.Parse(ThreeFillOld);
-            var newStyle = StyleParser.Parse(ThreeFillRemovedB);
+            var oldStyle = TestStyle.Document(ThreeFillOld);
+            var newStyle = TestStyle.Document(ThreeFillRemovedB);
             var set = Build(ThreeFillOld);
 
             IRenderLayer layerA = set[0];
@@ -429,8 +429,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ReorderRestyle_KeepsEverySlotAndRewritesOnlyTheQueue()
         {
-            var oldStyle = StyleParser.Parse(FillSymbolFillOld);
-            var newStyle = StyleParser.Parse(FillSymbolFillReordered);
+            var oldStyle = TestStyle.Document(FillSymbolFillOld);
+            var newStyle = TestStyle.Document(FillSymbolFillReordered);
             var set = Build(FillSymbolFillOld);
 
             var instances = new IRenderLayer[] { set[0], set[1], set[2] };
@@ -467,8 +467,8 @@ namespace MapRenderer.Tests.Style
         { ""id"": ""SECOND"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""SECOND"", ""layout"": { ""text-field"": ""{NAME}"" } }
     ]
 }".Replace("FIRST", first).Replace("SECOND", second);
-            var symbolsOld = StyleParser.Parse(TwoSymbols("p", "q"));
-            var symbolsNew = StyleParser.Parse(TwoSymbols("q", "p"));
+            var symbolsOld = TestStyle.Document(TwoSymbols("p", "q"));
+            var symbolsNew = TestStyle.Document(TwoSymbols("q", "p"));
             var symbolSet = Build(TwoSymbols("p", "q"));
             var slot0 = (SymbolRenderLayer)symbolSet[0];
             var slot1 = (SymbolRenderLayer)symbolSet[1];
@@ -510,8 +510,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SymbolRemovalRestyle_RefusesAndLeavesEveryLayerUntouched()
         {
-            var oldStyle = StyleParser.Parse(FillFillSymbolFillOld);
-            var newStyle = StyleParser.Parse(FillFillSymbolRemoved);
+            var oldStyle = TestStyle.Document(FillFillSymbolFillOld);
+            var newStyle = TestStyle.Document(FillFillSymbolRemoved);
             var set = Build(FillFillSymbolFillOld);
             try
             {
@@ -574,8 +574,8 @@ namespace MapRenderer.Tests.Style
             TestName = "RefusedRestyle_LeavesEveryLayerAndMaterialInstanceUntouched_DuplicateLayerId")]
         public void RefusedRestyle_LeavesEveryLayerAndMaterialInstanceUntouched(string oldJson, string newJson, string refusalReason)
         {
-            var oldStyle = StyleParser.Parse(oldJson);
-            var newStyle = StyleParser.Parse(newJson);
+            var oldStyle = TestStyle.Document(oldJson);
+            var newStyle = TestStyle.Document(newJson);
             var set = Build(oldJson);
             var instances = new IRenderLayer[] { set[0], set[1], set[2] };
             var materials = new Material[] { set[0].Material, set[1].Material, set[2].Material };
@@ -609,13 +609,13 @@ namespace MapRenderer.Tests.Style
 }}";
 
         private static StyleDocument FillStyle(string paintJson, string extraLayerJson = "")
-            => StyleParser.Parse(string.Format(FillTemplate, extraLayerJson, paintJson));
+            => TestStyle.Document(string.Format(FillTemplate, extraLayerJson, paintJson));
 
         // ── The draw-gate keys are freely transitionable ─────────────────────────────────────
 
         // A layer with NO paint member at all — the shape that takes Signature's FIRST early return, and
         // therefore the only shape that can see whether the draw-gate reduction runs before it.
-        private static StyleDocument NoPaintStyle(string extraLayerJson) => StyleParser.Parse($@"{{
+        private static StyleDocument NoPaintStyle(string extraLayerJson) => TestStyle.Document($@"{{
     ""version"": 8, ""name"": ""T"",
     ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
     ""layers"": [ {{ ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill0""{extraLayerJson} }} ]
@@ -720,8 +720,8 @@ namespace MapRenderer.Tests.Style
                        ""fill-color-transition"": { ""duration"": 5000 } } }
     ]
 }";
-            var oldStyleWithHints = StyleParser.Parse(WithTransitionHints(@"[""rgba"",102,153,204,1]"));
-            var newStyleWithHints = StyleParser.Parse(WithTransitionHints(@"[""rgba"",204,102,51,1]"));
+            var oldStyleWithHints = TestStyle.Document(WithTransitionHints(@"[""rgba"",102,153,204,1]"));
+            var newStyleWithHints = TestStyle.Document(WithTransitionHints(@"[""rgba"",204,102,51,1]"));
             var set2 = new RenderLayerSet();
             set2.Build(oldStyleWithHints, 0.0, MapMaterialSetTestUtil.Load());
             Assert.IsTrue(set2.TryRestyleInPlace(oldStyleWithHints, newStyleWithHints, StyleTransition.Default, 0.0),
@@ -746,13 +746,13 @@ namespace MapRenderer.Tests.Style
                 .SetName("NonTransitionableChange_RefusesTheGate(Filter)");
 
             yield return new TestCaseData(
-                    (Func<StyleDocument>)(() => StyleParser.Parse(@"{
+                    (Func<StyleDocument>)(() => TestStyle.Document(@"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [ { ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill0"",
         ""paint"": { ""fill-color"": [""rgba"",102,153,204,1] } } ]
 }")),
-                    (Func<StyleDocument>)(() => StyleParser.Parse(@"{
+                    (Func<StyleDocument>)(() => TestStyle.Document(@"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [ { ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill1"",
@@ -810,7 +810,7 @@ namespace MapRenderer.Tests.Style
 }}";
 
         private static StyleDocument SymbolStyleDoc(string paintJson)
-            => StyleParser.Parse(string.Format(SymbolTemplate, paintJson));
+            => TestStyle.Document(string.Format(SymbolTemplate, paintJson));
 
         /// <summary>
         /// The real shipped liberty → liberty-night pair must survive the gate once text-color
@@ -857,7 +857,7 @@ namespace MapRenderer.Tests.Style
                          : "this fill-color presence change must refuse the in-place gate.");
         }
 
-        private static StyleDocument RootStyle(string extraRootJson) => StyleParser.Parse($@"{{
+        private static StyleDocument RootStyle(string extraRootJson) => TestStyle.Document($@"{{
     ""version"": 8, ""name"": ""T"", {extraRootJson}
     ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
     ""layers"": [ {{ ""id"": ""fill0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""fill0"" }} ]
@@ -1081,7 +1081,7 @@ namespace MapRenderer.Tests.Style
         private const double LowerOnly  = 5.0;
 
         private static StyleDocument Style(params string[] layers)
-            => StyleParser.Parse($@"{{
+            => TestStyle.Document($@"{{
     ""version"": 8, ""name"": ""T"",
     ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
     ""layers"": [ {string.Join(",", layers)} ]
@@ -1291,7 +1291,7 @@ namespace MapRenderer.Tests.Style
         public void ZoomInterpolatedOpacity_GatesTheLayerWhereItPaintsNothing()
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(@"{
+            set.Build(TestStyle.Document(@"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [ { ""id"": ""ramp"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""ramp"",
@@ -1328,7 +1328,7 @@ namespace MapRenderer.Tests.Style
         public void FeatureDependentOpacity_NeverGatesTheLayerOut()
         {
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(@"{
+            set.Build(TestStyle.Document(@"{
     ""version"": 8, ""name"": ""T"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [ { ""id"": ""dd"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""dd"",

@@ -47,7 +47,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""multi-source"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
         /// <summary>Two distinct rendered sources — the multi-source discriminator (each gets its own
         /// TileManager pipeline / <c>_loaded</c> record per cover tile).</summary>
-        private static StyleDocument TwoSourceStyle() => StyleParser.Parse(@"{
+        private static StyleDocument TwoSourceStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""multi-source-b"",
             ""sources"": {
                 ""src-a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
@@ -559,7 +559,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""Test"",
             ""sources"": {
@@ -877,7 +877,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 // Style A: background-only (no fetching layer, so its own SetStyle commits synchronously).
-                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
@@ -886,7 +886,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // Style B: background + a url-source fill — the ONE await genuinely suspends on the gate.
                 var gate = new GatedLoader();
                 view.View.DocumentLoaderOverride = gate.Load;
-                UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundPlusUrlSourceStyle), "B").Preserve();
+                UniTask restyleTask = view.SetStyle(TestStyle.Document(BackgroundPlusUrlSourceStyle), "B").Preserve();
 
                 // Mid-resolution: OLD identity/layers/background must still be live — nothing mutated yet.
                 AssertOldStyleIntact(view, bgMaterialA, because: "nothing may mutate before the commit (no blank window).");
@@ -910,7 +910,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             Track(go);
             try
             {
-                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 var layersRef = view.Layers; // same instance across restyle (rebuilt in place)
@@ -919,7 +919,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 var gate = new GatedLoader();
                 view.View.DocumentLoaderOverride = gate.Load;
                 using var cts = new CancellationTokenSource();
-                UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundPlusUrlSourceStyle), "B", cts.Token).Preserve();
+                UniTask restyleTask = view.SetStyle(TestStyle.Document(BackgroundPlusUrlSourceStyle), "B", cts.Token).Preserve();
 
                 // Cancel WHILE still suspended in resolution — nothing has mutated yet.
                 cts.Cancel();
@@ -944,14 +944,14 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             Track(go);
             try
             {
-                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
 
                 using var cts = new CancellationTokenSource();
                 cts.Cancel(); // already cancelled BEFORE SetStyle is even called
-                UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#ff0000")), "B", cts.Token).Preserve();
+                UniTask restyleTask = view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#ff0000")), "B", cts.Token).Preserve();
                 yield return SpinToCompleted(restyleTask);
 
                 Assert.IsTrue(restyleTask.Status == UniTaskStatus.Canceled || restyleTask.Status == UniTaskStatus.Faulted,
@@ -972,7 +972,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""Test"",
             ""sources"": {
@@ -1152,7 +1152,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             view.View.DocumentLoaderOverride = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
             try
             {
-                var style = StyleParser.Parse(OneFillStyle("src", tilesTemplate.Replace("\\", "/")));
+                var style = TestStyle.Document(OneFillStyle("src", tilesTemplate.Replace("\\", "/")));
                 yield return Await(view.SetStyle(style, "inline-style"));
                 yield return PumpUntilSettled(view);
 
@@ -1181,7 +1181,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 // Source uses a `url` (no inline tiles) → resolution must fetch + fill from the TileJSON.
-                var style = StyleParser.Parse(@"{
+                var style = TestStyle.Document(@"{
                     ""version"": 8,
                     ""sources"": { ""src"": { ""type"": ""vector"", ""url"": ""https://example.com/tiles.json"" } },
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""src"", ""source-layer"":""countries"",
@@ -1214,7 +1214,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             };
             try
             {
-                var style = StyleParser.Parse(@"{
+                var style = TestStyle.Document(@"{
                     ""version"": 8,
                     ""sources"": {
                         ""A"": { ""type"":""vector"", ""tiles"":[""https://a/{z}/{x}/{y}.pbf""] },
@@ -1259,7 +1259,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 // Style 1: source A + a red fill layer.
-                yield return Await(view.SetStyle(StyleParser.Parse(@"{
+                yield return Await(view.SetStyle(TestStyle.Document(@"{
                     ""version"":8,
                     ""sources"": { ""A"": { ""type"":""vector"", ""tiles"":[""https://a/{z}/{x}/{y}.pbf""] } },
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""A"", ""source-layer"":""countries"",
@@ -1271,7 +1271,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 Assert.Greater(fetchesAfterV1, 0, "source A fetched its tile on v1");
 
                 // Style 2: SAME source A (unchanged def ⇒ same SourceKey), DIFFERENT layer paint (green).
-                yield return Await(view.SetStyle(StyleParser.Parse(@"{
+                yield return Await(view.SetStyle(TestStyle.Document(@"{
                     ""version"":8,
                     ""sources"": { ""A"": { ""type"":""vector"", ""tiles"":[""https://a/{z}/{x}/{y}.pbf""] } },
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""A"", ""source-layer"":""countries"",
@@ -1361,7 +1361,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             };
             try
             {
-                yield return SpinToCompleted(view.SetStyle(StyleParser.Parse(MixedStyle), "mixed"));
+                yield return SpinToCompleted(view.SetStyle(TestStyle.Document(MixedStyle), "mixed"));
                 yield return PumpUntilSettled(view);
 
                 Assert.AreEqual(0, docFetches,

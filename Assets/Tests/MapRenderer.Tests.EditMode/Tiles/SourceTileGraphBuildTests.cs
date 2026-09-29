@@ -100,7 +100,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>Fill-only style over a real MVT fixture — same shape as the other tile-pipeline
         /// fixtures (ThrottleTests), so the fetch is genuine UniTask I/O and the mesh-build kick is the only
         /// thing under test.</summary>
-        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": {
                 ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
@@ -195,7 +195,7 @@ namespace MapRenderer.Tests.Tiles
             view.WithTestCamera(projection: projection);
             try
             {
-                view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
+                view.LoadTestStyle(null, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
 
                 var spy = new RecordingWorkScheduler(new InlineWorkScheduler());
                 view.TileManager.WorkScheduler = spy;
@@ -343,7 +343,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>Fill + symbol over the same source — the shape every real style has, and the one the
         /// existing prepared-cache restyle teeth deliberately lack.</summary>
-        private static StyleDocument FillAndLabelStyleA() => StyleParser.Parse(@"{
+        private static StyleDocument FillAndLabelStyleA() => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
@@ -357,7 +357,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>A different style — different layer set, so the content token differs and the restyle
         /// takes the full-rebuild arm (which is what Clears the symbol store).</summary>
-        private static StyleDocument OtherStyleB() => StyleParser.Parse(@"{
+        private static StyleDocument OtherStyleB() => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
@@ -546,7 +546,7 @@ namespace MapRenderer.Tests.Tiles
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
             FileAssert.Exists(path);
-            return StyleParser.Parse(File.ReadAllText(path));
+            return TestStyle.Document(File.ReadAllText(path));
         }
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
@@ -906,7 +906,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        private static StyleDocument TwoFillLayerStyle() => StyleParser.Parse(@"{
+        private static StyleDocument TwoFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -944,7 +944,7 @@ namespace MapRenderer.Tests.Tiles
         {
             byte[] bytes = SampleTileFixture.Bytes();
             var src      = TestDataSource.FromBytes(bytes);
-            var style    = StyleParser.Parse(@"{
+            var style    = TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [
@@ -1008,7 +1008,7 @@ namespace MapRenderer.Tests.Tiles
         // ── The prepared cache survives a restyle ──────────────────────────────────────────────
         // These drive MapView.SetStyle: LoadTestStyle never sets CurrentStyle, so it cannot reach the purge.
 
-        private static StyleDocument TwoLayerStyleA() => StyleParser.Parse(@"{
+        private static StyleDocument TwoLayerStyleA() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1021,7 +1021,7 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         /// <summary>A style entirely unrelated to A — the "B" arm of an A→B→A drive.</summary>
-        private static StyleDocument SingleLayerStyleB() => StyleParser.Parse(@"{
+        private static StyleDocument SingleLayerStyleB() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""other"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1031,7 +1031,7 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         /// <summary>A single FILL layer at id "shape-layer" — the closed-hole drive's first arm.</summary>
-        private static StyleDocument SingleFillLayerStyle() => StyleParser.Parse(@"{
+        private static StyleDocument SingleFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1042,7 +1042,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>The SAME id "shape-layer", now a LINE layer — same ordered layer id, a different TYPE at
         /// the same index. The closed-hole drive's returning arm.</summary>
-        private static StyleDocument SingleLineLayerStyle_SameId() => StyleParser.Parse(@"{
+        private static StyleDocument SingleLineLayerStyle_SameId() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1172,7 +1172,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>A fill-extrusion layer BEFORE a fill layer, same source/source-layer. With
         /// <c>MapMaterialSet.FillExtrusionMaterial</c> null, <c>RenderLayerSet.Build</c> skips the extrusion
         /// layer, so the fill layer bakes at dense index 0 — see the field-mutation teeth below.</summary>
-        private static StyleDocument ExtrusionThenFillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument ExtrusionThenFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1357,7 +1357,7 @@ namespace MapRenderer.Tests.Tiles
         // ── Style transitions that need real tiles and a backend (the rest are RenderLayerSet-level) ──
         // The RenderLayerSet-level tests are StyleTransitionBindingTests and RestyleSurvivorGateTests.
 
-        private static StyleDocument TwoLayerStyleARecolored() => StyleParser.Parse(@"{
+        private static StyleDocument TwoLayerStyleARecolored() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1454,7 +1454,7 @@ namespace MapRenderer.Tests.Tiles
         // The fence pair. Both need a BACKGROUND layer: without one, SourceRegistry's
         // background-identity reuse has no observer, and a fresh SourcePipeline per call would still pass.
 
-        private static StyleDocument BackgroundAndFillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument BackgroundAndFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1465,7 +1465,7 @@ namespace MapRenderer.Tests.Tiles
         }");
 
         /// <summary>Same layers, background RECOLORED (still transitionable — an in-place restyle).</summary>
-        private static StyleDocument BackgroundRecoloredAndFillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument BackgroundRecoloredAndFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1477,7 +1477,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>Same fill layer, background REMOVED — a partial-survival restyle whose diff drops the
         /// synthetic source-less pipeline (SourcesUnchanged's pre-diff "true" goes stale exactly here).</summary>
-        private static StyleDocument FillOnlyStyle_BackgroundRemoved() => StyleParser.Parse(@"{
+        private static StyleDocument FillOnlyStyle_BackgroundRemoved() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1572,7 +1572,7 @@ namespace MapRenderer.Tests.Tiles
 
         // ── the BRG re-stamp is mandatory ──────────────────────────────────────────────────────────
 
-        private static StyleDocument ThreeFillLayersAbc() => StyleParser.Parse(@"{
+        private static StyleDocument ThreeFillLayersAbc() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1582,7 +1582,7 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        private static StyleDocument ThreeFillLayersReorderedCab() => StyleParser.Parse(@"{
+        private static StyleDocument ThreeFillLayersReorderedCab() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1640,7 +1640,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>Same three fill layers, "b" REMOVED — a partial-survival restyle that tombstones slot 1
         /// while leaving slots 0 and 2 alive.</summary>
-        private static StyleDocument ThreeFillLayersAcRemovedB() => StyleParser.Parse(@"{
+        private static StyleDocument ThreeFillLayersAcRemovedB() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
             ""layers"": [
@@ -1829,7 +1829,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>Fill-only style over a real MVT fixture on `countries` — the fixture this whole file
         /// shares.</summary>
-        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": {
                 ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
@@ -2521,7 +2521,7 @@ namespace MapRenderer.Tests.Tiles
             view.Config.Backend               = RenderBackend.GameObject;
             view.WithTestCamera();
 
-            var style = StyleParser.Parse(@"{
+            var style = TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [
@@ -2582,7 +2582,7 @@ namespace MapRenderer.Tests.Tiles
                 ""source-layer"": ""geolines"",
                 ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 } }";
             string layers = lineFirst ? lineLayer + "," + fillLayer : fillLayer + "," + lineLayer;
-            var style = StyleParser.Parse(@"{
+            var style = TestStyle.Document(@"{
                 ""version"": 8,
                 ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
                 ""layers"": [" + layers + @"]
@@ -2793,7 +2793,7 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MixedStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MixedStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": {
                 ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
@@ -3453,7 +3453,7 @@ namespace MapRenderer.Tests.Tiles
         /// <paramref name="extraSourceKeys"/> supplies (e.g. <c>, "scheme": "tms"</c>) and
         /// <paramref name="extraPaintKeys"/> adds to its paint.</summary>
         private static StyleDocument VectorStyle(string extraSourceKeys = "", string extraPaintKeys = "")
-            => StyleParser.Parse($@"{{
+            => TestStyle.Document($@"{{
             ""version"": 8,
             ""sources"": {{ ""v"": {{ ""type"": ""vector"",
                 ""tiles"": [""https://example.com/{{z}}/{{x}}/{{y}}.pbf""] {extraSourceKeys} }} }},
@@ -3463,7 +3463,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>A `url`-only vector source, resolved through a TileJSON the test serves via
         /// <c>DocumentLoaderOverride</c>.</summary>
-        private static StyleDocument UrlVectorStyle() => StyleParser.Parse(@"{
+        private static StyleDocument UrlVectorStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""sources"": { ""v"": { ""type"": ""vector"", ""url"": ""https://example.com/tj.json"" } },
             ""layers"": [ { ""id"": ""v-fill"", ""type"": ""fill"", ""source"": ""v"", ""source-layer"": ""x"",
@@ -3758,7 +3758,7 @@ namespace MapRenderer.Tests.Tiles
                 view.View.Camera.SetProperties(Cam(0, 0, 1.0));
                 view.View.Camera.SyncToCamera();
 
-                var style = StyleParser.Parse(@"{
+                var style = TestStyle.Document(@"{
                     ""version"": 8,
                     ""sources"": { ""g"": { ""type"": ""geojson"", ""bounds"": [170, 80, 175, 85],
                         ""data"": {""type"":""FeatureCollection"",""features"":[]} } },

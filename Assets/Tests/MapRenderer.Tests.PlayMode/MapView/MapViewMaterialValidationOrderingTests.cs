@@ -66,7 +66,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 // Style A commits normally (all three bases assigned).
-                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
@@ -75,7 +75,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // Style B: the ONE await genuinely suspends on the gate.
                 var gate = new GatedLoader();
                 view.View.DocumentLoaderOverride = gate.Load;
-                UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundPlusUrlSourceStyle), "B").Preserve();
+                UniTask restyleTask = view.SetStyle(TestStyle.Document(BackgroundPlusUrlSourceStyle), "B").Preserve();
 
                 // Null FillMaterial while BuildSourceSpecs is suspended. An entry-time validate has already
                 // passed here; the captured-set validate runs after this await, so it must catch it.

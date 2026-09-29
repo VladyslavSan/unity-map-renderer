@@ -1468,7 +1468,7 @@ namespace MapRenderer.Tests.Text
             var set = Track(ScriptableObject.CreateInstance<MapMaterialSet>());
             set.SymbolTextWorld = Track(new Material(Shader.Find("Map/Symbol/TextWorld")));
 
-            StyleDocument style = StyleParser.Parse(TwoSymbolLayers.Replace('\'', '"'));
+            StyleDocument style = TestStyle.Document(TwoSymbolLayers.Replace('\'', '"'));
 
             {
                 using var layers = new RenderLayerSet();
@@ -1555,7 +1555,7 @@ namespace MapRenderer.Tests.Text
             _subsystem = new SymbolSubsystem(_mapCamera);
             _tileBytes = LoadUp("Assets", "Fixtures", "sample-tile.bytes");
             _latinGlyphs = LoadUp("Assets", "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes");
-            _style = StyleParser.Parse(StyleJson);
+            _style = TestStyle.Document(StyleJson);
             _allStyleSymbolLayers = ExtractSymbolLayers(_style);
 
             _sSourceLayers = new List<Symbol.StyleLayer>();
@@ -1802,7 +1802,7 @@ namespace MapRenderer.Tests.Text
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
@@ -2046,7 +2046,7 @@ namespace MapRenderer.Tests.Text
             // Open the gate FIRST so DrainInFlightReconcile does not hang. SetStyle then runs
             // cancel → drain → ReleasePins(front) + ReleasePins(back) → Clear.
             gate.Set();
-            StyleDocument restyle = StyleParser.Parse(StyleJson);
+            StyleDocument restyle = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             yield return null; yield return null;
 
@@ -2177,7 +2177,7 @@ namespace MapRenderer.Tests.Text
 
             // Restyle: the back pin is already released, so front-release + Clear free the block once. A leaked
             // back pin would keep it pinned past Clear's conditional flush.
-            StyleDocument restyle = StyleParser.Parse(StyleJson);
+            StyleDocument restyle = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             yield return null; yield return null;
             Assert.AreEqual(before, SymbolTileBlock.DebugLiveAllocCount,
@@ -2369,7 +2369,7 @@ namespace MapRenderer.Tests.Text
                 Assert.Greater(plan.WinnerCount, 0, "sanity: the tile produced at least one winner before the restyle");
 
                 // Restyle: SetStyle Clear()s _frontResult/_backResult — SetStyle's `_frontSetVersion++` site.
-                StyleDocument restyle = StyleParser.Parse(StyleJson);
+                StyleDocument restyle = TestStyle.Document(StyleJson);
                 _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
 
                 SymbolGatherPlan afterRestyle = _subsystem.CurrentBatch(default, 0.0); // SAME _gatherPlan object, now empty
@@ -3332,7 +3332,7 @@ namespace MapRenderer.Tests.Text
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
             _subsystem.SpriteSourceFactoryOverride = (_, _) => new[] { ("default", (ISpriteSource)new GatedSpriteSource(gatedFetch)) };
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 

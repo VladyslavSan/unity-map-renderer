@@ -113,7 +113,7 @@ namespace MapRenderer.Tests.PlayMode.Text
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
@@ -249,7 +249,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             // A GATED glyph source: the first fetch suspends on this UTCS until the test releases it.
             var gate = new UniTaskCompletionSource<GlyphRangeResponse>();
             _subsystem.GlyphSourceFactoryOverride = _ => new TestGlyphSource((fontStack, rangeStart, ct) => gate.Task);
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
@@ -266,7 +266,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet (parked on the gated glyph fetch).");
 
             // Restyle mid-build: cancels the in-flight build's token, clears the store, disposes the pipeline.
-            StyleDocument restyle = StyleParser.Parse(StyleJson);
+            StyleDocument restyle = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             // Release the gate as CANCELLED — the suspended fetch throws OperationCanceledException, which
             // unwinds the build BEFORE it touches the (now disposed) glyph manager / atlas / store.
@@ -463,7 +463,7 @@ namespace MapRenderer.Tests.PlayMode.Text
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
@@ -544,7 +544,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet");
 
             // Restyle: cancels the build's token, clears the store AND drops the ready tail (E-1.5).
-            StyleDocument restyle = StyleParser.Parse(StyleJson);
+            StyleDocument restyle = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
 
             Assert.AreEqual(0, _subsystem.ReadyTailCount(), "restyle drops the ready tail — it never gets to commit");
@@ -564,7 +564,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             // A GATED glyph source: the first fetch suspends on this UTCS until the test releases it.
             var gate = new UniTaskCompletionSource<GlyphRangeResponse>();
             _subsystem.GlyphSourceFactoryOverride = _ => new TestGlyphSource((fontStack, rangeStart, ct) => gate.Task);
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
@@ -584,7 +584,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet (parked on the gated glyph fetch)");
 
             // Restyle mid-TAIL: cancels the in-flight tail's token, clears the store, disposes the pipeline.
-            StyleDocument restyle = StyleParser.Parse(StyleJson);
+            StyleDocument restyle = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             // Release the gate as CANCELLED — the suspended fetch throws OperationCanceledException, which
             // unwinds the tail BEFORE it reaches the ct check / commit (or touches the now-disposed pipeline).

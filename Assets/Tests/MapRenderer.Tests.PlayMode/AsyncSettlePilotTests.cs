@@ -21,7 +21,7 @@ namespace MapRenderer.Tests.Async
 
         /// <summary>A minimal one-fill-layer style over the committed fixture tile — enough to force the
         /// real (non-source-less) mesh-build path that hops to the ThreadPool.</summary>
-        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""Test"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },

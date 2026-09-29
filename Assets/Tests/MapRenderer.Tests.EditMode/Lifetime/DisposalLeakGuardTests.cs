@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Lifetime
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""LeakGuard"",
             ""sources"": {
@@ -453,7 +453,7 @@ namespace MapRenderer.Tests.Lifetime
         /// tile: <c>ConsumeMeshBuild</c>'s dense payload array gets length &gt;= 2, and (with the fixture's
         /// real geometry) both payloads are non-empty, so a per-mesh consume budget of 1 genuinely stops
         /// mid-tile rather than free-riding past an empty layer.</summary>
-        private static StyleDocument TwoFillLayerStyle() => StyleParser.Parse(@"{
+        private static StyleDocument TwoFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""LeakGuardTwoLayer"",
             ""sources"": {

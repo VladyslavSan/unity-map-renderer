@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+        private static StyleDocument FillStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""layers"": [
                 { ""id"":""fill"", ""type"":""fill"", ""source"":""s"", ""source-layer"":""countries"",

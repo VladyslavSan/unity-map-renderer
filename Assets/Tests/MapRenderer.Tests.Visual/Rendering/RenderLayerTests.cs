@@ -650,7 +650,7 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class RenderModeMaterialSelectionTests
     {
-        private static StyleDocument OneFillLayerStyle() => StyleParser.Parse(@"{
+        private static StyleDocument OneFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""OneFill"",
             ""sources"": {

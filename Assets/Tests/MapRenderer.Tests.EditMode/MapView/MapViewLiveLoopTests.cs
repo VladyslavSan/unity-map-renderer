@@ -40,7 +40,7 @@ namespace MapRenderer.Tests.MapViews
         /// Minimal 1-fill-layer style for the live loop tests: a single fill layer over the
         /// "countries" MVT source-layer with a constant red fill color (Constant expression kind).
         /// </summary>
-        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+        private static StyleDocument MinimalStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""name"": ""Test"",
             ""sources"": {

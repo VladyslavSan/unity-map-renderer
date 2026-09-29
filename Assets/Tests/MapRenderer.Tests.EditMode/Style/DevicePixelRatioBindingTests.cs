@@ -74,7 +74,7 @@ namespace MapRenderer.Tests.Style
 }";
 
         private static T FirstLayer<T>(string json) where T : StyleLayer
-            => (T)StyleParser.Parse(json).Layers[0];
+            => (T)TestStyle.Document(json).Layers[0];
 
         // ── Line: the four device-space float uniforms ───────────────────────────────────────────
 
@@ -342,7 +342,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void BrgPackedWidth_InheritsTheDeviceConversion()
         {
-            var style = StyleParser.Parse(LinePaintStyleJson);
+            var style = TestStyle.Document(LinePaintStyleJson);
             using var set   = new RenderLayerSet();
             set.Build(style, Zoom, MapMaterialSetTestUtil.Load());
             Assert.That(set.Count, Is.EqualTo(1), "line-only style must build exactly one render layer.");

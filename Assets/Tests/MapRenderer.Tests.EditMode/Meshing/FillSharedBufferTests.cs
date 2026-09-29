@@ -84,7 +84,7 @@ namespace MapRenderer.Tests.Meshing
 
             string styleJson = File.ReadAllText(
                 Path.Combine(Application.dataPath, "StreamingAssets", "Fixtures", "liberty.json"));
-            StyleDocument style = StyleParser.Parse(styleJson);
+            StyleDocument style = TestStyle.Document(styleJson);
             LineStyleLayer layer = null;
             foreach (var l in style.Layers)
                 if (l.Id == "boundary_3") { layer = l as LineStyleLayer; break; }
@@ -2519,7 +2519,7 @@ namespace MapRenderer.Tests.Meshing
             var id = new TileId { Z = z, X = x, Y = y };
             IProjection projection = label == "Spherical" ? (IProjection)new SphericalProjection() : new WebMercatorProjection();
 
-            StyleDocument style = StyleParser.Parse(File.ReadAllText(
+            StyleDocument style = TestStyle.Document(File.ReadAllText(
                 Path.Combine(Application.dataPath, "StreamingAssets", "Fixtures", "liberty.json")));
             LineStyleLayer layer = null;
             foreach (var l in style.Layers)

@@ -71,11 +71,11 @@ namespace MapRenderer.Tests
         private static StyleDocument _libertyNightDoc;
 
         /// <summary>The real shipped Liberty style, parsed once per test run.</summary>
-        public static StyleDocument LibertyDoc() => _libertyDoc ??= StyleParser.Parse(LoadLibertyJson());
+        public static StyleDocument LibertyDoc() => _libertyDoc ??= TestStyle.Document(LoadLibertyJson());
 
         /// <summary>The real shipped Liberty-night style (the day/night pair), parsed once
         /// per test run.</summary>
-        public static StyleDocument LibertyNightDoc() => _libertyNightDoc ??= StyleParser.Parse(LoadLibertyNightJson());
+        public static StyleDocument LibertyNightDoc() => _libertyNightDoc ??= TestStyle.Document(LoadLibertyNightJson());
 
         /// <summary>Liberty's symbol layer with this id, or null (a non-symbol layer also yields null).</summary>
         public static SymbolStyle.StyleLayer FindSymbolLayer(string id)

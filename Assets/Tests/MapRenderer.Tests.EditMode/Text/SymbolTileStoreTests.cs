@@ -128,7 +128,7 @@ namespace MapRenderer.Tests.Text
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
@@ -421,7 +421,7 @@ namespace MapRenderer.Tests.Text
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             subsystem.GlyphSourceFactoryOverride  = _ => TestGlyphSource.FromRanges(ranges);
             subsystem.SpriteSourceFactoryOverride = (_, _) => new[] { ("default", (ISpriteSource)new GatedSpriteSource(spriteFetch)) };
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             subsystem.SetStyle(style, ExtractSymbolLayers(style));
             return subsystem;
         }
@@ -497,7 +497,7 @@ namespace MapRenderer.Tests.Text
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem = new SymbolSubsystem(_mapCamera);
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            StyleDocument style = StyleParser.Parse(TextOnlyStyleJson);
+            StyleDocument style = TestStyle.Document(TextOnlyStyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             // Commit a tile directly through the store (no MVT decode, no build tail): that dirties CollectGeneration
@@ -574,7 +574,7 @@ namespace MapRenderer.Tests.Text
             _subsystem = new SymbolSubsystem(_mapCamera) { NowSecondsOverride = () => _simulatedNow };
             _subsystem.GlyphSourceFactoryOverride = _ => new TestGlyphSource((fontStack, rangeStart, ct) => gate.Task);
             // No 'sprite' key -> settles immediately, no park.
-            StyleDocument style = StyleParser.Parse(OverCapRtlStyleJson);
+            StyleDocument style = TestStyle.Document(OverCapRtlStyleJson);
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var key = new SymbolTileStore.Key(SourceId, Tile0);
@@ -592,7 +592,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsNull(_subsystem.Store().DebugBlockFor(key), "PRECONDITION: nothing committed while parked.");
 
             // Restyle mid-tail: cancels the in-flight build's token scope (does not by itself wake the await).
-            StyleDocument restyle = StyleParser.Parse(OverCapRtlStyleJson);
+            StyleDocument restyle = TestStyle.Document(OverCapRtlStyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             // Release the gate NORMALLY: EnsureGlyphRangesAsync returns cleanly, so only the pre-loop ct check
             // under test can stop this cancelled build before the shape loop.
@@ -672,7 +672,7 @@ namespace MapRenderer.Tests.Text
                 return UniTask.FromResult(GlyphRangeResponse.Absent()); // absent is fine: shaping fails on the
                                                                           // bidi check, before glyph resolution
             });
-            StyleDocument style = StyleParser.Parse(TwoFontOverCapRtlStyleJson); // no 'sprite' key -> no park
+            StyleDocument style = TestStyle.Document(TwoFontOverCapRtlStyleJson); // no 'sprite' key -> no park
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var probe = new LeaseProbeDecoder();

@@ -205,7 +205,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Drives the full scene: lit-ambient recipe → MapView (test materials, tile-selection clamped to
         /// <c>floor(zoom)</c>) → this scene's own camera + off-screen RT + <see cref="MapCamera"/>, wired via
-        /// <c>SetCamera</c> → the real style JSON parsed by <see cref="StyleParser.Parse(string)"/> →
+        /// <c>SetCamera</c> → the real style JSON parsed by <see cref="TestStyle.Document(string)"/> →
         /// <c>SetStyle</c> → pump to settled → re-sync the camera → render.
         /// </summary>
         /// <param name="px">Square render-target size, device pixels.</param>
@@ -277,7 +277,7 @@ namespace MapRenderer.Tests
 
             // ── The real style path: assemble → parse → SetStyle → pump to settled. ─────────────────────────
             string json = BuildStyleJson();
-            StyleDocument doc = StyleParser.Parse(json);
+            StyleDocument doc = TestStyle.Document(json);
             SpinToCompleted(_mapView.SetStyle(doc, "visual-scene"));
             PumpUntilSettled(_mapView);
 

@@ -356,7 +356,7 @@ namespace MapRenderer.Tests.Style
             string json = LoadFixtureText("maplibre-demo-style.json");
 
             StyleDocument doc = null;
-            Assert.DoesNotThrow(() => doc = StyleParser.Parse(json),
+            Assert.DoesNotThrow(() => doc = TestStyle.Document(json),
                 "a real published style must parse without throwing");
 
             Assert.AreEqual(8, doc.Version, "real style spec version");
@@ -421,7 +421,7 @@ namespace MapRenderer.Tests.Style
               ]
             }";
 
-            var doc = StyleParser.Parse(json);
+            var doc = TestStyle.Document(json);
 
             Assert.AreEqual(8, doc.Version);
             Assert.AreEqual("Minimal", doc.Name);
@@ -457,7 +457,7 @@ namespace MapRenderer.Tests.Style
               ""layers"": [ { ""id"": ""l"", ""type"": ""line"", ""source"": ""v"", ""source-layer"": ""roads"" } ]
             }";
 
-            var doc = StyleParser.Parse(json);
+            var doc = TestStyle.Document(json);
 
             var src = doc.GetSource("v");
             Assert.AreEqual("xyz", src.Scheme, "source scheme default");
@@ -487,7 +487,7 @@ namespace MapRenderer.Tests.Style
               ""layers"": [ { ""id"": ""l"", ""type"": ""fill"", ""source"": ""v"", ""source-layer"": ""x"", ""minzoom"": 5, ""maxzoom"": 12 } ]
             }";
 
-            var doc = StyleParser.Parse(json);
+            var doc = TestStyle.Document(json);
             var src = doc.GetSource("v");
             Assert.AreEqual("tms", src.Scheme);
             Assert.AreEqual(4, src.MinZoom);
@@ -525,7 +525,7 @@ namespace MapRenderer.Tests.Style
               ]
             }";
 
-            var doc = StyleParser.Parse(json);
+            var doc = TestStyle.Document(json);
 
             Assert.AreEqual(2, doc.Sources.Count);
             Assert.AreEqual(SourceType.Vector, doc.GetSource("vec").Type);
@@ -578,7 +578,7 @@ namespace MapRenderer.Tests.Style
             }";
 
             StyleDocument doc = null;
-            Assert.DoesNotThrow(() => doc = StyleParser.Parse(json), "unknown keys must not throw");
+            Assert.DoesNotThrow(() => doc = TestStyle.Document(json), "unknown keys must not throw");
 
             Assert.AreEqual(StyleLayerType.Unknown, doc.Layers[0].LayerType, "unknown type → Unknown");
             Assert.AreEqual("totally-new-layer-type", doc.Layers[0].RawType, "raw type preserved");
@@ -604,7 +604,7 @@ namespace MapRenderer.Tests.Style
             // version is spec-required, but forward-compat tolerance means absence must not throw.
             const string json = @"{ ""sources"": {}, ""layers"": [] }";
             StyleDocument doc = null;
-            Assert.DoesNotThrow(() => doc = StyleParser.Parse(json));
+            Assert.DoesNotThrow(() => doc = TestStyle.Document(json));
             Assert.AreEqual(0, doc.Version, "absent version → 0 (no throw)");
         }
 
@@ -628,7 +628,7 @@ namespace MapRenderer.Tests.Style
               ]
             }";
 
-            var doc = StyleParser.Parse(json);
+            var doc = TestStyle.Document(json);
             var bg = doc.Layers[0];
             var land = doc.Layers[1];
             var graticule = doc.Layers[2];
@@ -685,7 +685,7 @@ namespace MapRenderer.Tests.Style
               ]
             }";
 
-            var layer = StyleParser.Parse(json).Layers[0];
+            var layer = TestStyle.Document(json).Layers[0];
 
             Assert.IsNotNull(layer.Filter);
             Assert.IsTrue(layer.Filter.Raw.IsArray, "legacy filter retained as raw array");

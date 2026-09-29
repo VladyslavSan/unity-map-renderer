@@ -146,7 +146,7 @@ namespace MapRenderer.Tests.Text
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             subsystem.GlyphSourceFactoryOverride  = _ => TestGlyphSource.FromRanges(ranges);
             subsystem.SpriteSourceFactoryOverride = (_, _) => new[] { ("default", (ISpriteSource)new GatedSpriteSource(spriteFetch)) };
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             subsystem.SetStyle(style, ExtractSymbolLayers(style));
             return subsystem;
         }
@@ -443,7 +443,7 @@ namespace MapRenderer.Tests.Text
                 "That is what makes the discard below the ONLY remaining thing that can free it.");
 
             // The restyle: SetStyle drains the parked queue through the discard funnel.
-            StyleDocument restyled = StyleParser.Parse(StyleJson);
+            StyleDocument restyled = TestStyle.Document(StyleJson);
             _parkedSubsystem.SetStyle(restyled, ExtractSymbolLayers(restyled));
 
             Assert.AreEqual(0, _parkedSubsystem.PendingSpriteCount(), "sanity: the restyle emptied the queue");
@@ -625,7 +625,7 @@ namespace MapRenderer.Tests.Text
                 // parked queue — the interleaving TryParkBuild's gate makes safe.
                 if ((i & 3) == 0)
                 {
-                    StyleDocument restyled = StyleParser.Parse(StyleJson);
+                    StyleDocument restyled = TestStyle.Document(StyleJson);
                     _parkedSubsystem.SetStyle(restyled, ExtractSymbolLayers(restyled));
                 }
             }
@@ -636,7 +636,7 @@ namespace MapRenderer.Tests.Text
                 Assert.IsTrue(worker.Join(5000), "a stress worker failed to finish within the bound");
 
             // The final sweep: whatever is still parked is discarded here (refused entries left nothing).
-            StyleDocument final = StyleParser.Parse(NoGlyphStyleJson);
+            StyleDocument final = TestStyle.Document(NoGlyphStyleJson);
             _parkedSubsystem.SetStyle(final, ExtractSymbolLayers(final));
 
             Assert.AreEqual(probe.DecodeCount, probe.DisposedCount,

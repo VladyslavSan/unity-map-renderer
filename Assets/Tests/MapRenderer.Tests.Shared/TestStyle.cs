@@ -2,6 +2,7 @@
 // `Color`, so it never picks which of the suite's two Color bindings a call site meant.
 
 using MapRenderer.Core.Json;
+using MapRenderer.Unity.Style;
 using Background = MapRenderer.Unity.Style.Background;
 using Fill = MapRenderer.Unity.Style.Fill;
 using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
@@ -17,6 +18,9 @@ namespace MapRenderer.Tests
     /// </summary>
     public static class TestStyle
     {
+        /// <summary>Parses a whole style document from its JSON text with the host defaults.</summary>
+        public static StyleDocument Document(string json) => StyleParser.Parse(json);
+
         /// <summary>Parses <c>fill</c> paint properties, or the defaults when <paramref name="json"/> is null.</summary>
         public static Fill.PaintProperties FillPaint(string json = null)
             => Fill.PaintProperties.Parse(json != null ? JsonParser.Parse(json) : null);

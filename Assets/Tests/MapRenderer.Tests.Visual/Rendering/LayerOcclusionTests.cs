@@ -217,7 +217,7 @@ namespace MapRenderer.Tests.Visual
             bag.Track(go);
             try
             {
-                view.LoadTestStyle(null, LookAt, StyleParser.Parse(json)); // background is source-less — the injected source is never consulted
+                view.LoadTestStyle(null, LookAt, TestStyle.Document(json)); // background is source-less — the injected source is never consulted
                 PumpUntilSettled(view);
 
                 Bounds b = LoadedBounds(view);
@@ -248,7 +248,7 @@ namespace MapRenderer.Tests.Visual
             bag.Track(go);
             try
             {
-                view.LoadTestStyle(null, LookAt, StyleParser.Parse(styleJson));
+                view.LoadTestStyle(null, LookAt, TestStyle.Document(styleJson));
                 PumpUntilSettled(view);
 
                 Bounds b = LoadedBounds(view);
@@ -535,7 +535,7 @@ namespace MapRenderer.Tests.Visual
             }";
             // text-color white: a constant text-color binds _TextColor, and the black default would multiply the
             // hand-injected vertex ink to black. White is the identity, so the injected paint is untouched.
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             var symbolLayer = (Symbol.StyleLayer)style.Layers[0];
             var settings = MapMaterialSetTestUtil.Load();
 
@@ -619,7 +619,7 @@ namespace MapRenderer.Tests.Visual
                 ]
             }";
             // text-color: white on both layers — see the identical note on this file's first test.
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             var settings = MapMaterialSetTestUtil.Load();
             var layerA = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0, drawIndex: 1);
             var layerB = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[1], settings, 8.0, drawIndex: 2);
@@ -711,7 +711,7 @@ namespace MapRenderer.Tests.Visual
                 ]
             }";
             // text-color: white — see the identical note on this file's first test.
-            StyleDocument style = StyleParser.Parse(StyleJson);
+            StyleDocument style = TestStyle.Document(StyleJson);
             var settings = MapMaterialSetTestUtil.Load();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0, drawIndex: 0);
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 0;
@@ -824,7 +824,7 @@ namespace MapRenderer.Tests.Visual
             }";
             var settings = MapMaterialSetTestUtil.Load();
             var renderLayer = SymbolRenderLayer.Create(
-                (Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+                (Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 0;
 
             var buffer = new SymbolTileBuffer();

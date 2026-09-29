@@ -1046,7 +1046,7 @@ namespace MapRenderer.Tests.Visual
             const double Dpr = 1.0;
 
             var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(StyleJson(styledWidthPx, lineOffsetPx)), Zoom,
+            set.Build(TestStyle.Document(StyleJson(styledWidthPx, lineOffsetPx)), Zoom,
                       MapMaterialSetTestUtil.Load());
             Assert.That(set.Count, Is.EqualTo(1), "the probe-road style must yield exactly one render layer.");
             Assert.IsNotNull(set[0].Material, "Map/Line base material must be configured for this fixture.");

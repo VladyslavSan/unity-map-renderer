@@ -55,7 +55,7 @@ namespace MapRenderer.Tests
 
             // Build a minimal StyleLayer matching the layer name + optional color expression.
             var styleLayerJson = BuildStyleLayerJson(layerName, fillColorExpression, fillPattern, omitFillColor);
-            var style = StyleParser.Parse(styleLayerJson);
+            var style = TestStyle.Document(styleLayerJson);
             var fillStyleLayer = style.Layers[0];
             var paint = ((Fill.StyleLayer)fillStyleLayer).Paint;
 
