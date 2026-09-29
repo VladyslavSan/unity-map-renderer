@@ -608,113 +608,136 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── Joins: the three types must be DISTINGUISHABLE on screen ───────────────────────────
-        //
-        // Non-obvious why: a chamfer or arc emitted on the CONCAVE side is buried in the band overlap, and
-        // no interior probe sees it. The discriminator is the join's reach along the OUTWARD bisector, which
-        // at a 90° corner separates the three well beyond AA tolerance:
-        //     miter → halfWidth / cos45° = 1.41421·h     (the miter tip)
-        //     round → halfWidth          = 1.00000·h     (the arc radius)
-        //     bevel → halfWidth · cos45° = 0.70711·h     (the chamfer chord's standoff)
-        // The V opens toward −X, so the bisector is screen-RIGHT whatever the buffer's row order.
+        // ─── Views: top-down ortho and the steepest pitch the controller allows ─────────────────
 
-        private const float JoinReachWidthM     = 24f;                        // world metres, so h = 12 m
-        private const float JoinReachHalfWidthM = JoinReachWidthM * 0.5f;
-        private const float JoinReachHalfWidthPx = JoinReachHalfWidthM / MetresPerPx;   // ≈ 43.9 px
-        private const float JoinReachArmM       = 40f;
+        private const float PitchedViewDeg = 60f;
+        private const double RayStepPx     = 0.25;
+        private const int    MaxRaySteps   = 1200;
 
-        private static (GameObject go, Material mat) BuildApexFixture(JoinType join)
+        /// <summary>
+        /// The two views every reach tooth runs: top-down ortho, then a perspective camera pitched
+        /// <see cref="PitchedViewDeg"/> from straight down at the distance where one device pixel is
+        /// <see cref="MetresPerPx"/> metres, so a fixture measures at the same scale in both. Each camera gets a
+        /// frame-sized <c>targetTexture</c>, because <see cref="GroundRuler"/> projects through the live camera.
+        /// </summary>
+        private (string name, Camera camera)[] BuildReachViews()
         {
-            // Right turn at the apex; interior angle 90°; convex wedge faces +X.
+            var (orthoGo, ortho) = BuildCamera();
+
+            float distance = MetresPerPx * SnapH / (2f * math.tan(math.radians(TiltedFovDeg * 0.5f)));
+            var   forward  = Quaternion.Euler(90f - PitchedViewDeg, 0f, 0f) * Vector3.forward;
+            var (pitchedGo, pitched) = BuildTiltedCamera(-forward * distance, 90f - PitchedViewDeg);
+
+            Track(orthoGo);
+            Track(pitchedGo);
+            foreach (Camera camera in new[] { ortho, pitched })
+                camera.targetTexture = Track(new RenderTexture(SnapW, SnapH, 24, RenderTextureFormat.ARGB32));
+            return new[] { ("ortho", ortho), ("pitched", pitched) };
+        }
+
+        /// <summary>Coverage samples marching from <paramref name="from"/> to <paramref name="toward"/> and
+        /// <paramref name="extra"/> further, at <see cref="RayStepPx"/>.</summary>
+        private static float[] CoverageAlongWorldRay(
+            Camera camera, Frame pixels, double3 from, double3 toward, double extraPx,
+            float3 background, float3 plateau)
+        {
+            double2 origin = GroundRuler.ProjectPx(camera, from);
+            double2 dir    = GroundRuler.ScreenDirection(camera, from, toward);
+            int steps = (int)math.min((GroundRuler.ScreenSpanPx(camera, from, toward) + extraPx) / RayStepPx, MaxRaySteps);
+            return PixelCoverage.CoverageProfileAlongRay(pixels, origin, dir, steps, RayStepPx, background, plateau);
+        }
+
+        // ─── Joins: the three types must be DISTINGUISHABLE on screen ───────────────────────────
+
+        private const float JoinReachWidthPx     = 88f;                              // half-width 44 px
+        private const float JoinReachHalfWidthM  = JoinReachWidthPx * 0.5f * MetresPerPx;
+        private const float JoinReachArmM        = 40f;
+
+        /// <summary>A right-angle apex whose bisector runs along world +Z (<paramref name="bisectorZ"/> = 1) or -Z.</summary>
+        private static (GameObject go, Material mat) BuildApexFixture(JoinType join, float bisectorZ)
+        {
             var pts = new List<double2>
             {
-                new double2(-JoinReachArmM,  JoinReachArmM),
-                new double2(0.0,             0.0),
-                new double2(-JoinReachArmM, -JoinReachArmM),
+                new double2(-bisectorZ * JoinReachArmM, -bisectorZ * JoinReachArmM),
+                new double2(0.0,                        0.0),
+                new double2( bisectorZ * JoinReachArmM, -bisectorZ * JoinReachArmM),
             };
-            return BuildLine(pts, JoinReachWidthM, widthIsPixels: false,
+            return BuildLine(pts, JoinReachWidthPx, widthIsPixels: true,
                              color: new Color(0.95f, 0.60f, 0.15f, 1f), join: join, cap: CapType.Butt);
         }
 
         /// <summary>
-        /// Last column, marching +X from the apex along the bisector row, whose coverage is still ≥ half.
-        /// Returned in pixels from the apex. Sub-pixel refined by linear interpolation across the AA edge so
-        /// the three joins' reaches are resolved well inside their ~13 px separation.
+        /// The three join types reach different distances along the outward bisector of a right-angle corner:
+        /// miter 1.414·h, round 1·h, bevel 0.707·h, with h the world half-width. The oracle is the CAMERA
+        /// PROJECTION of that world point, in a top-down ortho view and a 60° pitched perspective view, toward
+        /// the camera and away from it. A silhouette is never "N px at every depth".
         /// </summary>
-        private static float BisectorReachPx(Frame pixels, float3 background, float3 plateau)
-        {
-            const int apexCol = SnapW / 2;
-            const int row     = SnapH / 2;
-
-            float prevCoverage = CoverageAt(pixels, apexCol, row, background, plateau);
-            Assert.Greater(prevCoverage, 0.9f,
-                $"The apex pixel itself must be covered by every join type (got {prevCoverage:F3}) — " +
-                "if it is not, the fixture is not where this tooth thinks it is.");
-
-            for (int col = apexCol + 1; col < SnapW; col++)
-            {
-                float coverage = CoverageAt(pixels, col, row, background, plateau);
-                if (coverage < 0.5f)
-                {
-                    // Linear crossing between the last ≥0.5 sample and this one.
-                    float t = (prevCoverage - 0.5f) / math.max(prevCoverage - coverage, 1e-6f);
-                    return (col - 1 - apexCol) + t;
-                }
-                prevCoverage = coverage;
-            }
-            Assert.Fail("Coverage never fell below half before the frame edge — fixture too large.");
-            return 0f;
-        }
-
         [Test]
         public void JoinTypes_AreDistinguishableOnScreen_ByBisectorReach()
         {
-            var (cameraGo, camera) = BuildCamera();
-            Track(cameraGo);
-            var reaches = new Dictionary<JoinType, float>();
+            (JoinType join, float factor)[] joins =
             {
-                foreach (var join in new[] { JoinType.Miter, JoinType.Round, JoinType.Bevel })
+                (JoinType.Miter, 1.41421f), (JoinType.Round, 1f), (JoinType.Bevel, 0.70711f),
+            };
+
+            using var lit = new LitAmbientScope();
+            foreach (var (viewName, camera) in BuildReachViews())
+            foreach (float bisectorZ in new[] { 1f, -1f })
+            {
+                string where = $"{viewName} view, bisector toward world {(bisectorZ > 0 ? "+Z" : "-Z")}";
+                var    apex  = double3.zero;
+                var    armMid = new double3(-bisectorZ * 0.5 * JoinReachArmM, 0.0, -bisectorZ * 0.5 * JoinReachArmM);
+                var    reaches  = new double[joins.Length];
+                var    expected = new double[joins.Length];
+
+                for (int i = 0; i < joins.Length; i++)
                 {
-                    var (lineGo, mat) = BuildApexFixture(join);
+                    (JoinType join, float factor) = joins[i];
+                    var tip = new double3(0.0, 0.0, bisectorZ * factor * JoinReachHalfWidthM);
+                    expected[i] = GroundRuler.ScreenSpanPx(camera, apex, tip);
+
+                    var (lineGo, mat) = BuildApexFixture(join, bisectorZ);
                     try
                     {
                         using var snap = new SnapshotRenderer(SnapW, SnapH);
                         snap.Render(camera);
 
-                        Frame pixels     = snap.Pixels;
-                        float3 background = BackgroundLinear(pixels);
+                        Frame pixels      = snap.Pixels;
+                        float3 background = PixelCoverage.BackgroundLinear(pixels);
 
-                        // Plateau: the most saturated sample on a column crossing BOTH arms. A fixed row could land
-                        // in the empty wedge and would assume the buffer's row order.
-                        float3 plateau = PlateauOnColumn(pixels, SnapW / 2 - 73, 0, SnapH - 1, background);
+                        // Plateau: the most saturated sample on the ray from the apex along one arm's centreline.
+                        double2 armDir = GroundRuler.ScreenDirection(camera, apex, armMid);
+                        int     armSteps = (int)(GroundRuler.ScreenSpanPx(camera, apex, armMid) / RayStepPx);
+                        float3  plateau  = PixelCoverage.PlateauAlongRay(
+                            pixels, GroundRuler.ProjectPx(camera, apex), armDir, armSteps, RayStepPx, background);
                         Assert.Greater(math.length(plateau - background), 0.05f,
-                            $"{join}: no covered pixel found on the arm-crossing column — the fixture did " +
-                            "not render where this tooth looks, so every later reading would be vacuous.");
+                            $"{where}, {join}: no covered pixel found on the arm — the fixture did not render " +
+                            "where this tooth looks, so every later reading would be vacuous.");
 
-                        reaches[join] = BisectorReachPx(pixels, background, plateau);
+                        float[] profile = CoverageAlongWorldRay(camera, pixels, apex, tip, 40.0, background, plateau);
+                        Assert.Greater(profile[0], 0.9f, $"{where}, {join}: the apex pixel itself must be covered.");
+                        reaches[i] = PixelCoverage.HalfCrossingDistancePx(profile, RayStepPx);
                     }
                     finally { DestroyFixture(lineGo, mat); }
                 }
 
-                float h = JoinReachHalfWidthPx;
-                // Absolute: each join reaches its own analytic distance. 2 px covers the AA edge and the
-                // round join's 4-segment chord secancy; the three targets are ~13 px apart.
-                Assert.AreEqual(1.41421f * h, reaches[JoinType.Miter], 2.0f,
-                    $"Miter must reach the miter tip at 1.414·h = {1.41421f * h:F1} px. Got {reaches[JoinType.Miter]:F2}.");
-                Assert.AreEqual(1.00000f * h, reaches[JoinType.Round], 2.0f,
-                    $"Round must reach the arc radius h = {h:F1} px. Got {reaches[JoinType.Round]:F2}. " +
-                    "Reading ~1.414·h means the arc is not being emitted and the join fell back to a miter.");
-                Assert.AreEqual(0.70711f * h, reaches[JoinType.Bevel], 2.0f,
-                    $"Bevel must stop at the chamfer chord, 0.707·h = {0.70711f * h:F1} px. " +
-                    $"Got {reaches[JoinType.Bevel]:F2}. Reading ~1.414·h is the pre-correction bug: the " +
-                    "chamfer emitted on the concave side, so the silhouette was the miter tip.");
+                // Round is the shortest gap between two join reaches, and it must stay resolvable.
+                Assert.Greater(expected[1] - expected[2], 5.0, $"{where}: fixture too small to tell round from bevel.");
+                Assert.Greater(expected[1], 10.0, $"{where}: the round join's projected reach is under 10 px.");
 
-                // Ordering with a hard separation floor. This is the part that cannot be satisfied by a
-                // join type degrading into another one, whatever the absolute tolerances allow.
-                Assert.Greater(reaches[JoinType.Miter] - reaches[JoinType.Round], 8.0f,
-                    $"Miter must out-reach round by ≫0 (got {reaches[JoinType.Miter]:F2} vs {reaches[JoinType.Round]:F2}).");
-                Assert.Greater(reaches[JoinType.Round] - reaches[JoinType.Bevel], 8.0f,
-                    $"Round must out-reach bevel by ≫0 (got {reaches[JoinType.Round]:F2} vs {reaches[JoinType.Bevel]:F2}).");
+                // 2 px covers the AA edge and the round join's chord secancy.
+                for (int i = 0; i < joins.Length; i++)
+                    Assert.AreEqual(expected[i], reaches[i], 2.0,
+                        $"{where}: {joins[i].join} must reach the projection of {joins[i].factor:F3}·h = " +
+                        $"{expected[i]:F1} px. Got {reaches[i]:F2}. Round reading the bevel standoff fell back to a " +
+                        "bevel, and reading the miter tip lost its arc. A reach that ignores the view means the " +
+                        "band left world space.");
+
+                // Ordering with a floor set by the oracle's own gaps: a join cannot pass by degrading into another.
+                Assert.Greater(reaches[0] - reaches[1], 0.5 * (expected[0] - expected[1]),
+                    $"{where}: miter must out-reach round (got {reaches[0]:F2} vs {reaches[1]:F2}).");
+                Assert.Greater(reaches[1] - reaches[2], 0.5 * (expected[1] - expected[2]),
+                    $"{where}: round must out-reach bevel (got {reaches[1]:F2} vs {reaches[2]:F2}).");
             }
         }
 
@@ -741,98 +764,95 @@ namespace MapRenderer.Tests.Visual
                              join: JoinType.Miter, cap: CapType.Round);
         }
 
-        /// <summary>
-        /// Alpha-weighted extent of a cap PAST its endpoint, in pixels, along one image row. Summing coverage
-        /// outward from the endpoint column measures how far the silhouette reaches without ever thresholding
-        /// a pixel as "lit".
-        /// </summary>
-        private static float CapExtentPastEndpointPx(
-            Frame pixels, int capColumn, int outward, int row, float3 background, float3 plateau)
+        private const float CapReachWidthPx = 64f;   // half-width 32 px: the far cap still projects past 10 px
+        private const float CapReachHalfWidthM = CapReachWidthPx * 0.5f * MetresPerPx;
+
+        /// <summary>A pixel-width line along world Z, centred on the origin, with the given cap on both ends.</summary>
+        private static (GameObject go, Material mat) BuildCappedLineAlongZ(CapType cap)
         {
-            float extent = 0f;
-            for (int step = 0; step < 32; step++)
+            var pts = new List<double2>
             {
-                int column = outward > 0 ? capColumn + step : capColumn - 1 - step;
-                extent += CoverageAt(pixels, column, row, background, plateau);
-            }
-            return extent;
+                new double2(0.0, -CapHalfLengthM),
+                new double2(0.0,  CapHalfLengthM),
+            };
+            return BuildLine(pts, CapReachWidthPx, widthIsPixels: true,
+                             color: new Color(0.95f, 0.60f, 0.15f, 1f), join: JoinType.Miter, cap: cap);
         }
 
         /// <summary>
-        /// A round cap must reach the screen at all, and its silhouette must be an ARC. Non-obvious why: the
-        /// fan's pivot vertex has <c>extrudeN == 0</c>, and a <c>normalize()</c> of it would be NaN, discarding
-        /// the whole cap so it renders as <c>butt</c>. A SQUARE cap also reaches past the endpoint, so the
-        /// extent must also SHRINK as the row moves off the centreline.
+        /// A cap's reach past the endpoint follows the PROJECTION of the world cap shape: butt 0, square h, round
+        /// sqrt(h² − y²) at lateral offset y. Read in a top-down ortho view and a 60° pitched perspective view,
+        /// at both ends of a line along Z. Non-obvious why: a <c>normalize()</c> of the round fan's zero pivot is
+        /// NaN and drops the whole cap, which renders as <c>butt</c>. The lateral offsets stop at 0.75h, where
+        /// the chorded round cap still tracks the circle.
         /// </summary>
         [Test]
-        public void RoundCap_ExtendsPastEndpoint_AsAnArc()
+        public void CapReach_FollowsProjectedWorldShape_UnderTilt()
         {
-            var (cameraGo, camera) = BuildCamera();
-            Track(cameraGo);
-            var (lineGo, mat)      = BuildRoundCappedLine();
-            AssertAaKeywordClear(mat);
+            double[] laterals = { 0.0, 0.5, 0.75 };
+            using var lit = new LitAmbientScope();
 
-            using var snap = new SnapshotRenderer(SnapW, SnapH);
-            try
+            foreach (var (viewName, camera) in BuildReachViews())
+            foreach (CapType cap in new[] { CapType.Butt, CapType.Square, CapType.Round })
             {
-                snap.Render(camera);
-                snap.WritePng("line-aa-a2b-round-cap-arc.png");
-
-                Frame pixels     = snap.Pixels;
-                float3 background = BackgroundLinear(pixels);
-                float3 plateau    = SampleLinearBox(pixels, SnapW / 2, SnapH / 2, 2);
-                AssertPlateauDistinct(background, plateau);
-
-                const float capHalfPx = CapWidthPx * 0.5f;   // 20 px — the cap's radius
-                const float centreRow = SnapH / 2f;          // the centreline sits on the row boundary
-
-                // A circle reaches sqrt(r² − dy²) (19.99, 17.02, 12.64 px); a square cap reaches r. Rows avoid
-                // the too-flat apex and the rim, where the chorded cap leaves the circle.
-                int[] rows = { SnapH / 2, SnapH / 2 + 10, SnapH / 2 + 15 };
-
-                foreach (int outward in new[] { -1, 1 })
+                var (lineGo, mat) = BuildCappedLineAlongZ(cap);
+                AssertAaKeywordClear(mat);
+                try
                 {
-                    int    capColumn = SnapW / 2 + outward * 100;
-                    string which     = outward < 0 ? "start" : "end";
+                    using var snap = new SnapshotRenderer(SnapW, SnapH);
+                    snap.Render(camera);
+                    snap.WritePng($"line-aa-a2b-cap-{cap}-{viewName}.png");
 
-                    var extents = new float[rows.Length];
-                    var ideals  = new float[rows.Length];
-                    var report  = new System.Text.StringBuilder();
-                    for (int i = 0; i < rows.Length; i++)
+                    Frame pixels      = snap.Pixels;
+                    float3 background = PixelCoverage.BackgroundLinear(pixels);
+                    float3 plateau    = PixelCoverage.PlateauAlongRay(
+                        pixels, GroundRuler.ProjectPx(camera, double3.zero), new double2(0.0, 1.0), 4, 1.0, background);
+                    AssertPlateauDistinct(background, plateau);
+
+                    foreach (double outward in new[] { -1.0, 1.0 })
                     {
-                        extents[i] = CapExtentPastEndpointPx(
-                            pixels, capColumn, outward, rows[i], background, plateau);
-                        float dy  = rows[i] + 0.5f - centreRow;
-                        ideals[i] = math.sqrt(math.max(capHalfPx * capHalfPx - dy * dy, 0f));
-                        report.Append($"[dy={dy:F1}] {extents[i]:F2} px (circle {ideals[i]:F2}) ");
+                        string where = $"{viewName} view, {cap} cap at the {(outward < 0 ? "near" : "far")} end";
+                        var    along = new double3(0.0, 0.0, outward);
+                        var    extents = new double[laterals.Length];
+                        var    ideals  = new double[laterals.Length];
+                        var    report  = new System.Text.StringBuilder();
+
+                        for (int i = 0; i < laterals.Length; i++)
+                        {
+                            double lateralM = laterals[i] * CapReachHalfWidthM;
+                            var    edge     = new double3(lateralM, 0.0, outward * CapHalfLengthM);
+                            double reachM   = cap == CapType.Butt   ? 0.0
+                                            : cap == CapType.Square ? CapReachHalfWidthM
+                                            : math.sqrt(CapReachHalfWidthM * CapReachHalfWidthM - lateralM * lateralM);
+                            ideals[i]  = GroundRuler.ScreenSpanPx(camera, edge, edge + along * reachM);
+                            var beyond = edge + along * (2.0 * CapReachHalfWidthM);
+                            extents[i] = PixelCoverage.CoverageIntegral(
+                                CoverageAlongWorldRay(camera, pixels, edge, beyond, 0.0, background, plateau)) * RayStepPx;
+                            report.Append($"[y={laterals[i]:F2}h] {extents[i]:F2} px (projected {ideals[i]:F2}) ");
+                        }
+                        TestContext.WriteLine($"{where}: {report}");
+
+                        if (cap != CapType.Butt)
+                            Assert.Greater(ideals[0], 10.0, $"{where}: the projected reach is under 10 px, too small to resolve.");
+
+                        for (int i = 0; i < extents.Length; i++)
+                            Assert.That(extents[i], Is.EqualTo(ideals[i]).Within(2.0),
+                                $"{where}: reach at lateral {laterals[i]:F2}h is {extents[i]:F2} px but the " +
+                                $"projected {cap} cap reaches {ideals[i]:F2} px. Zero for a round or square cap " +
+                                $"means it is not rendering (the NaN-pivot bug); a constant reach across " +
+                                $"offsets is a square cap. Extents: {report}");
+
+                        if (cap == CapType.Round)
+                            for (int i = 1; i < extents.Length; i++)
+                                Assert.That(extents[i - 1] - extents[i], Is.GreaterThan(0.5 * (ideals[i - 1] - ideals[i])),
+                                    $"{where}: the reach does not shrink between samples {i - 1} and {i}, so the " +
+                                    $"silhouette is flat, not an arc. Extents: {report}");
                     }
-                    TestContext.WriteLine($"{which} cap: {report}");
-
-                    // (a) It renders at all, at about the right radius. Zero here is the NaN-pivot bug:
-                    //     the cap is absent and the line ends flush, exactly like a butt cap.
-                    Assert.That(extents[0], Is.EqualTo(capHalfPx).Within(2f),
-                        $"{which} cap reaches {extents[0]:F2} px past its endpoint on the centreline; a " +
-                        $"round cap of half-width {capHalfPx:F0} px must reach ≈ {capHalfPx:F0} px. " +
-                        $"0 means the cap is not rendering at all. Extents: {report}");
-
-                    // (b) An ARC: the reach tracks sqrt(r² − dy²) and shrinks monotonically. The tolerance absorbs
-                    //     the chorded apex (r·cos18° = 19.02 px) and whole-pixel quantisation.
-                    for (int i = 0; i < extents.Length; i++)
-                        Assert.That(extents[i], Is.EqualTo(ideals[i]).Within(2.5f),
-                            $"{which} cap reach at sample {i} is {extents[i]:F2} px but a circular cap of " +
-                            $"radius {capHalfPx:F0} px reaches {ideals[i]:F2} px there. A constant reach " +
-                            $"across offsets is a SQUARE cap. Extents: {report}");
-
-                    for (int i = 1; i < extents.Length; i++)
-                        Assert.That(extents[i], Is.LessThanOrEqualTo(extents[i - 1] - 1.5f),
-                            $"{which} cap extent does not shrink between sample {i - 1} and {i}, so the " +
-                            $"silhouette is flat, not an arc — that is a square/butt cap shape. " +
-                            $"Extents: {report}");
                 }
-            }
-            finally
-            {
-                DestroyFixture(lineGo, mat);
+                finally
+                {
+                    DestroyFixture(lineGo, mat);
+                }
             }
         }
 
@@ -2133,16 +2153,25 @@ namespace MapRenderer.Tests.Visual
 
         // ─── Is interpolating `hairlineScale` sound? ────────────────────────────────────────────
 
+        private const float TiltedFovDeg = 55f;
+
         /// <summary>A PERSPECTIVE camera tilted toward the horizon, so a line running away from it spans a
-        /// wide range of depths and the rendered width of a fixed world width varies strongly along it.</summary>
+        /// wide range of depths and the rendered width of a fixed world width varies strongly along it.
+        /// The default pose looks 12° below the horizon from (0, 18, -55).</summary>
         private static (GameObject go, Camera camera) BuildTiltedCamera()
+            => BuildTiltedCamera(new Vector3(0f, 18f, -55f), 12f);
+
+        /// <summary>The tilted camera at <paramref name="position"/>, looking <paramref name="pitchBelowHorizonDeg"/>
+        /// below the horizon along +Z. It targets the RT-less snapshot frame: the aspect is 1 and
+        /// <c>targetTexture</c> is null until <see cref="SnapshotRenderer.Render"/> sets it.</summary>
+        private static (GameObject go, Camera camera) BuildTiltedCamera(Vector3 position, float pitchBelowHorizonDeg)
         {
             var go     = new GameObject("LineAaTiltCamera");
             var camera = go.AddComponent<Camera>();
-            camera.transform.position = new Vector3(0f, 18f, -55f);
-            camera.transform.rotation = Quaternion.Euler(12f, 0f, 0f);
+            camera.transform.position = position;
+            camera.transform.rotation = Quaternion.Euler(pitchBelowHorizonDeg, 0f, 0f);
             camera.orthographic       = false;
-            camera.fieldOfView        = 55f;
+            camera.fieldOfView        = TiltedFovDeg;
             camera.nearClipPlane      = 0.3f;
             camera.farClipPlane       = 2000f;
             camera.clearFlags         = CameraClearFlags.SolidColor;

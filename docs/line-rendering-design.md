@@ -134,6 +134,15 @@ Guards: `RibbonJobGeometryTests.JoinSide_BevelAndRound_ChamferIsOnTheConvexSide`
 sit outside both segments' half-width bands) and `JoinVertices_NormalTimesSide_IsUnchanged` (the AA/offset
 contract).
 
+**Caps and joins under tilt.** A pixel-width cap or join is the projection of a world shape whose half-width `h`
+is the styled width times the frame constant. Its silhouette is therefore the camera image of world geometry
+and never "N px at every depth": along the outward bisector a miter reaches `1.414·h`, a round join `h` and a
+bevel `0.707·h`. A square cap reaches `h` and a round cap `√(h² − y²)` at lateral offset `y`. A butt cap
+reaches 0. `LineAaSnapshotTests.JoinTypes_AreDistinguishableOnScreen_ByBisectorReach` and
+`CapReach_FollowsProjectedWorldShape_UnderTilt` measure these in a top-down orthographic view and a 60° pitched
+perspective view (the controller's steepest pitch), toward and away from the camera, against the projection of
+the world point. A reach that holds a constant pixel count across depth fails the pitched view only.
+
 ### Square caps
 
 Square caps bake `across ∓ along` (length √2) and are indistinguishable from a 90° join by
@@ -183,16 +192,11 @@ shader uniform × per-vertex `WidthScale`). The same fold appears in `docs/line-
    genuine but modest error, and a fix must not reintroduce a per-vertex screen-space scale. *A tile mesh is
    built once and viewed from every angle, so it may bake only view-independent quantities; the two segment
    tangents qualify, the miter derived from them does not.*
-2. **Cap and join types at grazing incidence are untested.** All three caps (butt/round/square) and all three
-   joins (miter/bevel/round) are implemented and wired; none is measured under tilt at grazing incidence. A
-   `normalize(0)` NaN once made `line-cap: round` render as butt, and it hid because nothing measured caps.
-   The only rendered square-cap test uses world-metre widths, so a square cap is never rendered with a pixel
-   width.
-3. **`ComputeInnerNormal`'s `|cos(θ/2)| < 1e-12` branch returns `mu · miterLimit`** with a `mu` whose
+2. **`ComputeInnerNormal`'s `|cos(θ/2)| < 1e-12` branch returns `mu · miterLimit`** with a `mu` whose
    *direction* is floating-point noise, where `ComputeMiterNormals` returns the inert `n1` fallback for the
    same condition. The branch is narrow (reachable only for `|n₁+n₂| ∈ [1e-12, 2e-12)`) and documented at both
    sites; unifying on the `n1` fallback is an option.
-4. **The round fan's `|side| = 0` locus is not the centreline at a *clamped* join** — the pivot sits up to
+3. **The round fan's `|side| = 0` locus is not the centreline at a *clamped* join** — the pivot sits up to
    `2 · halfWidth` from the corner while the rim is at `1 · halfWidth`. The miter join is in the same
    situation and it is not observed to matter (`Join_NoInteriorSeam` is green at 60°), but it is the
    geometric assumption the AA ramp rests on, and nothing measures it at a clamped corner.
@@ -225,7 +229,7 @@ visible artefact (a phase jump) is per joint.
 - `Assets/Code/MapRenderer.Unity/Shaders/README.md` — shader layout and conventions.
 - Nicolas P. Rougier, *Shader-Based Antialiased, Dashed, Stroked Polylines*, JCGT 2(2):105–121, 2013.
   <http://jcgt.org/published/0002/02/08/>. Its analytic cap/join distance table (Table 1) is the useful part
-  for caps and joins under tilt (open question 2); its dash atlas is a precision regression against our
+  for caps and joins under tilt; its dash atlas is a precision regression against our
   analytic dashes, and its 3D case uses camera-facing impostors, which suits neither ground-draped roads nor a
   shadow pass. The document is CC BY-ND 3.0 — implement from it, do not reproduce it here; supplemental code
   is BSD.

@@ -391,8 +391,8 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        /// <summary>Builds the apex-V shape of <c>LineAaSnapshotTests.BuildApexFixture</c> with the apex at the
-        /// look-at and the convex bisector along world +Z, the foreshortened direction. Renders one join at
+        /// <summary>Builds a right-angle apex-V with the apex at the look-at and the convex bisector along
+        /// world +Z, the foreshortened direction. Renders one join at
         /// one tilt, marches <see cref="PixelCoverage.CoverageProfileAlongRay"/> along the bisector, and
         /// returns the reach and the same-camera ruler for <paramref name="analyticReachMetres"/>. The ruler is
         /// the one-sided <see cref="GroundRuler.ScreenSpanPx"/>, because reach is measured FROM the apex.</summary>
@@ -460,9 +460,8 @@ namespace MapRenderer.Tests.Visual
         /// <b>T3.</b> Proves: the general-direction ray cut is valid under tilt; the three join types stay
         /// separable at 55°; the harness serves a line-GEOMETRY consumer, not only a band-width one.
         ///
-        /// <para>Does NOT prove anything at GRAZING incidence — this is the look-at at 55°, and grazing is
-        /// the open question <c>docs/line-rendering-design.md</c> owns. Nothing about caps. Nothing
-        /// about the short-segment fold régime — these arms are two orders above it.</para>
+        /// <para>Does NOT prove grazing incidence or caps (look-at at 55°, arms far above the short-segment fold
+        /// régime); <c>LineAaSnapshotTests</c> pins those, see <c>docs/line-rendering-design.md</c>.</para>
         /// </summary>
         [Test]
         public void JoinSilhouetteReach_MatchesTheRuler_UnderTilt()

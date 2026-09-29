@@ -180,7 +180,7 @@ namespace MapRenderer.Tests
 
         /// <summary>Distance from the ray origin (<c>i = 0</c>) to the first <c>≥0.5 → &lt;0.5</c> crossing in
         /// <paramref name="profile"/>, linearly interpolated between the bracketing samples and scaled by
-        /// <paramref name="stepPx"/>. Generalises <c>LineAaSnapshotTests.BisectorReachPx</c> to an arbitrary
+        /// <paramref name="stepPx"/>. Measures silhouette reach along an arbitrary
         /// screen direction. Limitation: it estimates silhouette REACH to a fraction of a pixel, not sub-0.1 px;
         /// use the coverage integral for apparent WIDTH. It fails when no crossing occurs, because a silent 0
         /// could pass a <c>&lt;</c> assertion for the wrong reason.</summary>

@@ -70,10 +70,10 @@ namespace MapRenderer.Tests
         public readonly RenderTexture ViewportRenderTexture;
         public readonly MapCamera    MapCam;
 
-        /// <summary>Null when <see cref="TiltedGroundSceneConfig.LitAmbient"/> is false.</summary>
-        public readonly GameObject LightGameObject;
+        private readonly LitAmbientScope _lit;
 
-        private readonly (int quality, UnityEngine.Rendering.AmbientMode mode, Color light) _savedAmbient;
+        /// <summary>Null when <see cref="TiltedGroundSceneConfig.LitAmbient"/> is false.</summary>
+        public GameObject LightGameObject => _lit?.LightGameObject;
 
         /// <summary>World metres per device pixel at the look-at — the frame's ruler. Every world size a
         /// tilt fixture wants must derive from this, never a bare metre literal: one device px is hundreds
@@ -82,16 +82,14 @@ namespace MapRenderer.Tests
 
         private TiltedGroundScene(
             TiltedGroundSceneConfig config, GameObject cameraGameObject, Camera unityCamera,
-            RenderTexture viewportRenderTexture, MapCamera mapCam, GameObject lightGameObject,
-            (int quality, UnityEngine.Rendering.AmbientMode mode, Color light) savedAmbient)
+            RenderTexture viewportRenderTexture, MapCamera mapCam, LitAmbientScope lit)
         {
             Config                = config;
             CameraGameObject      = cameraGameObject;
             UnityCamera           = unityCamera;
             ViewportRenderTexture = viewportRenderTexture;
             MapCam                = mapCam;
-            LightGameObject       = lightGameObject;
-            _savedAmbient         = savedAmbient;
+            _lit                  = lit;
         }
 
         /// <summary>Builds the scene: ambient/light (if <see cref="TiltedGroundSceneConfig.LitAmbient"/>) →
@@ -101,25 +99,7 @@ namespace MapRenderer.Tests
         /// it would corrupt every later lit render in the batch process.</summary>
         public static TiltedGroundScene Create(TiltedGroundSceneConfig config)
         {
-            (int quality, UnityEngine.Rendering.AmbientMode mode, Color light) savedAmbient = default;
-            GameObject lightGo = null;
-
-            if (config.LitAmbient)
-            {
-                savedAmbient = (
-                    QualitySettings.GetQualityLevel(),
-                    RenderSettings.ambientMode,
-                    RenderSettings.ambientLight);
-                QualitySettings.SetQualityLevel(0, false);
-                RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
-                RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
-
-                lightGo = new GameObject("TiltedGroundScene_DirLight");
-                lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
-                var light = lightGo.AddComponent<Light>();
-                light.type      = LightType.Directional;
-                light.intensity = 1f;
-            }
+            LitAmbientScope lit = config.LitAmbient ? new LitAmbientScope() : null;
 
             GameObject camGo = null;
             RenderTexture rt = null;
@@ -139,7 +119,7 @@ namespace MapRenderer.Tests
                 var mapCam = new MapCamera(
                     uCam, props, config.AltitudeMultiplier, config.Projection, config.DevicePixelRatio);
 
-                return new TiltedGroundScene(config, camGo, uCam, rt, mapCam, lightGo, savedAmbient);
+                return new TiltedGroundScene(config, camGo, uCam, rt, mapCam, lit);
             }
             catch
             {
@@ -147,13 +127,7 @@ namespace MapRenderer.Tests
                 // Dispose() would, and destroy whatever was partially built.
                 if (camGo != null) UnityEngine.Object.DestroyImmediate(camGo);
                 if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
-                if (lightGo != null) UnityEngine.Object.DestroyImmediate(lightGo);
-                if (config.LitAmbient)
-                {
-                    QualitySettings.SetQualityLevel(savedAmbient.quality, false);
-                    RenderSettings.ambientMode  = savedAmbient.mode;
-                    RenderSettings.ambientLight = savedAmbient.light;
-                }
+                lit?.Dispose();
                 throw;
             }
         }
@@ -183,13 +157,7 @@ namespace MapRenderer.Tests
 
         public void Dispose()
         {
-            if (LightGameObject != null) UnityEngine.Object.DestroyImmediate(LightGameObject);
-            if (Config.LitAmbient)
-            {
-                QualitySettings.SetQualityLevel(_savedAmbient.quality, false);
-                RenderSettings.ambientMode  = _savedAmbient.mode;
-                RenderSettings.ambientLight = _savedAmbient.light;
-            }
+            _lit?.Dispose();
             if (CameraGameObject != null) UnityEngine.Object.DestroyImmediate(CameraGameObject);
             if (ViewportRenderTexture != null)
             {
