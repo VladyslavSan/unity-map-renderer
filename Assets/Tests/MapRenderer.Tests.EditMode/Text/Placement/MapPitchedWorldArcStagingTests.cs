@@ -2543,8 +2543,13 @@ namespace MapRenderer.Tests.Text.Placement
         {
             double3 anchorRender = new double3(0.0, 0.0, GlobeDepthM);
             double3 alongSurface = math.cos(frameAngleRad) * GlobeEast - math.sin(frameAngleRad) * GlobeUpAtArcStart;
-            double3 acrossSurface = GlobeAcross;
+            FrameExpectedBox(anchorRender, alongSurface, GlobeAcross, out min, out max);
+        }
 
+        /// <summary>The screen AABB of the globe teeth's cell laid out in the stated ground frame at the anchor.</summary>
+        private static void FrameExpectedBox(in double3 anchorRender, in double3 alongSurface,
+            in double3 acrossSurface, out double2 min, out double2 max)
+        {
             // The same metres-per-baked-px the renderer applies: TextSizePx · metresPerLogicalPixel / OneEm.
             double metresPerBaked = GlobeTextSizePx * (double)GlobeMpp / TextQuadLayout.OneEm;
             double halfWidthM = GlobeCellHalfWidthBaked * metresPerBaked;
@@ -2790,6 +2795,54 @@ namespace MapRenderer.Tests.Text.Placement
                 $"GA-T3: LEFT edge expected {expectedMin.x:F4}, read {box.Min.x:F4}.");
             Assert.That(box.Max.x, Is.EqualTo(expectedMax.x).Within(0.05),
                 $"GA-T3: RIGHT edge expected {expectedMax.x:F4}, read {box.Max.x:F4}.");
+        }
+
+        // Planar axial term — on Mercator the ground frame's Gram-Schmidt is inert unless the tangent tilts.
+
+        /// <summary>
+        /// A flat-map road whose baked tangent rises 30° off the horizontal has <c>axial = sin 30° = 0.5</c>
+        /// against the constant Mercator up. The projected AABB must use the in-surface x̂ = (1,0,0) and
+        /// ŷ = (0,0,1), not the raw tangent. Non-obvious why: the 7 em text size amplifies the effect, as in
+        /// GA-T2. Limitation: the fixture is a hand-built tilted segment, so it shows the frame is right when
+        /// a tilted tangent arrives, not that the baker emits one.
+        /// </summary>
+        [Test]
+        public void MapPitched_PlanarTiltedTangent_ProjectedBoxUsesTheInSurfaceGroundFrame()
+        {
+            const double halfChordM = 2000.0;
+            double3 anchorRender = new double3(0.0, 0.0, GlobeDepthM);
+            double3 rise = new double3(0.0, halfChordM * math.tan(math.radians(30.0)), 0.0);
+            double3 along = new double3(halfChordM, 0.0, 0.0);
+            var worldPath = new[] { anchorRender - along - rise, anchorRender + along + rise };
+            var worldUps = new[] { new float3(0f, 1f, 0f), new float3(0f, 1f, 0f) };
+            var screenPath = new[] { ProjectPx(worldPath[0]), ProjectPx(worldPath[1]) };
+            var glyphs = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = GlobeCell() } };
+            var anchors = new[] { new LineAnchor(0, 0.5f) };
+            CurvedStageInput input = Input(AlignmentMode.Map, GlobeMpp, GlobeTextSizePx, maxAngleDeg: 180f, featureIndex: 64);
+            var pool = Pools.New();
+            int staged = Stage(in input, screenPath, worldPath, glyphs, anchors, ref pool,
+                view: OriginView(), worldUpPathOverride: worldUps);
+            Assert.That(staged, Is.EqualTo(1), "planar tilted tangent: the label must stage.");
+
+            double3 tangent = math.normalize(worldPath[1] - worldPath[0]);
+            double axial = math.dot(tangent, new double3(0.0, 1.0, 0.0));
+            Assert.That(axial, Is.EqualTo(0.5).Within(1e-9), "precondition: the axial term is genuinely non-zero.");
+
+            double3 inSurface = new double3(1.0, 0.0, 0.0);      // normalize(tangent − up·axial)
+            double3 acrossInSurface = new double3(0.0, 0.0, 1.0); // cross(x̂, up)
+            FrameExpectedBox(anchorRender, inSurface, acrossInSurface, out double2 expectedMin, out double2 expectedMax);
+            FrameExpectedBox(anchorRender, tangent, math.cross(tangent, new double3(0.0, 1.0, 0.0)),
+                out double2 rawMin, out double2 rawMax);
+            double separation = math.max(math.abs(expectedMin.y - rawMin.y), math.abs(expectedMax.y - rawMax.y));
+            Assert.That(separation, Is.GreaterThan(1.0),
+                $"non-vacuity: dropping the orthogonalisation must move a y edge by well over the 0.05 px " +
+                $"tolerance, measured {separation:F4} px.");
+
+            SymbolBox box = pool.Boxes[0];
+            Assert.That(box.Min.x, Is.EqualTo(expectedMin.x).Within(0.05), "planar tilted tangent: LEFT edge.");
+            Assert.That(box.Max.x, Is.EqualTo(expectedMax.x).Within(0.05), "planar tilted tangent: RIGHT edge.");
+            Assert.That(box.Min.y, Is.EqualTo(expectedMin.y).Within(0.05), "planar tilted tangent: LOWER edge.");
+            Assert.That(box.Max.y, Is.EqualTo(expectedMax.y).Within(0.05), "planar tilted tangent: UPPER edge.");
         }
     }
 
