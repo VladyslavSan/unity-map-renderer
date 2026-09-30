@@ -9,8 +9,8 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Reads what the Entities backend draws after each Update and asserts the tile hold's invariants: a previously drawn area that is still in
-    /// the view stays drawn (closed view), no slot draws a tile with its ancestor (nested-free), and one Update makes at most one show and one hide call
-    /// (batched visibility).
+    /// the view stays drawn (closed view), no slot draws a tile with its ancestor (nested-free), one Update makes at most one show and one hide call
+    /// (batched visibility), and a drawn record that still serves a cover tile stays drawn in every slot.
     /// </summary>
     internal sealed class DrawnTileWatcher
     {
@@ -20,6 +20,7 @@ namespace MapRenderer.Tests
         private readonly HashSet<TileId> _shownBackground = new();
         private readonly HashSet<TileId> _shownFill       = new();
         private readonly HashSet<TileId> _previousShown   = new();
+        private readonly HashSet<TileId> _previousFill    = new();
         private readonly List<TileId>    _cover           = new();
         private readonly List<TileId>    _scratch         = new();
 
@@ -27,7 +28,7 @@ namespace MapRenderer.Tests
         public bool SawDeeperThanCover;
 
         /// <param name="backgroundSlot">The layer slot of the background, which has one quad per tile and so measures coverage.</param>
-        /// <param name="fillSlot">A second slot, checked for nesting only.</param>
+        /// <param name="fillSlot">A second slot. It may draw fewer tiles than the cover, so it is checked for nesting, and for a drawn record that still serves a cover tile.</param>
         public DrawnTileWatcher(MapViewComponent view, int backgroundSlot, int fillSlot)
         {
             _view           = view;
@@ -37,6 +38,9 @@ namespace MapRenderer.Tests
 
         /// <summary>The background tiles drawn after the last <see cref="Check"/>.</summary>
         public HashSet<TileId> ShownBackground => _shownBackground;
+
+        /// <summary>The fill-slot tiles drawn after the last <see cref="Check"/>.</summary>
+        public HashSet<TileId> ShownFill => _shownFill;
 
         /// <summary>The cover: the tiles with a record in it, and the ones still waiting to be admitted.</summary>
         public List<TileId> Cover
@@ -66,12 +70,18 @@ namespace MapRenderer.Tests
             Assert.LessOrEqual(_view.VisibilityBatchesLastTick(), 2, "Batched visibility: one show call and one hide call per Update, however many tiles swap.");
 
             foreach (TileId was in _previousShown) AssertStillShown(was, cover);
+            foreach (TileId was in _previousFill)
+                if (cover.Contains(was))
+                    Assert.IsTrue(_shownFill.Contains(was),
+                        $"Closed view broke at Update {Ticks}: fill record {was} still serves the cover and is not drawn now. {Describe(cover)}");
 
             foreach (TileId shown in _shownBackground)
                 if (!cover.Contains(shown)) SawDeeperThanCover = true;
 
             _previousShown.Clear();
             foreach (TileId t in _shownBackground) _previousShown.Add(t);
+            _previousFill.Clear();
+            foreach (TileId t in _shownFill) _previousFill.Add(t);
         }
 
         /// <summary>The drawn background tiles are exactly the cover tiles.</summary>

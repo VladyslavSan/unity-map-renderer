@@ -321,7 +321,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 SourceId     = sourceId;
                 Key          = key;
                 MinZoom      = minZoom;
-                MaxZoom      = maxZoom;
+                MaxZoom      = math.max(maxZoom, 0); // a negative maxzoom is not a zoom level: ServingTile would shift past the tile's zoom
                 CreateSource = createSource;
                 Bounds       = bounds;
             }
@@ -419,17 +419,17 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>The strict ancestors of every cover tile, rebuilt with each cover recompute: the test for "has a descendant in the cover".</summary>
         private readonly HashSet<TileId> _coverAncestors = new();
 
-        /// <summary>The records currently shown, each with all bits set. A record is shown when its items are visible, or are about to be at the next flush.</summary>
+        /// <summary>The areas currently shown: the revealed cover, Hold and Bridge tiles. Every relative question of the swap reads this set.</summary>
+        private readonly HashSet<TileId> _revealedTiles = new();
+
+        /// <summary>For each serving key, how many revealed tiles it serves. The count exists whether or not the record does, so a record
+        /// that registers late reads it at once. It is a pure function of <see cref="_revealedTiles"/> and the serving map, so teardown leaves it alone.</summary>
+        private readonly Dictionary<LoadedKey, int> _shownCount = new();
+
+        /// <summary>The records currently shown, each with all bits set: the existing records whose <see cref="_shownCount"/> is above zero.</summary>
         private readonly Dictionary<LoadedKey, ulong> _revealed = new();
 
-        /// <summary>Shown records that were shown only to serve a cover tile from above (an overzoomed source's maxzoom tile). Such a record
-        /// is not a shown relative of the tiles it serves: it is left out of <see cref="_shownRecords"/> and <see cref="_shownBelow"/>.</summary>
-        private readonly HashSet<LoadedKey> _shownAsServing = new();
-
-        /// <summary>For each tile, how many of its records are shown as that tile. A tile is shown while the count is above zero.</summary>
-        private readonly Dictionary<TileId, int> _shownRecords = new();
-
-        /// <summary>For each tile, how many shown tiles lie strictly below it: the test for "has a shown descendant".</summary>
+        /// <summary>For each tile, how many revealed tiles lie strictly below it: the test for "has a shown descendant".</summary>
         private readonly Dictionary<TileId, int> _shownBelow = new();
 
         /// <summary>Scratch for <see cref="SwapStep"/>, <see cref="ServiceRetries"/> and <see cref="RecomputeRoles"/>; reused.</summary>
@@ -468,7 +468,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private int   _showBatchCount;
         private int[] _hideBatch = new int[32];
         private int   _hideBatchCount;
-        private readonly HashSet<int> _hiddenNow = new(64);
+        private readonly Dictionary<int, bool> _lastQueuedShow = new(64);
 
         // Parallel to the two above — each newly-built mesh's global material index, for the cache transfer.
         private readonly List<int> _consumeMatIndices = new(8);
@@ -583,8 +583,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             _desiredSet.Clear();
             ClearPreloadState();
             _revealed.Clear(); // every record is gone, and the backend is rebuilt below
-            _shownAsServing.Clear();
-            _shownRecords.Clear();
+            _revealedTiles.Clear();
+            _shownCount.Clear();
             _shownBelow.Clear();
 
             // No purge here: CurrentStyle is a content-derived token (see its own doc), so a changed style
@@ -642,8 +642,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _loaded.Remove(oldKey);
                 _loaded[newKey] = lt;
                 if (_revealed.Remove(oldKey, out ulong mask)) _revealed[newKey] = mask;
-                if (_shownAsServing.Remove(oldKey)) _shownAsServing.Add(newKey);
             }
+
+            RebuildShownCounts();
 
             // Deferred-release/desired bookkeeping is per-tick derived state, invalid against the just-
             // rebuilt slot indexing regardless of what survived — cleared unconditionally, as before.
@@ -682,6 +683,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _instanced?.Dispose();
             _showBatchCount = 0; // handles of the disposed backend mean nothing to the new one
             _hideBatchCount = 0;
+            _lastQueuedShow.Clear();
             _instanced = backend switch
             {
                 Map.RenderBackend.Brg =>
@@ -860,8 +862,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             foreach (var kv in _loaded)
             {
                 LoadedTile lt = kv.Value;
-                if (lt.Role == TileRole.Prepare) { preparing++; continue; }
                 bool condemned = IsCondemned(kv.Key, lt);
+                if (lt.Role == TileRole.Prepare) { if (!condemned) preparing++; continue; }
                 if (lt.Role == TileRole.Hold) { if (!condemned) held++; }
                 else if (lt.Role == TileRole.Bridge) { if (!condemned) bridged++; }
                 else if (!condemned) display++;
@@ -1847,7 +1849,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
 
             RenderTeardownRecord(ref lt);
-            MarkHidden(key); // a torn-down record takes its shown mark with it
+            _revealed.Remove(key); // the record is gone; the tiles it served stay revealed, and so does their count
         }
 
         /// <summary>Transfers a Built record's meshes into <see cref="_prepared"/>, keyed per layer under
@@ -1902,6 +1904,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private void AdmitTile(TileId id, int slot, IProjection projection, TileRole role = TileRole.Display)
         {
             var key = new LoadedKey(id, slot);
+            Debug.Assert(!_loaded.ContainsKey(key), "AdmitTile overwrites a record that is already loaded");
 
             // The SINGLE projected SW-corner render origin, shared by the mesh bake and the tile transform.
             double3 origin = TileRenderOrigin.Project(id, projection);
@@ -2106,7 +2109,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             TileId tile = key.Tile;
             if (_servedKeys.Contains(key)) { role = TileRole.Display; return true; }
 
-            bool shown = _revealed.ContainsKey(key);
+            bool shown = _shownCount.ContainsKey(key); // the record serves a revealed area, built or not
             if (shown && HasRelativeInCover(tile)) { role = TileRole.Hold; return true; }
             if (!shown && IsBetweenHoldAndCover(tile)) { role = TileRole.Bridge; return true; }
 
@@ -2208,15 +2211,14 @@ namespace MapRenderer.Unity.Rendering.Tile
             QueueShow(lt.OldDrawHandles);
         }
 
-        /// <summary>True iff <paramref name="key"/>'s record shows now: it is shown already, or its tile is shown and the record has a role.
-        /// A record that joins a shown tile is marked shown.</summary>
+        /// <summary>True iff <paramref name="key"/>'s record shows now: it serves a revealed tile and has a role. A record that joins a
+        /// revealed tile is marked shown.</summary>
         private bool FollowsShownTile(LoadedKey key, in LoadedTile lt)
         {
+            if (!_shownCount.ContainsKey(key)) return false;
             if (_revealed.ContainsKey(key)) return true;
-            bool servingFromAbove = _servedKeys.Contains(key) && !_coverSet.Contains(key.Tile);
-            bool tileShown = IsShown(key.Tile) || (servingFromAbove && _shownBelow.ContainsKey(key.Tile));
-            if (!tileShown || !TryResolveRole(in key, in lt, out _)) return false;
-            MarkShown(key, asOwnTile: !servingFromAbove);
+            if (!TryResolveRole(in key, in lt, out _)) return false;
+            _revealed[key] = ulong.MaxValue;
             return true;
         }
 
@@ -2230,43 +2232,32 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Hold and swap: a tile that left the cover stays shown until ready tiles cover its area ──
         // See docs/tile-pipeline-design.md "Hold and swap".
 
-        private bool IsShown(TileId tile) => _shownRecords.ContainsKey(tile);
+        private bool IsShown(TileId tile) => _revealedTiles.Contains(tile);
 
-        /// <summary>Marks a record shown. <paramref name="asOwnTile"/> is false when the record is shown only to serve a cover tile from above
-        /// it; it then counts as no shown tile until a swap shows it as its own tile.</summary>
-        private void MarkShown(LoadedKey key, bool asOwnTile)
+        /// <summary>Adds <paramref name="delta"/> (+1 or -1) to the shown-descendant count of every strict ancestor of <paramref name="tile"/>.</summary>
+        private void CountShownBelow(TileId tile, int delta)
         {
-            if (_revealed.TryAdd(key, ulong.MaxValue))
-            {
-                if (asOwnTile) CountShown(key.Tile, +1);
-                else _shownAsServing.Add(key);
-            }
-            else if (asOwnTile && _shownAsServing.Remove(key)) CountShown(key.Tile, +1);
-        }
-
-        /// <summary>Marks a record not shown. A record that is not shown is left as it is.</summary>
-        private void MarkHidden(LoadedKey key)
-        {
-            if (!_revealed.Remove(key)) return;
-            if (!_shownAsServing.Remove(key)) CountShown(key.Tile, -1);
-        }
-
-        private void CountShown(TileId tile, int delta)
-        {
-            _shownRecords.TryGetValue(tile, out int records);
-            records += delta;
-            bool first = delta > 0 && records == 1;
-            bool last  = delta < 0 && records == 0;
-            if (records > 0) _shownRecords[tile] = records; else _shownRecords.Remove(tile);
-            if (!first && !last) return;
-
             for (TileId up = tile; up.Z > 0;)
             {
                 up = TileAncestry.Parent(up);
                 _shownBelow.TryGetValue(up, out int n);
-                n += first ? 1 : -1;
+                n += delta;
                 if (n > 0) _shownBelow[up] = n; else _shownBelow.Remove(up);
             }
+        }
+
+        /// <summary>Rebuilds <see cref="_shownCount"/> from <see cref="_revealedTiles"/> against the current source slots.</summary>
+        private void RebuildShownCounts()
+        {
+            _shownCount.Clear();
+            foreach (TileId tile in _revealedTiles)
+                for (int slot = 0; slot < _sources.Count; slot++)
+                {
+                    if (!_sources.AdmitsTile(slot, tile)) continue;
+                    var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
+                    _shownCount.TryGetValue(key, out int n);
+                    _shownCount[key] = n + 1;
+                }
         }
 
         /// <summary>True iff a strict ancestor or descendant of <paramref name="tile"/> is in the cover.</summary>
@@ -2318,22 +2309,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             return false;
         }
 
-        /// <summary>True iff every record of <paramref name="tile"/> is shown. A record shown only to serve a cover tile from above counts as
-        /// shown here, so the tile's other records decide.</summary>
-        private bool AllRecordsShown(TileId tile)
-        {
-            bool any = false;
-            for (int slot = 0; slot < _sources.Count; slot++)
-            {
-                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
-                if (!_loaded.ContainsKey(key)) continue;
-                if (!_revealed.ContainsKey(key)) return false;
-                any = true;
-            }
-
-            return any;
-        }
-
         /// <summary>True iff some source has a record for <paramref name="tile"/>.</summary>
         private bool HasRecord(TileId tile)
         {
@@ -2357,28 +2332,41 @@ namespace MapRenderer.Unity.Rendering.Tile
             return true;
         }
 
-        /// <summary>Shows every item of <paramref name="tile"/>'s records: the swap knows its area is covered, or that nothing shown is near it.</summary>
+        /// <summary>Reveals <paramref name="tile"/>: the swap knows its area is covered, or that nothing shown is near it. A record that
+        /// serves it shows when its count goes from 0 to 1.</summary>
         private void RevealTile(TileId tile)
         {
+            if (!_revealedTiles.Add(tile)) return;
+            CountShownBelow(tile, +1);
             for (int slot = 0; slot < _sources.Count; slot++)
             {
+                if (!_sources.AdmitsTile(slot, tile)) continue;
                 var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
-                if (!_loaded.TryGetValue(key, out LoadedTile lt)) continue;
-                MarkShown(key, asOwnTile: key.Tile.Equals(tile));
+                _shownCount.TryGetValue(key, out int n);
+                _shownCount[key] = n + 1;
+                if (n > 0 || !_loaded.TryGetValue(key, out LoadedTile lt)) continue;
+                _revealed[key] = ulong.MaxValue;
                 QueueShow(lt.DrawHandles);
                 QueueShow(lt.OldDrawHandles);
             }
         }
 
-        /// <summary>Hides every item of <paramref name="tile"/>'s records. The records stay loaded until their release drains.</summary>
+        /// <summary>Conceals <paramref name="tile"/>. A record that serves it hides when its count goes from 1 to 0, so a record that still
+        /// serves another revealed tile stays shown. The records stay loaded until their release drains.</summary>
         private void ConcealTile(TileId tile)
         {
+            if (!_revealedTiles.Remove(tile)) return;
+            CountShownBelow(tile, -1);
             for (int slot = 0; slot < _sources.Count; slot++)
             {
+                if (!_sources.AdmitsTile(slot, tile)) continue;
                 var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
-                if (_servedKeys.Contains(key) || !_loaded.TryGetValue(key, out LoadedTile lt)) continue; // a record that serves the cover is never outgoing
+                if (!_shownCount.TryGetValue(key, out int n)) continue;
+                if (n > 1) { _shownCount[key] = n - 1; continue; }
+                _shownCount.Remove(key);
+                if (!_loaded.TryGetValue(key, out LoadedTile lt)) continue;
                 HideRecord(in lt);
-                MarkHidden(key);
+                _revealed.Remove(key);
             }
         }
 
@@ -2392,7 +2380,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // 1. A shown tile with no relative in the cover: its area left the view.
             _swapTiles.Clear();
-            foreach (var kv in _shownRecords) _swapTiles.Add(kv.Key);
+            foreach (TileId t in _revealedTiles) _swapTiles.Add(t);
             for (int i = 0; i < _swapTiles.Count; i++)
             {
                 TileId tile = _swapTiles[i];
@@ -2403,7 +2391,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // 2. Zoom out: a ready ancestor in the cover, or a hidden Bridge below it, shows whole and hides the tiles under it.
             _swapTiles.Clear();
-            foreach (var kv in _shownRecords) if (!_coverSet.Contains(kv.Key)) _swapTiles.Add(kv.Key);
+            foreach (TileId t in _revealedTiles) if (!_coverSet.Contains(t)) _swapTiles.Add(t);
             for (int i = 0; i < _swapTiles.Count; i++)
             {
                 TileId shown = _swapTiles[i];
@@ -2416,7 +2404,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // 3. Zoom in: a shown tile whose every cover area is covered by ready tiles gives way to them.
             _swapTiles.Clear();
-            foreach (var kv in _shownRecords) if (_coverAncestors.Contains(kv.Key)) _swapTiles.Add(kv.Key);
+            foreach (TileId t in _revealedTiles) if (_coverAncestors.Contains(t)) _swapTiles.Add(t);
             for (int i = 0; i < _swapTiles.Count; i++)
             {
                 TileId shown = _swapTiles[i];
@@ -2450,7 +2438,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 up = TileAncestry.Parent(up);
                 bool inCover = _coverSet.Contains(up);
-                if ((inCover || HasRecord(up)) && !AllRecordsShown(up) && IsReady(up))
+                if ((inCover || HasRecord(up)) && !IsShown(up) && IsReady(up))
                 {
                     ancestor = up;
                     found    = true;
@@ -2526,6 +2514,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 if (_hideBatchCount == _hideBatch.Length) System.Array.Resize(ref _hideBatch, _hideBatch.Length * 2);
                 _hideBatch[_hideBatchCount++] = handles[i];
+                _lastQueuedShow[handles[i]] = false;
             }
         }
 
@@ -2547,22 +2536,21 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (_showBatchCount == _showBatch.Length) System.Array.Resize(ref _showBatch, _showBatch.Length * 2);
             _showBatch[_showBatchCount++] = handle;
+            _lastQueuedShow[handle] = true;
         }
 
         /// <summary>Hides every queued item in ONE backend call, then shows every queued item in ONE more, so a tile with many
-        /// layers costs one batch each way. A handle queued both ways in one Update ends hidden, whatever the order: the batches are made
-        /// disjoint first. Runs at the end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
+        /// layers costs one batch each way. A handle queued both ways in one Update ends as its LAST queued call says: the batches are
+        /// made disjoint first. Runs at the end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
         private void FlushVisibility()
         {
             if (_hideBatchCount > 0 && _showBatchCount > 0)
             {
-                _hiddenNow.Clear();
-                for (int i = 0; i < _hideBatchCount; i++) _hiddenNow.Add(_hideBatch[i]);
-                int kept = 0;
-                for (int i = 0; i < _showBatchCount; i++)
-                    if (!_hiddenNow.Contains(_showBatch[i])) _showBatch[kept++] = _showBatch[i];
-                _showBatchCount = kept;
+                _hideBatchCount = KeepLastQueued(_hideBatch, _hideBatchCount, shown: false);
+                _showBatchCount = KeepLastQueued(_showBatch, _showBatchCount, shown: true);
             }
+
+            _lastQueuedShow.Clear();
 
             if (_instanced != null)
             {
@@ -2581,6 +2569,15 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _hideBatchCount = 0; // the queues are dropped when _instanced is null: no backend holds those handles
             _showBatchCount = 0;
+        }
+
+        /// <summary>Compacts <paramref name="batch"/> to the handles whose last queued call was <paramref name="shown"/>. Returns the new count.</summary>
+        private int KeepLastQueued(int[] batch, int count, bool shown)
+        {
+            int kept = 0;
+            for (int i = 0; i < count; i++)
+                if (_lastQueuedShow[batch[i]] == shown) batch[kept++] = batch[i];
+            return kept;
         }
 
         /// <summary>Tears down a record's RENDER state: destroys its meshes, unregisters its draw items, and stashes

@@ -3380,7 +3380,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>Above a source's `maxzoom` its maxzoom ancestor serves the tile (overzoom): the tile is admitted,
-        /// `ServingTile` names the ancestor, and the `bounds` gate still applies to the tile itself.</summary>
+        /// `ServingTile` names the ancestor, and the `bounds` gate still applies to the tile itself. A negative `maxzoom` clamps to 0.</summary>
         [Test]
         public void TileInsideBounds_AboveMaxZoom_IsAdmittedAndServedByItsMaxZoomAncestor()
         {
@@ -3393,6 +3393,12 @@ namespace MapRenderer.Tests.Tiles
                 "a tile at the maxzoom serves itself");
             Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 3, X = 1, Y = 2 }),
                 "outside `bounds`: overzoom does not override the bounds gate");
+
+            // A negative maxzoom reads as zoom 0: the root tile serves, and the same spec still matches the stored, clamped pipeline.
+            TileManager.SourceSpec negative = Spec(0, -1, default);
+            using var clamped = BuildRegistry(negative);
+            Assert.AreEqual(new TileId { Z = 0, X = 0, Y = 0 }, clamped.ServingTile(0, inside), "maxzoom -1 clamps to 0");
+            Assert.IsTrue(clamped.Matches(new List<TileManager.SourceSpec> { negative }, hasBackground: false), "the clamped pipeline matches its own spec");
         }
 
         /// <summary>The spec-default bounds (the whole world) must admit every tile, including the

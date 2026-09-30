@@ -87,6 +87,18 @@ namespace MapRenderer.Tests.MapViews
             ]
         }");
 
+        private static StyleDocument FillOnlyStyle() => TestStyle.Document(@"{
+            ""version"": 8,
+            ""name"": ""Test"",
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+            ]
+        }");
+
         /// <summary>Draw commands the BRG backend emits for the camera view, per material slot.</summary>
         private static int EmittedFor(MapView view, int materialIndex)
         {
@@ -117,12 +129,12 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void Overzoom_ServesFromTheMaxZoomAncestor_AcrossTheMaxZoomBoundary()
         {
-            MapView NewView(double preload)
+            MapView NewView(double preload, RenderBackend backend = RenderBackend.Brg, int minZoom = 14, int maxZoom = 15)
             {
                 var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
-                view.Config.Backend = RenderBackend.Brg;
-                view.Config.TileSelection.MinZoom = 14;
-                view.Config.TileSelection.MaxZoom = 15;
+                view.Config.Backend = backend;
+                view.Config.TileSelection.MinZoom = minZoom;
+                view.Config.TileSelection.MaxZoom = maxZoom;
                 view.Config.TileSelection.ZoomLevelPreload = preload;
                 view.WithTestCamera(256);
                 view.Config.MaxConsumesPerTick = 64;
@@ -175,6 +187,10 @@ namespace MapRenderer.Tests.MapViews
                     PumpUntilSettled(view);
                     view.LateUpdate();
                     Check(zoom);
+
+                    view.LateUpdate();
+                    view.LateUpdate();
+                    Assert.AreEqual(0, view.VisibilityBatchesLastTick(), $"zoom {zoom}: a settled view shows and hides nothing, so the serving record is not swapped every frame.");
                 }
 
                 // Preload at its default, from a cold start just below the level switch: the z15 children are prepared, but the
@@ -238,6 +254,125 @@ namespace MapRenderer.Tests.MapViews
             finally
             {
                 view.Teardown();
+            }
+
+            // Every Update, with the Entities backend read back: the watcher keeps the source's z14 fill drawn across 14.9 -> 15.1 -> 14.9,
+            // while the background swaps its tiles with no hole and no overlap.
+            MapView swapView = NewView(-1.0, RenderBackend.Entities);
+            try
+            {
+                swapView.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(centre.x, centre.y, 14.9),
+                    style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+                var watcher = new DrawnTileWatcher(swapView, backgroundSlot: 0, fillSlot: 1);
+                void Tick()
+                {
+                    // Only Update resets VisibilityBatchesLastTick, so the watcher's "<= 2" sees this LateUpdate and the drain together.
+                    swapView.LateUpdate();
+                    swapView.DrainMeshBuilds();
+                    watcher.Check();
+                }
+
+                void TickUntilSettled()
+                {
+                    for (int i = 0; i < 2500 && !(i > 2 && swapView.LoadedTileCount() > 0 && swapView.AllTilesSettled()); i++) Tick();
+                }
+
+                TickUntilSettled();
+                Assert.IsTrue(watcher.ShownFill.Contains(ancestor), "precondition: the z14 fill is drawn");
+                foreach (double zoom in new[] { 15.1, 14.9, 15.1 })
+                {
+                    swapView.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoom });
+                    TickUntilSettled();
+                }
+
+                Assert.AreEqual(4, watcher.ShownBackground.Count, "the background ends on the four z15 tiles");
+            }
+            finally
+            {
+                swapView.Teardown();
+            }
+
+            // A maxzoom of 16, zooming in from 14.9 across the boundary: the z15 tiles that bridge the view never flicker over the z16 cover, and
+            // none lingers as a Bridge.
+            MapView deepView = NewView(-1.0, maxZoom: 16);
+            try
+            {
+                deepView.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(centre.x, centre.y, 14.9),
+                    style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+                PumpUntilSettled(deepView);
+                deepView.LateUpdate();
+                deepView.Camera.Apply(new CameraPropertiesUpdate { Zoom = 16.1 });
+                var cover = new List<TileId>();
+                for (int i = 0; i < 2500; i++)
+                {
+                    deepView.LateUpdate();
+                    deepView.DrainMeshBuilds();
+                    deepView.LateUpdate();
+                    cover.Clear();
+                    deepView.CollectLoadedTileIds(cover);
+                    Assert.LessOrEqual(EmittedFor(deepView, 0), 4, $"update {i}: the background draws no more than the four tiles of the view");
+                    Assert.AreEqual(0, deepView.CaptureTelemetry().BridgeTileCount, $"update {i}: no Bridge stays up");
+                    if (i > 2 && deepView.AllTilesSettled()) break;
+                }
+
+                deepView.LateUpdate();
+                deepView.LateUpdate();
+                Assert.AreEqual(0, deepView.VisibilityBatchesLastTick(), "settled: nothing is shown or hidden again");
+                Assert.AreEqual(4, EmittedFor(deepView, 0), "settled: the background draws the four z16 cover tiles");
+                Assert.AreEqual(1, EmittedFor(deepView, 1), "settled: the z14 fill is drawn once");
+            }
+            finally
+            {
+                deepView.Teardown();
+            }
+
+            // A style with no background: a tile served only from above is still a shown tile. Zooming out to z13 settles on the z13 tiles
+            // and draws nothing of z14 or z15 beside them.
+            MapView plainView = NewView(-1.0, minZoom: 13);
+            try
+            {
+                plainView.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(centre.x, centre.y, 15.1),
+                    style: FillOnlyStyle(), sourceMaxZoom: 14);
+                PumpUntilSettled(plainView);
+                plainView.LateUpdate();
+                Assert.AreEqual(1, EmittedFor(plainView, 0), "precondition: the z14 fill draws once above maxzoom");
+                plainView.Camera.Apply(new CameraPropertiesUpdate { Zoom = 13.1 });
+                PumpUntilSettled(plainView);
+                plainView.LateUpdate();
+                plainView.LateUpdate();
+                var settledIds = new List<TileId>();
+                plainView.CollectLoadedTileIds(settledIds);
+                Assert.IsTrue(settledIds.TrueForAll(t => t.Z == 13), "settled: every cover record is z13");
+                Assert.AreEqual(settledIds.Count, EmittedFor(plainView, 0), "settled: the fill draws each z13 tile once, with no z14 or z15 beside it");
+                Assert.AreEqual(0, plainView.VisibilityBatchesLastTick(), "settled: nothing is shown or hidden again");
+            }
+            finally
+            {
+                plainView.Teardown();
+            }
+
+            // Deep overzoom: one Update pans over a screen inside one z14 tile, concealing the old cover tiles and revealing the new ones.
+            // The source's one fill record is concealed and revealed in that Update, and ends shown.
+            MapView panView = NewView(-1.0, maxZoom: 18);
+            try
+            {
+                panView.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(centre.x, centre.y, 17.5),
+                    style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+                PumpUntilSettled(panView);
+                panView.LateUpdate();
+                Assert.AreEqual(1, EmittedFor(panView, 1), "precondition: the z14 fill draws once");
+
+                panView.Camera.Apply(new CameraPropertiesUpdate { Longitude = centre.x + 0.0046 }); // about 600 px, inside the same z14 tile
+                panView.LateUpdate();
+                panView.LateUpdate();
+                Assert.AreEqual(1, EmittedFor(panView, 1), "the pan leaves the z14 fill drawn");
+                PumpUntilSettled(panView);
+                panView.LateUpdate();
+                Assert.AreEqual(1, EmittedFor(panView, 1), "settled: the z14 fill draws once");
+            }
+            finally
+            {
+                panView.Teardown();
             }
         }
 
