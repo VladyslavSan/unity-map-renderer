@@ -36,6 +36,8 @@ namespace MapRenderer.Unity.Text
         {
             public int Generation;
             public SharedDisposable<IDisposable> Block;
+            // Set when the entry first enters a collected set while active: its labels may have drawn.
+            public bool WasCollected;
         }
 
         private readonly Dictionary<Key, Entry> _active = new Dictionary<Key, Entry>();
@@ -222,6 +224,7 @@ namespace MapRenderer.Unity.Text
                 Entry e = kv.Value;
                 // A null Block means nothing to render; in production a committed slot always has one.
                 if (e.Block == null) continue;
+                e.WasCollected = true;
                 into.Add(e.Block, isDeparting: false);
             }
             foreach (KeyValuePair<Key, double> dep in _departing)
@@ -262,18 +265,34 @@ namespace MapRenderer.Unity.Text
         private readonly List<Key> _reconcileRelease = new List<Key>();
         private readonly List<Key> _reconcileRestore = new List<Key>();
 
-        /// <summary>PULL model: reconcile the active set against the pipeline's currently <paramref name="loaded"/>
-        /// tiles. An active tile absent from <paramref name="loaded"/> is released (kept warm iff
-        /// <paramref name="keepWarmOnRelease"/>);
-        /// a loaded tile currently on the cached side is restored (a cache re-entry has no re-fetch to rebuild it);
-        /// a loaded tile with no entry is left for its bytes-ready build. Idempotent.</summary>
-        public void ReconcileActiveSet(IReadOnlyList<Key> loaded, bool keepWarmOnRelease,
+        // Keys of loaded tiles whose geometry is not visible, as of the last reconcile: FIFO eviction skips them. Bounded by the loaded records.
+        private readonly HashSet<Key> _pinned = new HashSet<Key>();
+
+        /// <summary>PULL model: reconcile the active set against the loaded tiles. An active tile in neither list is released (kept warm iff
+        /// <paramref name="keepWarmOnRelease"/>) and fades out. One in <paramref name="hidden"/> (geometry not visible) goes to the cached
+        /// side, pinned against eviction even with the cache off. One whose labels were collected fades out as departing first. A cached tile in <paramref name="shown"/> is
+        /// restored. A loaded tile with no entry waits for its build. Idempotent.</summary>
+        /// <param name="hidden">Loaded tiles whose geometry is not visible.</param>
+        public void ReconcileActiveSet(IReadOnlyList<Key> shown, IReadOnlyList<Key> hidden, bool keepWarmOnRelease,
             double nowSeconds = 0.0, double departingGraceSeconds = 0.0)
         {
             // No MarkCollectDirty() here: this runs every frame, so a self-bump would defeat the memo. Real
             // effects bump inside Release/Restore/PurgeExpiredDeparting.
             _loadedKeys.Clear();
-            for (int i = 0; i < loaded.Count; i++) _loadedKeys.Add(loaded[i]);
+            _pinned.Clear();
+            for (int i = 0; i < shown.Count; i++) _loadedKeys.Add(shown[i]);
+            for (int i = 0; i < hidden.Count; i++)
+            {
+                _loadedKeys.Add(hidden[i]);
+                _pinned.Add(hidden[i]);
+            }
+
+            // Restore cached tiles that re-entered loaded (RemoveCached clears the departing stamp → fades back in).
+            _reconcileRestore.Clear();
+            for (int i = 0; i < shown.Count; i++)
+                if (_cachedIndex.ContainsKey(shown[i])) _reconcileRestore.Add(shown[i]);
+            for (int i = 0; i < _reconcileRestore.Count; i++)
+                Restore(_reconcileRestore[i]);
 
             // Release actives that left the loaded set (collect first — cannot mutate _active while iterating).
             _reconcileRelease.Clear();
@@ -289,12 +308,24 @@ namespace MapRenderer.Unity.Text
                     _departing[key] = nowSeconds + departingGraceSeconds;
             }
 
-            // Restore cached tiles that re-entered loaded (RemoveCached clears the departing stamp → fades back in).
-            _reconcileRestore.Clear();
-            for (int i = 0; i < loaded.Count; i++)
-                if (_cachedIndex.ContainsKey(loaded[i])) _reconcileRestore.Add(loaded[i]);
-            for (int i = 0; i < _reconcileRestore.Count; i++)
-                Restore(_reconcileRestore[i]);
+            // With the cache off, a cached tile that is no longer loaded is a true drop (a hidden tile that left loaded).
+            if (!keepWarmOnRelease)
+            {
+                _reconcileRelease.Clear();
+                foreach (KeyValuePair<Key, LinkedListNode<KeyedEntry>> kv in _cachedIndex)
+                    if (!_loadedKeys.Contains(kv.Key)) _reconcileRelease.Add(kv.Key);
+                for (int i = 0; i < _reconcileRelease.Count; i++) Release(_reconcileRelease[i], false);
+            }
+
+            // A loaded tile that is not visible stays pinned in the cache. A drawn one fades out first, as on any tile exit.
+            for (int i = 0; i < hidden.Count; i++)
+            {
+                Key key = hidden[i];
+                if (!_active.Remove(key, out Entry entry)) continue;
+                EnqueueCached(key, entry);
+                if (departingGraceSeconds > 0.0 && entry.WasCollected) _departing[key] = nowSeconds + departingGraceSeconds;
+                MarkCollectDirty();
+            }
 
             PurgeExpiredDeparting(nowSeconds);
         }
@@ -336,8 +367,10 @@ namespace MapRenderer.Unity.Text
             _cachedIndex[key] = node;
             if (_cacheCap > 0 && _cachedIndex.Count > _cacheCap)
             {
-                LinkedListNode<KeyedEntry> oldest = _cachedOrder.First; // FIFO: evict the oldest-released
-                _cachedOrder.RemoveFirst();
+                LinkedListNode<KeyedEntry> oldest = _cachedOrder.First; // FIFO: evicts the oldest unpinned entry, possibly the one just inserted
+                while (oldest != null && _pinned.Contains(oldest.Value.Key)) oldest = oldest.Next;
+                if (oldest == null) return; // every entry is pinned: the cache may exceed its cap by the pins
+                _cachedOrder.Remove(oldest);
                 _cachedIndex.Remove(oldest.Value.Key);
                 _departing.Remove(oldest.Value.Key); // keep departing ⊆ cached
                 oldest.Value.Entry.Block?.Release(); // over-cap eviction is a genuine drop — the entry's own reference

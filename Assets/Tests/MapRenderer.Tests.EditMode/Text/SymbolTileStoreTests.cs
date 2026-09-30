@@ -130,7 +130,7 @@ namespace MapRenderer.Tests.Text
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
-        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t, shown: true);
 
         /// <summary>Drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
         /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool (so
@@ -467,7 +467,7 @@ namespace MapRenderer.Tests.Text
                 buffer, slotCount: 1, TileRenderOrigin.Project(Tile0, Projection));
             Assert.IsTrue(_subsystem.Store().CompleteBuild(key, gen, block), "sanity: the block committed");
 
-            var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0) };
+            var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0, shown: true) };
             _subsystem.ReconcileLoadedTiles(loaded);
 
             var spy = new RecordingWorkScheduler(new InlineWorkScheduler());
@@ -1101,15 +1101,63 @@ namespace MapRenderer.Tests.Text
             Commit(store, key, store.BeginBuild(key), Symbols(1));
             Assert.AreEqual(1, Collect(store).Count, "active tile renders");
 
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true); // tile left cover
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true); // tile left cover
             Assert.AreEqual(0, Collect(store).Count, "out of cover → not rendered");
             Assert.AreEqual(1, store.CachedTileCount, "…but kept warm");
 
-            store.ReconcileActiveSet(Loaded(key), keepWarmOnRelease: true); // cache-hit re-entry (no re-fetch)
+            store.ReconcileActiveSet(Loaded(key), hidden: Loaded(), keepWarmOnRelease: true); // cache-hit re-entry (no re-fetch)
             List<ShapedSymbol> back = Collect(store);
             Assert.AreEqual(1, back.Count, "reconcile restores the kept-warm labels on re-entry");
             Assert.AreEqual(1, back[0].FeatureIndex, "the SAME tile's labels");
             store.Clear();
+
+            // A hidden child opens cached and stays uncollected, unfaded and unevicted at cacheCap 1; it collects once shown.
+            // The markers are distinct identities, so point dedup cannot hide a doubled label.
+            var hiddenStore = new SymbolTileStore(cacheCap: 1);
+            var parent = Key("src", 2);
+            var child  = Key("src", 3);
+            Commit(hiddenStore, parent, hiddenStore.BeginBuild(parent), Symbols(2));
+            Commit(hiddenStore, child, hiddenStore.BeginBuild(child, cached: true), Symbols(3));
+            hiddenStore.ReconcileActiveSet(Loaded(parent), hidden: Loaded(child), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, Collect(hiddenStore).Count, "only the shown tile's labels are collected");
+            Assert.AreEqual(0, hiddenStore.DepartingTileCount, "a hidden tile that never drew does not fade");
+            for (int x = 4; x <= 6; x++)
+            {
+                var other = Key("src", x);
+                Commit(hiddenStore, other, hiddenStore.BeginBuild(other), Symbols(x));
+            }
+
+            hiddenStore.ReconcileActiveSet(Loaded(parent), hidden: Loaded(child), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.IsTrue(hiddenStore.HasCommittedBlock(child), "released tiles passing through a full cache do not evict a pinned tile");
+            hiddenStore.ReconcileActiveSet(Loaded(child), hidden: Loaded(), keepWarmOnRelease: true);
+            List<ShapedSymbol> shown = Collect(hiddenStore);
+            Assert.AreEqual(1, shown.Count, "a shown tile collects");
+            Assert.AreEqual(3, shown[0].FeatureIndex, "the hidden tile's own labels, restored when it is shown");
+            hiddenStore.Clear();
+
+            // A tile whose labels were drawn when it becomes hidden fades out as departing, pinned, and an existing stamp is kept.
+            var fadeStore = new SymbolTileStore(cacheCap: 8);
+            var drawn = Key("src", 7);
+            Commit(fadeStore, drawn, fadeStore.BeginBuild(drawn), Symbols(7));
+            Assert.AreEqual(1, Collect(fadeStore).Count, "the tile's labels are collected");
+            fadeStore.ReconcileActiveSet(Loaded(), hidden: Loaded(drawn), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, fadeStore.DepartingTileCount, "a drawn tile that becomes hidden fades out");
+            Assert.AreEqual(1, Collect(fadeStore).Count, "…and stays collected while it fades");
+            fadeStore.ReconcileActiveSet(Loaded(), hidden: Loaded(drawn), keepWarmOnRelease: true, nowSeconds: 10.3, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, fadeStore.DepartingTileCount, "a departing key that arrives hidden keeps its stamp");
+            fadeStore.ReconcileActiveSet(Loaded(), hidden: Loaded(drawn), keepWarmOnRelease: true, nowSeconds: 10.6, departingGraceSeconds: 0.5);
+            Assert.AreEqual(0, fadeStore.DepartingTileCount, "the stamp is not renewed, so the fade ends");
+            Assert.IsTrue(fadeStore.HasCommittedBlock(drawn), "…and the pinned entry stays warm");
+            fadeStore.Clear();
+
+            // An active tile that was never collected goes hidden with no stamp, and stays pinned.
+            var unseenStore = new SymbolTileStore(cacheCap: 8);
+            var unseen = Key("src", 8);
+            Commit(unseenStore, unseen, unseenStore.BeginBuild(unseen), Symbols(8));
+            unseenStore.ReconcileActiveSet(Loaded(), hidden: Loaded(unseen), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.AreEqual(0, unseenStore.DepartingTileCount, "a tile that never drew does not fade");
+            Assert.IsTrue(unseenStore.HasCommittedBlock(unseen), "…and stays pinned");
+            unseenStore.Clear();
         }
 
         // ── keepWarmOnRelease:false (mesh cache disabled) → a released tile is dropped, not kept warm, so a
@@ -1121,10 +1169,17 @@ namespace MapRenderer.Tests.Text
             var key = Key("src", 1);
             Commit(store, key, store.BeginBuild(key), Symbols(1));
 
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: false);
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: false);
             Assert.AreEqual(0, store.CachedTileCount, "cache disabled → not kept warm");
-            store.ReconcileActiveSet(Loaded(key), keepWarmOnRelease: false);
+            store.ReconcileActiveSet(Loaded(key), hidden: Loaded(), keepWarmOnRelease: false);
             Assert.AreEqual(0, Collect(store).Count, "nothing to restore — a revisit must re-fetch/rebuild");
+
+            // With the cache off a hidden tile is pinned while loaded, and dropped once it is no longer loaded.
+            Commit(store, key, store.BeginBuild(key), Symbols(1));
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(key), keepWarmOnRelease: false);
+            Assert.IsTrue(store.HasCommittedBlock(key), "a hidden tile stays while it is loaded");
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: false);
+            Assert.IsFalse(store.HasCommittedBlock(key), "a hidden tile that is no longer loaded is dropped");
         }
 
         // ── Idempotent: reconciling twice with the same loaded set moves nothing (self-healing, no churn). ──
@@ -1136,8 +1191,8 @@ namespace MapRenderer.Tests.Text
             Commit(store, a, store.BeginBuild(a), Symbols(1));
             Commit(store, b, store.BeginBuild(b), Symbols(2));
 
-            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true);
-            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true);
+            store.ReconcileActiveSet(Loaded(a, b), hidden: Loaded(), keepWarmOnRelease: true);
+            store.ReconcileActiveSet(Loaded(a, b), hidden: Loaded(), keepWarmOnRelease: true);
             Assert.AreEqual(2, store.ActiveTileCount, "both stay active");
             Assert.AreEqual(0, store.CachedTileCount, "nothing released");
             Assert.AreEqual(2, Collect(store).Count);
@@ -1151,7 +1206,7 @@ namespace MapRenderer.Tests.Text
         {
             var store = new SymbolTileStore(cacheCap: 8);
             var pending = Key("src", 9);
-            store.ReconcileActiveSet(Loaded(pending), keepWarmOnRelease: true);
+            store.ReconcileActiveSet(Loaded(pending), hidden: Loaded(), keepWarmOnRelease: true);
             Assert.AreEqual(0, store.ActiveTileCount, "reconcile does not build — it only moves existing entries");
             Assert.AreEqual(0, store.CachedTileCount);
         }
@@ -1203,7 +1258,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, key, store.BeginBuild(key), Symbols(1));
 
             // Leaves cover at t=10 with a 0.5s grace → kept warm AND stamped departing.
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, store.DepartingTileCount, "the released tile is departing");
             Assert.AreEqual(0, store.ActiveTileCount, "…and no longer active");
             List<ShapedSymbol> during = Collect(store);
@@ -1211,13 +1266,13 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, during[0].FeatureIndex, "…and they are its own labels");
 
             // A reconcile still inside the window keeps it departing + collected.
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.3, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.3, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, store.DepartingTileCount, "still within the grace window");
             Assert.AreEqual(1, Collect(store).Count, "…still collected");
 
             // Past the window → purged. The symbols stay WARM (a cache hit still restores them) but are not
             // collected as departing (by now they have fully faded, so this is not a pop).
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.6, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.6, departingGraceSeconds: 0.5);
             Assert.AreEqual(0, store.DepartingTileCount, "grace elapsed → purged");
             Assert.AreEqual(0, Collect(store).Count, "…no longer collected");
             Assert.AreEqual(1, store.CachedTileCount, "but still kept warm for a cache-hit re-entry");
@@ -1232,10 +1287,10 @@ namespace MapRenderer.Tests.Text
             var store = new SymbolTileStore(cacheCap: 8);
             var key = Key("src", 1);
             Commit(store, key, store.BeginBuild(key), Symbols(1));
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, store.DepartingTileCount, "departing after leaving cover");
 
-            store.ReconcileActiveSet(Loaded(key), keepWarmOnRelease: true, nowSeconds: 10.2, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(key), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.2, departingGraceSeconds: 0.5);
             Assert.AreEqual(0, store.DepartingTileCount, "re-entry within grace clears the departing stamp");
             Assert.AreEqual(1, store.ActiveTileCount, "…and the tile is active again");
             Assert.AreEqual(1, Collect(store).Count, "…rendered as a normal active label (fades back in)");
@@ -1249,7 +1304,7 @@ namespace MapRenderer.Tests.Text
             var store = new SymbolTileStore(cacheCap: 8);
             var key = Key("src", 1);
             Commit(store, key, store.BeginBuild(key), Symbols(1));
-            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true); // grace defaults to 0 → feature off
+            store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true); // grace defaults to 0 → feature off
             Assert.AreEqual(0, store.DepartingTileCount, "grace 0 ⇒ nothing retained");
             Assert.AreEqual(0, Collect(store).Count, "a released tile is not collected");
             store.Clear();
@@ -1265,7 +1320,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, a, store.BeginBuild(a), Symbols(1));
             Commit(store, b, store.BeginBuild(b), Symbols(2));
             // b leaves cover with grace → departing; a stays active.
-            store.ReconcileActiveSet(Loaded(a), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(a), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
 
             List<ShapedSymbol> output = CollectWithActiveCount(store, CrossTileSymbolKey.CanonicalGridMeters, out int activeCount);
             Assert.AreEqual(2, output.Count, "both the active and the departing label are collected");
@@ -1287,7 +1342,7 @@ namespace MapRenderer.Tests.Text
             var lb = TestSymbolTileBuffer.Point(default, null, float2.zero, float2.zero, featureIndex: 2, text: "x");
             Commit(store, a, store.BeginBuild(a), la);
             Commit(store, b, store.BeginBuild(b), lb);
-            store.ReconcileActiveSet(Loaded(a), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(a), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, store.DepartingTileCount, "b is departing");
 
             List<ShapedSymbol> output = CollectWithActiveCount(store, 1.0, out int activeCount); // dedup ON
@@ -1327,7 +1382,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, kDeparting, store.BeginBuild(kDeparting), departingBuffer);
 
             // Release the z=8 tile (not in the loaded set) with grace → cached + departing; z=9 stays active.
-            store.ReconcileActiveSet(Loaded(kActive), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(kActive), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, store.DepartingTileCount, "the z=8 tile is departing");
 
             List<ShapedSymbol> output = CollectWithActiveCount(store, 1.0, out int activeCount); // gate ON (magnitude ignored)
@@ -1377,7 +1432,7 @@ namespace MapRenderer.Tests.Text
             var kDeparting = new SymbolTileStore.Key("src", tileDeparting);
             Commit(store, kActive, store.BeginBuild(kActive), activeBuffer);
             Commit(store, kDeparting, store.BeginBuild(kDeparting), departingBuffer);
-            store.ReconcileActiveSet(Loaded(kActive), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(kActive), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, store.DepartingTileCount, "the second z=9 tile is departing");
 
             List<ShapedSymbol> output = CollectWithActiveCount(store, 1.0, out int activeCount);
@@ -1785,7 +1840,7 @@ namespace MapRenderer.Tests.Text
             // Release Dep (not in the loaded set) with grace → cached + departing; P/C/M stay active in order.
             store.ReconcileActiveSet(
                 new List<SymbolTileStore.Key> { kP, kC, kM },
-                keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+                hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(3, store.ActiveTileCount, "P, C, M active");
             Assert.AreEqual(1, store.DepartingTileCount, "Dep is departing");
 
@@ -1885,12 +1940,12 @@ namespace MapRenderer.Tests.Text
                     break;
                 case BumpCase.PurgeExpiredDeparting:
                     Commit(store, key, store.BeginBuild(key), Symbols(1));
-                    store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+                    store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
                     Assert.AreEqual(1, store.DepartingTileCount, "precondition: the tile is departing");
                     g0 = store.CollectGeneration;
                     // Second reconcile past the grace window: nothing releases/restores (active empty, loaded empty), so
                     // the ONLY collect-relevant change is PurgeExpiredDeparting removing the expired departing key.
-                    store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 11.0, departingGraceSeconds: 0.5);
+                    store.ReconcileActiveSet(Loaded(), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 11.0, departingGraceSeconds: 0.5);
                     Assert.AreEqual(0, store.DepartingTileCount, "precondition: the departing key was purged");
                     break;
                 case BumpCase.Clear:
@@ -1954,10 +2009,10 @@ namespace MapRenderer.Tests.Text
             Commit(store, a, store.BeginBuild(a), Symbols(1));
             Commit(store, b, store.BeginBuild(b), Symbols(2));
 
-            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(a, b), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             int g0 = store.CollectGeneration;
             // Same loaded set, a later `now` still inside any grace (nothing to purge — nothing is departing anyway).
-            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true, nowSeconds: 10.2, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(a, b), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.2, departingGraceSeconds: 0.5);
             Assert.AreEqual(g0, store.CollectGeneration,
                 "a second reconcile with the SAME loaded set moves nothing → the collect generation must be unchanged");
             Assert.AreEqual(2, store.ActiveTileCount, "…and both tiles stay active");
@@ -1977,7 +2032,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, b, store.BeginBuild(b), Symbols(2));
             Commit(store, dep, store.BeginBuild(dep), Symbols(3));
             // dep leaves cover with grace → departing (exercises the AppendDeparting branch too); a/b stay active.
-            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            store.ReconcileActiveSet(Loaded(a, b), hidden: Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
 
             var blk1 = new List<int>(); var loc1 = new List<int>(); var d1 = new List<byte>();
             store.CollectInto(blk1, loc1, d1, ParityQ, out int active1);

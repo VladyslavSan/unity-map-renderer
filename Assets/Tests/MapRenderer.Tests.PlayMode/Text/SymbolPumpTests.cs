@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
-        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t, shown: true);
 
         /// <summary>Drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
         /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool, so
@@ -467,7 +467,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
-        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t, shown: true);
 
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
         {

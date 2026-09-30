@@ -390,14 +390,14 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             ]
         }");
 
-        private static StyleDocument TwoSourceStyle() => TestStyle.Document(@"{
+        private static StyleDocument TwoSourceStyle(string meshSourceLayer = "countries") => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""layers"": [
                 { ""id"": ""labels"", ""type"": ""symbol"", ""source"": ""symsrc"", ""source-layer"": ""centroids"",
                   ""layout"": { ""text-field"": ""{NAME}"", ""text-size"": 16 } },
                 { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""meshsrc"",
-                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+                  ""source-layer"": """ + meshSourceLayer + @""", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
             ]
         }");
 
@@ -565,9 +565,16 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle(), symbolsIntentionallyUnwired: true);
+                // The mesh source names a layer the tile lacks, so no record has draw handles: only readiness can show the tile.
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle(meshSourceLayer: "absent"), symbolsIntentionallyUnwired: true);
                 yield return PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: both sources' tiles must settle.");
+
+                var loadedKeys = new List<LoadedTileKey>();
+                view.TileManager.CollectLoadedTileKeys(loadedKeys);
+                Assert.AreEqual(2, loadedKeys.Count, "sanity: both sources' z0 records are loaded.");
+                Assert.IsTrue(loadedKeys.TrueForAll(k => k.Shown),
+                    "a ready tile with no geometry is shown, so its labels draw: " + string.Join(", ", loadedKeys.ConvertAll(k => $"{k.SourceId}:{k.Shown}")));
 
                 Assert.IsTrue(spy.BeginBuildCalls.Exists(c => c.SourceId == "symsrc"),
                     "REGRESSION: a symbol-only source (zero dense mesh layers) must fetch+kick even with the " +

@@ -13,6 +13,10 @@ namespace MapRenderer.Unity.Rendering.Tile
     {
         public readonly string SourceId;
         public readonly TileId Tile;
-        public LoadedTileKey(string sourceId, TileId tile) { SourceId = sourceId; Tile = tile; }
+
+        /// <summary>True while the record serves a revealed tile. A loaded record that does not keeps its symbols warm, uncollected.</summary>
+        public readonly bool Shown;
+
+        public LoadedTileKey(string sourceId, TileId tile, bool shown) { SourceId = sourceId; Tile = tile; Shown = shown; }
     }
 }

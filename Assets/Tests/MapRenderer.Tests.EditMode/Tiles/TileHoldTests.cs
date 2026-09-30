@@ -177,7 +177,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 rig.PumpUntilSettled();
-                rig.AssertShowsExactlyTheCover();
+                AssertSettled(rig);
                 int firstLevelTiles = rig.ShownBackground.Count;
 
                 // Zoom in with the finer level's fetch closed: the coarse tiles stay up, for as long as it takes (no time limit).
@@ -207,14 +207,14 @@ namespace MapRenderer.Tests.Tiles
 
                 rig.OpenTile(slow);
                 rig.PumpUntilSettled();
-                rig.AssertShowsExactlyTheCover();
+                AssertSettled(rig);
                 Assert.AreEqual(0, rig.Manager.Held, "a settled view holds nothing");
 
                 // Zoom out: the coarser level comes back as a whole, and the finer tiles go in the same flush.
                 view.Config.MaxConsumesPerTick = 64;
                 rig.Move(5.5);
                 rig.PumpUntilSettled();
-                rig.AssertShowsExactlyTheCover();
+                AssertSettled(rig);
                 Assert.AreEqual(firstLevelTiles, rig.ShownBackground.Count);
 
                 SwingBack(rig);
@@ -248,7 +248,7 @@ namespace MapRenderer.Tests.Tiles
             view.Config.MaxConsumesPerTick = int.MaxValue;
             rig.Tick();
             Assert.AreEqual(0, rig.Manager.Held, "every tile swapped in the one Update that registered the finer level");
-            rig.AssertShowsExactlyTheCover();
+            AssertSettled(rig);
             Assert.LessOrEqual(view.TilesReleasedLastTick(), 1, "teardown stays on its own budget");
             Assert.GreaterOrEqual(view.ReleaseQueueDepth(), coarseTiles, "the swapped-out records wait, hidden, for their teardown");
             return view.TilesReleasedLastTick();
@@ -263,7 +263,7 @@ namespace MapRenderer.Tests.Tiles
             int hitsBefore = view.TileManager.PreparedCacheHits;
             rig.Move(5.5);
             rig.PumpUntilSettled();
-            rig.AssertShowsExactlyTheCover();
+            AssertSettled(rig);
             Assert.LessOrEqual(view.TileManager.PreparedCacheHits - hitsBefore, drained + 2,
                 "a record that was still waiting for teardown is shown again, not registered again");
 
@@ -274,7 +274,7 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreEqual(0, rig.ShownBackground.Count, "nothing is drawn where the view left");
             rig.Move(5.5);
             rig.PumpUntilSettled();
-            rig.AssertShowsExactlyTheCover();
+            AssertSettled(rig);
             Assert.LessOrEqual(view.TileManager.PreparedCacheHits - hitsBefore, drained + 3,
                 "the coarse tiles that were still waiting are shown by their own records");
         }
@@ -298,7 +298,7 @@ namespace MapRenderer.Tests.Tiles
 
             rig.OpenGate(8);
             rig.PumpUntilSettled();
-            rig.AssertShowsExactlyTheCover();
+            AssertSettled(rig);
             Assert.AreEqual(0, rig.Manager.Held);
         }
 
@@ -324,7 +324,7 @@ namespace MapRenderer.Tests.Tiles
 
             view.Config.MaxConsumesPerTick = 64;
             rig.PumpUntilSettled();
-            rig.AssertShowsExactlyTheCover();
+            AssertSettled(rig);
         }
 
         /// <summary>A cover tile whose three siblings are also in the cover, so its family is complete.</summary>
@@ -360,16 +360,26 @@ namespace MapRenderer.Tests.Tiles
 
             rig.OpenGate(8);
             rig.PumpUntilSettled();
-            rig.AssertShowsExactlyTheCover();
+            AssertSettled(rig);
         }
 
-        /// <summary>Every drawn tile has a record the symbol subsystem is told about, whether it is in the cover or held for it.</summary>
+        /// <summary>The drawn tiles are exactly the cover, and the symbol subsystem is told so.</summary>
+        private static void AssertSettled(Rig rig)
+        {
+            rig.AssertShowsExactlyTheCover();
+            AssertReportedToSymbols(rig.View, rig.ShownBackground);
+        }
+
+        /// <summary>A record is reported to the symbol subsystem as shown exactly when its tile is drawn. A hidden child of a held tile is
+        /// reported not shown, so its labels wait for its geometry; a held tile is reported shown until the swap hides it.</summary>
         private static void AssertReportedToSymbols(MapView view, HashSet<TileId> drawn)
         {
             var keys = new List<LoadedTileKey>();
             view.TileManager.CollectLoadedTileKeys(keys);
+            foreach (LoadedTileKey key in keys)
+                Assert.AreEqual(drawn.Contains(key.Tile), key.Shown, $"record of tile {key.Tile} is reported shown iff its tile is drawn");
             foreach (TileId tile in drawn)
-                Assert.IsTrue(keys.Exists(k => k.Tile.Equals(tile)), $"drawn tile {tile} is reported to the symbol subsystem");
+                Assert.IsTrue(keys.Exists(k => k.Tile.Equals(tile) && k.Shown), $"drawn tile {tile} is reported shown");
         }
 
         private static bool HasLevel(HashSet<TileId> tiles, int zoom)

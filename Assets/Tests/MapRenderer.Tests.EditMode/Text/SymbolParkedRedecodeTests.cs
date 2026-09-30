@@ -243,7 +243,7 @@ namespace MapRenderer.Tests.Text
         public IEnumerator AParkedBuild_DecodesOnce_AndCommitsTheSameSymbolsAsAnUnparkedOne()
         {
             int mainThreadId = Thread.CurrentThread.ManagedThreadId;
-            var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0) };
+            var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0, shown: true) };
 
             // ── Arm 1: PARKED. The sprite fetch is held open across the kick, so TryBeginBuild parks.
             var gate = new UniTaskCompletionSource<SpriteResponse>();
@@ -414,7 +414,7 @@ namespace MapRenderer.Tests.Text
         [UnityTest]
         public IEnumerator AParkedBuildDroppedByARestyle_ReleasesItsDecodeReference()
         {
-            var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0) };
+            var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0, shown: true) };
 
             var gate = new UniTaskCompletionSource<SpriteResponse>();
             var probe = new LeaseProbeDecoder();

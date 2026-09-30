@@ -143,6 +143,7 @@ namespace MapRenderer.Unity.Text
         // Reused scratch for the per-frame reconcile — loaded keys filtered to sources with symbol layers. Never
         // reallocated in steady state.
         private readonly List<SymbolTileStore.Key> _reconcileKeys = new();
+        private readonly List<SymbolTileStore.Key> _reconcileHidden = new();
         private int _lastUploadedGlyphCount;
         private bool _loggedOverflow;
         private bool _loggedSkip;
@@ -723,16 +724,17 @@ namespace MapRenderer.Unity.Text
         {
             if (_layersBySource == null) return; // no style set yet
             _reconcileKeys.Clear();
+            _reconcileHidden.Clear();
             for (int i = 0; i < loaded.Count; i++)
             {
                 LoadedTileKey k = loaded[i];
-                if (_layersBySource.ContainsKey(k.SourceId))
-                    _reconcileKeys.Add(new SymbolTileStore.Key(k.SourceId, k.Tile));
+                if (!_layersBySource.ContainsKey(k.SourceId)) continue;
+                (k.Shown ? _reconcileKeys : _reconcileHidden).Add(new SymbolTileStore.Key(k.SourceId, k.Tile));
             }
             // Pass the departing grace so a tile leaving cover keeps its symbols collected (fading out) instead of
             // popping. Only when the mesh cache is enabled — otherwise symbols are dropped, nothing to fade.
             double grace = _cacheEnabled ? DepartingGraceSeconds : 0.0;
-            _store.ReconcileActiveSet(_reconcileKeys, _cacheEnabled, nowSeconds, grace);
+            _store.ReconcileActiveSet(_reconcileKeys, _reconcileHidden, _cacheEnabled, nowSeconds, grace);
         }
 
         /// <summary>The budgeted main-thread TAIL for one build: collects every processor's required glyph

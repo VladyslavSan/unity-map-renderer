@@ -231,6 +231,16 @@ is set, stamps it **departing** (`key → wall-clock expiry`). While departing:
   within grace clears the stamp (via `RemoveCached`, the single "leaves cached" chokepoint that keeps the
   invariant *departing ⊆ cached*) → the winner fades back in.
 
+A tile that is loaded but serves no revealed tile (a prepared tile, or a child under a held parent) is not collected,
+and a hidden tile is never evicted. `SymbolTileStore.ReconcileActiveSet` takes it as a *hidden* key: its entry moves to
+the cached side and is pinned, so the FIFO eviction skips it, even with the cache off. The store owns that decision, not
+the tile manager, which only reports `Shown`. An entry that was collected at least once fades out as departing, pinned,
+when it becomes hidden; one that was never collected moves to the pinned cached side with no stamp. A Prepare record's
+symbol build opens on the cached side; a hidden Display record's opens active and moves there in the same frame's
+reconcile, before any collect, so it is never collected. A hidden entry returns to the active side when its key is
+*shown*. With the cache off, a cached entry whose key is no longer loaded is dropped. So a tile's labels appear with its
+geometry, and during a hold only the held tile's labels draw.
+
 Because a departing winner is a **real plan entry**, it re-projects to its live position every frame — so it
 eases out correctly even while the camera pans. The wall-clock is threaded from `MapView.LateUpdate`
 (`Time.timeAsDouble`). Telemetry: `LastDepartingCulledCount`, `DepartingTileCount`.

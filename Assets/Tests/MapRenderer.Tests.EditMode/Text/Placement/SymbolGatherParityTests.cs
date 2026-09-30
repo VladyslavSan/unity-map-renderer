@@ -2311,7 +2311,7 @@ namespace MapRenderer.Tests.Text.Placement
             // D leaves cover with a grace window → cached + departing (collected after the active split).
             store.ReconcileActiveSet(
                 new List<SymbolTileStore.Key> { Key(ta), Key(tb), Key(tc) },
-                keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
+                hidden: new List<SymbolTileStore.Key>(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
             return store;
         }
 

@@ -761,19 +761,21 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// will admit, or <see cref="TileId"/>'s default if the list is empty.</summary>
         internal TileId DesiredHeadTile => _desired.Count > 0 ? _desired[0].Tile : default;
 
-        /// <summary>Fills <paramref name="into"/> with the (source, tile) membership of the records in the cover and of the tiles held
-        /// for them. A record prepared ahead or waiting as a Bridge is left out, so the symbol subsystem neither draws nor releases it.
+        /// <summary>Fills <paramref name="into"/> with the (source, tile) membership of every record that has a role, flagged
+        /// <see cref="LoadedTileKey.Shown"/> while its geometry is visible. A record with no role is left out, so its symbols depart.
         /// Allocation-free.</summary>
         internal void CollectLoadedTileKeys(List<LoadedTileKey> into)
         {
             into.Clear();
             foreach (var kv in _loaded)
             {
-                if (kv.Value.Role != TileRole.Display && kv.Value.Role != TileRole.Hold) continue;
                 if (IsCondemned(kv.Key, kv.Value)) continue; // a swapped-out tile's labels end with its tile, not with its release
-                into.Add(new LoadedTileKey(_sources.SourceIdOf(kv.Key.Slot), kv.Key.Tile));
+                into.Add(new LoadedTileKey(_sources.SourceIdOf(kv.Key.Slot), kv.Key.Tile, shown: IsRecordVisible(kv.Key)));
             }
         }
+
+        /// <summary>True iff <paramref name="key"/>'s record serves a revealed tile: the one question the symbol side asks about visibility.</summary>
+        private bool IsRecordVisible(LoadedKey key) => _shownCount.ContainsKey(key);
 
         /// <summary>The tile of each record that serves a cover tile, as a <see cref="TileId"/> (may repeat across sources). A record that
         /// a swap took out of the cover keeps its old role until its release drains, so the role is not the test.</summary>
@@ -2420,7 +2422,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int i = 0; i < _cover.Count; i++)
             {
                 TileId tile = _cover[i];
-                if (IsShown(tile) || HasShownRelative(tile) || !HasDrawHandles(tile)) continue;
+                if (IsShown(tile) || HasShownRelative(tile) || !(HasDrawHandles(tile) || IsReady(tile))) continue;
                 RevealTile(tile);
                 changed = true;
             }

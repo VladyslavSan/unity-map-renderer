@@ -1581,7 +1581,7 @@ namespace MapRenderer.Tests.Text
             if (_camGo != null) UnityEngine.Object.DestroyImmediate(_camGo);
         }
 
-        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t, shown: true);
 
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
         {
@@ -1804,7 +1804,7 @@ namespace MapRenderer.Tests.Text
             _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
-        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t, shown: true);
 
         private void DriveTileBytesReady(TileId tile)
         {
@@ -2670,7 +2670,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, Key(tileDep), store.BeginBuild(Key(tileDep)), depBuffer);
             store.ReconcileActiveSet(
                 new List<SymbolTileStore.Key> { Key(tileP), Key(tileC), Key(tileM) },
-                keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+                hidden: new List<SymbolTileStore.Key>(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(3, store.ActiveTileCount);
             Assert.AreEqual(1, store.DepartingTileCount);
 
@@ -2785,7 +2785,7 @@ namespace MapRenderer.Tests.Text
             // For the stale-cached site, the tile must be cached AND departing before capture (CaptureSnapshot only
             // pins active + departing tiles) — reconcile to an empty loaded set with grace stamps it departing.
             if (site == DeferSite.ReleaseStaleCached)
-                store.ReconcileActiveSet(new List<SymbolTileStore.Key>(), keepWarmOnRelease: true,
+                store.ReconcileActiveSet(new List<SymbolTileStore.Key>(), hidden: new List<SymbolTileStore.Key>(), keepWarmOnRelease: true,
                     nowSeconds: 10.0, departingGraceSeconds: 1000.0);
 
             // Pin `t`'s block by holding a live snapshot referencing it (as an active slice, or a departing one above).
@@ -2952,7 +2952,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, Key(tileA), store.BeginBuild(Key(tileA)), aBuffer);
             Commit(store, Key(tileB), store.BeginBuild(Key(tileB)), bBuffer);
             store.ReconcileActiveSet(new List<SymbolTileStore.Key> { Key(tileA), Key(tileB) },
-                keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+                hidden: new List<SymbolTileStore.Key>(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
 
             var snapshot = new SymbolSnapshot();
             store.CaptureSnapshot(snapshot);
@@ -2989,7 +2989,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, Key(tileDeparting), store.BeginBuild(Key(tileDeparting)), depBuffer);
             // tileDeparting is never in the active set → it leaves cover, kept warm and departing.
             store.ReconcileActiveSet(new List<SymbolTileStore.Key> { Key(tileActive) },
-                keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
+                hidden: new List<SymbolTileStore.Key>(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
             Assert.AreEqual(1, store.ActiveTileCount);
             Assert.AreEqual(1, store.DepartingTileCount);
 
@@ -3040,7 +3040,7 @@ namespace MapRenderer.Tests.Text
             var store = new SymbolTileStore(cacheCap: 16);
             Commit(store, Key(tileDeparting), store.BeginBuild(Key(tileDeparting)), depBuffer);
             store.ReconcileActiveSet(new List<SymbolTileStore.Key>(),
-                keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
+                hidden: new List<SymbolTileStore.Key>(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 1000.0);
             Assert.AreEqual(0, store.ActiveTileCount);
             Assert.AreEqual(1, store.DepartingTileCount);
 
@@ -3359,7 +3359,7 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+        private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t, shown: true);
 
         // This suite only ever commits Tile0, so it reads that tile's baked native block directly
         // (DebugBlockFor), which carries the per-point AtlasKind discriminator (Points[i].AtlasKind).

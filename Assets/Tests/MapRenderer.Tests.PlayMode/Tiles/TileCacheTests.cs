@@ -196,7 +196,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 Assert.IsFalse(drawn.Exists(t => t.Z == 5), "a prepared tile is not reported as loaded.");
                 var reported = new List<LoadedTileKey>();
                 view.TileManager.CollectLoadedTileKeys(reported); // what the symbol subsystem reconciles against
-                Assert.IsFalse(reported.Exists(k => k.Tile.Z == 5), "a prepared tile is not reported to the label subsystem, so none draws.");
+                Assert.IsTrue(reported.Exists(k => k.Tile.Z == 5), "a prepared tile is reported to the label subsystem, so its labels stay pinned.");
+                Assert.IsFalse(reported.Exists(k => k.Tile.Z == 5 && k.Shown), "but not as shown, so none draws.");
 
                 // ── A build in flight is never cancelled for leaving the preload set, nor for leaving the keep set.
                 foreach (double zoom in new[] { 4.68, 4.5 })

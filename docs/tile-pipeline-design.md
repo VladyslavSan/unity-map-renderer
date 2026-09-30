@@ -245,9 +245,10 @@ switch shows tiles that are already registered.
   prepared ahead: the cover's records and any `Bridge`. The pump and the clip-change rebake sort records in the cover first, so preparing never takes a slot or a
   per-tick budget from a tile being drawn. A prepared key whose tile enters the cover is dropped from the prepared list, and the cover
   merge desires it.
-- **Labels.** A `Prepare` record's symbol build opens on the store's kept-warm side with no departing stamp, so its labels do not draw.
-  `CollectLoadedTileKeys` reports `Display` and `Hold` records (§ 4.8), the tile counts report `Display` records only, and
-  `PreparingTileCount` counts the rest. At the switch the tile is reported and the store restores its entry.
+- **Labels.** A tile's labels follow its geometry. `CollectLoadedTileKeys` reports every record that has a role, flagged `Shown` while the
+  record serves a revealed tile. A `Prepare` record is reported not shown, so the store keeps its labels warm and pinned and nothing draws. A record that was shown and becomes hidden
+  while it keeps a role fades its labels out as departing. The tile counts report `Display` records only, and `PreparingTileCount` counts the rest. At the switch the record
+  becomes shown and the store restores its entry (see labels-and-symbols § 1.5; § 4.8 for a hidden tile under a hold).
 
 ### 4.8 Holding a tile until its area is covered
 
