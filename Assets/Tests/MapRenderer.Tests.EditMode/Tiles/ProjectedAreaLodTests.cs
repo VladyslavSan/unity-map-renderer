@@ -670,6 +670,191 @@ namespace MapRenderer.Tests.Tiles
               + "recorded tradeoff for the default's better-looking cover, not a defect to fix here.");
         }
 
+        // ── Zoom-level and tile-detail hysteresis, and the jump: the selector damps its own LOD flicker ────────────
+
+        // The UMR-251 repro pose: Stuttgart, zoom 11, tilt 55, a 1920x1080 viewport, flat Mercator.
+        private const double PanLat  = 48.78;
+        private const double PanLon  = 9.18;
+        private const double PanZoom = 11.0;
+        private const double PanTilt = 55.0;
+        private static readonly double2 PanViewport = new double2(1920.0, 1080.0);
+
+        // One screen width in degrees of longitude at the pan zoom (tiles are 512 px wide).
+        private static readonly double DegreesPerScreen = PanViewport.x * 360.0 / (512.0 * math.pow(2.0, PanZoom));
+
+        private static FrustumTileSelector PanSelector(double tileDetailHysteresis = 0.0, double zoomLevelHysteresis = 0.0)
+            => new FrustumTileSelector(MinZoom, MaxZoom, OnScreenTilePx, new ScreenSpaceLodStrategy(tileDetailHysteresis),
+                                       new GeometryAwareFarPlane(4.0), zoomLevelHysteresis);
+
+        /// <summary>Selects the cover with the camera panned <paramref name="screensEast"/> screens east of the pose.</summary>
+        private static List<TileId> PanSelect(FrustumTileSelector selector, double screensEast,
+                                              double zoom = PanZoom, double heading = 0.0)
+        {
+            var view = new ViewContext
+            {
+                Camera = new CameraProperties(new GeoCoordinate3D
+                    { Longitude = PanLon + screensEast * DegreesPerScreen, Latitude = PanLat, Altitude = 0.0 }, zoom, heading, PanTilt),
+                ViewportPx = PanViewport,
+                Projection = new WebMercatorProjection(),
+            };
+            var buffer = new List<TileId>();
+            selector.SelectVisibleTiles(view, buffer);
+            return buffer;
+        }
+
+        private static int NearLevel(List<TileId> cover)
+        {
+            int level = 0;
+            foreach (TileId t in cover) level = math.max(level, t.Z);
+            return level;
+        }
+
+        /// <summary>True iff a tile of one cover is a strict ancestor of a tile of the other: a coarse tile became
+        /// its children or the reverse. A pan alone brings tiles in and out but never produces this at one zoom.</summary>
+        private static bool HasLodTransition(List<TileId> before, List<TileId> after)
+        {
+            foreach (TileId a in before)
+                foreach (TileId b in after)
+                    if (IsBelow(a, b) || IsBelow(b, a)) return true;
+
+            return false;
+        }
+
+        /// <summary>True iff <paramref name="descendant"/> lies strictly below <paramref name="ancestor"/>, found by walking up.</summary>
+        private static bool IsBelow(TileId ancestor, TileId descendant)
+        {
+            TileId above = descendant;
+            for (int levels = descendant.Z - ancestor.Z; levels > 0; levels--) above = TileAncestry.Parent(above);
+            return descendant.Z > ancestor.Z && above.Equals(ancestor);
+        }
+
+        /// <summary>The screen-step index where a stateless selector's east pan first changes LOD, or -1.</summary>
+        private static int FirstTransitionStep(int stepsPerScreen, int maxSteps)
+        {
+            FrustumTileSelector stateless = PanSelector();
+            List<TileId> previous = PanSelect(stateless, 0.0);
+            for (int step = 1; step <= maxSteps; step++)
+            {
+                List<TileId> current = PanSelect(stateless, step / (double)stepsPerScreen);
+                if (HasLodTransition(previous, current)) return step;
+                previous = current;
+            }
+
+            return -1;
+        }
+
+        /// <summary>The LOD transitions while a selector alternates between two poses, eight times each.</summary>
+        private static int JitterTransitions(FrustumTileSelector selector, double a, double b)
+        {
+            List<TileId> previous = PanSelect(selector, a);
+            int transitions = 0;
+            for (int cycle = 0; cycle < 8; cycle++)
+                foreach (double at in new[] { b, a })
+                {
+                    List<TileId> current = PanSelect(selector, at);
+                    if (HasLodTransition(previous, current)) transitions++;
+                    previous = current;
+                }
+
+            return transitions;
+        }
+
+        /// <summary>
+        /// The selector's stickiness, one arm per rule, each with a control that fails without the rule. Sticky
+        /// level: the target holds past the integer by the zoom-level hysteresis, in both directions. Tile detail: a jitter across one
+        /// LOD threshold flips tiles statelessly and not with the hysteresis. Jump: two levels, a teleport, and an empty
+        /// viewport each equal a fresh selector, and a heading change alone is not a jump.
+        /// </summary>
+        [Test]
+        public void ScreenSpaceLod_ZoomLevelAndTileDetailHysteresis_HoldJitterAndResetOnJump()
+        {
+            // ── Zoom level: hysteresis 0.05 holds 11 up to 12.05 and 12 down to 11.95; 0 follows the floor.
+            FrustumTileSelector sticky = PanSelector(zoomLevelHysteresis: 0.05);
+            FrustumTileSelector plain  = PanSelector();
+            foreach (double zoom in new[] { 11.5, 12.0, 12.001, 12.049 })
+            {
+                List<TileId> cover = PanSelect(sticky, 0.0, zoom);
+                Assert.AreEqual(11, NearLevel(cover), $"sticky, zoom {zoom}: the cover stays at level 11");
+            }
+
+            Assert.AreEqual(12, NearLevel(PanSelect(sticky, 0.0, 12.051)), "sticky: past 12.05 the level switches up");
+            Assert.AreEqual(12, NearLevel(PanSelect(sticky, 0.0, 11.96)), "sticky: 11.96 holds level 12 on the way down");
+            Assert.AreEqual(11, NearLevel(PanSelect(sticky, 0.0, 11.94)), "sticky: below 11.95 the level switches down");
+            PanSelect(plain, 0.0, 11.5);
+            Assert.AreEqual(12, NearLevel(PanSelect(plain, 0.0, 12.001)), "control: no hysteresis switches at the integer");
+
+            // ── Jump seen through the sticky level, which does not depend on the tile-detail hysteresis: 12.02 holds 11 unless
+            // the selector jumped, and then the level is the camera's own 12.
+            FrustumTileSelector moved = PanSelector(zoomLevelHysteresis: 0.05);
+            PanSelect(moved, 0.0, 11.5);
+            Assert.AreEqual(12, NearLevel(PanSelect(moved, 2.0, 12.02)), "a two-screen teleport is a jump: the level is fresh");
+            FrustumTileSelector stepped = PanSelector(zoomLevelHysteresis: 0.05);
+            PanSelect(stepped, 0.0, 11.5);
+            Assert.AreEqual(11, NearLevel(PanSelect(stepped, 0.01, 12.02)), "control: a small step is no jump and holds the level");
+
+            // ── Tile detail: the first threshold crossing of a pan, jittered across.
+            const int StepsPerScreen = 64;
+            int first = FirstTransitionStep(StepsPerScreen, 4 * StepsPerScreen);
+            Assert.Greater(first, 0, "precondition: a stateless pan must reach an LOD transition.");
+            double before = (first - 1) / (double)StepsPerScreen;
+            double after  = first / (double)StepsPerScreen;
+            Assert.GreaterOrEqual(JitterTransitions(PanSelector(), before, after), 8, "control: with no hysteresis, every crossing flips tiles");
+            Assert.AreEqual(0, JitterTransitions(PanSelector(tileDetailHysteresis: 0.05), before, after), "the default tile-detail hysteresis holds the jitter");
+
+            // A tile 10% past the threshold.
+            TileLodContext Past(TileLodHistory history)
+                => new TileLodContext { GroundSize = 1.1, Distance = 1.0, ScreenRatio = 1.0, History = history };
+            var hysteresis = new ScreenSpaceLodStrategy(0.2);
+            Assert.IsFalse(hysteresis.StopAt(Past(TileLodHistory.None)), "past the threshold, no history: subdivide");
+            Assert.IsTrue(hysteresis.StopAt(Past(TileLodHistory.Stopped)), "past the threshold, was stopped: hold");
+            Assert.IsFalse(hysteresis.StopAt(Past(TileLodHistory.Refined)), "past the threshold, was subdivided: subdivide");
+            Assert.IsFalse(new ScreenSpaceLodStrategy(0.0).StopAt(Past(TileLodHistory.Stopped)), "hysteresis 0 is stateless");
+
+            // A tile 10% inside the threshold: only a subdivided tile keeps subdividing (0.9 > 2^-0.2 = 0.87).
+            TileLodContext Inside(TileLodHistory history)
+                => new TileLodContext { GroundSize = 0.9, Distance = 1.0, ScreenRatio = 1.0, History = history };
+            Assert.IsTrue(hysteresis.StopAt(Inside(TileLodHistory.None)), "inside the threshold, no history: stop");
+            Assert.IsTrue(hysteresis.StopAt(Inside(TileLodHistory.Stopped)), "inside the threshold, was stopped: stop");
+            Assert.IsFalse(hysteresis.StopAt(Inside(TileLodHistory.Refined)), "inside the threshold, was subdivided: hold");
+
+            // ── Jump: two levels, a teleport, an empty viewport. The widest hysteresis makes history steer, and the
+            // control proves it does: a selector carrying history from next to the threshold differs from a fresh one.
+            const double WideHysteresis = 0.5;
+            List<TileId> freshBefore = PanSelect(PanSelector(WideHysteresis, 0.05), before);
+            FrustumTileSelector carried = PanSelector(WideHysteresis, 0.05);
+            PanSelect(carried, after);
+            CollectionAssert.AreNotEqual(freshBefore, PanSelect(carried, before), "control: unreset history steers the cover");
+
+            FrustumTileSelector zoomedIn = PanSelector(WideHysteresis, 0.05);
+            PanSelect(zoomedIn, after);
+            CollectionAssert.AreEqual(PanSelect(PanSelector(WideHysteresis, 0.05), before, 13.0), PanSelect(zoomedIn, before, 13.0), "11 to 13 equals fresh");
+
+            FrustumTileSelector zoomedOut = PanSelector(WideHysteresis, 0.05);
+            PanSelect(zoomedOut, after);
+            CollectionAssert.AreEqual(PanSelect(PanSelector(WideHysteresis, 0.05), before, 8.0), PanSelect(zoomedOut, before, 8.0), "11 to 8 equals fresh");
+
+            FrustumTileSelector teleported = PanSelector(WideHysteresis, 0.05);
+            PanSelect(teleported, after);
+            CollectionAssert.AreEqual(PanSelect(PanSelector(WideHysteresis, 0.05), 2.0), PanSelect(teleported, 2.0), "a two-screen teleport equals fresh");
+
+            FrustumTileSelector emptied = PanSelector(WideHysteresis, 0.05);
+            PanSelect(emptied, after);
+            emptied.SelectVisibleTiles(new ViewContext { Camera = new CameraProperties(new GeoCoordinate3D
+                { Longitude = PanLon, Latitude = PanLat, Altitude = 0.0 }, PanZoom, 0.0, PanTilt),
+                ViewportPx = new double2(0.0, 0.0), Projection = new WebMercatorProjection() }, new List<TileId>());
+            CollectionAssert.AreEqual(freshBefore, PanSelect(emptied, before), "an empty viewport, then the pose, equals fresh");
+
+            // The ancestry step every walk above uses.
+            Assert.AreEqual(new TileId { Z = 2, X = 2, Y = 1 }, TileAncestry.Parent(new TileId { Z = 3, X = 5, Y = 2 }), "Parent halves x, y and zoom");
+            Assert.AreEqual(new TileId { Z = 0, X = 0, Y = 0 }, TileAncestry.Parent(new TileId { Z = 0, X = 0, Y = 0 }), "the world tile is its own parent");
+
+            // A heading change alone keeps the history: the hysteresis still holds the crossing the new heading sees.
+            FrustumTileSelector turned = PanSelector(0.05, 0.05);
+            List<TileId> seen = PanSelect(turned, after);
+            Assert.IsFalse(HasLodTransition(seen, PanSelect(turned, before, PanZoom, 0.5)), "a heading change is not a jump");
+            Assert.IsTrue(HasLodTransition(seen, PanSelect(PanSelector(), before, PanZoom, 0.5)), "control: a fresh selector flips there");
+        }
+
         // ── Tooth C — the instrument ──────────────────────────────────────────────────────────────
 
         /// <summary>

@@ -12,6 +12,7 @@ namespace MapRenderer.Unity.View
     /// knobs belong on an implementation's constructor, never here or on <see cref="ViewContext"/>; the
     /// set may mix zoom levels (each <see cref="TileId"/> has its own <c>Z</c>), so a distance-LOD selector
     /// drops in; it returns only the set, and the consumer owns transitions and parent/child provenance.
+    /// An implementation may keep the last cover to damp flicker, so one instance serves one camera.
     /// </summary>
     public interface IVisibleTileSelector
     {

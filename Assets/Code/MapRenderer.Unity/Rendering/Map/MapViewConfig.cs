@@ -179,6 +179,17 @@ namespace MapRenderer.Unity.Rendering.Map
                  "fewest tiles under tilt, visibly coarser — trades quality for frame time.")]
         public TileLodMode LodMode = TileLodMode.ScreenSpaceLod;
 
+        [Tooltip("How far past a whole zoom level the camera must go before the map switches to the next level's " +
+                 "tiles, in zoom levels (the map also holds the lower level that far below). Stops the tiles " +
+                 "switching level on zoom jitter. 0 = switch exactly at the whole level; clamped to [0, 0.5]. " +
+                 "Above 0.1 the tiles can look one level off the style zoom.")]
+        public double ZoomLevelHysteresis = 0.05;
+
+        [Tooltip("ScreenSpaceLod only. How far past its switch point a tile's size on screen must go before the " +
+                 "tile changes detail level, in zoom levels. Stops boundary tiles flickering between two detail " +
+                 "levels during a pan under tilt. 0 = switch exactly at the switch point; clamped to [0, 0.5].")]
+        public double TileDetailHysteresis = 0.05;
+
         [Tooltip("ProjectedArea only. 1.0 stops exactly at the target on-screen size; higher = coarser cover, " +
                  "fewer tiles, lower visual quality. It cannot be tuned to match ScreenSpaceLod — the two " +
                  "rules differ per tile, not by a constant.")]

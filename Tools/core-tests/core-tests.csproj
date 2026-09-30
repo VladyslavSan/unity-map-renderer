@@ -97,6 +97,7 @@
          MapRenderer.Unity and is covered by the EditMode runner instead. -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileCoverStats.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileLodStrategy.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileAncestry.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/Camera/FarPlanePolicy.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/DeviceScaling.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/ViewFrustum.cs" />

@@ -1792,7 +1792,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// <see cref="SelectorInputs.Equals(SelectorInputs)"/> is hand-written field-by-field (not
-        /// a tuple — see its summary for why), which means a NINTH field added later can be silently left
+        /// a tuple — see its summary for why), which means a field added later can be silently left
         /// out of the comparison. Changing each field ALONE from a baseline must flip <c>Equals</c> to
         /// false — a field missing from the comparison passes vacuously here instead.
         /// </summary>
@@ -1800,25 +1800,29 @@ namespace MapRenderer.Tests.Tiles
         public void SelectorInputsEquals_DistinguishesEveryField()
         {
             var baseline = new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0, maxZoom: 14,
-                onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0);
+                onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05);
             Assert.IsTrue(baseline.Equals(baseline), "sanity: an instance must equal itself");
 
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: true, lod: TileLodMode.Flat, minZoom: 0,
-                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "Globe");
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "Globe");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.ScreenSpaceLod,
-                minZoom: 0, maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "Lod");
+                minZoom: 0, maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "Lod");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 1,
-                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "MinZoom");
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "MinZoom");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
-                maxZoom: 15, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "MaxZoom");
+                maxZoom: 15, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "MaxZoom");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
-                maxZoom: 14, onScreenPx: 256, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "OnScreenPx");
+                maxZoom: 14, onScreenPx: 256, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "OnScreenPx");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
-                maxZoom: 14, onScreenPx: 512, mercFarCap: 5.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "MercFarCap");
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 5.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "MercFarCap");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
-                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 9.0, areaAggressiveness: 1.0)), "GlobeFarCap");
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 9.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "GlobeFarCap");
             Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
-                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 2.0)), "AreaAggressiveness");
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 2.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.05)), "AreaAggressiveness");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.1, tileDetailHysteresis: 0.05)), "ZoomLevelHysteresis");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0, zoomLevelHysteresis: 0.05, tileDetailHysteresis: 0.1)), "TileDetailHysteresis");
         }
     }
 

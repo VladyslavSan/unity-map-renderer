@@ -177,6 +177,35 @@ and GameObjects fall back to a `RemoveItem` loop, and every implementation is id
 handle. `RenderTeardownRecord` unregisters through it. With a release budget of 4 and 30 layers a worst frame
 costs at most 4 structural changes instead of 450.
 
+### 4.6 The selector damps its own LOD flicker
+
+Two thresholds flip under a small camera move: the target level at each integer zoom, and a tile's stop-or-subdivide
+decision at the screen-space LOD threshold under tilt. Each flip swaps a coarse tile for its children (or the reverse)
+through the build pipeline. `FrustumTileSelector` therefore keeps the last cover and damps both.
+
+- **Zoom-level hysteresis.** The selector holds a level `L` and keeps it while `L - h <= zc < L + 1 + h`, where `zc` is
+  the camera zoom plus the selection offset and `h` is `ZoomLevelHysteresis` (default 0.05, clamped to `[0, 0.5]`).
+  Outside that window `L` is the floor of `zc`, clamped to the selector's zoom range. With the camera inside
+  `[L + 1, L + 1 + h)` the tiles are one level coarser than the style zoom, which is not visible at `h <= 0.1`.
+- **Tile-detail hysteresis.** `ScreenSpaceLodStrategy` reads each candidate's `TileLodContext.History` (stopped,
+  subdivided, or none, taken from the last cover and its strict ancestors). It scales the stop threshold by `1`, `f`
+  or `1/f` with `f = 2^b` and `b` = `TileDetailHysteresis` (default 0.05, clamped to `[0, 0.5]`). The two knobs are
+  separate: one holds a zoom level, the other a tile's size ratio. `2^0.05` is about 3.5% each way: it holds jitter of
+  that size, and a move past it still flips the tile. At 0.5 the factor is 1.41 each way.
+- **History survives a level change.** A jump clears it and starts from the camera's integer level: two or more
+  levels, or a look-at on a tile the last cover neither emitted, subdivided nor lay below. The first call, and the
+  call after an empty viewport, have no history and read as a jump. Heading and tilt changes alone are not jumps.
+  The look-at rule cannot see a pure zoom, and a tile's decision never reads the target level, so the level rule is
+  what clears remembered decisions after a change of two levels. A look-at beyond the Mercator latitude range counts
+  as drawn, so a globe view of a pole is not a jump on every frame.
+- **`TileAncestry`** is the one quadtree helper (`Parent`).
+- **One selector is one camera's history.** `MapView` rebuilds the selector when any selection input changes, which
+  also resets the history. Both hysteresis values live on the selector, so changing one is that rebuild.
+
+Visibility, occlusion, the near-field zoom cap and termination are unchanged. The hysteresis values do not touch
+`ProjectedAreaLodStrategy` or `FlatLodStrategy`, and they do not hold geometry: they only reduce how often the
+cover changes.
+
 ## 5. The bake — what a prepared tile is a function of
 
 A tile's mesh is baked at the tile's **integer** zoom (`TileId.Z`), never at the fractional camera zoom, and

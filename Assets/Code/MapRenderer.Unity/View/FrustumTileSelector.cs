@@ -15,6 +15,8 @@ namespace MapRenderer.Unity.View
     /// <see cref="IProjection.Project"/>/<see cref="IProjection.TangentBasisAt"/>, and a globe culls tiles past
     /// <see cref="IProjection.TryGetHorizonOccluder"/>. <see cref="ITileLodStrategy"/> decides stop-vs-subdivide;
     /// <see cref="IFarPlanePolicy"/> is shared with the render camera. The planar world does not wrap.
+    /// Non-local invariant: one instance is one camera's history. The target level holds inside a hysteresis of
+    /// the continuous level, and each tile's previous decision reaches the strategy. A jump starts without history.
     /// </summary>
     public sealed class FrustumTileSelector : IVisibleTileSelector
     {
@@ -22,10 +24,21 @@ namespace MapRenderer.Unity.View
         private readonly int    _maxZoom;
         private readonly int    _selectionZoomOffset;
         private readonly double _onScreenTilePx;
+        private readonly double _zoomLevelHysteresis;
         private readonly ITileLodStrategy _lod;
         private readonly IFarPlanePolicy  _farPolicy;
 
         private readonly List<TileId> _stack = new List<TileId>(256);
+
+        // The previous selection, read as TileLodContext.History. Cleared by a jump, not by a level change.
+        private readonly HashSet<TileId> _prevEmitted = new HashSet<TileId>(256);
+        private readonly HashSet<TileId> _prevRefined = new HashSet<TileId>(256); // strict ancestors of emitted
+
+        // Largest zoom-level hysteresis: the holding window is 1 + 2h wide and stays below two levels.
+        private const double MaxZoomLevelHysteresis = 0.5;
+
+        // The sticky target level in use, or -1 before the first selection and after an empty viewport.
+        private int _level = -1;
 
         /// <param name="minZoom">Lower clamp for the near-field selection zoom.</param>
         /// <param name="maxZoom">Upper clamp for the near-field selection zoom.</param>
@@ -34,9 +47,13 @@ namespace MapRenderer.Unity.View
         /// <param name="lod">Stop-vs-subdivide policy. Default <see cref="FlatLodStrategy"/> (uniform zoom).</param>
         /// <param name="farPolicy">Far-plane policy — MUST match the render camera's. Default
         ///   <see cref="GeometryAwareFarPlane"/> (planar); the globe wants <see cref="MultiplierFarPlane"/>.</param>
+        /// <param name="zoomLevelHysteresis">Zoom units the target level holds past each integer, clamped to [0, 0.5].
+        ///   0 follows the camera's integer zoom exactly; it is the legacy and test value, production passes the config.</param>
         public FrustumTileSelector(int minZoom = 0, int maxZoom = 22, int onScreenTilePx = 512,
-                                   ITileLodStrategy lod = null, IFarPlanePolicy farPolicy = null)
+                                   ITileLodStrategy lod = null, IFarPlanePolicy farPolicy = null,
+                                   double zoomLevelHysteresis = 0.0)
         {
+            _zoomLevelHysteresis = math.clamp(zoomLevelHysteresis, 0.0, MaxZoomLevelHysteresis);
             _minZoom = minZoom;
             _maxZoom = maxZoom;
             double tilePx     = WebMercator.TilePixelSize;
@@ -56,11 +73,10 @@ namespace MapRenderer.Unity.View
             IProjection      proj = view.Projection;
             CameraProperties cam  = view.Camera;
             double2          vp   = view.ViewportPx;
-            if (vp.x <= 0.0 || vp.y <= 0.0) return;
+            if (vp.x <= 0.0 || vp.y <= 0.0) { ClearHistory(); return; }
 
-            int z = cam.IntegerZoom + _selectionZoomOffset;
-            if (z < _minZoom) z = _minZoom;
-            if (z > _maxZoom) z = _maxZoom;
+            double continuous = cam.Zoom + _selectionZoomOffset;
+            int    z          = ChooseLevel(in cam, proj, continuous);
 
             // Render-space scene frame (look-at at the origin), matching MapView.BuildSceneFrame.
             var lookAt = new GeoCoordinate
@@ -127,9 +143,85 @@ namespace MapRenderer.Unity.View
                     ScreenRatio      = lodRatio,
                     OnScreenPx       = onScreenPx,
                     TargetOnScreenPx = _onScreenTilePx,
+                    History          = HistoryOf(t),
                 };
                 if (_lod.StopAt(in ctx)) { reuseBuffer.Add(t); continue; } // far → coarse
                 PushChildren(t);
+            }
+
+            RememberCover(reuseBuffer);
+            _level = z;
+        }
+
+        /// <summary>The target level: the previous one while <c>L - m &lt;= continuous &lt; L + 1 + m</c>, else the
+        /// floor of the camera zoom. A jump (two or more levels, or a look-at on a tile the last cover did not
+        /// reach) clears the history first. An empty history reads as a jump.</summary>
+        private int ChooseLevel(in CameraProperties cam, IProjection proj, double continuous)
+        {
+            int fresh = math.clamp(cam.IntegerZoom + _selectionZoomOffset, _minZoom, _maxZoom);
+            int held  = _level;
+            if (held < 0 || math.abs(fresh - held) >= 2 || !LookAtWasDrawn(in cam, proj, held))
+            {
+                ClearHistory();
+                return fresh;
+            }
+
+            bool sticky = continuous >= held - _zoomLevelHysteresis && continuous < held + 1 + _zoomLevelHysteresis;
+            return sticky ? held : fresh;
+        }
+
+        /// <summary>True iff the tile under the look-at at <paramref name="level"/> was in the last cover, was
+        /// subdivided by it, or lies below a tile it emitted.</summary>
+        private bool LookAtWasDrawn(in CameraProperties cam, IProjection proj, int level)
+        {
+            double latitude = proj.ClampValidLatitude(cam.LookAt.Latitude);
+            if (math.abs(latitude) > WebMercator.MaxLatitude) return true; // no Mercator tile there, so never a jump
+            double2 unit = WebMercatorTiling.UnitSquareFromLonLat(new GeoCoordinate
+            {
+                Latitude  = latitude,
+                Longitude = cam.LookAt.Longitude,
+            });
+            int last = (1 << level) - 1;
+            var tile = new TileId
+            {
+                Z = level,
+                X = math.clamp((int)(unit.x * (1 << level)), 0, last),
+                Y = math.clamp((int)(unit.y * (1 << level)), 0, last),
+            };
+            if (_prevEmitted.Contains(tile) || _prevRefined.Contains(tile)) return true;
+            for (TileId above = tile; above.Z > 0; )
+            {
+                above = TileAncestry.Parent(above);
+                if (_prevEmitted.Contains(above)) return true;
+            }
+
+            return false;
+        }
+
+        private TileLodHistory HistoryOf(TileId t)
+            => _prevEmitted.Contains(t) ? TileLodHistory.Stopped
+             : _prevRefined.Contains(t) ? TileLodHistory.Refined
+             : TileLodHistory.None;
+
+        private void ClearHistory()
+        {
+            _prevEmitted.Clear();
+            _prevRefined.Clear();
+            _level = -1;
+        }
+
+        /// <summary>Stores <paramref name="cover"/> and its strict ancestors as the next call's history. The ancestor
+        /// walk stops at the first ancestor already stored, so it is bounded by the tree depth per new branch.</summary>
+        private void RememberCover(List<TileId> cover)
+        {
+            _prevEmitted.Clear();
+            _prevRefined.Clear();
+            for (int i = 0; i < cover.Count; i++)
+            {
+                TileId t = cover[i];
+                _prevEmitted.Add(t);
+                for (TileId above = TileAncestry.Parent(t); above.Z > 0; above = TileAncestry.Parent(above))
+                    if (!_prevRefined.Add(above)) break;
             }
         }
 

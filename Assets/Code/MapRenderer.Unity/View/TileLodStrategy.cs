@@ -1,5 +1,7 @@
 // Engine-free: compiled by both the Unity EditMode runner and the fast dotnet core-tests project.
 
+using Unity.Mathematics;
+
 namespace MapRenderer.Unity.View
 {
     /// <summary>Selectable LOD behaviours (serialized in config / the Inspector; resolved to a strategy). Add a
@@ -19,6 +21,20 @@ namespace MapRenderer.Unity.View
         ProjectedArea = 2,
     }
 
+    /// <summary>What the previous selection did with a tile. It lets a strategy hold a decision inside a hysteresis
+    /// range around its threshold, so a tile at the threshold does not flip on every small camera move.</summary>
+    public enum TileLodHistory
+    {
+        /// <summary>No history: a first selection, a jump, an empty viewport, or a tile the last cover did not reach.</summary>
+        None = 0,
+
+        /// <summary>The last cover emitted this tile as a coarse stop.</summary>
+        Stopped = 1,
+
+        /// <summary>The last cover subdivided this tile: it is a strict ancestor of an emitted tile.</summary>
+        Refined = 2,
+    }
+
     /// <summary>
     /// Per-tile detail policy for the frustum tile-cover traversal (planar + globe share it). The traversal
     /// handles VISIBILITY (frustum + occlusion) and the near-field detail cap; the strategy decides, for a
@@ -30,7 +46,9 @@ namespace MapRenderer.Unity.View
     {
         /// <summary>True ⇒ emit <c>ctx</c>'s tile as-is (stop descending). False ⇒ subdivide into 4 children.
         /// Only called for VISIBLE tiles whose zoom is still below <see cref="TileLodContext.TargetZoom"/> — the
-        /// traversal always emits at the target zoom regardless, so termination doesn't depend on the strategy.</summary>
+        /// traversal always emits at the target zoom regardless, so termination doesn't depend on the strategy.
+        /// Pure in <c>ctx</c>: the same context gives the same answer. A strategy may read
+        /// <see cref="TileLodContext.History"/> to hold a decision.</summary>
         bool StopAt(in TileLodContext ctx);
 
         /// <summary>Short stable id for logging / the Inspector (e.g. "flat", "lod-screen").</summary>
@@ -69,6 +87,9 @@ namespace MapRenderer.Unity.View
 
         /// <summary>The selector's target on-screen tile size, in pixels (the 512 MapLibre convention).</summary>
         public double TargetOnScreenPx { get; init; }
+
+        /// <summary>What the previous selection did with the tile; empty after a jump.</summary>
+        public TileLodHistory History { get; init; }
     }
 
     /// <summary>Never stops early, so every visible tile is subdivided to the target zoom —
@@ -82,16 +103,32 @@ namespace MapRenderer.Unity.View
     /// <summary>Screen-space LOD: stop once <c>GroundSize ≤ ScreenRatio·Distance</c>, so near tiles reach the target
     /// zoom and tiles toward the horizon stop coarser. The default: under tilt it grows the tile count (the billboard
     /// approximation ignores foreshortening), but buys more horizon detail than <see cref="ProjectedAreaLodStrategy"/>.
-    /// Limitation: panning pulls far tiles across the threshold, and the coarse tile leaves the cover before its
-    /// finer children are built, so that patch flashes white for a frame or two. The fix is tile retention in
-    /// <c>TileManager</c>; <see cref="FlatLodStrategy"/> does not churn.</summary>
+    /// A tile-detail hysteresis <c>b</c> (zoom units) widens the threshold to a range with <c>h = 2^b</c>: a tile the last cover
+    /// stopped at keeps stopping up to <c>h</c> times the threshold, and one it subdivided keeps subdividing down to
+    /// <c>1/h</c> of it. With <c>b = 0</c> the rule is stateless.
+    /// Limitation: the hysteresis makes flips rarer, it does not hide them. A flip still swaps a coarse tile for its
+    /// children before they are built, and the fix is a geometry hold in <c>TileManager</c>.</summary>
     public sealed class ScreenSpaceLodStrategy : ITileLodStrategy
     {
+        /// <summary>The largest tile-detail hysteresis: the range is twice this wide in zoom units, so it stays within one level.</summary>
+        internal const double MaxTileDetailHysteresis = 0.5;
+
+        private readonly double _hysteresisFactor;
+
         public string Name => "lod-screen";
+
+        /// <param name="tileDetailHysteresis">Tile-detail hysteresis in zoom units, clamped to [0, 0.5]. 0 turns it off.</param>
+        public ScreenSpaceLodStrategy(double tileDetailHysteresis = 0.0) => _hysteresisFactor = math.pow(2.0, math.clamp(tileDetailHysteresis, 0.0, MaxTileDetailHysteresis));
 
         public bool StopAt(in TileLodContext ctx)
         {
-            return ctx.Distance > 0.0 && ctx.GroundSize <= ctx.ScreenRatio * ctx.Distance;
+            double factor = ctx.History switch
+            {
+                TileLodHistory.Stopped => _hysteresisFactor,
+                TileLodHistory.Refined => 1.0 / _hysteresisFactor,
+                _                      => 1.0,
+            };
+            return ctx.Distance > 0.0 && ctx.GroundSize <= ctx.ScreenRatio * ctx.Distance * factor;
         }
     }
 

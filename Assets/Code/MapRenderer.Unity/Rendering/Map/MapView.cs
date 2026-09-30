@@ -721,12 +721,16 @@ namespace MapRenderer.Unity.Rendering.Map
             public readonly double      MercFarCap;
             public readonly double      GlobeFarCap;
             public readonly double      AreaAggressiveness;
+            public readonly double      ZoomLevelHysteresis;
+            public readonly double      TileDetailHysteresis;
 
             public SelectorInputs(bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
-                                  double mercFarCap, double globeFarCap, double areaAggressiveness)
+                                  double mercFarCap, double globeFarCap, double areaAggressiveness,
+                                  double zoomLevelHysteresis, double tileDetailHysteresis)
             {
                 Globe = globe; Lod = lod; MinZoom = minZoom; MaxZoom = maxZoom; OnScreenPx = onScreenPx;
                 MercFarCap = mercFarCap; GlobeFarCap = globeFarCap; AreaAggressiveness = areaAggressiveness;
+                ZoomLevelHysteresis = zoomLevelHysteresis; TileDetailHysteresis = tileDetailHysteresis;
             }
 
             /// <summary>Field-by-field only — no <see cref="EqualityComparer{T}"/>, no boxing, no
@@ -734,13 +738,14 @@ namespace MapRenderer.Unity.Rendering.Map
             public bool Equals(SelectorInputs other)
                 => Globe == other.Globe && Lod == other.Lod && MinZoom == other.MinZoom
                 && MaxZoom == other.MaxZoom && OnScreenPx == other.OnScreenPx && MercFarCap == other.MercFarCap
-                && GlobeFarCap == other.GlobeFarCap && AreaAggressiveness == other.AreaAggressiveness;
+                && GlobeFarCap == other.GlobeFarCap && AreaAggressiveness == other.AreaAggressiveness
+                && ZoomLevelHysteresis == other.ZoomLevelHysteresis && TileDetailHysteresis == other.TileDetailHysteresis;
 
             public override bool Equals(object obj) => obj is SelectorInputs other && Equals(other);
 
             public override int GetHashCode()
-                => HashCode.Combine(Globe, Lod, MinZoom, MaxZoom, OnScreenPx, MercFarCap, GlobeFarCap,
-                                    AreaAggressiveness);
+                => HashCode.Combine(HashCode.Combine(Globe, Lod, MinZoom, MaxZoom, OnScreenPx, MercFarCap, GlobeFarCap,
+                                                     AreaAggressiveness), ZoomLevelHysteresis, TileDetailHysteresis);
         }
 
         // ── Visible-tile selector, rebuilt only when a selection input (or the projection) changes ──────
@@ -755,7 +760,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 globe: globe, lod: tileSelection.LodMode, minZoom: tileSelection.MinZoom,
                 maxZoom: tileSelection.MaxZoom, onScreenPx: tileSelection.OnScreenTilePx,
                 mercFarCap: tileSelection.MercatorFarPlaneCap, globeFarCap: tileSelection.GlobeFarPlaneCap,
-                areaAggressiveness: tileSelection.ProjectedAreaAggressiveness);
+                areaAggressiveness: tileSelection.ProjectedAreaAggressiveness,
+                zoomLevelHysteresis: tileSelection.ZoomLevelHysteresis, tileDetailHysteresis: tileSelection.TileDetailHysteresis);
             if (TileManager.Selector != null && _hasSelectorInputs && key.Equals(_selectorInputs)) return;
             _selectorInputs    = key;
             _hasSelectorInputs = true;
@@ -764,7 +770,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // geometry-aware for the flat map. The camera gets the same far, so it renders the selected frustum.
             ITileLodStrategy lod = tileSelection.LodMode switch
             {
-                TileLodMode.ScreenSpaceLod => new ScreenSpaceLodStrategy(),
+                TileLodMode.ScreenSpaceLod => new ScreenSpaceLodStrategy(tileSelection.TileDetailHysteresis),
                 TileLodMode.ProjectedArea  => new ProjectedAreaLodStrategy(tileSelection.ProjectedAreaAggressiveness),
                 _                          => new FlatLodStrategy(),
             };
@@ -774,7 +780,8 @@ namespace MapRenderer.Unity.Rendering.Map
 
             Camera.FarPlanePolicy = far;
             TileManager.Selector = new FrustumTileSelector(
-                tileSelection.MinZoom, tileSelection.MaxZoom, tileSelection.OnScreenTilePx, lod, far);
+                tileSelection.MinZoom, tileSelection.MaxZoom, tileSelection.OnScreenTilePx, lod, far,
+                tileSelection.ZoomLevelHysteresis);
         }
 
         /// <summary>
