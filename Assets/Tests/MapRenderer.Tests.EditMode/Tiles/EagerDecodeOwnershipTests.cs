@@ -1,6 +1,7 @@
 // Unity EditMode only — drives a real TileManager through MapView over the committed fixture, with a fake
 // ITileFeatureSource carrying a probe decoder. NOT registered in core-tests.csproj.
 
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -66,13 +67,33 @@ namespace MapRenderer.Tests.Tiles
             internal readonly LeaseProbeDecoder Probe = new LeaseProbeDecoder();
             internal bool Serving = true;
             internal UniTaskCompletionSource Gate;
+            private readonly List<UniTask<SharedDisposable<IDecodedTile>>> _fetches =
+                new List<UniTask<SharedDisposable<IDecodedTile>>>();
+
+            /// <summary>Polls until every fetch this source handed out has completed, or the timeout ends. The decoder's count rises
+            /// before its fetch completes. Reads each <c>Status</c>, which can throw once the product consumes the task:
+            /// call it before any tick.</summary>
+            internal bool WaitForAllFetches(int timeoutMs)
+            {
+                int deadline = Environment.TickCount + timeoutMs;
+                while (true)
+                {
+                    bool done = true;
+                    foreach (var fetch in _fetches) done &= fetch.Status.IsCompleted();
+                    if (done) return true;
+                    if (deadline - Environment.TickCount <= 0) return false;
+                    Thread.Sleep(1);
+                }
+            }
 
             internal ProbeFeatureSource(byte[] bytes) => _bytes = bytes;
 
             public UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
             {
                 if (!Serving) return UniTask.FromResult<SharedDisposable<IDecodedTile>>(null);
-                return Fetch(id);
+                UniTask<SharedDisposable<IDecodedTile>> fetch = Fetch(id);
+                _fetches.Add(fetch);
+                return fetch;
             }
 
             private async UniTask<SharedDisposable<IDecodedTile>> Fetch(TileId id)
@@ -143,6 +164,10 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreEqual(loaded, fake.Probe.DecodeCount,
                 "ANTI-VACUITY: every cover tile must really have decoded. UnbalancedCount over zero decodes " +
                 "is trivially zero, so without this every tooth in this fixture passes against a broken funnel.");
+
+            // No tick here: a tick would kick a tile.
+            Assert.IsTrue(fake.WaitForAllFetches(10000),
+                "every fetch must have completed, or the observe tick leaves its record unobserved");
 
             view.LateUpdate(); // THE observe tick: each completed fetch lands in its record's lt.Decode
 
