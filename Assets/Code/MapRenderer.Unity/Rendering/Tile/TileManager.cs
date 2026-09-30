@@ -175,7 +175,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// <summary>The decode handle from the fetch — null before completion, and again once this record stops owning it.</summary>
             public SharedDisposable<IDecodedTile> Decode;
 
-            /// <summary>Why the record is loaded. The default is <see cref="TileRole.Display"/>; only a prepared-ahead admission differs.</summary>
+            /// <summary>Why the record is loaded. A prepared-ahead admission starts as <see cref="TileRole.Prepare"/>; <see cref="RecomputeRoles"/> rewrites it.</summary>
             public TileRole Role;
 
             /// <summary>True from a network fault until the retry starts. The record is not Built, is skipped by the pump, and is not ready.</summary>
@@ -1804,7 +1804,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Releases up to <paramref name="budget"/> queued records this Update (0 = uncapped). Each
-        /// key is re-validated — one back in cover, or already cleared by a restyle, is skipped without spending budget.</summary>
+        /// key is re-validated — one back in a role, or already cleared by a restyle, is skipped without spending budget.</summary>
         private void DrainReleaseQueue(int budget)
         {
             if (_releaseQueue.Count == 0) return;
@@ -2120,8 +2120,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             return lt.Role == TileRole.Prepare && ((!lt.Built && !lt.WaitingRetry) || _keepSet.Contains(key));
         }
 
-        /// <summary>Gives every record its role: a record that entered the cover is shown, and one with no role joins the
-        /// deferred-release queue. Showing and hiding belong to <see cref="SwapStep"/>. Runs on each cover recompute and after
+        /// <summary>Gives every record its role, and one with no role joins the deferred-release queue.
+        /// Showing and hiding belong to <see cref="SwapStep"/>. Runs on each cover recompute and after
         /// each swap, and again while a prepared record outlives its sets.</summary>
         private void RecomputeRoles()
         {
@@ -2143,7 +2143,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt  = _loaded[key];
                 TryResolveRole(in key, in lt, out TileRole role);
                 lt.Role = role;
-                if (role == TileRole.Display) ShowRecord(key, in lt);
                 _loaded[key] = lt;
             }
 

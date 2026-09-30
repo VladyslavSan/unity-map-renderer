@@ -21,9 +21,9 @@ namespace MapRenderer.Unity.Rendering.Backend
     internal interface ITileRenderBackend : IDisposable
     {
         /// <summary>
-        /// Registers a tile-layer mesh as a draw item at SW-corner render origin <paramref name="tileOriginRender"/>,
-        /// which <see cref="Rebuild"/> places relative to the frame's scene origin. <paramref name="materialIndex"/>
-        /// is the layer's global slot into the full-width material list; null (non-tile-mesh) slots never get it.
+        /// Registers a tile-layer mesh as a draw item at SW-corner render origin <paramref name="tileOriginRender"/>.
+        /// <see cref="Rebuild"/> positions it relative to the frame's scene origin, not this call.
+        /// <paramref name="materialIndex"/> is the layer's global slot into the full-width material list; null slots never get it.
         /// <paramref name="tileId"/> groups a tile's layers under one named parent for debugging
         /// (<see cref="BRG.TileRenderer"/> ignores it).
         /// </summary>

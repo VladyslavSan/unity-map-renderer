@@ -29,7 +29,7 @@ the slow clock — and slow work out of the fast clock — is the spine of the w
 Driven by `TileManager`, which owns the loaded-tile set (`_loaded`):
 
 ```
-TileManager.Update(cameraProperties, selectionConfig)        // once per frame, but mostly idle
+TileManager.Update(cameraProperties, selectionConfig, nowSeconds)  // once per frame, but mostly idle
   ├─ CoverSelect      : pick the visible tile cover for this camera (z/x/y set)
   ├─ Request/Release  : fetch newly-covered tiles, release departed ones (kept-warm in a cache)
   └─ per-tile kick    : SymbolWorkerFactory.TryBeginBuild(source, tile)   ── kick ──►  SymbolSubsystem

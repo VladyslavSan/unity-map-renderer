@@ -405,8 +405,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         /// <summary>
         /// Registers a tile-layer mesh as an Entities-Graphics entity, parented under its tile's root
-        /// entity (created on demand). Returns a handle for later removal. <paramref name="materialIndex"/>
-        /// is the layer's global SLOT, indexing the full-width material list, matching
+        /// entity (created on demand). <see cref="Rebuild"/> positions it, not this call. Returns a handle for later
+        /// removal. <paramref name="materialIndex"/> is the layer's global SLOT, indexing the full-width material list, matching
         /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>; non-tile-mesh slots are null and never
         /// receive this call.
         /// </summary>

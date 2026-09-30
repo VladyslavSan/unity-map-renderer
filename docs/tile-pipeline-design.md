@@ -121,13 +121,13 @@ leaves.
 
 ### 4.1 The Update order, and what the cover gate does not gate
 
-The cover descent, the desired-list merge and the leaving-tile enqueue run only when `CoverKeyGate.IsDirty`
-— the camera or viewport moved since the last commit. Admission, `PumpPending` and `DrainReleaseQueue` run
+The cover descent, the desired-list merge and the role pass that follows them run when `CoverKeyGate.IsDirty`
+— the camera or viewport moved since the last commit. The role pass also runs after a swap that changed something, and while a prepared record outlives its sets. Admission, `PumpPending` and `DrainReleaseQueue` run
 every Update, in or out of that gate, so a backlog drains while the camera is still.
 
 The gate does not read the pending count. A pending tile forcing the descent every frame buys nothing: the
 request loop keys off `_loaded` membership and finds nothing new on an unchanged cover, and the release loop
-keys off cover membership and finds nothing leaving. Those are the frames already under consume load, so the
+re-validates each record by role and finds nothing that lost one. Those are the frames already under consume load, so the
 descent they would pay for is the one that costs most.
 
 ### 4.2 The budget-zero asymmetry
@@ -213,7 +213,7 @@ through the build pipeline. `FrustumTileSelector` therefore keeps the last cover
   The look-at rule cannot see a pure zoom, and a tile's decision never reads the target level, so the level rule is
   what clears remembered decisions after a change of two levels. A look-at beyond the Mercator latitude range counts
   as drawn, so a globe view of a pole is not a jump on every frame.
-- **`TileAncestry`** is the one quadtree helper (`Parent`).
+- **`TileAncestry`** is the one quadtree helper (`Parent`, `IsStrictAncestor`).
 - **One selector is one camera's history.** `MapView` rebuilds the selector when any selection input changes, which
   also resets the history. Both hysteresis values live on the selector, so changing one is that rebuild.
 
@@ -227,7 +227,7 @@ A level switch draws a whole new set of tiles at once. `TileManager` loads that 
 switch shows tiles that are already registered.
 
 - **Roles.** A record is `Display` when its tile is in the cover and `Prepare` when its tile is in the preload set P but not in the
-  cover. A record with no role (`Display`, `Hold`, `Bridge` or `Prepare`) is released through the deferred-release queue. A `Prepare` record that enters the cover is shown in
+  cover. A record with no role (`Display`, `Hold`, `Bridge` or `Prepare`) is released through the deferred-release queue. A `Prepare` record that enters the cover is shown by the swap step, in
   one batch, unless a tile that overlaps it is shown: § 4.8 then decides when it shows.
 - **The preload set P.** `Selector.LastTarget` gives the held level `L`, the continuous level `zc` and the selector's level range. For
   each cover tile at level `L`, P holds its four children once `zc >= L + 1 - p`, and its parent while `zc < L + p`, where `p` is
@@ -242,12 +242,12 @@ switch shows tiles that are already registered.
   cache. After a jump the unfinished prepared records still finish: at most `MaxConcurrentPrepareLoads` admitted ahead, plus drawn tiles
   that were still loading when they left the cover for P.
 - **Separate caps.** Prepared keys wait in their own list and load under `MaxConcurrentPrepareLoads` (at least 1). `CountActiveLoads` counts the records that are not
-  prepared ahead: the cover's records and any `Bridge`. The pump and the clip-change rebake sort records in the cover first, so preparing never takes a slot or a
+  prepared ahead: the cover's records, any `Bridge`, and any `Hold` still in flight. The pump and the clip-change rebake sort records in the cover first, so preparing never takes a slot or a
   per-tick budget from a tile being drawn. A prepared key whose tile enters the cover is dropped from the prepared list, and the cover
   merge desires it.
 - **Labels.** A tile's labels follow its geometry. `CollectLoadedTileKeys` reports every record that has a role, flagged `Shown` while the
   record serves a revealed tile. A `Prepare` record is reported not shown, so the store keeps its labels warm and pinned and nothing draws. A record that was shown and becomes hidden
-  while it keeps a role fades its labels out as departing. The tile counts report `Display` records only, and `PreparingTileCount` counts the rest. At the switch the record
+  while it keeps a role fades its labels out as departing. The tile counts report `Display` records only, and `PreparingTileCount` counts `Prepare` records only. At the switch the record
   becomes shown and the store restores its entry (see labels-and-symbols § 1.5; § 4.8 for a hidden tile under a hold).
 
 ### 4.8 Holding a tile until its area is covered
@@ -261,7 +261,7 @@ area is covered or leaves the view, so it never outlives what is on screen.
   cover tile, on one ancestry chain, is `Bridge`. A `Bridge` is opportunistic: a record that left the cover while it was loading, between a hold
   and a cover tile, is kept instead of cancelled, and a `Bridge` fetches nothing of its own. A level that was the cover on some frame is
   requested as usual. Only a jump (two levels or more at once) requests nothing for the levels it skips. `CountActiveLoads` counts a
-  `Bridge` with the cover.
+  `Bridge` and a `Hold` that is still in flight with the cover.
 - **Shown state.** Two structures describe what is shown, and they answer different questions.
   - The **area set** `_revealedTiles` holds the revealed cover, `Hold` and `Bridge` tiles. `_shownBelow` counts the revealed tiles under each ancestor.
     Every area question of the swap reads only these two. A record's role reads its own count: a record that serves a revealed area is `Hold` once the area has left the cover.
@@ -288,10 +288,11 @@ area is covered or leaves the view, so it never outlives what is on screen.
   `MapView.LateUpdate` runs the backend's `Rebuild` after `TileManager.Update`, so the flush's shows are in that frame's draw list.
   A swap has no one-frame hole on any backend.
 - **The guard.** A tile's first reveal belongs to the swap step, which looks at the tiles around it. Registering items never starts
-  it. `FollowsShownTile` is the guard: a record shows only when it serves a revealed tile (its shown count is above zero) and it
-  has a role. `ShowRecord` and the consume path both ask it, so a record that finishes loading or rebakes passes through it too. The
-  guard asks for a role, so a record with no role, one waiting for its release, stays hidden. The swap itself shows such a record when
-  it regains a role before the release drains (a swing-back).
+  it. `FollowsShownTile` is the guard. It is false unless the record serves a revealed tile (its shown count is above zero). A record
+  already marked shown passes with no role check. Any other record needs a role, and the guard then marks it shown (it writes `_revealed`).
+  `ShowRecord` and the consume path both ask it, so a record that finishes loading or rebakes passes through it too. A record with no role
+  that is not yet marked shown, one waiting for its release, stays hidden. The swap itself shows such a record when it regains a role
+  before the release drains (a swing-back).
 
 ### 4.9 Retrying a failed download
 
