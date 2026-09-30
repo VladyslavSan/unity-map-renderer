@@ -201,6 +201,11 @@ namespace MapRenderer.Unity.Rendering.Map
                  "tile is never cancelled, so the set must stay bounded.")]
         public int MaxConcurrentPrepareLoads = 4;
 
+        [Tooltip("Seconds a tile waits after a failed download (timeout, 5xx, connection error) before it is fetched " +
+                 "again. A missing tile (404) and a tile that cannot be decoded are not retried. The old tile stays on " +
+                 "screen until the new ones are ready. A value of 0 or less uses 10.")]
+        public double FetchRetrySeconds = 10.0;
+
         [Tooltip("ProjectedArea only. 1.0 stops exactly at the target on-screen size; higher = coarser cover, " +
                  "fewer tiles, lower visual quality. It cannot be tuned to match ScreenSpaceLod — the two " +
                  "rules differ per tile, not by a constant.")]

@@ -586,9 +586,15 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 int loadedBefore = view.LoadedTileCount();
                 Assert.GreaterOrEqual(loadedBefore, 3, "need > budget tiles so the release budget actually defers work.");
 
-                // Zoom far out → the whole z6 cover leaves; the new cover is the coarse (z0) world tile.
+                // Zoom far out → the whole z6 cover leaves; the new cover is the coarse (z0) world tile. The old tiles stay
+                // drawn until that tile is ready; the Update that swaps them enqueues every departure and the drain frees up to the budget.
                 view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 0.0 });
-                view.LateUpdate(); // recompute enqueues every departure, then the drain frees up to the budget
+                for (int frame = 0; frame < 3000 && view.TilesReleasedLastTick() == 0; frame++)
+                {
+                    view.LateUpdate();
+                    yield return null;
+                }
+
                 Assert.AreEqual(2, view.TilesReleasedLastTick(),
                     "the zoom-out frees only up to MaxReleasesPerTick (2), NOT the whole departing cover at once.");
                 Assert.AreEqual(loadedBefore - 2, view.ReleaseQueueDepth(),
@@ -621,10 +627,15 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 int loadedBefore = view.LoadedTileCount();
                 Assert.GreaterOrEqual(loadedBefore, 4, "need enough tiles that a naive pan-back would free clearly > the transient.");
 
-                // Pan out (budget 1): the recompute enqueues the departing cover; the drain frees ONE, leaving
-                // the rest deferred in the queue.
+                // Pan out (budget 1): the old tiles stay drawn until the coarse tile is ready. The Update that swaps them
+                // enqueues the departing cover; the drain frees ONE, leaving the rest deferred in the queue.
                 view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 0.0 });
-                view.LateUpdate();
+                for (int frame = 0; frame < 3000 && view.ReleaseQueueDepth() == 0; frame++)
+                {
+                    view.LateUpdate();
+                    yield return null;
+                }
+
                 Assert.GreaterOrEqual(view.ReleaseQueueDepth(), 3, "most departures are deferred, not released.");
 
                 // Uncap the budget for the RETURN frame — a naive drain (no re-validation) would now free the

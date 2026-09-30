@@ -1,7 +1,7 @@
 // Tiles/TileFetchTests.cs — fetch-cancellation and symbol-kick teeth, PlayMode half.
 //
 // Contents:
-//   TileFetchCancellationTests  — rapid zoom/cover churn must not flood the log with unobserved fetch exceptions.
+//   TileFetchCancellationTests  — rapid zoom/cover churn must not flood the log with unobserved fetch exceptions; a failed download holds the old tile and retries.
 //   TileSymbolKickTests         — the symbol kick fires via the normal PumpPending path once the off-main decode lands between ticks.
 
 using System;
@@ -15,6 +15,7 @@ using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity.Style;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Cameras;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.Collections.Generic;
@@ -135,6 +136,186 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             {
                 UniTaskScheduler.UnobservedTaskException -= handler;
                 if (go != null) { view.Teardown(); UnityEngine.Object.DestroyImmediate(go); }
+            }
+        }
+
+        private enum Kind { Ok, FaultOnce, Absent, Corrupt, Unsupported, AlwaysFault }
+
+        private const int FineZoom = 6;
+
+        /// <summary>Serves the sample tile, except that the first tiles requested at the armed level get a scripted failure, in request order.</summary>
+        private sealed class Script
+        {
+            private readonly object _lock = new();
+            private readonly byte[] _ok = SampleTileFixture.Bytes();
+            private readonly Dictionary<TileId, int>  _calls = new();
+            private readonly Dictionary<TileId, Kind> _kinds = new();
+            private readonly List<(TileId tile, Kind kind)> _designated = new();
+            private Kind[] _order = Array.Empty<Kind>();
+            private int _armedZoom = FineZoom;
+
+            public void Arm(int zoom, params Kind[] order)
+            {
+                lock (_lock) { _armedZoom = zoom; _order = order; _designated.Clear(); }
+            }
+
+            public int CallsOf(TileId tile)
+            {
+                lock (_lock) return _calls.TryGetValue(tile, out int n) ? n : 0;
+            }
+
+            public TileId First(Kind kind)
+            {
+                lock (_lock)
+                {
+                    foreach (var d in _designated) if (d.kind == kind) return d.tile;
+                }
+
+                return default;
+            }
+
+            public async UniTask<TileResponse> Fetch(TileId tile)
+            {
+                Kind kind;
+                int  call;
+                lock (_lock)
+                {
+                    call = _calls.TryGetValue(tile, out int n) ? n + 1 : 1;
+                    _calls[tile] = call;
+                    if (!_kinds.TryGetValue(tile, out kind))
+                    {
+                        kind = tile.Z == _armedZoom && _designated.Count < _order.Length ? _order[_designated.Count] : Kind.Ok;
+                        _kinds[tile] = kind;
+                        if (kind != Kind.Ok) _designated.Add((tile, kind));
+                    }
+                }
+
+                await UniTask.SwitchToThreadPool();
+                switch (kind)
+                {
+                    case Kind.FaultOnce when call == 1:
+                    case Kind.AlwaysFault:
+                        throw new InvalidOperationException("scripted network failure");
+                    case Kind.Absent:  return TileResponse.Absent(TileEncoding.Mvt);
+                    case Kind.Corrupt: return new TileResponse(new byte[] { 0x1A, 0x64 }, TileEncoding.Mvt);
+                    case Kind.Unsupported: return new TileResponse(_ok, (TileEncoding)99);
+                    default:           return new TileResponse(_ok, TileEncoding.Mvt);
+                }
+            }
+        }
+
+        private static IEnumerator Frames(MapView view, Func<bool> done, string what)
+        {
+            for (var settle = SettleTimeout.Start(); settle.Running;)
+            {
+                view.LateUpdate();
+                if (done()) yield break;
+                yield return null;
+            }
+
+            Assert.Fail($"timed out waiting for: {what}");
+        }
+
+        /// <summary>
+        /// A child whose download fails keeps its parent on screen, is not fetched again before the cooldown, and is fetched again after it;
+        /// a missing tile, an undecodable tile and an unsupported encoding are ready at once and never fetched again; failed children never
+        /// hold the load slots a tile in a new area needs; a prepared tile that waits to retry is released once it leaves its preload sets.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator NetworkFault_HoldsTheParentAndRetriesOnce_OtherFailuresAreReady_AndNoSlotIsHeld()
+        {
+            var script = new Script();
+            var go     = new GameObject("MapView_FetchRetry");
+            var view   = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
+            try
+            {
+                double now = 100.0;
+                view.Config.TileSelection.MinZoom = 4;
+                view.Config.TileSelection.MaxZoom = 7;
+                view.Config.TileSelection.ZoomLevelPreload = -1.0;
+                view.Config.Backend = RenderBackend.Entities;
+                view.Config.MaxConsumesPerTick = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+                view.Config.MaxConcurrentTileLoads = 4; // a failed child must not keep holding one of these
+                view.WithTestCamera();
+                view.View.NowSecondsOverride = () => now;
+                view.LoadTestStyle(TestDataSource.FromFetch(script.Fetch), Cam(0, 0, 5.5), style: MinimalStyle());
+
+                var drawn = new HashSet<TileId>();
+                yield return Frames(view, () => view.AllTilesSettled(), "the coarse level to settle");
+
+                // Zoom in: the first three fine tiles requested fail, are missing, and are undecodable.
+                script.Arm(FineZoom, Kind.FaultOnce, Kind.Absent, Kind.Corrupt, Kind.Unsupported);
+                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 6.5 });
+                yield return Frames(view, () => view.TileManager.Telemetry.PendingTileCount == 1 && script.First(Kind.Unsupported).Z == FineZoom,
+                    "every fine tile but the failed one to finish");
+
+                TileId failed  = script.First(Kind.FaultOnce);
+                TileId absent  = script.First(Kind.Absent);
+                TileId corrupt = script.First(Kind.Corrupt);
+                TileId unsupported = script.First(Kind.Unsupported);
+                TileId parent  = TileAncestry.Parent(failed);
+                view.EntitiesRenderer().DrawnTilesAtSlot(0, drawn);
+                Assert.IsTrue(drawn.Contains(parent), "the parent of a failed child stays on screen");
+                Assert.IsFalse(drawn.Contains(failed), "the failed child is not drawn");
+                Assert.Greater(view.TileManager.Telemetry.HeldTileCount, 0);
+                Assert.AreEqual(1, view.TileManager.Telemetry.PendingTileCount, "a missing tile and an undecodable tile are ready at once: only the failed one is pending");
+                Assert.IsFalse(drawn.Contains(absent) || drawn.Contains(corrupt) || drawn.Contains(unsupported), "and, having no data, draw nothing");
+
+                // Inside the cooldown nothing is fetched again.
+                now = 109.0;
+                for (int i = 0; i < 10; i++) { view.LateUpdate(); yield return null; }
+                Assert.AreEqual(1, script.CallsOf(failed), "no retry before the cooldown");
+
+                // After it the tile is fetched once more, through a release, and the parent gives way.
+                now = 110.5;
+                yield return Frames(view, () => script.CallsOf(failed) == 2 && view.AllTilesSettled(), "the retry to succeed and the view to settle");
+                Assert.AreEqual(2, script.CallsOf(failed), "exactly one retry");
+                Assert.AreEqual(0, view.TileManager.Telemetry.HeldTileCount);
+                view.EntitiesRenderer().DrawnTilesAtSlot(0, drawn);
+                Assert.IsFalse(drawn.Contains(parent), "the parent is replaced once its children are ready");
+                Assert.IsTrue(drawn.Contains(failed), "the retried child is drawn");
+
+                now = 160.0;
+                for (int i = 0; i < 5; i++) { view.LateUpdate(); yield return null; }
+                Assert.AreEqual(1, script.CallsOf(absent), "a missing tile is not fetched again");
+                Assert.AreEqual(1, script.CallsOf(corrupt), "an undecodable tile is not fetched again");
+                Assert.AreEqual(1, script.CallsOf(unsupported), "an encoding nothing decodes is not fetched again");
+
+                // Four tiles that keep failing, in a new area: they wait, and the tiles after them still load.
+                script.Arm(FineZoom, Kind.AlwaysFault, Kind.AlwaysFault, Kind.AlwaysFault, Kind.AlwaysFault);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 60.0 });
+                yield return Frames(view, () =>
+                    {
+                        view.EntitiesRenderer().DrawnTilesAtSlot(0, drawn);
+                        return view.TileManager.Telemetry.PendingTileCount == 4 && drawn.Count > 0;
+                    },
+                    "tiles behind four failed ones to load and draw");
+                Assert.AreEqual(0, view.ActiveLoadCount(), "a record waiting to retry holds no load slot");
+
+                // A prepared tile that fails waits too, and once the zoom leaves its preload sets it is released, not retried for ever.
+                now = 200.0;
+                view.Config.TileSelection.ZoomLevelPreload = 0.3;
+                script.Arm(FineZoom + 1, Kind.AlwaysFault);
+                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 6.8 });
+                yield return Frames(view, () => script.First(Kind.AlwaysFault).Z == FineZoom + 1 && script.CallsOf(script.First(Kind.AlwaysFault)) >= 1,
+                    "a prepared tile to be requested and fail");
+                TileId preparedFailed = script.First(Kind.AlwaysFault);
+                for (int i = 0; i < 10; i++) { view.LateUpdate(); yield return null; }
+                Assert.Greater(view.TileManager.Telemetry.PreparingTileCount, 0, "precondition: prepared records are loaded, the failed one among them");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 5.5 });
+                yield return Frames(view, () => view.TileManager.Telemetry.PreparingTileCount == 0, "the prepared records, the failed one included, to be released");
+                now = 240.0;
+                for (int i = 0; i < 10; i++) { view.LateUpdate(); yield return null; }
+                Assert.AreEqual(1, script.CallsOf(preparedFailed), "a failed prepared tile outside its preload sets is not fetched again");
+            }
+            finally
+            {
+                view.Teardown();
+                UnityEngine.Object.DestroyImmediate(go);
             }
         }
     }

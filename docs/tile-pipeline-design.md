@@ -152,9 +152,9 @@ puts and a mesh-destroy burst. Releasing them in the frame they leave is the mir
 consume, so the Update **enqueues** instead: a record leaving cover joins `_releaseQueue`, deduped by
 `_releaseQueued`. `DrainReleaseQueue` frees up to `MaxReleasesPerTick` records per Update.
 
-Each dequeue is **re-validated against the live cover** before it spends budget. A key whose tile is back in
-`_coverSet` (the camera panned back during the one-to-three-frame linger) or whose record is already gone (a
-restyle cleared it) is dropped without a release. That turns pan-out-pan-back from destroy-and-refetch churn
+Each dequeue is **re-validated by role** before it spends budget. A key whose record has a role again (the
+camera panned back while the record waited, or the record is held for a swap) or whose record is already gone
+(a restyle cleared it) is dropped without a release. That turns pan-out-pan-back from destroy-and-refetch churn
 into a no-op.
 
 A queued record stays in `_loaded` and is still pumped while it waits, so its in-flight work proceeds to the
@@ -227,8 +227,8 @@ A level switch draws a whole new set of tiles at once. `TileManager` loads that 
 switch shows tiles that are already registered.
 
 - **Roles.** A record is `Display` when its tile is in the cover and `Prepare` when its tile is in the preload set P but not in the
-  cover. A record with neither role is released through the deferred-release queue. A `Display` record that leaves the cover for P is
-  hidden, and a `Prepare` record that enters the cover is shown, each in one batch.
+  cover. A record with no role (`Display`, `Hold`, `Bridge` or `Prepare`) is released through the deferred-release queue. A `Prepare` record that enters the cover is shown in
+  one batch, unless a tile that overlaps it is shown: § 4.8 then decides when it shows.
 - **The preload set P.** `Selector.LastTarget` gives the held level `L`, the continuous level `zc` and the selector's level range. For
   each cover tile at level `L`, P holds its four children once `zc >= L + 1 - p`, and its parent while `zc < L + p`, where `p` is
   `ZoomLevelPreload` (default 0.05, clamped to `[-1, 1]`, negative starts after the whole level). P stays inside the selector's level
@@ -241,15 +241,76 @@ switch shows tiles that are already registered.
 - **An in-flight `Prepare` record is never cancelled** for leaving P or K. It finishes, and if it still has no role it is released to the
   cache. After a jump the unfinished prepared records still finish: at most `MaxConcurrentPrepareLoads` admitted ahead, plus drawn tiles
   that were still loading when they left the cover for P.
-- **Separate caps.** Prepared keys wait in their own list and load under `MaxConcurrentPrepareLoads` (at least 1). `CountActiveLoads` counts only
-  records in the cover, and the pump and the clip-change rebake sort records in the cover first, so preparing never takes a slot or a
+- **Separate caps.** Prepared keys wait in their own list and load under `MaxConcurrentPrepareLoads` (at least 1). `CountActiveLoads` counts the records that are not
+  prepared ahead: the cover's records and any `Bridge`. The pump and the clip-change rebake sort records in the cover first, so preparing never takes a slot or a
   per-tick budget from a tile being drawn. A prepared key whose tile enters the cover is dropped from the prepared list, and the cover
   merge desires it.
 - **Labels.** A `Prepare` record's symbol build opens on the store's kept-warm side with no departing stamp, so its labels do not draw.
-  `CollectLoadedTileKeys` and the tile counts report `Display` records only, and `PreparingTileCount` counts the rest. At the switch the
-  tile is reported and the store restores its entry.
-- **Limitation.** A record that leaves the cover for P hides at once, because nothing holds the old tiles until the new ones are ready.
-  After a fast zoom the old tiles can vanish before the new ones finish.
+  `CollectLoadedTileKeys` reports `Display` and `Hold` records (§ 4.8), the tile counts report `Display` records only, and
+  `PreparingTileCount` counts the rest. At the switch the tile is reported and the store restores its entry.
+
+### 4.8 Holding a tile until its area is covered
+
+A tile that leaves the cover stays drawn until ready tiles cover its area, or until its area leaves the view. No frame draws a
+hole where it was, and no frame draws it together with a tile above or below it. There is no time limit: a hold ends when the
+area is covered or leaves the view, so it never outlives what is on screen.
+
+- **Roles.** `TileRole` is `Display`, `Hold`, `Bridge` or `Prepare`, in that order of precedence. A shown tile that is not in the
+  cover but has a relative in it (an ancestor or a descendant) is `Hold`. A hidden tile that lies strictly between a `Hold` tile and a
+  cover tile, on one ancestry chain, is `Bridge`. A `Bridge` is opportunistic: a record that left the cover while it was loading, between a hold
+  and a cover tile, is kept instead of cancelled, and a `Bridge` fetches nothing of its own. A level that was the cover on some frame is
+  requested as usual. Only a jump (two levels or more at once) requests nothing for the levels it skips. `CountActiveLoads` counts a
+  `Bridge` with the cover.
+- **Shown state.** `_revealed` holds one mask per shown record, `_shownRecords` counts the shown records of each tile, and `_shownBelow`
+  counts the shown tiles under each ancestor. They change through `MarkShown` and `MarkHidden`, and a restyle clears or re-keys them. A record is shown when its items are
+  visible at the next flush. A record that is shown only to serve a cover tile from above (a source's maxzoom tile under overzoom) is
+  recorded apart and counts as no shown tile, so it is not a shown relative of the tiles it serves, and a swap never hides it.
+- **Ready.** A tile is ready when every source that serves it has its record built, or rebuilding with its previous geometry still
+  registered, and not waiting to retry, the background included. A source that does not serve the tile counts for nothing. A missing record is not ready. An absent tile and a tile that
+  cannot be decoded are built and empty, so they are ready.
+- **One step, every Update.** `SwapStep` runs after the pump and at the end of the drain.
+  1. A shown tile with no relative in the cover is hidden: its area left the view.
+  2. **Zoom out.** The shallowest ancestor that has a record, is not fully shown and is ready, looking up to the cover tile, is shown
+     whole, and every shown tile under it is hidden.
+  3. **Zoom in.** A shown tile whose cover areas are all covered gives way to the tiles that cover them. An area is covered when it has
+     no relative in the cover, when its shallowest ready tile with a record (in the cover or not) exists, or when its four children are covered. A
+     `Bridge` that is shown becomes a `Hold`, and steps 2 and 3 replace it later in the same way.
+  4. A cover tile that has no shown relative and has items shows itself. This covers a new area, which fills in layer by layer, and a
+     tile that returns before its release drains.
+- **One flush.** Every show and hide of an Update reaches the backend in one `FlushVisibility`: one hide call and one show call. A handle
+  queued both ways in one Update ends hidden, because the two batches are made disjoint before the calls. The
+  outgoing items are hidden, not removed. The record loses its role and waits in the release queue, so a swing-back shows it again
+  without registering it again. `MaxReleasesPerTick` bounds that teardown and never the swap.
+- **The guard.** A tile's first reveal belongs to the swap step, which looks at the tiles around it. Registering items never starts
+  it. `FollowsShownTile` is the guard: a record shows only when its tile is shown already, or it serves a shown tile from above, and it
+  has a role. `ShowRecord` and the consume path both ask it, so a record that finishes loading or rebakes passes through it too. The
+  guard asks for a role, so a record with no role, one waiting for its release, stays hidden. The swap itself shows such a record when
+  it regains a role before the release drains (a swing-back).
+
+### 4.9 Retrying a failed download
+
+A download that fails with a network error (a timeout, a 5xx, a connection error) is not ready. The record waits, is skipped by the
+pump, holds no load slot, and is fetched again after `FetchRetrySeconds` (default 10; a value of 0 or less uses 10), for as long as it still has a role. The tile that
+it would replace stays drawn meanwhile.
+
+- **What retries.** Only the failure arm of `TakeDecodeFromFetch`. A cancelled fetch, an absent tile (404, 204) and a tile that cannot be
+  decoded do not retry: the record is built and empty, and the same bytes would fail the same way. An encoding that nothing decodes is
+  treated as undecodable. A fault that is not a network error but throws into the same arm retries as well, at the same rate. A
+  prepared record that waits to retry is not kept past its preload sets: it is released like any record with no role.
+- **Through a release.** The retry releases the tile in its source first, then requests it again. The failure arm also catches a throw
+  after the scheduler cached the bytes (for example a scheduling failure), and the release evicts those bytes, so the new request is a fresh
+  fetch. It also clears the scheduler's in-flight entry and absent-tile suppression for the tile.
+- **The clock.** `TileManager.Update` takes the time in seconds. The retry scan runs every Update and at the end of the drain, not only
+  when the cover changes.
+
+### 4.10 Invariants of the hold
+
+| Name | Invariant |
+|---|---|
+| Closed view | An area drawn at the end of one Update is drawn at the end of the next, unless it left the view. A new area with nothing drawn before it is the exception: it appears tile by tile. |
+| Nested-free | Per layer slot, no two drawn tiles are an ancestor and a descendant. |
+| Fault retry | A network fault is not ready, and is fetched again through a release no sooner than the cooldown, while the record has a role. |
+| Batched visibility | An Update makes at most one show call and one hide call, whatever the number of tiles that swap. |
 
 ## 5. The bake — what a prepared tile is a function of
 

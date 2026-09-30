@@ -7,6 +7,7 @@
 // of returning a sentinel. The .asmdef's UNITY_INCLUDE_TESTS constraint keeps this file out of a release
 // player, so the Editor-only members need no `#if UNITY_EDITOR` here.
 
+using System.Collections.Generic;
 using Unity.Entities;
 using Unity.Entities.Graphics;
 using Unity.Mathematics;
@@ -38,6 +39,16 @@ namespace MapRenderer.Tests
         /// <see cref="DisableRendering"/> tag. Throws for an unknown handle.</summary>
         internal static bool IsItemDrawn(this EntitiesTileRenderer renderer, int handle)
             => !renderer._em.HasComponent<DisableRendering>(renderer._items[handle].Entity);
+
+        /// <summary>Fills <paramref name="into"/> with the tiles that have at least one drawn item at <paramref name="materialIndex"/>.
+        /// Reads the backend, not the tile manager, so it sees what the frame draws.</summary>
+        internal static void DrawnTilesAtSlot(this EntitiesTileRenderer renderer, int materialIndex, HashSet<TileId> into)
+        {
+            into.Clear();
+            foreach (var kv in renderer._items)
+                if (kv.Value.MaterialIndex == materialIndex && !renderer._em.HasComponent<DisableRendering>(kv.Value.Entity))
+                    into.Add(kv.Value.TileId);
+        }
 
         /// <summary>True when NO live draw item at <paramref name="materialIndex"/> is gated out. Reads
         /// every item rather than one handle, so a gate that reached only some of a slot's entities fails

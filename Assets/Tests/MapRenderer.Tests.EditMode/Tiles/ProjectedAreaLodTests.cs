@@ -848,6 +848,15 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreEqual(new TileId { Z = 2, X = 2, Y = 1 }, TileAncestry.Parent(new TileId { Z = 3, X = 5, Y = 2 }), "Parent halves x, y and zoom");
             Assert.AreEqual(new TileId { Z = 0, X = 0, Y = 0 }, TileAncestry.Parent(new TileId { Z = 0, X = 0, Y = 0 }), "the world tile is its own parent");
 
+            // IsStrictAncestor agrees with the walk-up oracle over every pair in a four-level grid: never true of a tile and itself or a sibling, true across three levels.
+            var grid = new List<TileId>();
+            for (int z = 0; z <= 3; z++)
+                for (int x = 0; x < 1 << z; x++)
+                    for (int y = 0; y < 1 << z; y++) grid.Add(new TileId { Z = z, X = x, Y = y });
+            foreach (TileId a in grid)
+                foreach (TileId b in grid)
+                    Assert.AreEqual(IsBelow(a, b), TileAncestry.IsStrictAncestor(a, b), $"IsStrictAncestor({a}, {b})");
+
             // A heading change alone keeps the history: the hysteresis still holds the crossing the new heading sees.
             FrustumTileSelector turned = PanSelector(0.05, 0.05);
             List<TileId> seen = PanSelect(turned, after);

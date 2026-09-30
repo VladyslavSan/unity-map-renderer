@@ -50,6 +50,12 @@ namespace MapRenderer.App
         [Tooltip("Records prepared ahead of the level switch: loaded and registered hidden, not counted above.")]
         public int PreparingTileCount;
 
+        [Tooltip("Records of tiles that left the cover but stay shown until ready tiles cover their area.")]
+        public int HeldTileCount;
+
+        [Tooltip("Hidden records between a held tile and a cover tile, kept for the swap.")]
+        public int BridgeTileCount;
+
         [Tooltip("Backend show/hide batches the last update issued (at most one each).")]
         public int VisibilityBatchesLastTick;
 
@@ -195,6 +201,8 @@ namespace MapRenderer.App
             PendingTileCount       = snap.PendingTileCount;
             ConsumeBacklog         = snap.ConsumeBacklog;
             PreparingTileCount     = snap.PreparingTileCount;
+            HeldTileCount          = snap.HeldTileCount;
+            BridgeTileCount        = snap.BridgeTileCount;
             VisibilityBatchesLastTick = snap.VisibilityBatchesLastTick;
             PrologueInFlight       = snap.PrologueInFlight;
             GraphMeasureInFlight   = snap.GraphMeasureInFlight;

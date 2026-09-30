@@ -645,7 +645,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
             EnsureSelector();
             using (PmManagerUpdate.Auto())
-                TileManager.Update(cameraProperties, BuildTileSelectionConfig());
+                TileManager.Update(cameraProperties, BuildTileSelectionConfig(), NowSeconds);
 
             // Pull the sprite sheet, which the symbol subsystem owns and fetches, into the fill-pattern layers each
             // frame. SetSprites early-outs on an unchanged pair.
@@ -806,6 +806,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 ZoomLevelPreload          = _config.TileSelection.ZoomLevelPreload,
                 MaxConcurrentPrepareLoads = _config.TileSelection.MaxConcurrentPrepareLoads,
                 ZoomLevelHysteresis       = _config.TileSelection.ZoomLevelHysteresis,
+                FetchRetrySeconds         = _config.TileSelection.FetchRetrySeconds,
             };
 
         /// <summary>

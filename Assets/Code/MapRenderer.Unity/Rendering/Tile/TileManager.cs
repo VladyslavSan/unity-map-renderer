@@ -104,14 +104,21 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             /// <summary>The selector's zoom-level hysteresis. A finished prepared tile stays loaded this far past the preload edge.</summary>
             public double ZoomLevelHysteresis;
+
+            /// <summary>Seconds a record waits after a network fault before its fetch starts again. Decode errors and absent tiles never retry.</summary>
+            public double FetchRetrySeconds;
         }
 
-        /// <summary>Why a record is loaded. A tile in the cover is <see cref="Display"/>; a tile prepared ahead of the level
-        /// switch is <see cref="Prepare"/>: registered hidden and reported to no subsystem. A record with neither is released.</summary>
+        /// <summary>Why a record is loaded, with precedence Display, Hold, Bridge, Prepare. A tile in the cover is
+        /// <see cref="Display"/>. A shown tile that left the cover but still has a relative in it is <see cref="Hold"/>.
+        /// A hidden tile between a Hold and a cover tile is <see cref="Bridge"/>. A tile prepared ahead of the level switch
+        /// is <see cref="Prepare"/>: registered hidden and reported to no subsystem. A record with none is released.</summary>
         private enum TileRole
         {
             Display = 0,
             Prepare,
+            Hold,
+            Bridge,
         }
 
         // ── Mesh build payload ──────────────────────────────────────────────────────────────
@@ -170,6 +177,12 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             /// <summary>Why the record is loaded. The default is <see cref="TileRole.Display"/>; only a prepared-ahead admission differs.</summary>
             public TileRole Role;
+
+            /// <summary>True from a network fault until the retry starts. The record is not Built, is skipped by the pump, and is not ready.</summary>
+            public bool WaitingRetry;
+
+            /// <summary>The <see cref="Update"/> clock reading at which a <see cref="WaitingRetry"/> record fetches again.</summary>
+            public double RetryAtSeconds;
         }
 
         /// <summary>Composite key for the multi-source loaded table — value-type + <see cref="System.IEquatable{T}"/> avoids boxing on every Dictionary probe.</summary>
@@ -384,6 +397,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly List<LoadedKey>    _prepareDesired    = new(64);
         private readonly HashSet<LoadedKey> _prepareDesiredSet = new(64);
 
+        /// <summary>The cover's own tiles. The swap asks area questions of these, apart from <see cref="_servedKeys"/>, which asks which records serve them.</summary>
+        private readonly HashSet<TileId> _coverSet = new();
+
         /// <summary>The record keys that serve a cover tile, one per (serving tile, slot). Several cover tiles can share
         /// one key when a source serves them from its maxzoom ancestor. Rebuilt with each cover recompute.</summary>
         private readonly HashSet<LoadedKey> _servedKeys = new();
@@ -399,6 +415,34 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>True while an in-flight prepared record outlives its sets, so the next Update checks again once it finishes.</summary>
         private bool _rolePassPending;
+
+        /// <summary>The strict ancestors of every cover tile, rebuilt with each cover recompute: the test for "has a descendant in the cover".</summary>
+        private readonly HashSet<TileId> _coverAncestors = new();
+
+        /// <summary>The records currently shown, each with all bits set. A record is shown when its items are visible, or are about to be at the next flush.</summary>
+        private readonly Dictionary<LoadedKey, ulong> _revealed = new();
+
+        /// <summary>Shown records that were shown only to serve a cover tile from above (an overzoomed source's maxzoom tile). Such a record
+        /// is not a shown relative of the tiles it serves: it is left out of <see cref="_shownRecords"/> and <see cref="_shownBelow"/>.</summary>
+        private readonly HashSet<LoadedKey> _shownAsServing = new();
+
+        /// <summary>For each tile, how many of its records are shown as that tile. A tile is shown while the count is above zero.</summary>
+        private readonly Dictionary<TileId, int> _shownRecords = new();
+
+        /// <summary>For each tile, how many shown tiles lie strictly below it: the test for "has a shown descendant".</summary>
+        private readonly Dictionary<TileId, int> _shownBelow = new();
+
+        /// <summary>Scratch for <see cref="SwapStep"/>, <see cref="ServiceRetries"/> and <see cref="RecomputeRoles"/>; reused.</summary>
+        private readonly List<TileId>    _swapTiles     = new(32);
+        private readonly List<TileId>    _swapCovering  = new(32);
+        private readonly List<LoadedKey> _retryScratch  = new(8);
+
+        /// <summary>The clock and retry cooldown of the current <see cref="Update"/>; the drain reads the last values.</summary>
+        private double _nowSeconds;
+        private double _fetchRetrySeconds;
+
+        /// <summary>The retry cooldown used when the config gives none: a zero would refetch a failed tile every Update.</summary>
+        private const double DefaultFetchRetrySeconds = 10.0;
 
         /// <summary>Sorts <see cref="_desired"/> and <see cref="_toRelease"/> by priority key.</summary>
         private readonly TilePrioritySorter _sorter = new();
@@ -424,6 +468,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private int   _showBatchCount;
         private int[] _hideBatch = new int[32];
         private int   _hideBatchCount;
+        private readonly HashSet<int> _hiddenNow = new(64);
 
         // Parallel to the two above — each newly-built mesh's global material index, for the cache transfer.
         private readonly List<int> _consumeMatIndices = new(8);
@@ -537,6 +582,10 @@ namespace MapRenderer.Unity.Rendering.Tile
             _desired.Clear();
             _desiredSet.Clear();
             ClearPreloadState();
+            _revealed.Clear(); // every record is gone, and the backend is rebuilt below
+            _shownAsServing.Clear();
+            _shownRecords.Clear();
+            _shownBelow.Clear();
 
             // No purge here: CurrentStyle is a content-derived token (see its own doc), so a changed style
             // already partitions to a different token and an unchanged one is safe to keep and reuse.
@@ -589,8 +638,11 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             foreach (var (oldKey, lt, newSlot) in reKeyed)
             {
+                var newKey = new LoadedKey(oldKey.Tile, newSlot);
                 _loaded.Remove(oldKey);
-                _loaded[new LoadedKey(oldKey.Tile, newSlot)] = lt;
+                _loaded[newKey] = lt;
+                if (_revealed.Remove(oldKey, out ulong mask)) _revealed[newKey] = mask;
+                if (_shownAsServing.Remove(oldKey)) _shownAsServing.Add(newKey);
             }
 
             // Deferred-release/desired bookkeeping is per-tick derived state, invalid against the just-
@@ -707,32 +759,39 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// will admit, or <see cref="TileId"/>'s default if the list is empty.</summary>
         internal TileId DesiredHeadTile => _desired.Count > 0 ? _desired[0].Tile : default;
 
-        /// <summary>Fills <paramref name="into"/> with the (source, tile) membership of the records in the cover. A record
-        /// prepared ahead is left out, so the symbol subsystem neither draws nor releases it. Allocation-free.</summary>
+        /// <summary>Fills <paramref name="into"/> with the (source, tile) membership of the records in the cover and of the tiles held
+        /// for them. A record prepared ahead or waiting as a Bridge is left out, so the symbol subsystem neither draws nor releases it.
+        /// Allocation-free.</summary>
         internal void CollectLoadedTileKeys(List<LoadedTileKey> into)
         {
             into.Clear();
             foreach (var kv in _loaded)
             {
-                if (kv.Value.Role != TileRole.Display) continue;
+                if (kv.Value.Role != TileRole.Display && kv.Value.Role != TileRole.Hold) continue;
+                if (IsCondemned(kv.Key, kv.Value)) continue; // a swapped-out tile's labels end with its tile, not with its release
                 into.Add(new LoadedTileKey(_sources.SourceIdOf(kv.Key.Slot), kv.Key.Tile));
             }
         }
 
-        /// <summary>The tile of each <see cref="TileRole.Display"/> record, as a <see cref="TileId"/> (may repeat across sources).</summary>
+        /// <summary>The tile of each record that serves a cover tile, as a <see cref="TileId"/> (may repeat across sources). A record that
+        /// a swap took out of the cover keeps its old role until its release drains, so the role is not the test.</summary>
         internal void CollectLoadedTileIds(List<TileId> into)
         {
             into.Clear();
             foreach (var kv in _loaded)
-                if (kv.Value.Role == TileRole.Display) into.Add(kv.Key.Tile);
+                if (_servedKeys.Contains(kv.Key)) into.Add(kv.Key.Tile);
         }
+
+        /// <summary>True iff the record waits in the release queue with no role. A swapped-out record keeps its old stored role until its
+        /// release drains, and one that regained a role (a swing-back) is not condemned although it is still queued.</summary>
+        private bool IsCondemned(LoadedKey key, in LoadedTile lt) => _releaseQueued.Contains(key) && !TryResolveRole(in key, in lt, out _);
 
         /// <summary>Records in <see cref="_loaded"/> with <paramref name="role"/>, recomputed fresh each call.</summary>
         private int CountByRole(TileRole role)
         {
             int n = 0;
             foreach (var kv in _loaded)
-                if (kv.Value.Role == role) n++;
+                if (kv.Value.Role == role && !IsCondemned(kv.Key, kv.Value)) n++;
             return n;
         }
 
@@ -796,11 +855,16 @@ namespace MapRenderer.Unity.Rendering.Tile
             int graphWrite = 0;
             int display = 0;
             int preparing = 0;
+            int held = 0;
+            int bridged = 0;
             foreach (var kv in _loaded)
             {
                 LoadedTile lt = kv.Value;
                 if (lt.Role == TileRole.Prepare) { preparing++; continue; }
-                display++;
+                bool condemned = IsCondemned(kv.Key, lt);
+                if (lt.Role == TileRole.Hold) { if (!condemned) held++; }
+                else if (lt.Role == TileRole.Bridge) { if (!condemned) bridged++; }
+                else if (!condemned) display++;
                 if (lt.Built) continue;
                 pending++;
                 if (lt.Step == BuildStep.Write && lt.Graph.IsStepComplete)
@@ -822,6 +886,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 FractionalZoom         = _coverGate.LastZoom,
                 LoadedTileCount        = display,
                 PreparingTileCount     = preparing,
+                HeldTileCount          = held,
+                BridgeTileCount        = bridged,
                 VisibilityBatchesLastTick = VisibilityBatchesLastTick,
                 PendingTileCount       = pending,
                 ConsumeBacklog         = backlog,
@@ -955,17 +1021,20 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>One frame of the tile loop — a thin shell over <see cref="UpdateCore"/> so telemetry
         /// refreshes after every return from it, the <c>Selector == null</c> early return included (a
         /// dirty-frame-only update would freeze when the map goes still). A throw from <see cref="UpdateCore"/> skips the refresh.</summary>
-        public void Update(CameraProperties cam, TileSelectionConfig cfg)
+        /// <param name="nowSeconds">The clock retries are timed against.</param>
+        public void Update(CameraProperties cam, TileSelectionConfig cfg, double nowSeconds)
         {
-            UpdateCore(cam, cfg);
+            UpdateCore(cam, cfg, nowSeconds);
             _telemetry = CaptureTelemetry();
         }
 
-        private void UpdateCore(CameraProperties cam, TileSelectionConfig cfg)
+        private void UpdateCore(CameraProperties cam, TileSelectionConfig cfg, double nowSeconds)
         {
             if (Selector == null) return;
 
             ResetPerTickCounters();
+            _nowSeconds        = nowSeconds;
+            _fetchRetrySeconds = cfg.FetchRetrySeconds > 0.0 ? cfg.FetchRetrySeconds : DefaultFetchRetrySeconds;
 
             // Defensive backstop, not the normal path — cfg.Projection is always non-null here in production.
             _projection = cfg.Projection ?? new WebMercatorProjection(); // cached for the mesh build bake
@@ -1007,6 +1076,17 @@ namespace MapRenderer.Unity.Rendering.Tile
                 Selector.SelectVisibleTiles(in view, _cover);
 
                 _servedKeys.Clear();
+                _coverSet.Clear();
+                _coverAncestors.Clear();
+                for (int i = 0; i < _cover.Count; i++)
+                {
+                    _coverSet.Add(_cover[i]);
+                    for (TileId up = _cover[i]; up.Z > 0;)
+                    {
+                        up = TileAncestry.Parent(up);
+                        if (!_coverAncestors.Add(up)) break; // its own ancestors are already in
+                    }
+                }
 
                 // Merge, not rebuild — newly-covered keys join the desired list; admission below is priority-ordered and capped.
                 // Cover tiles a source serves from one maxzoom ancestor share a key, so the merge queues it once.
@@ -1055,6 +1135,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (_rebakePending) MarkStaleRecords(cfg.MaxConcurrentTileLoads, cfg.MaxConcurrentPrepareLoads, in priorityCtx);
             PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick, in priorityCtx);
 
+            ServiceRetries();
+            SwapStep();
+
             // Drain a budgeted slice of the deferred-release backlog EVERY Update, after admission/pump.
             DrainReleaseQueue(cfg.MaxReleasesPerTick);
 
@@ -1091,7 +1174,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             var unsettled = new List<LoadedKey>(8);
             foreach (var kv in _loaded)
             {
-                if (!kv.Value.Built)
+                if (!kv.Value.Built && !kv.Value.WaitingRetry)
                     unsettled.Add(kv.Key);
             }
 
@@ -1111,16 +1194,21 @@ namespace MapRenderer.Unity.Rendering.Tile
                     lt.FetchCompleted = true;
 
                     // Observe the fetch outcome exactly once so a faulted fetch is never dropped unobserved.
-                    SharedDisposable<IDecodedTile> handle = TakeDecodeFromFetch(req);
-                    if (handle != null)
+                    FetchOutcome outcome = TakeDecodeFromFetch(req);
+                    if (outcome.Decode != null)
                     {
                         // STORE it, not a bare local — a throw inside the kick must leave `_loaded[key]` recoverable, not lost.
-                        lt.Decode = handle;
+                        lt.Decode = outcome.Decode;
                     }
                     else
                     {
-                        // Absent/failed/cancelled fetch — nothing to build.
-                        lt.Built     = true;
+                        // Absent/undecodable/cancelled: nothing to build. A network fault waits for its retry instead.
+                        if (outcome.NetworkFault)
+                        {
+                            lt.WaitingRetry   = true;
+                            lt.RetryAtSeconds = _nowSeconds + _fetchRetrySeconds;
+                        }
+                        else lt.Built = true;
                         _loaded[key] = lt;
                         continue;
                     }
@@ -1181,7 +1269,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     // CompleteWriteAndTakePayloads is idempotent — a partially-consumed tile gets the same array back with nulled slots.
                     MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
                     // lt.Graph is NOT disposed here, FinishConsume is the single disposal site — drain ignores per-frame caps.
-                    ConsumeMeshBuild(id, ref lt, payloads, int.MaxValue, int.MaxValue, out _, out _);
+                    ConsumeMeshBuild(key, ref lt, payloads, int.MaxValue, int.MaxValue, out _, out _);
                 }
                 else if (lt.Step == BuildStep.None && !lt.Built)
                 {
@@ -1191,6 +1279,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _loaded[key] = lt;
             }
 
+            ServiceRetries();
+            SwapStep();
             FlushVisibility();
         }
 
@@ -1258,7 +1348,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _toRelease.Clear();
             foreach (var kv in _loaded)
             {
-                if (!kv.Value.Built)
+                if (!kv.Value.Built && !kv.Value.WaitingRetry)
                     _toRelease.Add(kv.Key);
             }
 
@@ -1320,7 +1410,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
 
                     bool complete = ConsumeMeshBuild(
-                        id, ref lt, payloads, meshBudgetLeft, vertBudgetLeft,
+                        key, ref lt, payloads, meshBudgetLeft, vertBudgetLeft,
                         out int meshesThisCall, out int vertsThisCall);
 
                     meshesConsumed           += meshesThisCall;
@@ -1432,16 +1522,21 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 // Observe the fetch outcome exactly once, so a faulted fetch is never left unobserved.
                 lt.FetchCompleted = true;
-                SharedDisposable<IDecodedTile> handle = TakeDecodeFromFetch(lt.Request);
-                if (handle != null)
+                FetchOutcome outcome = TakeDecodeFromFetch(lt.Request);
+                if (outcome.Decode != null)
                 {
                     // Retain the handle once per fetch — the fork point where one (source, tile) splits into the mesh and symbol cadences.
-                    lt.Decode = handle;
+                    lt.Decode = outcome.Decode;
                     pending++; // decode awaiting kick
+                }
+                else if (outcome.NetworkFault)
+                {
+                    lt.WaitingRetry   = true; // not Built, so not ready: the hold stays until a retry succeeds
+                    lt.RetryAtSeconds = _nowSeconds + _fetchRetrySeconds;
                 }
                 else
                 {
-                    // Absent / failed / cancelled — mark built (nothing to render).
+                    // Absent / undecodable / cancelled — mark built (nothing to render).
                     lt.Built = true;
                 }
 
@@ -1578,9 +1673,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Resumable per-mesh consume: uploads and registers layers from <see cref="LoadedTile.ConsumeCursor"/>
         /// until a budget binds or the tile finishes. Returns true when fully consumed, false to resume next Update.</summary>
         private bool ConsumeMeshBuild(
-            TileId id, ref LoadedTile lt, MeshDataPayload[] payloads, int meshBudget, int vertBudget,
+            LoadedKey key, ref LoadedTile lt, MeshDataPayload[] payloads, int meshBudget, int vertBudget,
             out int meshesConsumed, out int vertsConsumed)
         {
+            TileId id = key.Tile;
             meshesConsumed = 0;
             vertsConsumed  = 0;
 
@@ -1643,7 +1739,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
-            if (lt.Role == TileRole.Display) QueueShow(_consumeHandles); // only this call's handles: earlier calls already queued theirs; a prepared tile stays hidden
+            // Only this call's handles: earlier calls already queued theirs. A record follows its tile: it shows when the tile is shown, and a
+            // tile's first reveal belongs to the swap step.
+            if (_consumeHandles.Count > 0 && FollowsShownTile(key, in lt)) QueueShow(_consumeHandles);
 
             bool complete = cursor >= denseCount;
             if (complete)
@@ -1749,6 +1847,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
 
             RenderTeardownRecord(ref lt);
+            MarkHidden(key); // a torn-down record takes its shown mark with it
         }
 
         /// <summary>Transfers a Built record's meshes into <see cref="_prepared"/>, keyed per layer under
@@ -1783,17 +1882,18 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Records in the cover not yet <see cref="LoadedTile.Built"/>, recomputed fresh each call rather than
         /// tracked incrementally — a cached counter would need write-back on every mutation site.</summary>
-        private int CountActiveLoads() => CountInFlight(TileRole.Display);
+        private int CountActiveLoads() => CountInFlight(prepared: false);
 
         /// <summary>Prepared-ahead records not yet built: what <see cref="TileSelectionConfig.MaxConcurrentPrepareLoads"/> bounds.</summary>
-        private int CountPrepareLoads() => CountInFlight(TileRole.Prepare);
+        private int CountPrepareLoads() => CountInFlight(prepared: true);
 
-        /// <summary>Records with <paramref name="role"/> that are not yet <see cref="LoadedTile.Built"/>.</summary>
-        private int CountInFlight(TileRole role)
+        /// <summary>In-flight records that are (<paramref name="prepared"/>) or are not prepared ahead. A Bridge counts with the cover;
+        /// a record waiting to retry counts in neither, so a dead source cannot hold every slot.</summary>
+        private int CountInFlight(bool prepared)
         {
             int n = 0;
             foreach (var kv in _loaded)
-                if (!kv.Value.Built && kv.Value.Role == role) n++;
+                if (!kv.Value.Built && !kv.Value.WaitingRetry && (kv.Value.Role == TileRole.Prepare) == prepared) n++;
             return n;
         }
 
@@ -1842,7 +1942,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (allCached)
             {
                 _prepared.Hits++;
-                _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIds, role);
+                LoadedTile restored = BuildTileFromCache(id, origin, _denseLayerIds, role);
+                _loaded[key] = restored;
+                ShowRecord(key, in restored);
                 // A cache HIT re-shows the tile with NO fetch; the symbol subsystem PULLS it back in.
             }
             else
@@ -1995,20 +2097,27 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>True iff the record has a reason to stay loaded, and which: a tile in the cover is shown, a tile in P is
+        /// <summary>True iff the record has a reason to stay loaded, and which. A tile in the cover is shown (Display). A shown tile
+        /// that left it keeps a relative in it as a Hold. A hidden tile between a Hold and a cover tile is a Bridge. A tile in P is
         /// prepared, and a prepared record stays while it is unfinished or inside K. An in-flight prepared record is never
         /// cancelled for leaving P.</summary>
         private bool TryResolveRole(in LoadedKey key, in LoadedTile lt, out TileRole role)
         {
+            TileId tile = key.Tile;
             if (_servedKeys.Contains(key)) { role = TileRole.Display; return true; }
+
+            bool shown = _revealed.ContainsKey(key);
+            if (shown && HasRelativeInCover(tile)) { role = TileRole.Hold; return true; }
+            if (!shown && IsBetweenHoldAndCover(tile)) { role = TileRole.Bridge; return true; }
+
             role = TileRole.Prepare;
             if (_preloadSet.Contains(key)) return true;
-            return lt.Role == TileRole.Prepare && (!lt.Built || _keepSet.Contains(key));
+            return lt.Role == TileRole.Prepare && ((!lt.Built && !lt.WaitingRetry) || _keepSet.Contains(key));
         }
 
-        /// <summary>Gives every record its role: a record that entered the cover is shown, one that left it for P is hidden,
-        /// and one with no role joins the deferred-release queue. Runs on each cover recompute, and again while a prepared
-        /// record outlives its sets.</summary>
+        /// <summary>Gives every record its role: a record that entered the cover is shown, and one with no role joins the
+        /// deferred-release queue. Showing and hiding belong to <see cref="SwapStep"/>. Runs on each cover recompute and after
+        /// each swap, and again while a prepared record outlives its sets.</summary>
         private void RecomputeRoles()
         {
             _roleChanges.Clear();
@@ -2019,7 +2128,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt = kv.Value;
                 if (!TryResolveRole(kv.Key, in lt, out TileRole role)) _toRelease.Add(kv.Key);
                 else if (role != lt.Role) _roleChanges.Add(kv.Key);
-                else if (role == TileRole.Prepare && !lt.Built && !_preloadSet.Contains(kv.Key) && !_keepSet.Contains(kv.Key))
+                else if (role == TileRole.Prepare && !lt.Built && !lt.WaitingRetry && !_preloadSet.Contains(kv.Key) && !_keepSet.Contains(kv.Key))
                     _rolePassPending = true;
             }
 
@@ -2029,8 +2138,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt  = _loaded[key];
                 TryResolveRole(in key, in lt, out TileRole role);
                 lt.Role = role;
-                if (role == TileRole.Display) ShowRecord(in lt);
-                else HideRecord(in lt);
+                if (role == TileRole.Display) ShowRecord(key, in lt);
                 _loaded[key] = lt;
             }
 
@@ -2087,16 +2195,29 @@ namespace MapRenderer.Unity.Rendering.Tile
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
-            if (role == TileRole.Display) ShowRecord(in lt); // a prepared tile stays hidden until it enters the cover
             return lt;
         }
 
-        /// <summary>The one path by which a record's items become visible: queues its current and, while it rebakes,
-        /// previous draw handles for the next <see cref="FlushVisibility"/>. Showing a shown item changes nothing.</summary>
-        private void ShowRecord(in LoadedTile lt)
+        /// <summary>The one path by which a record catches up with a tile that is shown: queues its current and, while it rebakes,
+        /// previous draw handles for the next <see cref="FlushVisibility"/>. A record of a tile that is not shown stays hidden, because a
+        /// tile's first reveal belongs to <see cref="SwapStep"/>, which checks the tiles around it. Showing a shown item changes nothing.</summary>
+        private void ShowRecord(LoadedKey key, in LoadedTile lt)
         {
+            if (!FollowsShownTile(key, in lt)) return;
             QueueShow(lt.DrawHandles);
             QueueShow(lt.OldDrawHandles);
+        }
+
+        /// <summary>True iff <paramref name="key"/>'s record shows now: it is shown already, or its tile is shown and the record has a role.
+        /// A record that joins a shown tile is marked shown.</summary>
+        private bool FollowsShownTile(LoadedKey key, in LoadedTile lt)
+        {
+            if (_revealed.ContainsKey(key)) return true;
+            bool servingFromAbove = _servedKeys.Contains(key) && !_coverSet.Contains(key.Tile);
+            bool tileShown = IsShown(key.Tile) || (servingFromAbove && _shownBelow.ContainsKey(key.Tile));
+            if (!tileShown || !TryResolveRole(in key, in lt, out _)) return false;
+            MarkShown(key, asOwnTile: !servingFromAbove);
+            return true;
         }
 
         /// <summary>Queues a record's current and, while it rebakes, previous draw handles to hide at the next flush.</summary>
@@ -2104,6 +2225,297 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             QueueHide(lt.DrawHandles);
             QueueHide(lt.OldDrawHandles);
+        }
+
+        // ── Hold and swap: a tile that left the cover stays shown until ready tiles cover its area ──
+        // See docs/tile-pipeline-design.md "Hold and swap".
+
+        private bool IsShown(TileId tile) => _shownRecords.ContainsKey(tile);
+
+        /// <summary>Marks a record shown. <paramref name="asOwnTile"/> is false when the record is shown only to serve a cover tile from above
+        /// it; it then counts as no shown tile until a swap shows it as its own tile.</summary>
+        private void MarkShown(LoadedKey key, bool asOwnTile)
+        {
+            if (_revealed.TryAdd(key, ulong.MaxValue))
+            {
+                if (asOwnTile) CountShown(key.Tile, +1);
+                else _shownAsServing.Add(key);
+            }
+            else if (asOwnTile && _shownAsServing.Remove(key)) CountShown(key.Tile, +1);
+        }
+
+        /// <summary>Marks a record not shown. A record that is not shown is left as it is.</summary>
+        private void MarkHidden(LoadedKey key)
+        {
+            if (!_revealed.Remove(key)) return;
+            if (!_shownAsServing.Remove(key)) CountShown(key.Tile, -1);
+        }
+
+        private void CountShown(TileId tile, int delta)
+        {
+            _shownRecords.TryGetValue(tile, out int records);
+            records += delta;
+            bool first = delta > 0 && records == 1;
+            bool last  = delta < 0 && records == 0;
+            if (records > 0) _shownRecords[tile] = records; else _shownRecords.Remove(tile);
+            if (!first && !last) return;
+
+            for (TileId up = tile; up.Z > 0;)
+            {
+                up = TileAncestry.Parent(up);
+                _shownBelow.TryGetValue(up, out int n);
+                n += first ? 1 : -1;
+                if (n > 0) _shownBelow[up] = n; else _shownBelow.Remove(up);
+            }
+        }
+
+        /// <summary>True iff a strict ancestor or descendant of <paramref name="tile"/> is in the cover.</summary>
+        private bool HasRelativeInCover(TileId tile)
+        {
+            if (_coverAncestors.Contains(tile)) return true;
+            for (TileId up = tile; up.Z > 0;)
+            {
+                up = TileAncestry.Parent(up);
+                if (_coverSet.Contains(up)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>True iff a strict ancestor or descendant of <paramref name="tile"/> is shown.</summary>
+        private bool HasShownRelative(TileId tile)
+        {
+            if (_shownBelow.ContainsKey(tile)) return true;
+            return HasShownAncestor(tile);
+        }
+
+        private bool HasShownAncestor(TileId tile)
+        {
+            for (TileId up = tile; up.Z > 0;)
+            {
+                up = TileAncestry.Parent(up);
+                if (IsShown(up)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>True iff <paramref name="tile"/> lies strictly between a shown tile and a cover tile, on one ancestry chain, in either direction.</summary>
+        private bool IsBetweenHoldAndCover(TileId tile)
+        {
+            if (_coverAncestors.Contains(tile)) return HasShownAncestor(tile);
+            return _shownBelow.ContainsKey(tile) && HasAncestorInCover(tile);
+        }
+
+        private bool HasAncestorInCover(TileId tile)
+        {
+            for (TileId up = tile; up.Z > 0;)
+            {
+                up = TileAncestry.Parent(up);
+                if (_coverSet.Contains(up)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>True iff every record of <paramref name="tile"/> is shown. A record shown only to serve a cover tile from above counts as
+        /// shown here, so the tile's other records decide.</summary>
+        private bool AllRecordsShown(TileId tile)
+        {
+            bool any = false;
+            for (int slot = 0; slot < _sources.Count; slot++)
+            {
+                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
+                if (!_loaded.ContainsKey(key)) continue;
+                if (!_revealed.ContainsKey(key)) return false;
+                any = true;
+            }
+
+            return any;
+        }
+
+        /// <summary>True iff some source has a record for <paramref name="tile"/>.</summary>
+        private bool HasRecord(TileId tile)
+        {
+            for (int slot = 0; slot < _sources.Count; slot++)
+                if (_loaded.ContainsKey(new LoadedKey(_sources.ServingTile(slot, tile), slot))) return true;
+            return false;
+        }
+
+        /// <summary>True iff every source that serves <paramref name="tile"/> has its record built, or rebuilding with its previous geometry
+        /// still registered, and not waiting to retry, the background included. A missing record is not ready; a source that does not
+        /// serve the tile counts for nothing. An absent or undecodable tile is built, so it is ready and empty.</summary>
+        private bool IsReady(TileId tile)
+        {
+            for (int slot = 0; slot < _sources.Count; slot++)
+            {
+                if (!_sources.AdmitsTile(slot, tile)) continue;
+                if (!_loaded.TryGetValue(new LoadedKey(_sources.ServingTile(slot, tile), slot), out LoadedTile lt)) return false;
+                if (!(lt.Built || (lt.Rebaking && lt.OldDrawHandles != null)) || lt.WaitingRetry) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Shows every item of <paramref name="tile"/>'s records: the swap knows its area is covered, or that nothing shown is near it.</summary>
+        private void RevealTile(TileId tile)
+        {
+            for (int slot = 0; slot < _sources.Count; slot++)
+            {
+                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
+                if (!_loaded.TryGetValue(key, out LoadedTile lt)) continue;
+                MarkShown(key, asOwnTile: key.Tile.Equals(tile));
+                QueueShow(lt.DrawHandles);
+                QueueShow(lt.OldDrawHandles);
+            }
+        }
+
+        /// <summary>Hides every item of <paramref name="tile"/>'s records. The records stay loaded until their release drains.</summary>
+        private void ConcealTile(TileId tile)
+        {
+            for (int slot = 0; slot < _sources.Count; slot++)
+            {
+                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
+                if (_servedKeys.Contains(key) || !_loaded.TryGetValue(key, out LoadedTile lt)) continue; // a record that serves the cover is never outgoing
+                HideRecord(in lt);
+                MarkHidden(key);
+            }
+        }
+
+        /// <summary>Runs every Update after the pump, and at the end of the drain. It hides a shown tile whose area left the view,
+        /// replaces a shown tile by the ready tiles that cover it, shows a ready ancestor over shown descendants, and shows a cover
+        /// tile that has no shown relative. Its shows and hides reach the backend in the one <see cref="FlushVisibility"/>.</summary>
+        private void SwapStep()
+        {
+            if (_instanced == null) return;
+            bool changed = false;
+
+            // 1. A shown tile with no relative in the cover: its area left the view.
+            _swapTiles.Clear();
+            foreach (var kv in _shownRecords) _swapTiles.Add(kv.Key);
+            for (int i = 0; i < _swapTiles.Count; i++)
+            {
+                TileId tile = _swapTiles[i];
+                if (_coverSet.Contains(tile) || HasRelativeInCover(tile)) continue;
+                ConcealTile(tile);
+                changed = true;
+            }
+
+            // 2. Zoom out: a ready ancestor in the cover, or a hidden Bridge below it, shows whole and hides the tiles under it.
+            _swapTiles.Clear();
+            foreach (var kv in _shownRecords) if (!_coverSet.Contains(kv.Key)) _swapTiles.Add(kv.Key);
+            for (int i = 0; i < _swapTiles.Count; i++)
+            {
+                TileId shown = _swapTiles[i];
+                if (!IsShown(shown) || !TryFindCoveringAncestor(shown, out TileId ancestor)) continue;
+                RevealTile(ancestor);
+                for (int j = 0; j < _swapTiles.Count; j++)
+                    if (IsShown(_swapTiles[j]) && TileAncestry.IsStrictAncestor(ancestor, _swapTiles[j])) ConcealTile(_swapTiles[j]);
+                changed = true;
+            }
+
+            // 3. Zoom in: a shown tile whose every cover area is covered by ready tiles gives way to them.
+            _swapTiles.Clear();
+            foreach (var kv in _shownRecords) if (_coverAncestors.Contains(kv.Key)) _swapTiles.Add(kv.Key);
+            for (int i = 0; i < _swapTiles.Count; i++)
+            {
+                TileId shown = _swapTiles[i];
+                if (!IsShown(shown)) continue;
+                _swapCovering.Clear();
+                if (!ChildrenCovered(shown)) continue;
+                for (int j = 0; j < _swapCovering.Count; j++) RevealTile(_swapCovering[j]);
+                ConcealTile(shown);
+                changed = true;
+            }
+
+            // 4. A cover tile with no shown relative shows itself: a new area, a swing-back, or a record registered under a relative since hidden.
+            for (int i = 0; i < _cover.Count; i++)
+            {
+                TileId tile = _cover[i];
+                if (IsShown(tile) || HasShownRelative(tile) || !HasDrawHandles(tile)) continue;
+                RevealTile(tile);
+                changed = true;
+            }
+
+            if (changed) RecomputeRoles();
+        }
+
+        /// <summary>The shallowest ancestor of <paramref name="shown"/> that has a record, is not fully shown, and is ready, looking up to the
+        /// cover tile above it. Between them it takes any loaded tile, a Bridge or a prepared one. Fails when no ancestor is in the cover.</summary>
+        private bool TryFindCoveringAncestor(TileId shown, out TileId ancestor)
+        {
+            ancestor = default;
+            bool found = false;
+            for (TileId up = shown; up.Z > 0;)
+            {
+                up = TileAncestry.Parent(up);
+                bool inCover = _coverSet.Contains(up);
+                if ((inCover || HasRecord(up)) && !AllRecordsShown(up) && IsReady(up))
+                {
+                    ancestor = up;
+                    found    = true;
+                }
+
+                if (inCover) return found;
+            }
+
+            return false; // no ancestor in the cover: the tile is held for descendants, which step 3 handles
+        }
+
+        /// <summary>True iff each child area of <paramref name="tile"/> is covered, filling <see cref="_swapCovering"/> with the ready tiles that cover it.</summary>
+        private bool ChildrenCovered(TileId tile)
+        {
+            for (int child = 0; child < 4; child++)
+            {
+                var c = new TileId { Z = tile.Z + 1, X = tile.X * 2 + (child & 1), Y = tile.Y * 2 + (child >> 1) };
+                if (!AreaCovered(c)) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>An area is covered when it has no relative in the cover, or when its shallowest ready cover or Bridge tile exists, or when all four of its children are covered.</summary>
+        private bool AreaCovered(TileId tile)
+        {
+            bool inCover = _coverSet.Contains(tile);
+            bool above   = _coverAncestors.Contains(tile);
+            if (!inCover && !above) return true;
+            if ((inCover || HasRecord(tile)) && IsReady(tile))
+            {
+                _swapCovering.Add(tile);
+                return true;
+            }
+
+            return above && ChildrenCovered(tile);
+        }
+
+        private bool HasDrawHandles(TileId tile)
+        {
+            for (int slot = 0; slot < _sources.Count; slot++)
+                if (_loaded.TryGetValue(new LoadedKey(_sources.ServingTile(slot, tile), slot), out LoadedTile lt) && lt.DrawHandles != null) return true;
+            return false;
+        }
+
+        /// <summary>Starts the fetch again for every record whose network-fault cooldown has passed and that is not queued for release.
+        /// The general failure arm also catches a throw after the scheduler cached the bytes, so the retry releases the tile in its source
+        /// first: that evicts the cached bytes and makes the request a fresh fetch.</summary>
+        private void ServiceRetries()
+        {
+            _retryScratch.Clear();
+            foreach (var kv in _loaded)
+                if (kv.Value.WaitingRetry && _nowSeconds >= kv.Value.RetryAtSeconds && !_releaseQueued.Contains(kv.Key))
+                    _retryScratch.Add(kv.Key);
+
+            for (int i = 0; i < _retryScratch.Count; i++)
+            {
+                LoadedKey  key = _retryScratch[i];
+                LoadedTile lt  = _loaded[key];
+                _sources.ReleaseTile(key.Slot, key.Tile);
+                lt.Request        = _sources.SourceAt(key.Slot).GetTile(key.Tile).Preserve();
+                lt.FetchCompleted = false;
+                lt.WaitingRetry   = false;
+                _loaded[key]      = lt;
+            }
         }
 
         /// <summary>Queues <paramref name="handles"/> to hide at the next <see cref="FlushVisibility"/>.</summary>
@@ -2138,9 +2550,20 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Hides every queued item in ONE backend call, then shows every queued item in ONE more, so a tile with many
-        /// layers costs one batch each way. Runs at the end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
+        /// layers costs one batch each way. A handle queued both ways in one Update ends hidden, whatever the order: the batches are made
+        /// disjoint first. Runs at the end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
         private void FlushVisibility()
         {
+            if (_hideBatchCount > 0 && _showBatchCount > 0)
+            {
+                _hiddenNow.Clear();
+                for (int i = 0; i < _hideBatchCount; i++) _hiddenNow.Add(_hideBatch[i]);
+                int kept = 0;
+                for (int i = 0; i < _showBatchCount; i++)
+                    if (!_hiddenNow.Contains(_showBatch[i])) _showBatch[kept++] = _showBatch[i];
+                _showBatchCount = kept;
+            }
+
             if (_instanced != null)
             {
                 if (_hideBatchCount > 0)
@@ -2210,26 +2633,45 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Observes a completed fetch's outcome once and hands the decode handle to the caller, who
         /// now owns it (null on cancel/fault/absent) — the other consumption path is
         /// <see cref="PendingDisposalQueue"/>'s own discard, for a fetch nobody consumes.</summary>
-        private SharedDisposable<IDecodedTile> TakeDecodeFromFetch(UniTask<SharedDisposable<IDecodedTile>> req)
+        private FetchOutcome TakeDecodeFromFetch(UniTask<SharedDisposable<IDecodedTile>> req)
         {
             try
             {
-                return req.GetAwaiter().GetResult();
+                return new FetchOutcome(req.GetAwaiter().GetResult(), networkFault: false);
             }
             catch (System.OperationCanceledException)
             {
-                return null; // tile released mid-fetch — benign cancellation
+                return default; // tile released mid-fetch — benign cancellation
             }
             catch (Processing.TileDecodeException ex)
             {
                 // Before the general arm: a malformed tile faults the same task a 5xx does, so a shared counter would mislabel bad bytes as a fetch failure.
                 LogDecodeErrorThrottled(ex);
-                return null;
+                return default; // bad bytes: the same bytes fail again, so this is ready-empty and never retried
+            }
+            catch (System.NotSupportedException ex)
+            {
+                LogDecodeErrorThrottled(ex);
+                return default; // any NotSupportedException from a fetch (an unknown encoding, for one) is deterministic: ready-empty, never retried
             }
             catch (System.Exception ex)
             {
                 LogFetchErrorThrottled(ex);
-                return null;
+                return new FetchOutcome(null, networkFault: true);
+            }
+        }
+
+        /// <summary>What a completed fetch gave the record: a decode handle, or nothing. <see cref="NetworkFault"/> is true
+        /// only for a failure worth retrying; a cancelled, absent or undecodable tile has none and is ready-empty.</summary>
+        private readonly struct FetchOutcome
+        {
+            public readonly SharedDisposable<IDecodedTile> Decode;
+            public readonly bool                           NetworkFault;
+
+            public FetchOutcome(SharedDisposable<IDecodedTile> decode, bool networkFault)
+            {
+                Decode       = decode;
+                NetworkFault = networkFault;
             }
         }
 
@@ -2288,8 +2730,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (lt.Meshes == null && lt.Decode == null) continue;
 
                 anyOutstanding = true;
-                if ((lt.Role == TileRole.Prepare || _servedKeys.Contains(kv.Key)) && !_releaseQueued.Contains(kv.Key))
-                    _toRelease.Add(kv.Key);
+                if (!_releaseQueued.Contains(kv.Key)) _toRelease.Add(kv.Key);
             }
 
             _rebakePending = anyOutstanding;

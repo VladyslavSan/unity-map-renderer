@@ -74,6 +74,12 @@ namespace MapRenderer.Unity.View
         /// counted in <see cref="LoadedTileCount"/> or <see cref="PendingTileCount"/>.</summary>
         public int PreparingTileCount { get; init; }
 
+        /// <summary>Records of tiles that left the cover but stay shown until ready tiles cover their area.</summary>
+        public int HeldTileCount { get; init; }
+
+        /// <summary>Hidden records between a held tile and a cover tile, kept for the swap.</summary>
+        public int BridgeTileCount { get; init; }
+
         /// <summary><c>SetItemsVisible</c> calls the last Update issued: at most one to show and one to hide.</summary>
         public int VisibilityBatchesLastTick { get; init; }
 

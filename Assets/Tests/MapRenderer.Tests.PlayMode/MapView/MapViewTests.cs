@@ -835,6 +835,87 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
             }
         }
+
+        private const string BackgroundAndFillStyleJson = @"{
+            ""version"": 8,
+            ""name"": ""LevelBoundary"",
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#102030"" } },
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+            ]
+        }";
+
+        /// <summary>
+        /// The real selector, across a whole-level boundary (13.9 to 14.1): with the next level prepared ahead the switch starts no fetch and
+        /// swaps in one Update, and every Update keeps the view closed, nested-free and within one show and one hide call.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator ZoomAcrossALevelBoundary_SwitchesToPreparedTilesWithoutAFetchOrAHole()
+        {
+            var go   = Track(new GameObject("MapView_LevelBoundary"));
+            var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
+            view.WithTestCamera();
+            view.Config.Backend                              = RenderBackend.Entities;
+            view.Config.TileSelection.ZoomLevelPreload       = 0.3;
+            view.Config.TileSelection.MaxConcurrentPrepareLoads = 64;
+            view.Config.MaxConsumesPerTick                   = 256;
+            view.Config.MaxMeshBuildsPerTick                 = 256;
+            view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(0, 0, 13.9), style: TestStyle.Document(BackgroundAndFillStyleJson));
+            var watcher = new DrawnTileWatcher(view, backgroundSlot: 0, fillSlot: 1);
+            try
+            {
+                for (var settle = SettleTimeout.Start(); settle.Running;)
+                {
+                    view.LateUpdate();
+                    watcher.Check();
+                    if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) break;
+                    yield return null;
+                }
+
+                Assert.IsTrue(view.AllTilesSettled(), "the level and the tiles prepared ahead of it have loaded");
+                Assert.Greater(view.TileManager.Telemetry.PreparingTileCount, 0, "non-vacuous: the next level is already loaded, hidden");
+                watcher.AssertShowsExactlyTheCover();
+
+                int switchTicks = 0;
+                int levelBefore = view.TileManager.Telemetry.CoverMaxZoom;
+                for (int step = 1; step <= 16; step++)
+                {
+                    int missesBefore = view.TileManager.PreparedCacheMisses;
+                    view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 13.9 + 0.0125 * step });
+                    view.LateUpdate();
+                    watcher.Check();
+                    int level = view.TileManager.Telemetry.CoverMaxZoom;
+                    if (level != levelBefore)
+                    {
+                        switchTicks++;
+                        Assert.AreEqual(missesBefore, view.TileManager.PreparedCacheMisses, "the switch to prepared tiles starts no fetch");
+                        Assert.AreEqual(0, view.TileManager.Telemetry.HeldTileCount, "and swaps in the same Update");
+                        levelBefore = level;
+                    }
+
+                    yield return null;
+                }
+
+                Assert.AreEqual(1, switchTicks, "the selector switched level once inside the sweep");
+                for (var settle = SettleTimeout.Start(); settle.Running && !view.AllTilesSettled();)
+                {
+                    view.LateUpdate();
+                    watcher.Check();
+                    yield return null;
+                }
+
+                Assert.AreEqual(0, view.TileManager.Telemetry.HeldTileCount);
+                watcher.AssertShowsExactlyTheCover();
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────

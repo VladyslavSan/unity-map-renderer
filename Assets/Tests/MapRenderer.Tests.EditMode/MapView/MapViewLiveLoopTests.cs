@@ -13,6 +13,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity.Style;
 using Fill = MapRenderer.Unity.Style.Fill;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
@@ -193,6 +194,46 @@ namespace MapRenderer.Tests.MapViews
                 {
                     preloadView.Teardown();
                 }
+
+                // The source's ancestor is admitted and finishes AFTER a z15 background tile is shown (one load slot, camera on that tile): its
+                // fill shows once it registers, although it has no record marked shown yet.
+                var gate     = new UniTaskCompletionSource<bool>();
+                var gatedSrc = TestDataSource.FromFetch(async tile =>
+                {
+                    if (tile.Z == 14) await gate.Task;
+                    return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
+                });
+                MapView gatedView = NewView(-1.0);
+                gatedView.Config.MaxConcurrentTileLoads = 1;
+                try
+                {
+                    var nearest = new TileId { Z = 15, X = ancestor.X * 2 + 1, Y = ancestor.Y * 2 };
+                    double2 nearestCentre = nearest.ToLonLat(0.5, 0.5, 1.0);
+                    gatedView.LoadTestStyle(gatedSrc, Cam(nearestCentre.x, nearestCentre.y, 15.1), style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+                    for (var settle = SettleTimeout.Start(); settle.Running && EmittedFor(gatedView, 0) < 1;)
+                    {
+                        gatedView.LateUpdate();
+                        Thread.Sleep(1);
+                    }
+
+                    Assert.AreEqual(1, EmittedFor(gatedView, 0), "precondition: one z15 background tile is shown while the source's ancestor loads.");
+                    Assert.AreEqual(0, EmittedFor(gatedView, 1), "precondition: the source's ancestor has not registered.");
+                    gate.TrySetResult(true);
+                    for (var settle = SettleTimeout.Start(); settle.Running && !gatedView.TryGetBuiltTile(ancestor);)
+                    {
+                        gatedView.LateUpdate();
+                        Thread.Sleep(1);
+                    }
+
+                    Assert.IsTrue(gatedView.TryGetBuiltTile(ancestor), "the source's ancestor finished loading.");
+                    gatedView.LateUpdate(); // the backend sorts its items at the start of a frame, so one more reads what the last Update showed
+                    Assert.AreEqual(1, EmittedFor(gatedView, 1), "the ancestor's fill shows once it registers, though no tile of its own is shown.");
+                }
+                finally
+                {
+                    gate.TrySetResult(true);
+                    gatedView.Teardown();
+                }
             }
             finally
             {
@@ -301,6 +342,22 @@ namespace MapRenderer.Tests.MapViews
                     view.LateUpdate();
                 },
                     "A cover recompute with a prepared level in play must not allocate (preload set, prepare keys, roles).");
+
+                // ── (f) HELD: the z2 tiles wait for z3 tiles that are built but not yet registered (consume blocked). The swap
+                // step walks their areas on every Update, and a holding tick must not allocate.
+                view.Config.MaxConsumesPerTick = 0;
+                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 3.5 });
+                for (int frame = 0; frame < 3000; frame++)
+                {
+                    view.LateUpdate();
+                    view.AwaitInFlightMeshBuilds();
+                    TileTelemetrySnapshot waiting = view.CaptureTelemetry();
+                    if (waiting.PendingTileCount > 0 && waiting.ConsumeBacklog == waiting.PendingTileCount) break;
+                }
+
+                Assert.Greater(view.CaptureTelemetry().HeldTileCount, 0, "precondition: the z2 tiles are held, so the swap step has areas to walk.");
+                AllocationDiagnostics.AssertNotAllocating(() => view.LateUpdate(),
+                    "A tick that holds a tile for unregistered finer tiles must not allocate (the swap step's area walk).");
             }
             finally
             {
