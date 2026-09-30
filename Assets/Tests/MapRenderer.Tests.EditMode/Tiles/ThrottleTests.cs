@@ -5,7 +5,7 @@
 // Contents:
 //   TeardownPenOrderTests                   — Unity EditMode only — drives a real TileManager.Dispose().
 //   ThrottleTests                           — Throttle acceptance tests.
-//   TileLoadMeasurementTests                — Tooth (c) (consume-tick alloc-free) is NOT duplicated here — it is already guaranteed by MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory (asserts Is.Not.AllocatingGCMemory() over the budgeted-consume Update in the all-built steady state,…
+//   TileLoadMeasurementTests                — Tooth (c) (consume-tick alloc-free) is NOT duplicated here — it is already guaranteed by MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory (asserts zero allocation over the budgeted-consume Update in the all-built steady state,…
 //   TileLoadStressDriverTests               — Tests for the TileLoadStressDriver debug harness: the pure motion math (ZoomAt triangle wave + LookAtAt circular orbit) and the wired live-plumbing (Update pushes the swept zoom + orbited look-at onto the real MapCamera; disabled/unwired are clean no-ops).
 //   TileManagerBackgroundRegistrationTests  — The source-less per-covered-tile background processor's TileManager wiring.
 //   TileManagerLoadPriorityTests            — The load concurrency cap and the priority order: which tile builds first, the cap across a full load, no cancel in flight, re-prioritization, the strategy toggle, and an allocation-free admission path.
@@ -33,10 +33,8 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using System.Collections;
 using System.IO;
 using UnityEngine.TestTools;
-using UnityEngine.TestTools.Constraints;
 using Unity.Mathematics;
 using Unity.Profiling;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;

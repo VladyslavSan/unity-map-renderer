@@ -33,8 +33,6 @@ using MapRenderer.Core.Json;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
 using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 
 
 namespace MapRenderer.Tests.Meshing

@@ -1,9 +1,7 @@
-// Unity EditMode ONLY: it uses Is.Not.AllocatingGCMemory(), because GC.GetAllocatedBytesForCurrentThread()
+// Unity EditMode ONLY: it uses AllocationDiagnostics, because GC.GetAllocatedBytesForCurrentThread()
 // reads 0 in this runner. Non-obvious why: the measured delegate is warmed first to keep one-time JIT out.
 
 using NUnit.Framework;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Expressions

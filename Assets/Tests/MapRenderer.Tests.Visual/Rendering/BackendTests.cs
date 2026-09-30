@@ -585,8 +585,7 @@ namespace MapRenderer.Tests.Visual
                 }
                 catch (AssertionException)
                 {
-                    // The constraint trips on ≥1 GC.Alloc sampler call; its byte/count actual prints blank
-                    // here, so report the trip itself, not the unhelpful message tail.
+                    // The meter trips on any GC.Alloc event on this thread; report the trip itself, not its message tail.
                     verdict = $"ALLOCATES over {N} Rebuilds (GC.Alloc recorder tripped)";
                 }
                 TestContext.WriteLine($"[EG alloc] EntitiesTileRenderer.Rebuild steady-state (NUnit GC.Alloc recorder): {verdict}");

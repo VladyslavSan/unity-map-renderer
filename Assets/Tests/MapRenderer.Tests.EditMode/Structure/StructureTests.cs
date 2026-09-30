@@ -782,7 +782,7 @@ namespace MapRenderer.Tests.Structure
                 "cannot reach.)");
 
             // All three mint APIs (.Materialize(, TileGeometryBuffers.Allocate(, .AdoptDerivedLists(): a native
-            // Allocate clone is also invisible to Is.Not.AllocatingGCMemory().
+            // Allocate clone is also invisible to the GC.Alloc meter.
             foreach (string mintToken in new[]
                      { ".Materialize(", "TileGeometryBuffers.Allocate(", "TileGeometryBuffers.AdoptDerivedLists(" })
             {
@@ -2811,7 +2811,8 @@ namespace MapRenderer.Tests.Structure
     /// <summary>
     /// A file that <c>Tools/core-tests</c> compiles verbatim from <c>Assets/</c> runs in both lanes. The thread
     /// allocation counter measures under <c>dotnet test</c> and returns a constant 0 in the Unity runner, so a
-    /// tooth on it asserts <c>0 == 0</c> there. Both lanes report green, so only this fence can see it.
+    /// tooth on it asserts <c>0 == 0</c> there. Both lanes report green, so only this fence can see it. The same test
+    /// fences the EditMode meter: no test code may read the GC.Alloc recorder across all threads.
     /// </summary>
     [TestFixture]
     public class CoreTestsLaneFenceTests
@@ -2842,7 +2843,27 @@ namespace MapRenderer.Tests.Structure
             Assert.IsEmpty(offenders,
                 $"these files are compiled into BOTH lanes and read {DeadMeter}, which is a constant 0 in EditMode, so " +
                 "the assertion is vacuous there. Move the tooth to a file under Tools/core-tests, or use " +
-                "Is.Not.AllocatingGCMemory() in an EditMode-only file: " + string.Join(", ", offenders));
+                "AllocationDiagnostics in an EditMode-only file: " + string.Join(", ", offenders));
+
+            // All-threads reads count another thread's allocation in the window and red a tooth at random; the tokens are
+            // built in pieces so this file does not match itself.
+            string[] allThreads = { "Allocating" + "GCMemory", "CollectFrom" + "AllThreads" };
+            string testsDir = Path.Combine(Application.dataPath, "Tests");
+            var allThreadsOffenders = new List<string>();
+            int testFiles = 0;
+            foreach (string path in Directory.GetFiles(testsDir, "*.cs", SearchOption.AllDirectories))
+            {
+                testFiles++;
+                string code = SymbolExtractorStructureTests.StripComments(File.ReadAllText(path));
+                foreach (string token in allThreads)
+                    if (code.Contains(token)) allThreadsOffenders.Add(Path.GetFileName(path) + " uses " + token);
+            }
+
+            Assert.GreaterOrEqual(testFiles, 150,
+                $"precondition (positive control): the scan must find the test tree's files; found {testFiles}.");
+            Assert.IsEmpty(allThreadsOffenders,
+                "a zero-alloc tooth must count the calling thread only: use AllocationDiagnostics, never Unity's constraint " +
+                "or a recorder read after its all-threads collect. " + string.Join("; ", allThreadsOffenders));
         }
     }
 }

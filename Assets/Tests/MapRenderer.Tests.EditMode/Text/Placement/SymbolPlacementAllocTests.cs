@@ -28,8 +28,6 @@ using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using Symbol = MapRenderer.Unity.Style.Symbol;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Unity.Jobs.Symbols;

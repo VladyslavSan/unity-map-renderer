@@ -1,11 +1,9 @@
-// Unity EditMode only: Is.Not.AllocatingGCMemory() is the only trustworthy allocation meter on Unity Mono.
+// Unity EditMode only: AllocationDiagnostics (the GC.Alloc Recorder) is the only trustworthy allocation meter on Unity Mono.
 // Pins that ProcessOnWorker's feature selection appends into the build's pooled TileBuildBuffers.
 
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;

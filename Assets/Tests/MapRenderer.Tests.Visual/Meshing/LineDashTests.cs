@@ -927,8 +927,7 @@ namespace MapRenderer.Tests.Visual
         /// <see cref="MapRenderer.Unity.Rendering.Layers.LineRenderLayer.ApplyZoom"/> re-evaluates a
         /// zoom-dependent line-dasharray on EVERY frame (not gated like other paint), so
         /// <see cref="MapRenderer.Unity.Style.Line.LineDash.TryEvaluatePattern"/>'s old <c>new float[n]</c>
-        /// would allocate every frame the camera moves. Constructing the constraint directly avoids a second,
-        /// colliding <c>Is</c> import (see BackendTests.cs for the same idiom).
+        /// would allocate every frame the camera moves.
         /// </summary>
         [Test]
         public void ApplyZoom_ZoomInterpolatedDashArray_AllocatesNothing()
@@ -938,9 +937,8 @@ namespace MapRenderer.Tests.Visual
 
             scene.Layers.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0)); // warm up (JIT + first-apply)
 
-            var allocates = new UnityEngine.TestTools.Constraints.AllocatingGCMemoryConstraint();
-            Assert.That(() => scene.Layers.ApplyZoom(new StyleFrameInputs(Zoom + 0.5, 1.0, 0.0)),
-                new NUnit.Framework.Constraints.NotConstraint(allocates),
+            AllocationDiagnostics.AssertNotAllocating(
+                () => scene.Layers.ApplyZoom(new StyleFrameInputs(Zoom + 0.5, 1.0, 0.0)),
                 "a zoom-interpolated line-dasharray must not allocate on every ApplyZoom.");
         }
     }

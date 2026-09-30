@@ -1,11 +1,9 @@
 // Unity EditMode only — tests that require NativeArray (engine API) or the NUnit GC-alloc recorder
-// (UnityEngine.TestTools.Constraints). NOT included in Tools/core-tests.
+// (UnityEngine.Profiling.Recorder). NOT included in Tools/core-tests.
 
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Projection

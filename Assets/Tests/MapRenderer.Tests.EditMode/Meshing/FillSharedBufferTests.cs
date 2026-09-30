@@ -41,10 +41,6 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Fill = MapRenderer.Unity.Style.Fill;
 using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
-// UnityEngine.TestTools.Constraints.Is derives from NUnit's Is, so aliasing it also covers the file's
-// existing bare NUnit Is call sites (GreaterThanOrEqualTo/EqualTo).
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Collections;
 using MapRenderer.Tests.TestSupport;
 using UnityEngine.Rendering;
@@ -843,8 +839,8 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>Main-thread GC.Alloc allocation-event TOTAL across a warmed loop of <paramref
         /// name="iterations"/> builds — NOT divided per build: integer division would let 1-9 stray events
-        /// across 10 builds silently read as 0. <c>Recorder.Get("GC.Alloc")</c> filtered to the current
-        /// thread, immune to other threads' allocations (docs/gc-and-allocation-design.md § "Measuring GC in
+        /// across 10 builds silently read as 0. <see cref="AllocationDiagnostics.CountOnCallingThread"/>: the
+        /// calling thread only, immune to other threads' allocations (docs/gc-and-allocation-design.md § "Measuring GC in
         /// tests"). Not <c>GC.GetTotalMemory</c> or <c>GC.GetAllocatedBytesForCurrentThread()</c> (reads a
         /// constant 0 in this Unity Mono runner).</summary>
         private static long AllocEventsTotal(in FillMeshPipeline.LayerInput input, int iterations)
@@ -857,33 +853,18 @@ namespace MapRenderer.Tests.Meshing
                 warm.Dispose();
             }
 
-            var recorder = UnityEngine.Profiling.Recorder.Get("GC.Alloc");
-            recorder.enabled = false; // flush the recorder's own creation-time samples first
-            recorder.FilterToCurrentThread();
-            recorder.enabled = true;
-            try
+            FillMeshPipeline.LayerInput layerInput = input; // an `in` parameter cannot be captured
+            TestDelegate loop = () =>
             {
-                // Calibration: a known allocation inside the window proves the recorder is live this run —
-                // an empty window can otherwise report the PREVIOUS window's value, not a fresh zero.
-                var sentinel = new object();
-                GC.KeepAlive(sentinel);
-
                 for (int i = 0; i < iterations; i++)
                 {
-                    FillGraphOutput b = FillMeshGraph.Schedule(input);
+                    FillGraphOutput b = FillMeshGraph.Schedule(layerInput);
                     b.Handle.Complete();
                     b.Dispose();
                 }
-            }
-            finally
-            {
-                recorder.enabled = false;
-                recorder.CollectFromAllThreads();
-            }
-
-            Assert.GreaterOrEqual(recorder.sampleBlockCount, 1,
-                "calibration: the recorder must see at least the sentinel allocation, or it is dead this run.");
-            return recorder.sampleBlockCount - 1;
+            };
+            loop(); // warm the measured delegate itself, so its own compile is outside the window
+            return AllocationDiagnostics.CountOnCallingThread(loop);
         }
 
         /// <summary>

@@ -238,7 +238,7 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   scripting define (Player settings) in a project that only uses ECS for one optional subsystem. Two
   reasons: (1) correct architecture — create the world on demand when the ECS path is selected, so the
   non-ECS shipping path pays nothing; (2) the auto-created **editor** world's systems tick on editor
-  update and perturb fragile zero-tolerance `Is.Not.AllocatingGCMemory()` tests (a stray allocation lands
+  update and perturb fragile zero-tolerance zero-alloc tests (a stray allocation lands
   in the measurement window). The define is compile-time and cascades to the editor-world gate;
   `ICustomBootstrap` is runtime-only and does NOT stop the editor world. Create worlds manually via
   `DefaultWorldInitialization.Initialize` thereafter. (Seen: S53a — adding Entities flipped a no-GC test
@@ -252,9 +252,11 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `OnDestroy` does NOT fire on `Object.DestroyImmediate` — call the explicit teardown
   (`MapView.Teardown()`) before destroying the GameObject. (Seen: S53b.)
 
-- **`Is.Not.AllocatingGCMemory()` tests are flaky under a heavier domain.** They assert *exactly* zero
+- **Zero-alloc tests are flaky under a heavier domain.** They assert *exactly* zero
   allocation, so any stray allocation from added assemblies / background activity fails them — under the
-  full suite, not in isolation, and the failing set rotates run-to-run. Before treating one as a
+  full suite, not in isolation, and the failing set rotates run-to-run. The meter counts the calling thread
+  only now (`AllocationDiagnostics`), so another thread's allocation no longer reds them; a stray allocation on
+  the test thread still does. Before treating one as a
   regression, re-run it **in isolation**; a logic regression fails deterministically and in isolation too.
   (Seen: S53a — installing the Entities packages made 1–4 such tests flake per full run; all passed in
   isolation.)
@@ -713,7 +715,7 @@ other, and the rule for guards applies: assert it was satisfiable.
   instrument that answers "does this tree compile". **Never report a fast-runner pass as a compile check.**
 
 
-- **Measuring per-frame GC allocation: only NUnit's `Is.Not.AllocatingGCMemory` is trustworthy here; the
+- **Measuring per-frame GC allocation: only the `GC.Alloc` recorder, read for the calling thread, is trustworthy here; the
   two obvious `System.GC` counters both lie on this Unity Mono runtime.** Verified during the S53b
   re-measurement (2026-06-23):
   - `GC.GetTotalMemory(forceFullCollection: false)` measures *net heap delta*, not allocation traffic — it
@@ -724,24 +726,22 @@ other, and the rule for guards applies: assert it was satisfiable.
   - `GC.GetAllocatedBytesForCurrentThread()` returns a **constant 0** on this build — a self-check
     allocating a known 80 KB registered 0 bytes. Any "0 allocations" from it is a broken-instrument
     artifact, not a real zero. **Always canary an allocation API before trusting a 0 from it.**
-  - Use `UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory()` (the same instrument the BRG
-    zero-alloc tooth uses) — it samples the `GC.Alloc` profiler recorder, so it sees transient churn and is
-    immune to GC timing. Caveat: it reports a *count of allocation calls*, not a byte total (and its "But
-    was:" actual prints blank here), so it answers "allocates: yes/no", not "how many bytes". For a byte
-    figure use `Unity.Profiling.ProfilerRecorder` ("GC Allocated In Frame"). Also: a **single** update can be
-    alloc-free while a **run of N** updates trips the recorder — EG allocates intermittently, so measure over
-    many frames or you will under-report. (Beware the `Is` name collision: alias
-    `using Is = UnityEngine.TestTools.Constraints.Is;` + `using NIs = NUnit.Framework.Is;`, or instantiate
-    `new AllocatingGCMemoryConstraint()` and wrap in `NUnit.Framework.Constraints.NotConstraint`.)
-  - **Two further calibration points, for figures below what the constraint above can size.**
+  - Use `AllocationDiagnostics` (the `GC.Alloc` profiler recorder, read for the calling thread) — it sees transient
+    churn and is immune to GC timing. Caveat: it reports a *count of allocation events*, so it answers "allocates:
+    yes/no", not "how many bytes". For a byte figure use `Unity.Profiling.ProfilerRecorder` ("GC Allocated In
+    Frame"). Also: a **single** update can be alloc-free while a **run of N** updates trips the recorder — EG
+    allocates intermittently, so measure over many frames or you will under-report. Do not use Unity's
+    `Is.Not.AllocatingGCMemory()` or `AllocatingGCMemoryConstraint` directly: they call `CollectFromAllThreads()`
+    before reading, so another thread's allocation inside the window reds the tooth.
+  - **Two further calibration points, for figures below what `AllocationDiagnostics` above can size.**
     `GC.GetTotalMemory(false)` deltas ARE trustworthy, but only for large per-op allocations (roughly
     ≥100 KB): warm the body once, divide by N, confirm `GC.CollectionCount(0)` is unchanged across the
     window, and calibrate a known allocation in the same test. It measures *retained* heap, so it
     quantises to the runtime's heap-expansion granularity — it can read byte-identical across
     configurations that genuinely differ, or exactly 0 when an allocation fits existing free space; never
-    use it to rank components against each other. For counting or ranking, read the same recorder
-    `Is.Not.AllocatingGCMemory()` uses, for a count instead of a verdict:
-    `Recorder.Get("GC.Alloc")`, filtered to the current thread, `sampleBlockCount` after N calls. It
+    use it to rank components against each other. For counting or ranking, use
+    `AllocationDiagnostics.CountOnCallingThread`, which reads the recorder filtered to the current thread, for a count
+    instead of a verdict (`sampleBlockCount` after N calls, read after the disable). It
     counts allocation *events*, is exactly proportional, and has no noise floor — but a window that
     collects zero samples reports the PREVIOUS window's value, not a fresh zero, so never rest a
     conclusion on one zero reading; corroborate by additivity across configurations. Separately, an
@@ -1309,7 +1309,7 @@ gate cannot catch a miscalibrated instrument, because the instrument and the cod
 wrong.
 
 - A fence scoped to a folder when its predicate names two specific files can trip on a clean tree.
-- `Is.Not.AllocatingGCMemory()` reads green on a `new NativeArray<T>(…, Allocator.Persistent)` — it measures
+- A zero-alloc tooth reads green on a `new NativeArray<T>(…, Allocator.Persistent)` — it measures
   MANAGED allocation only, so it is vacuous by construction against anything native (see "Measuring
   per-frame GC allocation" above). Any test using it to police a native allocation needs a different
   instrument.

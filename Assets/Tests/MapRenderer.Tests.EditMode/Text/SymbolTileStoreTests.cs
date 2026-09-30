@@ -18,7 +18,6 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
-using UnityEngine.TestTools.Constraints;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
@@ -31,7 +30,6 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
-using Is = UnityEngine.TestTools.Constraints.Is;
 using Symbol = MapRenderer.Unity.Style.Symbol;
 using MapRenderer.Unity.Jobs.Tiles;
 using System.Threading;

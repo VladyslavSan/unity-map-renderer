@@ -22,8 +22,6 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Text;
 using System;
 using System.IO;

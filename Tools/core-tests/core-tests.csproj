@@ -441,7 +441,7 @@
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs" />
     <!-- S19 Slice 3: word-wrap tests (shared verbatim) -->
     <!-- S19 Slice 4: RTL layout tests (shared verbatim) -->
-    <!-- TextQuadLayoutAllocTests.cs is Unity-only (UnityEngine.TestTools.Constraints) — NOT registered here. -->
+    <!-- TextQuadLayoutAllocTests.cs is Unity-only (the GC.Alloc Recorder) — NOT registered here. -->
 
     <!-- S20 Slice 1: placement/billboard math (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolPaint.cs" />

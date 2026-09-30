@@ -25,7 +25,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Updates <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry with a
         /// throwaway plan, which is safe because <c>GatherIntoMirror</c> copies before <c>Update</c> returns. It
-        /// allocates per call; use the fixture-owned-plan overload inside <c>Is.Not.AllocatingGCMemory</c> or
+        /// allocates per call; use the fixture-owned-plan overload inside <c>AllocationDiagnostics.AssertNotAllocating</c> or
         /// where the gather memo needs a stable plan identity:
         /// <see cref="TickSymbols(SymbolPlacementSystem, in SceneFrame, TestSymbolPlan, SymbolTileBuffer, GlyphAtlasTexture, float, IReadOnlyList{SymbolRenderLayer}, Texture2D)"/>.
         /// </summary>

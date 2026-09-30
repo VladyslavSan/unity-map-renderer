@@ -10,8 +10,6 @@
 
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Json;
 using MapRenderer.Unity.Style;

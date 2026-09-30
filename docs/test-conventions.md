@@ -120,13 +120,13 @@ Three lanes. Take the **first** one whose entry condition holds.
   |---|---|---|---|
   | frame loop | no | no | yes — `[UnityTest]` + `yield` |
   | `UnityEngine` types | no | yes | yes |
-  | GC meter | `GC.GetAllocatedBytesForCurrentThread()` | `Is.Not.AllocatingGCMemory()` | `Is.Not.AllocatingGCMemory()` |
+  | GC meter | `GC.GetAllocatedBytesForCurrentThread()` | `AllocationDiagnostics` | `AllocationDiagnostics` |
   | project lock | none — runs with the Editor open | exclusive | exclusive |
 
   - **The two GC meters are not interchangeable, and the wrong one is silently vacuous, not red.**
     `GC.GetAllocatedBytesForCurrentThread()` returns a constant `0` in the Unity Mono runner, so
     `Assert.AreEqual(0L, after - before)` reduces to `0 == 0` and passes whatever the code does.
-    `Is.Not.AllocatingGCMemory()` is Recorder-based and is the only live meter in EditMode; it is not
+    `AllocationDiagnostics` is Recorder-based, counts the calling thread only, and is the only live meter in EditMode; it is not
     available in the fast lane.
   - **A fast-lane file runs in BOTH lanes, so an assertion can be live in one and vacuous in the other.**
     A zero-allocation tooth that reads `GC.GetAllocatedBytesForCurrentThread()` measures in `dotnet test`
@@ -229,11 +229,9 @@ The list is not closed. Two of these were found by merging, not by inspection, a
 been written on the assumption the earlier ones were complete. **When a merge surfaces a new collision,
 re-sweep the destinations already built** — they were assembled under an incomplete model.
 
-**Aliases.** `UnityEngine.TestTools.Constraints.Is` derives from `NUnit.Framework.Is` and adds a single
-member, `AllocatingGCMemory()`. It hides nothing, so a file that gains the alias behaves identically —
-every inherited constraint resolves to the same NUnit implementation. The hazard runs the other way and
-is loud: a file calling `Is.AllocatingGCMemory()` merged into a destination without the alias does not
-compile. Keep alias-carriers together for that reason, not because a union could weaken an assertion.
+**Aliases.** No test file aliases `UnityEngine.TestTools.Constraints.Is`: zero-alloc teeth call `AllocationDiagnostics`, and
+`StructureTests` rejects a code use of the constraint. Keep any other alias-carriers together when merging, so no merge
+drops the alias a destination needs.
 
 **Dropping a using is the same hazard wearing a different hat.** A merge takes the UNION of its inputs'
 usings. Removing `using UnityEngine;` to stop a `Color` ambiguity does not fail — it rebinds every bare

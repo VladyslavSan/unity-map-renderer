@@ -134,22 +134,26 @@ one-line takeaways so a doc reader here does not repeat the discovery:
   (It *does* work in the `Tools/core-tests` real-.NET project.)
 - **`GC.GetTotalMemory()`** measures net heap delta, not allocation traffic — GC-timing-dependent, swings
   wildly, useless as an allocation meter.
-- **Trust `UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory()`** — it samples the `GC.Alloc`
-  profiler recorder, so it sees transient churn and is immune to GC timing. Caveats: it answers *allocates:
-  yes/no*, not a byte count; **warm the exact measured delegate** first (a one-shot lambda's JIT can
+- **Trust the `GC.Alloc` profiler recorder, read for the calling thread only** (`AllocationDiagnostics`) — it sees
+  transient churn and is immune to GC timing. Unity's `Is.Not.AllocatingGCMemory()` reads the same recorder but
+  calls `CollectFromAllThreads()` first, so ANOTHER thread's allocation inside the window reds it; do not use it
+  directly. Caveats: a verdict is *allocates: yes/no*; **warm the exact measured delegate** first (a one-shot lambda's JIT can
   register a false positive); and a **single** call can be alloc-free while a **run of N** trips it, so
-  measure over a loop. Always **canary** any GC meter against a known allocation before trusting a `0`.
-- **For a numeric ceiling (not just yes/no), read the same recorder directly:** `Recorder.Get("GC.Alloc")`,
-  filtered to the current thread, `sampleBlockCount` after N calls — counts allocation events on that
-  thread only, proportional, immune to another thread's heap traffic. A zero-sample window can report the
-  PREVIOUS window's value instead of a fresh zero, so never trust a single zero reading alone.
+  measure over a loop. Always **canary** any GC meter against a known allocation before trusting a `0`. A zero-alloc
+  tooth proves the calling thread only: work handed to another thread is not covered, including a job body that runs
+  managed on a worker when Burst is off.
+- **For a numeric ceiling (not just yes/no), use `AllocationDiagnostics.CountOnCallingThread`.** The sequence is
+  `enabled = false`, `FilterToCurrentThread()`, `enabled = true`, act, `enabled = false`, then read
+  `sampleBlockCount`. The count is ready only after the disable, and a `CollectFromAllThreads()` first would
+  undo the filter. A calibration window proves the recorder is live, since a zero-sample window can otherwise
+  report the PREVIOUS window's value.
 - **A subject's first-ever call in a process can pay a one-time engine/JIT cost unrelated to its
   steady-state allocation** — a `NativeArray`'s first `AsSpan`/`AsReadOnlySpan`, a first-use static —
   and that cost is ORDER-DEPENDENT: it lands on whichever test calls that code path first. A full suite
   usually absorbs it in an earlier, unrelated test; an isolated run, a filtered run, or a reordered suite
   can instead land it on a zero-alloc assertion, which then fails with no load and no logic change.
   `MapRenderer.Tests.AllocationDiagnostics.AssertNotAllocating` is the wrapper every zero-alloc assertion in
-  this codebase uses in place of `Is.Not.AllocatingGCMemory()` directly: it warms the measured delegate
+  this codebase uses in place of the raw constraint: it warms the measured delegate
   itself, so an isolated run pays the first-use cost outside the window, and prints forensic context (whether a
   re-measure repeats the allocation, `GC.CollectionCount(0)`, the frame count, pending ThreadPool work) on a failure. Pass
   `warmUp: false` when the FIRST call is itself the state under test — a fresh buffer never touched before,

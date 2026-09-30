@@ -4,8 +4,6 @@
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;

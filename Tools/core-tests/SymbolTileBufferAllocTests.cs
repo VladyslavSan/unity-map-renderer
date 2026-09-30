@@ -4,7 +4,7 @@
 // GC.GetAllocatedBytesForCurrentThread reads a constant 0 in the Unity Mono EditMode runner
 // (docs/gc-and-allocation-design.md § 6), so this byte-delta tooth can only discriminate in the CoreCLR
 // dotnet runner. The EditMode zero-alloc coverage for this subsystem uses the Recorder-based
-// Is.Not.AllocatingGCMemory() instead.
+// AllocationDiagnostics instead.
 //
 // Per-thread counter; GetTotalMemory is process-wide, so other threads' allocations land in its window.
 

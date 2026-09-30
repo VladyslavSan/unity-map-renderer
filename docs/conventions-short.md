@@ -157,7 +157,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     still holds clears it under them). `UnityEngine.Pool` is engine-only, but that never keeps code in Core —
     placement follows architecture, not the fast-test loop (`ARCHITECTURE.md` § "Module boundaries").
   - **Prove it:** a GC-elimination change ships a **zero-alloc tooth, RED-verified**; the EditMode meter is
-    `Is.Not.AllocatingGCMemory()` (`GetAllocatedBytesForCurrentThread()` is dead there — vacuous), the
+    `AllocationDiagnostics` (`GetAllocatedBytesForCurrentThread()` is dead there — vacuous), the
     thread-local byte delta works only in `Tools/core-tests`.
   - **Out of scope:** cold paths (parse, static init, throw-path `$"…"`).
 

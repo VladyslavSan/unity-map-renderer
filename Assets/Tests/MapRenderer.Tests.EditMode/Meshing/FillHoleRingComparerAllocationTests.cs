@@ -1,4 +1,4 @@
-// EditMode only: FillMeshPipeline.HoleRingComparer is internal to Jobs, and Is.Not.AllocatingGCMemory() is
+// EditMode only: FillMeshPipeline.HoleRingComparer is internal to Jobs, and AllocationDiagnostics is
 // this runner's only live GC meter. Limitation: FillMeshGraph.Schedule allocates per call, so this pins the
 // per-polygon hole-ring sort alone — a reused NativeArray sorted through a struct comparer, with no boxing.
 
@@ -7,8 +7,6 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using Unity.Collections;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Jobs.Geometry;
 using MapRenderer.Core.Geo;

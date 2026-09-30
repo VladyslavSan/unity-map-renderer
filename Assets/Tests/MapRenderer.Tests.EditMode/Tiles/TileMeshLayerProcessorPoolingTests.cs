@@ -1,4 +1,4 @@
-// Unity EditMode only: Is.Not.AllocatingGCMemory() is the only trustworthy allocation meter on Unity Mono.
+// Unity EditMode only: AllocationDiagnostics (the GC.Alloc Recorder) is the only trustworthy allocation meter on Unity Mono.
 // TileMeshLayerProcessor and MeshDataPayload are rented from ConcurrentBag-backed pools, not `new`d per kick.
 //
 // Non-obvious why: both objects cross the main/worker thread boundary between allocation and release,
@@ -8,8 +8,6 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;

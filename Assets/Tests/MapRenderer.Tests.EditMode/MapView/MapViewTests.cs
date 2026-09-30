@@ -15,8 +15,6 @@ using MapController   = MapRenderer.App.Controller;
 using TouchController = MapRenderer.App.TouchController;
 using MapHost = MapRenderer.App.MapHost;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.App;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;

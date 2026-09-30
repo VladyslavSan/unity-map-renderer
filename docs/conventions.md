@@ -447,11 +447,11 @@ to the next when the one above is genuinely impossible.
 
 4. **Prove it with a tooth.** A GC-elimination change carries a **zero-allocation test, RED-verified** against
    the un-fixed code (re-inserting the allocation must make the test fail — otherwise the meter is dead, not
-   the allocation). The working meter is **runner-specific**: use `Is.Not.AllocatingGCMemory()` (the
-   Recorder-based constraint) in the Unity EditMode runner — `GC.GetAllocatedBytesForCurrentThread()` returns
+   the allocation). The working meter is **runner-specific**: use `AllocationDiagnostics` (the
+   Recorder, read for the calling thread) in the Unity EditMode runner — `GC.GetAllocatedBytesForCurrentThread()` returns
    0 there for any allocation and a byte-delta tooth is vacuous; the thread-local byte delta works only in the
-   `Tools/core-tests` real-.NET runner. Warm the exact measured delegate before asserting (the constraint can
-   false-positive on the one-shot JIT of a microscopic path).
+   `Tools/core-tests` real-.NET runner. Warm the exact measured delegate before asserting (a one-shot
+   lambda's JIT reads as an allocation).
 
 **Out of scope — cold paths.** Style/expression parse, static-table initialization, one-per-load setup, and
 `$"…"` on an exception path run once (or only on failure). Pooling them trades readability for nothing; the

@@ -1,16 +1,14 @@
-// Mvt/MvtNativeShapeTests.cs — the two MVT fixtures that alias Is = UnityEngine.TestTools.Constraints.Is (EditMode),
-// split from Mvt/MvtDecodeTests.cs by the using-collision rule: that file's fixtures use bare NUnit Is.
+// Mvt/MvtNativeShapeTests.cs — the two MVT fixtures that need the Recorder-based zero-alloc meter (EditMode),
+// split from Mvt/MvtDecodeTests.cs.
 //
 // Contents:
-//   DensePropertyStoreTests  — DensePropertyStore's zero-allocation teeth via the Recorder-based Is.Not.AllocatingGCMemory().
+//   DensePropertyStoreTests  — DensePropertyStore's zero-allocation teeth via the Recorder-based AllocationDiagnostics.
 //   MvtValueCompactionTests  — MvtLayer.Values shrank from a GC-heap List<MvtValue> to a blittable NativeArray<MvtValueNative>.
 
 using System.Collections.Generic;
 using System.IO;
 using System;
 using NUnit.Framework;
-using UnityEngine.TestTools.Constraints;
-using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Jobs.Mvt;
@@ -23,7 +21,7 @@ using Unity.Collections.LowLevel.Unsafe;
 namespace MapRenderer.Tests.Mvt
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // DensePropertyStoreTests — DensePropertyStore's zero-allocation teeth via Is.Not.AllocatingGCMemory()
+    // DensePropertyStoreTests — DensePropertyStore's zero-allocation teeth via AllocationDiagnostics
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -116,7 +114,7 @@ namespace MapRenderer.Tests.Mvt
             IFeature feature = layer.Features[0]; // every countries feature has NAME (has NAME == 239)
 
             // Warm the EXACT delegate the constraint invokes, so its one-time JIT is outside the measured window
-            // (Is.Not.AllocatingGCMemory's one-shot-lambda false positive); a per-call allocation still fails.
+            // (a one-shot lambda's compile would read as an allocation); a per-call allocation still fails.
             TestDelegate act = () => feature.TryGetProperty("NAME", out Value _);
             for (int w = 0; w < 50; w++) act();
             AllocationDiagnostics.AssertNotAllocating(act,
