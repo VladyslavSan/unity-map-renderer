@@ -948,7 +948,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.Greater(telemetry.VisibleTileCount, 30,
                     $"Cover must be large (many quadtree nodes visited) — got VisibleTileCount={telemetry.VisibleTileCount}.");
 
-                // Prime the reused buffers (_cover, _coverSet, _toRelease, the selector's _stack) to steady
+                // Prime the reused buffers (_cover, _servedKeys, _toRelease, the selector's _stack) to steady
                 // capacity before measuring — mirrors MapViewLiveLoopTests' priming ticks.
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + 1e-6, Longitude = 13.405 + 1e-6 });
                 view.LateUpdate();

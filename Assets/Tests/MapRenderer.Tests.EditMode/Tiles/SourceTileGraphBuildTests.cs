@@ -3379,15 +3379,20 @@ namespace MapRenderer.Tests.Tiles
             Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 2, Y = 1 }), "middle column must not admit");
         }
 
-        /// <summary>A tile inside `bounds` is still rejected once its zoom exceeds the source's `maxzoom` —
-        /// the bounds gate does not override the zoom gate.</summary>
+        /// <summary>Above a source's `maxzoom` its maxzoom ancestor serves the tile (overzoom): the tile is admitted,
+        /// `ServingTile` names the ancestor, and the `bounds` gate still applies to the tile itself.</summary>
         [Test]
-        public void TileInsideBounds_AboveMaxZoom_IsRejected()
+        public void TileInsideBounds_AboveMaxZoom_IsAdmittedAndServedByItsMaxZoomAncestor()
         {
             using var registry = BuildRegistry(Spec(0, 1, Gb(0, 0, 180, 85)));
 
-            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 2, X = 3, Y = 1 }),
-                "inside `bounds` (see the z2 positive control above), but z2 > MaxZoom=1");
+            var inside = new TileId { Z = 3, X = 7, Y = 2 };
+            Assert.IsTrue(registry.AdmitsTile(0, inside), "inside `bounds`, z3 > MaxZoom=1: admitted by overzoom");
+            Assert.AreEqual(new TileId { Z = 1, X = 1, Y = 0 }, registry.ServingTile(0, inside), "the z1 ancestor serves it");
+            Assert.AreEqual(new TileId { Z = 1, X = 1, Y = 0 }, registry.ServingTile(0, new TileId { Z = 1, X = 1, Y = 0 }),
+                "a tile at the maxzoom serves itself");
+            Assert.IsFalse(registry.AdmitsTile(0, new TileId { Z = 3, X = 1, Y = 2 }),
+                "outside `bounds`: overzoom does not override the bounds gate");
         }
 
         /// <summary>The spec-default bounds (the whole world) must admit every tile, including the

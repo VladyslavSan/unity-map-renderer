@@ -74,9 +74,10 @@ namespace MapRenderer.Tests
         /// layer throws here unless this is <c>true</c>; then its source loads but never places.</param>
         /// <param name="bounds">Every spec's declared bounds gate (default = no gate). A test measuring the
         /// admission path needs a real value here, or <c>AdmitsTile</c>'s overlap branch never runs.</param>
+        /// <param name="sourceMaxZoom">Every spec's <c>maxzoom</c>; above it the source's maxzoom tiles serve.</param>
         internal static void LoadTestStyle(this MapViewComponent view, IDataSource source,
             CameraProperties initialView, StyleDocument style = null, IWorkScheduler decodeScheduler = null,
-            bool symbolsIntentionallyUnwired = false, GeoBounds bounds = default)
+            bool symbolsIntentionallyUnwired = false, GeoBounds bounds = default, int sourceMaxZoom = int.MaxValue)
         {
             IWorkScheduler decodeSched = decodeScheduler ?? TestWorkScheduler;
             MapView mv = view.View;
@@ -85,7 +86,7 @@ namespace MapRenderer.Tests
             mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
 
             // One SourceSpec per distinct rendered source-id, each creating the injected source. The zoom range
-            // stays wide-open (the selector clamps cover), and the key is irrelevant: tests never restyle-diff.
+            // stays wide-open unless a test sets a maxzoom, and the key is irrelevant: tests never restyle-diff.
             var specs = new List<TileManager.SourceSpec>();
             var seen  = new HashSet<string>();
             var layers = mv.Layers.Layers;
@@ -112,7 +113,7 @@ namespace MapRenderer.Tests
                 // MapView.BuildSourceSpecs' production wrap.
                 if (seen.Add(sid))
                     specs.Add(new TileManager.SourceSpec(
-                        sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source, decodeSched), bounds));
+                        sid, default, 0, sourceMaxZoom, () => new MvtTileFeatureSource(source, decodeSched), bounds));
             }
         }
 

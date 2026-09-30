@@ -1208,11 +1208,11 @@ namespace MapRenderer.Tests.Structure
                 "reference it owns and releases. Successor to the IDecodedTileHandle clause.");
         }
 
-        /// <summary><c>SourceRegistry</c>'s public surface is EXACTLY ten members, with no <c>SourcePipeline</c>
+        /// <summary><c>SourceRegistry</c>'s public surface is EXACTLY eleven members, with no <c>SourcePipeline</c>
         /// escaping; reflection, because the nested class's fields fool an indentation grep. The bound has
-        /// zero headroom: an eleventh member means the seam failed.</summary>
+        /// zero headroom: a twelfth member means the seam failed.</summary>
         [Test]
-        public void SourceRegistry_SurfaceIsExactlyTenMembers()
+        public void SourceRegistry_SurfaceIsExactlyElevenMembers()
         {
             Type type = typeof(SourceRegistry);
             const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
@@ -1220,10 +1220,10 @@ namespace MapRenderer.Tests.Structure
             PropertyInfo[] properties = type.GetProperties(flags);
             MethodInfo[]   methods    = type.GetMethods(flags).Where(m => !m.IsSpecialName).ToArray();
 
-            Assert.AreEqual(10, properties.Length + methods.Length,
-                $"SourceRegistry's public surface must be EXACTLY 10 members — found " +
+            Assert.AreEqual(11, properties.Length + methods.Length,
+                $"SourceRegistry's public surface must be EXACTLY 11 members — found " +
                 $"{properties.Length} properties ({string.Join(", ", properties.Select(p => p.Name))}) + " +
-                $"{methods.Length} methods ({string.Join(", ", methods.Select(m => m.Name))}). An eleventh member " +
+                $"{methods.Length} methods ({string.Join(", ", methods.Select(m => m.Name))}). A twelfth member " +
                 "is a STOP-and-report finding (tile-pipeline-design.md § \"The source registry's narrow surface\"), not a tooth to widen.");
 
             // Matches SourcePipeline itself, a byref (`&`), an array, or a generic argument, which a bare-name

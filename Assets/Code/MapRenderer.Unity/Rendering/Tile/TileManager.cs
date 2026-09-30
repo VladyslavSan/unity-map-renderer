@@ -364,8 +364,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         // Reused buffers — never reallocated in steady state.
         private readonly List<TileId> _cover = new(64);
 
-        private readonly HashSet<TileId> _coverSet = new();
-
         // Keyed by (tile, source-slot) — one record per (tile, source).
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new();
         private readonly List<LoadedKey>                   _toRelease = new(32);
@@ -386,9 +384,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly List<LoadedKey>    _prepareDesired    = new(64);
         private readonly HashSet<LoadedKey> _prepareDesiredSet = new(64);
 
-        /// <summary>The tiles prepared ahead (P), and the larger set that keeps a finished prepared record loaded (K). Rebuilt with each cover recompute.</summary>
-        private readonly HashSet<TileId> _preloadSet = new();
-        private readonly HashSet<TileId> _keepSet    = new();
+        /// <summary>The record keys that serve a cover tile, one per (serving tile, slot). Several cover tiles can share
+        /// one key when a source serves them from its maxzoom ancestor. Rebuilt with each cover recompute.</summary>
+        private readonly HashSet<LoadedKey> _servedKeys = new();
+
+        /// <summary>The record keys prepared ahead (P), and the larger set that keeps a finished prepared record loaded (K).
+        /// Neither holds a key that already serves a cover tile. Rebuilt with each cover recompute.</summary>
+        private readonly HashSet<LoadedKey> _preloadSet = new();
+        private readonly HashSet<LoadedKey> _keepSet    = new();
 
         /// <summary>Scratch for <see cref="RecomputeRoles"/> and <see cref="PartitionPrepareLast"/>; reused.</summary>
         private readonly List<LoadedKey> _roleChanges    = new(32);
@@ -604,6 +607,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             _prepareDesired.Clear();
             _prepareDesiredSet.Clear();
+            _servedKeys.Clear();
             _preloadSet.Clear();
             _keepSet.Clear();
             _rolePassPending = false;
@@ -715,7 +719,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>Every tile in the cover with a record, as a <see cref="TileId"/> (may repeat across sources).</summary>
+        /// <summary>The tile of each <see cref="TileRole.Display"/> record, as a <see cref="TileId"/> (may repeat across sources).</summary>
         internal void CollectLoadedTileIds(List<TileId> into)
         {
             into.Clear();
@@ -875,7 +879,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     li, !(_layers[li] is IFadeableRenderLayer fadeable) || fadeable.PaintsSomething);
         }
 
-        /// <summary>Test-only: true ⟺ the tile has ≥1 source-record, ALL its records are <c>Built</c>, and
+        /// <summary>Test-only: true ⟺ the record tile <paramref name="id"/> has ≥1 source-record, ALL its records are <c>Built</c>, and
         /// the union produced geometry. N=1 ⇒ identical to a single-record (built + has-geometry) check.</summary>
         internal bool TryGetBuiltTile(TileId id)
         {
@@ -892,7 +896,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             return any && anyGeom;
         }
 
-        /// <summary>Test-only, backend-agnostic: <see cref="Mesh"/> assets for a loaded tile — the union
+        /// <summary>Test-only, backend-agnostic: <see cref="Mesh"/> assets for a loaded record tile — the union
         /// across its source-records (pipeline-slot order), or null if the tile has no geometry.</summary>
         internal Mesh[] GetTileMeshes(TileId id)
         {
@@ -1002,30 +1006,30 @@ namespace MapRenderer.Unity.Rendering.Tile
                 };
                 Selector.SelectVisibleTiles(in view, _cover);
 
-                _coverSet.Clear();
-                for (int i = 0; i < _cover.Count; i++)
-                    _coverSet.Add(_cover[i]);
-
-                ComputePreloadSets(in cfg);
+                _servedKeys.Clear();
 
                 // Merge, not rebuild — newly-covered keys join the desired list; admission below is priority-ordered and capped.
+                // Cover tiles a source serves from one maxzoom ancestor share a key, so the merge queues it once.
                 for (int i = 0; i < _cover.Count; i++)
                 {
                     TileId id = _cover[i];
                     for (int slot = 0; slot < _sources.Count; slot++)
                     {
                         if (!_sources.AdmitsTile(slot, id)) continue; // source doesn't serve this zoom/bounds
-                        var key = new LoadedKey(ServingTile(id, slot), slot);
+                        var key = new LoadedKey(_sources.ServingTile(slot, id), slot);
+                        _servedKeys.Add(key);
                         if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
                         if (_desiredSet.Add(key)) _desired.Add(key);
                     }
                 }
 
-                // Drop desired entries whose tile left the cover — an already-admitted record is never touched here.
+                ComputePreloadSets(in cfg);
+
+                // Drop desired entries that no longer serve a cover tile — an already-admitted record is never touched here.
                 for (int i = _desired.Count - 1; i >= 0; i--)
                 {
                     LoadedKey dk = _desired[i];
-                    if (!_coverSet.Contains(dk.Tile))
+                    if (!_servedKeys.Contains(dk))
                     {
                         _desiredSet.Remove(dk);
                         _desired.RemoveAt(i);
@@ -1921,10 +1925,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (admitted > 0) _prepareDesired.RemoveRange(0, admitted);
         }
 
-        /// <summary>The record tile that serves cover tile <paramref name="cover"/> for <paramref name="slot"/>: the tile itself.
-        /// The slot parameter is the seam UMR-256 uses to serve a source above its own maxzoom.</summary>
-        private static TileId ServingTile(TileId cover, int slot) => cover;
-
         /// <summary>Fills <see cref="_preloadSet"/> (P) and <see cref="_keepSet"/> (K) from the selector's held level and the
         /// cover: the children of each level-<c>L</c> cover tile once the zoom is within the preload lead of <c>L + 1</c>, and its
         /// parent while it is within the lead above <c>L</c>. K uses the lead plus the zoom-level hysteresis. Both are empty
@@ -1949,23 +1949,28 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>Adds to <paramref name="into"/> the children and parent of <paramref name="tile"/> that <paramref name="lead"/> puts
-        /// in reach of the current zoom, leaving out tiles already in the cover.</summary>
-        private void AddPreload(TileId tile, in TargetLevel target, double lead, HashSet<TileId> into)
+        /// <summary>Adds to <paramref name="into"/> the serving keys of the children and parent of <paramref name="tile"/> that
+        /// <paramref name="lead"/> puts in reach of the current zoom, leaving out keys that already serve the cover.</summary>
+        private void AddPreload(TileId tile, in TargetLevel target, double lead, HashSet<LoadedKey> into)
         {
             if (target.Continuous >= target.Level + 1 - lead && target.Level + 1 <= target.MaxLevel)
             {
                 for (int child = 0; child < 4; child++)
-                {
-                    var c = new TileId { Z = tile.Z + 1, X = tile.X * 2 + (child & 1), Y = tile.Y * 2 + (child >> 1) };
-                    if (!_coverSet.Contains(c)) into.Add(c);
-                }
+                    AddPreloadKeys(new TileId { Z = tile.Z + 1, X = tile.X * 2 + (child & 1), Y = tile.Y * 2 + (child >> 1) }, into);
             }
 
             if (target.Continuous < target.Level + lead && target.Level - 1 >= target.MinLevel && tile.Z > 0)
+                AddPreloadKeys(TileAncestry.Parent(tile), into);
+        }
+
+        /// <summary>Adds the record key each admitting slot serves <paramref name="tile"/> with, unless that key already serves a cover tile.</summary>
+        private void AddPreloadKeys(TileId tile, HashSet<LoadedKey> into)
+        {
+            for (int slot = 0; slot < _sources.Count; slot++)
             {
-                TileId parent = TileAncestry.Parent(tile);
-                if (!_coverSet.Contains(parent)) into.Add(parent);
+                if (!_sources.AdmitsTile(slot, tile)) continue;
+                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
+                if (!_servedKeys.Contains(key)) into.Add(key);
             }
         }
 
@@ -1976,22 +1981,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int i = _prepareDesired.Count - 1; i >= 0; i--)
             {
                 LoadedKey key = _prepareDesired[i];
-                if (!_preloadSet.Contains(key.Tile)) // P excludes the cover, so a tile that entered it is dropped here too
+                if (!_preloadSet.Contains(key)) // P excludes the cover, so a key that entered it is dropped here too
                 {
                     _prepareDesiredSet.Remove(key);
                     _prepareDesired.RemoveAt(i);
                 }
             }
 
-            foreach (TileId tile in _preloadSet)
+            foreach (LoadedKey key in _preloadSet)
             {
-                for (int slot = 0; slot < _sources.Count; slot++)
-                {
-                    if (!_sources.AdmitsTile(slot, tile)) continue;
-                    var key = new LoadedKey(tile, slot);
-                    if (_loaded.ContainsKey(key)) continue;
-                    if (_prepareDesiredSet.Add(key)) _prepareDesired.Add(key);
-                }
+                if (_loaded.ContainsKey(key)) continue;
+                if (_prepareDesiredSet.Add(key)) _prepareDesired.Add(key);
             }
         }
 
@@ -2000,10 +2000,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// cancelled for leaving P.</summary>
         private bool TryResolveRole(in LoadedKey key, in LoadedTile lt, out TileRole role)
         {
-            if (_coverSet.Contains(key.Tile)) { role = TileRole.Display; return true; }
+            if (_servedKeys.Contains(key)) { role = TileRole.Display; return true; }
             role = TileRole.Prepare;
-            if (_preloadSet.Contains(key.Tile)) return true;
-            return lt.Role == TileRole.Prepare && (!lt.Built || _keepSet.Contains(key.Tile));
+            if (_preloadSet.Contains(key)) return true;
+            return lt.Role == TileRole.Prepare && (!lt.Built || _keepSet.Contains(key));
         }
 
         /// <summary>Gives every record its role: a record that entered the cover is shown, one that left it for P is hidden,
@@ -2019,7 +2019,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt = kv.Value;
                 if (!TryResolveRole(kv.Key, in lt, out TileRole role)) _toRelease.Add(kv.Key);
                 else if (role != lt.Role) _roleChanges.Add(kv.Key);
-                else if (role == TileRole.Prepare && !lt.Built && !_preloadSet.Contains(kv.Key.Tile) && !_keepSet.Contains(kv.Key.Tile))
+                else if (role == TileRole.Prepare && !lt.Built && !_preloadSet.Contains(kv.Key) && !_keepSet.Contains(kv.Key))
                     _rolePassPending = true;
             }
 
@@ -2288,7 +2288,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (lt.Meshes == null && lt.Decode == null) continue;
 
                 anyOutstanding = true;
-                if ((lt.Role == TileRole.Prepare || _coverSet.Contains(kv.Key.Tile)) && !_releaseQueued.Contains(kv.Key))
+                if ((lt.Role == TileRole.Prepare || _servedKeys.Contains(kv.Key)) && !_releaseQueued.Contains(kv.Key))
                     _toRelease.Add(kv.Key);
             }
 

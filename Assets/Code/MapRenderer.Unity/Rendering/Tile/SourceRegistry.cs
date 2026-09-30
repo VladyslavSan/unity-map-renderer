@@ -73,13 +73,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True for the synthetic background slot, which has no feature source.</summary>
         public bool IsSourceless(int slot) => _pipelines[slot].IsSourceless;
 
-        /// <summary>True if a slot's source serves <paramref name="tile"/>: its zoom is in range AND, when the
-        /// source declares <c>bounds</c>, the tile's ground quad STRICTLY overlaps them (a tile that only
+        /// <summary>True if a slot's source serves <paramref name="tile"/>: its zoom is at or above the source's
+        /// <c>minzoom</c> (above <c>maxzoom</c> the maxzoom ancestor serves it, see <see cref="ServingTile"/>) AND,
+        /// when the source declares <c>bounds</c>, the tile's ground quad STRICTLY overlaps them (a tile that only
         /// touches the boundary is rejected — see <see cref="ResolveBounds"/>).</summary>
         public bool AdmitsTile(int slot, TileId tile)
         {
             var p = _pipelines[slot];
-            if (tile.Z < p.MinZoom || tile.Z > p.MaxZoom) return false;
+            if (tile.Z < p.MinZoom) return false;
             if (!p.HasBounds) return true;
 
             double2 tileMin = WebMercatorTiling.UnitSquareTileMin(tile);
@@ -93,6 +94,14 @@ namespace MapRenderer.Unity.Rendering.Tile
             bool yOverlap = tileMax.y > p.BoundsMin.y && tileMin.y < p.BoundsMax.y;
 
             return xOverlap && yOverlap;
+        }
+
+        /// <summary>The tile whose record serves <paramref name="tile"/> for <paramref name="slot"/>: the tile
+        /// itself, or its ancestor at the source's <c>maxzoom</c> when the tile is finer than the source.</summary>
+        public TileId ServingTile(int slot, TileId tile)
+        {
+            int levels = tile.Z - _pipelines[slot].MaxZoom;
+            return levels <= 0 ? tile : new TileId { Z = tile.Z - levels, X = tile.X >> levels, Y = tile.Y >> levels };
         }
 
         /// <summary>Converts a declared <see cref="GeoBounds"/> to unit-square min/max, or reports no gate

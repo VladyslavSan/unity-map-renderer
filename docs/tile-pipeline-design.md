@@ -74,10 +74,18 @@ construction.
 `SourceRegistry` is slot-keyed and never returns the pipeline object it holds. An indexer that returned it
 would hand every caller the `ITileFeatureSource` and the mutable `MinZoom`/`MaxZoom` fields no caller should
 touch, and every later need ("just the source id", "is this slot sourceless?") would be met by punching a
-property off the returned object instead of by an intention-revealing method. Ten narrow operations ship
-instead — `SourceIdOf`, `IsSourceless`, `AdmitsTile`, `SourceAt`, `ReleaseTile`, `Rebuild` among them — and
-`TileProcessingStructureTests.SourceRegistry_SurfaceIsExactlyTenMembers` pins the bound, so a later "just add a getter"
+property off the returned object instead of by an intention-revealing method. Eleven narrow operations ship
+instead — `SourceIdOf`, `IsSourceless`, `AdmitsTile`, `ServingTile`, `SourceAt`, `ReleaseTile`, `Rebuild` among them — and
+`TileProcessingStructureTests.SourceRegistry_SurfaceIsExactlyElevenMembers` pins the bound, so a later "just add a getter"
 fails loudly rather than reopening the indexer shape.
+
+Above a source's `maxzoom` the source overzooms: `AdmitsTile` admits any tile at or above `minzoom` that passes `bounds`, and
+`ServingTile` names the record that serves it, which is the tile's ancestor at the `maxzoom`. A cover tile finer than the source
+therefore shares one `LoadedKey` with its siblings, and the cover merge, the preload sets and the role pass all work on those
+serving keys, so one record is fetched, built and drawn once and stays `Display` while any cover tile it serves remains. The
+record is built once at its own zoom and never rebuilt per level; a zoom-dependent property that is not yet per-frame, and a
+zoom-dependent filter, keep their `maxzoom` values above it. The source-less background has no `maxzoom`, so it serves every
+tile itself.
 
 A source's fetch ADDRESS is the only place a non-XYZ tile identity exists (`scheme: "tms"`, flipped by
 `TileUrlTemplate` at fetch time); `bounds` gates admission instead, in `AdmitsTile`, so every other

@@ -129,7 +129,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 |---|---|---|
 | `url` (TileJSON) | `supported` | Fetched once per style load. Inline `tiles` wins. |
 | `tiles` | `partial` | Only the first URL template is used. |
-| `minzoom` / `maxzoom` | `partial` | A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom; there is no per-source overzoom, only past the host `TileSelection.MaxZoom` cap. |
+| `minzoom` / `maxzoom` | `partial` | Above `maxzoom` the source's `maxzoom` tile serves the finer cover tiles (overzoom), built once at that zoom. A zoom-dependent property that is not yet per-frame, and a zoom-dependent filter, keep their `maxzoom` values above it. Below `minzoom` the source draws nothing. The host `TileSelection.MaxZoom` cap still bounds the cover. |
 | `bounds` | `supported` | Gates tile requests: a cover tile whose ground quad does not strictly overlap `bounds` is never fetched. |
 | `scheme` | `supported` | `"tms"` flips only the fetch address (`TileUrlTemplate`); every other identity (loaded/cache keys) stays XYZ. |
 | `attribution` | `no rendering effect` | Not read. |
@@ -142,7 +142,7 @@ A source is fetched only when a visible `fill`, `line`, `symbol` or `fill-extrus
 | Key | Status | Note |
 |---|---|---|
 | `data` | `supported` | An inline object, or a URL string fetched through the same loader TileJSON uses. |
-| `maxzoom` | `partial` | Defaults to 18 (the spec value) when absent. A cover tile above `maxzoom` is not requested, so the source draws nothing at that zoom — the same per-source-overzoom limit as the vector row. |
+| `maxzoom` | `partial` | Defaults to 18 (the spec value) when absent. Above `maxzoom` the `maxzoom` tile serves the finer cover tiles, with the same per-frame limits as the vector row. |
 | `buffer` | `partial` | An authored value is honoured (×8 to reference units, clamped to [0, 512]). An absent key keeps the slicer's own 64-reference-unit default, not the spec's 128. |
 | `tolerance` | `not supported` | Not read. The slicer runs at tolerance 0 (`GeoJsonSliceOptions.SimplifyTolerance` accepts no other value). |
 | `cluster`, `clusterRadius`, `clusterMaxZoom`, `clusterMinPoints`, `clusterProperties` | `not supported` | No clustering. |

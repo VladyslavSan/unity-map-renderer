@@ -73,6 +73,133 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
+        private static StyleDocument BackgroundAndFillStyle() => TestStyle.Document(@"{
+            ""version"": 8,
+            ""name"": ""Test"",
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#102030"" } },
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+            ]
+        }");
+
+        /// <summary>Draw commands the BRG backend emits for the camera view, per material slot.</summary>
+        private static int EmittedFor(MapView view, int materialIndex)
+        {
+            var emit = new List<int>();
+            view.BrgRenderer().ComputeEmitOrder(emit, UnityEngine.Rendering.BatchCullingViewType.Camera);
+            int count = 0;
+            foreach (int sortedIndex in emit)
+                if (view.BrgRenderer().MaterialIndexAtSorted(sortedIndex) == materialIndex) count++;
+            return count;
+        }
+
+        /// <summary>The fill slot's mesh for <paramref name="tile"/>: the tile's meshes hold one per slot, told apart by material index.</summary>
+        private static Mesh FillMeshOf(MapView view, TileId tile)
+        {
+            Mesh[] meshes  = view.GetTileMeshes(tile);
+            int[]  indices = view.GetTileMaterialIndices(tile);
+            for (int i = 0; meshes != null && i < meshes.Length; i++)
+                if (indices[i] == 1) return meshes[i];
+            return null;
+        }
+
+        /// <summary>
+        /// Above a source's <c>maxzoom</c> its maxzoom tile serves, and the background, which has no source, stays at the
+        /// cover's zoom. At a point where one z14 tile holds the whole view, z15 covers it with four tiles: the source keeps
+        /// ONE record (one fetch, though four cover tiles ask for it) and draws it once; the background holds four z15
+        /// records. Starting at 15.1 and crossing to 14.9 and back fetches nothing more and never replaces the mesh.
+        /// </summary>
+        [Test]
+        public void Overzoom_ServesFromTheMaxZoomAncestor_AcrossTheMaxZoomBoundary()
+        {
+            MapView NewView(double preload)
+            {
+                var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+                view.Config.Backend = RenderBackend.Brg;
+                view.Config.TileSelection.MinZoom = 14;
+                view.Config.TileSelection.MaxZoom = 15;
+                view.Config.TileSelection.ZoomLevelPreload = preload;
+                view.WithTestCamera(256);
+                view.Config.MaxConsumesPerTick = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+                return view;
+            }
+
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var view = NewView(-1.0); // no prepared tiles: the records are exactly the cover's
+
+            var ancestor = new TileId { Z = 14, X = 8192, Y = 8192 };
+            double2 centre = ancestor.ToLonLat(0.5, 0.5, 1.0); // the corner of its four z15 children
+            try
+            {
+                view.LoadTestStyle(src, Cam(centre.x, centre.y, 15.1), style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+
+                // One load slot: of the five distinct keys (four z15 background tiles, one z14 source ancestor) one is
+                // admitted and four wait, so the source ancestor was queued once, not once per cover tile that uses it.
+                view.Config.MaxConcurrentTileLoads = 1;
+                view.LateUpdate();
+                Assert.AreEqual(4, view.DesiredCount(), "five distinct keys, one admitted.");
+                view.Config.MaxConcurrentTileLoads = 12;
+
+                PumpUntilSettled(view);
+                view.LateUpdate();
+                Mesh before = FillMeshOf(view, ancestor);
+                Assert.IsNotNull(before, "precondition: the z14 ancestor is built, with a fill mesh.");
+
+                var ids = new List<TileId>();
+                void Check(double zoom)
+                {
+                    ids.Clear();
+                    view.CollectLoadedTileIds(ids);
+                    int z14 = ids.FindAll(t => t.Z == 14).Count;
+                    int z15 = ids.FindAll(t => t.Z == 15).Count;
+                    bool overzoom = zoom > 15.0;
+                    Assert.AreEqual(overzoom ? 4 : 0, z15, $"zoom {zoom}: only the background has z15 records.");
+                    Assert.AreEqual(overzoom ? 1 : 2, z14,
+                        $"zoom {zoom}: the source's z14 record, plus the background's own z14 record below z15.");
+                    Assert.AreEqual(1, src.FetchCount, $"zoom {zoom}: one fetch serves every cover tile of the z14 ancestor.");
+                    Assert.AreSame(before, FillMeshOf(view, ancestor), $"zoom {zoom}: the source record is never rebuilt.");
+                    Assert.AreEqual(1, EmittedFor(view, 1), $"zoom {zoom}: the ancestor's fill is drawn once, not per z15 tile.");
+                    Assert.AreEqual(overzoom ? 4 : 1, EmittedFor(view, 0), $"zoom {zoom}: the background draws the cover's own tiles.");
+                }
+
+                Check(15.1);
+                foreach (double zoom in new[] { 14.9, 15.1 })
+                {
+                    view.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoom });
+                    PumpUntilSettled(view);
+                    view.LateUpdate();
+                    Check(zoom);
+                }
+
+                // Preload at its default, from a cold start just below the level switch: the z15 children are prepared, but the
+                // source's ancestor already serves the cover, so only the background prepares them and the source fetches once.
+                var   preloadSrc  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+                MapView preloadView = NewView(0.05);
+                try
+                {
+                    preloadView.LoadTestStyle(preloadSrc, Cam(centre.x, centre.y, 14.96), style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+                    PumpUntilSettled(preloadView);
+                    preloadView.LateUpdate();
+                    Assert.AreEqual(1, preloadSrc.FetchCount, "the source's ancestor serves the cover, so preparing its children fetches nothing.");
+                    Assert.AreEqual(1, EmittedFor(preloadView, 1), "the ancestor's fill stays a drawn cover record, not a hidden prepared one.");
+                    Assert.AreEqual(4, preloadView.CaptureTelemetry().PreparingTileCount, "the four z15 children are prepared, by the background only.");
+                }
+                finally
+                {
+                    preloadView.Teardown();
+                }
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
         // ── (3) NO per-frame GC in steady state ────────────────────────────────────────────────
         // Zero per-frame allocation is the BRG backend's contract; the Entities backend allocates at times.
 
@@ -100,7 +227,7 @@ namespace MapRenderer.Tests.MapViews
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
-                // Prime the reused buffers (_cover, _coverSet, _toRelease) to steady capacity.
+                // Prime the reused buffers (_cover, _servedKeys, _toRelease) to steady capacity.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
                 view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
