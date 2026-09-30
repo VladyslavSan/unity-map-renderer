@@ -261,15 +261,13 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   (Seen: S53a — installing the Entities packages made 1–4 such tests flake per full run; all passed in
   isolation.)
 
-- **A render backend that draws on instance/entity creation must POSITION it at creation — not next
-  frame.** `MapView.LateUpdate` recomputes transforms (`InstancedRebuild`) *before* it consumes newly-built
-  tiles, so an entity created with `LocalToWorld.identity` renders at the world origin for one frame until
-  the next Rebuild moves it — a visible blink during zoom. The GameObject backend never showed this (it
-  sets the container transform at creation) and BRG never showed it (it defers all drawing to Rebuild, so
-  a new instance is simply absent for a frame, never misplaced). Only the Entities backend, whose entity
-  is immediately live with render components + generous bounds, flashed. Fix: cache the last scene origin
-  in `Rebuild` and place each entity at its correct position the instant it is created. (Seen: S53b
-  follow-up.)
+- **A render backend must be rebuilt AFTER the tile update in the frame.** `MapView.LateUpdate` runs
+  `TileManager.Update` and then `InstancedRebuild`, so an item that a swap registers and reveals in a frame is in
+  the backend's draw list and placed in that same frame. The opposite order hid a swap's last-registered child
+  from BRG's sorted draw list for one frame (a one-frame hole where the parent was already concealed). Entities
+  and GameObjects position a new entity or container at the next `Rebuild`, which runs in the same frame, so
+  neither keeps a creation-time position. Every production creation happens inside `TileManager.Update`; only a
+  test drain (`DrainMeshBuilds`) creates outside it. (Seen: S53b follow-up; UMR-270.)
 
 - **A "generous" FIXED `RenderBounds` box is NOT a safe never-cull hack — it must ENCLOSE the mesh, and a
   fixed box centred at the origin fails at low zoom.** EG frustum-culls each entity by

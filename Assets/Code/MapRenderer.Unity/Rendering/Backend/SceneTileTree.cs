@@ -30,10 +30,6 @@ namespace MapRenderer.Unity.Rendering.Backend
         private readonly Dictionary<TileId, TileNode> _nodes = new Dictionary<TileId, TileNode>();
         private          GameObject                   _root;
 
-        // Last frame seen by Rebuild (null before the first). A container created after Rebuild in the same
-        // frame is placed from it at once, instead of blinking at the world origin until the next Rebuild.
-        private SceneFrame? _lastFrame;
-
         // Inactive parent for released containers; the pool recycles them because a zoom step replaces the whole
         // cover at once. Non-obvious why: ObjectPool does not reparent, so a released container left in place
         // stays under _root as a fake live tile, and SetParent(null) makes it an active scene root that keeps
@@ -85,22 +81,10 @@ namespace MapRenderer.Unity.Rendering.Backend
             return _nodes.TryGetValue(tileId, out var n) && n.Go != null ? n.Go.transform : null;
         }
 
-        private float3 InitialScenePos(double3 tileOriginRender)
-        {
-            return _lastFrame is { } frame
-                ? FloatingOrigin.TileToSceneRebased(tileOriginRender, frame.SceneOriginRender, frame.Rebase)
-                : float3.zero;
-        }
-
-        private quaternion InitialSceneRot()
-        {
-            return _lastFrame is { } frame ? new quaternion(frame.Rebase) : quaternion.identity;
-        }
-
         /// <summary>
         /// Returns the existing container for <paramref name="tileId"/>, or creates one parented under the
-        /// tree root, named <c>"Tile z/x/y"</c> and positioned + oriented at the tile's current scene
-        /// placement. The caller is responsible for parenting its own child(ren) under the returned
+        /// tree root, named <c>"Tile z/x/y"</c>. <see cref="Rebuild"/> places it in the frame that created
+        /// it. The caller is responsible for parenting its own child(ren) under the returned
         /// <see cref="Transform"/> and calling <see cref="AddChild"/> once per child registered.
         /// </summary>
         public Transform GetOrCreateTileNode(TileId tileId, double3 tileOriginRender)
@@ -110,9 +94,8 @@ namespace MapRenderer.Unity.Rendering.Backend
             GameObject go = _containerPool.Get();
             go.transform.SetParent(_root.transform, worldPositionStays: false);
             go.name = $"Tile {tileId}";
-            float3 pos = InitialScenePos(tileOriginRender);
-            go.transform.localPosition = new Vector3(pos.x, pos.y, pos.z);
-            go.transform.localRotation = InitialSceneRot(); // identity for Mercator; per-frame rebase for the globe
+            go.transform.localPosition = Vector3.zero; // Rebuild places it, in the frame that created it
+            go.transform.localRotation = Quaternion.identity;
 
             _nodes[tileId] = new TileNode { Go = go, TileOriginRender = tileOriginRender, ChildCount = 0 };
             return go.transform;
@@ -156,10 +139,6 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {
-            // Cache so a tile node created later this frame (after this Rebuild) is created already
-            // positioned, instead of blinking at the world origin for a frame.
-            _lastFrame = frame;
-
             quaternion rot = new quaternion(frame.Rebase); // same orientation for every tile (identity for Mercator)
             foreach (var kv in _nodes)
             {

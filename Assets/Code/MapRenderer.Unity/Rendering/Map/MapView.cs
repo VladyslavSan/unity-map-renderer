@@ -638,14 +638,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 TileManager.PushLayerDrawGates();
             }
 
-            // Camera-relative rendering: every frame, place all loaded tiles relative to the look-at origin.
-            // Mercator's rebase is the identity; the globe's rotates each tile into the look-at's local ENU frame.
-            using (PmInstancedRebuild.Auto())
-                TileManager.InstancedRebuild(sceneFrame);
-
             EnsureSelector();
             using (PmManagerUpdate.Auto())
                 TileManager.Update(cameraProperties, BuildTileSelectionConfig(), NowSeconds);
+
+            // Camera-relative rendering: place all loaded tiles relative to the look-at origin.
+            // Non-obvious why: this follows Update so the backend's draw list holds every item the swap registered and revealed this frame.
+            using (PmInstancedRebuild.Auto())
+                TileManager.InstancedRebuild(sceneFrame);
 
             // Pull the sprite sheet, which the symbol subsystem owns and fetches, into the fill-pattern layers each
             // frame. SetSprites early-outs on an unchanged pair.

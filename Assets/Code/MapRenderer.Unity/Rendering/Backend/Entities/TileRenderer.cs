@@ -132,11 +132,6 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private static readonly ProfilerMarker PmAddParent =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.AddLayerParent);
 
-        // Last frame seen by Rebuild. An entity added after Rebuild in the same frame is placed from it at
-        // once, instead of blinking at the world origin until the next Rebuild.
-        private SceneFrame _lastFrame;
-        private bool       _hasSceneOrigin;
-
         /// <param name="layerMaterials">The full-width per-layer material list, indexed by slot.</param>
         /// <param name="layerNames">
         /// Optional per-layer style ids parallel to <paramref name="layerMaterials"/>, used only to name the
@@ -377,21 +372,6 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         // ── Draw item registration ────────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Returns the scene-space position for <paramref name="tileOriginRender"/> using the last
-        /// <see cref="Rebuild"/> frame, or the world origin if no Rebuild has run yet (in which case the
-        /// next Rebuild fixes it). Used to place freshly-created entities without an origin "blink".
-        /// </summary>
-        private float3 InitialScenePos(double3 tileOriginRender)
-            => _hasSceneOrigin
-                ? FloatingOrigin.TileToSceneRebased(tileOriginRender, _lastFrame.SceneOriginRender, _lastFrame.Rebase)
-                : float3.zero;
-
-        /// <summary>The root orientation for a freshly-created tile — the last frame's rebase rotation
-        /// (identity for Mercator), or identity if no Rebuild has run yet.</summary>
-        private quaternion InitialSceneRot()
-            => _hasSceneOrigin ? new quaternion(_lastFrame.Rebase) : quaternion.identity;
-
 #if UNITY_EDITOR
         // FixedString64Bytes holds ≤61 UTF-8 bytes and its string ctor THROWS on overflow — truncate
         // defensively (entity names are an editor-only debug aid for the Entities Hierarchy).
@@ -413,11 +393,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         {
             if (_tileRoots.TryGetValue(tileId, out var rec)) return rec.Root;
 
-            float3     pos = InitialScenePos(tileOriginRender);
-            quaternion rot = InitialSceneRot(); // identity for Mercator; per-frame rebase for the globe
-            Entity root = _em.CreateEntity();
-            _em.AddComponentData(root, LocalTransform.FromPositionRotation(pos, rot));
-            _em.AddComponentData(root, new LocalToWorld { Value = float4x4.TRS(pos, rot, new float3(1f)) });
+            Entity root = _em.CreateEntity(); // Rebuild places it, in the frame that created it
+            _em.AddComponentData(root, LocalTransform.Identity);
+            _em.AddComponentData(root, new LocalToWorld { Value = float4x4.identity });
 #if UNITY_EDITOR
             _em.SetName(root, ToEntityName($"Tile {tileId}"));
 #endif
@@ -467,12 +445,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _em.SetComponentData(e, new Parent { Value = root });
             _em.SetComponentData(e, LocalTransform.Identity);
 
-            // Set LocalToWorld directly: this entity renders before its first transform tick, so this avoids an
-            // origin blink. The next Rebuild's LocalToWorldSystem re-derives the same value from the root.
-            _em.SetComponentData(e, new LocalToWorld
-            {
-                Value = float4x4.TRS(InitialScenePos(tileOriginRender), InitialSceneRot(), new float3(1f))
-            });
+            // Identity until the Rebuild of this frame, whose LocalToWorldSystem derives the value from the root.
+            _em.SetComponentData(e, new LocalToWorld { Value = float4x4.identity });
 
             // RenderBounds drives EG frustum culling, so it mirrors mesh.bounds, which the builders compute in the
             // vertices' frame. Non-obvious why: a fixed box is too small at low zoom, where a tile spans several
@@ -602,11 +576,6 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         public void Rebuild(in SceneFrame frame)
         {
             if (IsDisposed) return;
-
-            // Cache so a tile-layer consumed later this frame (after this Rebuild) can be created
-            // already positioned, instead of blinking at the world origin for a frame.
-            _lastFrame      = frame;
-            _hasSceneOrigin = true;
 
             quaternion rot = new quaternion(frame.Rebase); // same orientation for every tile (identity for Mercator)
             using (PmRootTransforms.Auto())

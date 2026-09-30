@@ -242,7 +242,6 @@ namespace MapRenderer.Tests.MapViews
                     }
 
                     Assert.IsTrue(gatedView.TryGetBuiltTile(ancestor), "the source's ancestor finished loading.");
-                    gatedView.LateUpdate(); // the backend sorts its items at the start of a frame, so one more reads what the last Update showed
                     Assert.AreEqual(1, EmittedFor(gatedView, 1), "the ancestor's fill shows once it registers, though no tile of its own is shown.");
                 }
                 finally
@@ -301,16 +300,14 @@ namespace MapRenderer.Tests.MapViews
                     style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
                 PumpUntilSettled(deepView);
                 deepView.LateUpdate();
+                int tilesBefore = EmittedFor(deepView, 0);
                 deepView.Camera.Apply(new CameraPropertiesUpdate { Zoom = 16.1 });
-                var cover = new List<TileId>();
                 for (int i = 0; i < 2500; i++)
                 {
+                    deepView.AwaitInFlightMeshBuilds();
                     deepView.LateUpdate();
-                    deepView.DrainMeshBuilds();
-                    deepView.LateUpdate();
-                    cover.Clear();
-                    deepView.CollectLoadedTileIds(cover);
-                    Assert.LessOrEqual(EmittedFor(deepView, 0), 4, $"update {i}: the background draws no more than the four tiles of the view");
+                    int drawn = EmittedFor(deepView, 0); // the Update's own result, with no further Update to hide a one-frame hole
+                    Assert.IsTrue(drawn == tilesBefore || drawn == 4, $"update {i}: the background draws the old tiles or the four new ones, never a hole or both ({drawn})");
                     Assert.AreEqual(0, deepView.CaptureTelemetry().BridgeTileCount, $"update {i}: no Bridge stays up");
                     if (i > 2 && deepView.AllTilesSettled()) break;
                 }

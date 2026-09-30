@@ -1573,37 +1573,6 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Spawn-position flash regression ───────────────────────────────────────────────────────
-        // Non-obvious why: MapView runs Rebuild BEFORE it consumes new tiles, so a layer added after Rebuild
-        // must spawn at its scene position, not at the origin, where it would flash for one frame.
-
-        [Test]
-        public void AddTileLayer_AfterRebuild_PositionedImmediately_NotAtOrigin()
-        {
-            var (mesh, mat) = FixtureFill();
-            using var r = new GameObjectTileRenderer(new[] { mat });
-            {
-                var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                double2 tileOrigin  = FloatingOrigin.TileLocalOriginMercator(tid);
-                double2 sceneOrigin = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
-                float3  expected    = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin);
-
-                // Frame's Rebuild runs first (no items yet) — seeds the scene origin, like MapView.LateUpdate.
-                r.Rebuild(SceneFrame.Mercator(sceneOrigin));
-
-                // Tile consumed AFTER the Rebuild — must NOT be created at the origin.
-                int h = r.AddShownTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
-
-                var (x, z) = r.GetInstanceTranslation(h);
-                Assert.That(x, Is.EqualTo(expected.x).Within(0.01f),
-                    "A tile added after Rebuild must be created at its scene X immediately (no origin blink).");
-                Assert.That(z, Is.EqualTo(expected.z).Within(0.01f),
-                    "A tile added after Rebuild must be created at its scene Z immediately (no origin blink).");
-                Assert.That(new Vector2(x, z).magnitude, Is.GreaterThan(1f),
-                    "Sanity: the expected scene position is well away from the world origin.");
-            }
-        }
-
         // ── Dispose ───────────────────────────────────────────────────────────────────────────────
 
         [Test]
@@ -1681,6 +1650,7 @@ namespace MapRenderer.Tests.Visual
                 var cam0 = MakeCam(0, 0, 0.0);
                 view.LoadTestStyle(src, cam0, style: MinimalStyle());
                 PumpUntilSettled(view);
+                view.LateUpdate(); // the drain created the containers after the last Rebuild; this one places them
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the GameObject backend.");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),

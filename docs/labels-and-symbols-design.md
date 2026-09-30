@@ -120,8 +120,9 @@ is load-bearing:
    sceneFrame       = BuildSceneFrame(...)      // floating origin: origin = look-at, + ENU rebase
 
 2. Layers.ApplyZoom(...)                        // zoom uniforms, px→device basis, before anything else moves
-   TileManager.InstancedRebuild(sceneFrame)     // place tile meshes relative to the origin
    TileManager.Update(cameraProperties, ...)    // the slow clock (tile lifecycle) — cover select + request/release
+   TileManager.InstancedRebuild(sceneFrame)     // place tile meshes relative to the origin
+   //   (after Update, so a swap's items are in this frame's draw list)
 
 3. if SymbolSubsystem.HasSymbolLayers:
      TileManager.CollectLoadedTileKeys(scratch)         // PULL the current loaded set
