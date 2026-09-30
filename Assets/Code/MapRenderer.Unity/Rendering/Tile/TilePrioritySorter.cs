@@ -44,15 +44,15 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>True iff (keyA, a) sorts strictly after (keyB, b) — smaller priority key first, then
-        /// TileId (Z, X, Y), then Slot (mirrors <see cref="TilePriority.SortByPriority"/>'s tiebreak,
-        /// extended for per-source Slot: a tile drawn from N sources can appear up to N times).</summary>
+        /// TileId (Z, X, Y), then Slot DESCENDING (mirrors <see cref="TilePriority.SortByPriority"/>'s tiebreak, extended for
+        /// per-source Slot: a tile drawn from N sources can appear up to N times). The background slot is last, so it goes first.</summary>
         private static bool IsAfter(double keyA, TileManager.LoadedKey a, double keyB, TileManager.LoadedKey b)
         {
             if (keyA != keyB) return keyA > keyB;
             if (a.Tile.Z != b.Tile.Z) return a.Tile.Z > b.Tile.Z;
             if (a.Tile.X != b.Tile.X) return a.Tile.X > b.Tile.X;
             if (a.Tile.Y != b.Tile.Y) return a.Tile.Y > b.Tile.Y;
-            return a.Slot > b.Slot;
+            return a.Slot < b.Slot;
         }
     }
 }

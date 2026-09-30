@@ -191,7 +191,7 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.Greater(rig.Manager.Held, 0, "the coarse tiles are held while the finer ones load");
                 Assert.IsTrue(rig.SawDeeperThanCover, "the drawn tiles are the held coarse level, not the cover");
-                AssertReportedToSymbols(view, rig.ShownBackground);
+                AssertReportedToSymbols(view, rig.ShownBackground, strict: false);
 
                 // One child of a complete family is still downloading: the family's coarse tile stays up, although its three other children
                 // are ready, and every other family swaps.
@@ -226,6 +226,36 @@ namespace MapRenderer.Tests.Tiles
             {
                 rig.OpenAllGates();
                 view.Teardown();
+            }
+
+            RecordOfARevealedAreaShowsWhileTheTileIsHeld(projection);
+        }
+
+        /// <summary>A tile revealed through its background alone, while its source is still loading, is held when the camera zooms in: the source
+        /// record, created after the reveal and finished after the zoom, serves a revealed area and so keeps its Hold role and shows.</summary>
+        private void RecordOfARevealedAreaShowsWhileTheTileIsHeld(string projection)
+        {
+            Rig rig = NewRig(projection);
+            try
+            {
+                rig.View.Config.MaxConcurrentTileLoads = 1; // the background of a tile loads first, and its source record only after it shows
+                rig.CloseGate(5);
+                rig.Pump(() => rig.ShownBackground.Count > 0, "the background to show while the source loads");
+                for (int i = 0; i < 5; i++) rig.Tick(); // the source record is admitted, and stays in flight behind the gate
+                Assert.AreEqual(0, rig.Watcher.ShownFill.Count, "precondition: no fill shows before its source finishes");
+
+                rig.CloseGate(6);
+                rig.Move(6.5);
+                for (int i = 0; i < 5; i++) rig.Tick();
+                Assert.Greater(rig.Manager.Held, 0, "precondition: the revealed level-5 tiles are held");
+
+                rig.OpenGate(5);
+                rig.Pump(() => HasLevel(rig.Watcher.ShownFill, 5), "the held tiles' source records to show");
+            }
+            finally
+            {
+                rig.OpenAllGates();
+                rig.View.Teardown();
             }
         }
 
@@ -356,7 +386,7 @@ namespace MapRenderer.Tests.Tiles
             for (int i = 0; i < 10; i++) rig.Tick();
             Assert.IsTrue(HasLevel(rig.ShownBackground, 9), "the level-9 tiles stay drawn while level 8 loads");
             Assert.Greater(rig.Manager.Held, 0, "they are held, not prepared");
-            AssertReportedToSymbols(view, rig.ShownBackground);
+            AssertReportedToSymbols(view, rig.ShownBackground, strict: false);
 
             rig.OpenGate(8);
             rig.PumpUntilSettled();
@@ -367,17 +397,22 @@ namespace MapRenderer.Tests.Tiles
         private static void AssertSettled(Rig rig)
         {
             rig.AssertShowsExactlyTheCover();
-            AssertReportedToSymbols(rig.View, rig.ShownBackground);
+            AssertReportedToSymbols(rig.View, rig.ShownBackground, strict: true);
         }
 
-        /// <summary>A record is reported to the symbol subsystem as shown exactly when its tile is drawn. A hidden child of a held tile is
-        /// reported not shown, so its labels wait for its geometry; a held tile is reported shown until the swap hides it.</summary>
-        private static void AssertReportedToSymbols(MapView view, HashSet<TileId> drawn)
+        /// <summary>A record is shown to the symbol subsystem only when its tile is drawn, and a drawn tile has a shown record. Strict: a record is shown
+        /// exactly when its tile is drawn. Mid-load a tile can be drawn by its background alone while a source's own groups are not revealed yet, so the
+        /// non-strict form drops the "exactly".</summary>
+        private static void AssertReportedToSymbols(MapView view, HashSet<TileId> drawn, bool strict)
         {
             var keys = new List<LoadedTileKey>();
             view.TileManager.CollectLoadedTileKeys(keys);
             foreach (LoadedTileKey key in keys)
-                Assert.AreEqual(drawn.Contains(key.Tile), key.Shown, $"record of tile {key.Tile} is reported shown iff its tile is drawn");
+            {
+                if (strict) Assert.AreEqual(drawn.Contains(key.Tile), key.Shown, $"record of tile {key.Tile} is reported shown iff its tile is drawn");
+                else if (key.Shown) Assert.IsTrue(drawn.Contains(key.Tile), $"record of tile {key.Tile} is reported shown only if its tile is drawn");
+            }
+
             foreach (TileId tile in drawn)
                 Assert.IsTrue(keys.Exists(k => k.Tile.Equals(tile) && k.Shown), $"drawn tile {tile} is reported shown");
         }

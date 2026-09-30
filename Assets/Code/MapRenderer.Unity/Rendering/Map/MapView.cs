@@ -337,6 +337,7 @@ namespace MapRenderer.Unity.Rendering.Map
             {
                 // Unconditional here, including a pure reorder — docs/tile-pipeline-design.md,
                 // "Partial-survival restyle".
+                TileManager.SetVisibilityGroups(_config.VisibilityGroups);
                 TileManager.RestyleSourcesInPlace(specs, _config.Backend);
 
                 // The in-place arm skips Layers.Build, the style token, SymbolSubsystem.SetStyle and the symbol
@@ -381,6 +382,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 _symbolStyleLayers); // group symbol layers + (re)build the shared glyph pipeline
             CommitProbe?.Invoke(CommitPhase.SymbolStyleApplied);
 
+            TileManager.SetVisibilityGroups(_config.VisibilityGroups);
             TileManager.SetSources(specs, _config.Backend, RecordProbeOrNull());
             _committedStyle = style; // the rebuild completed — the gate may trust it again
         }

@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
 
 namespace MapRenderer.Unity.Rendering.Map
@@ -150,6 +151,27 @@ namespace MapRenderer.Unity.Rendering.Map
             Enabled    = true,
             ByteBudget = 128L * 1024 * 1024,
             MaxCount   = 1024,
+        };
+
+        [Tooltip("The order a new tile's layers appear in, as lists of layer kinds. A group shows when every layer of it " +
+                 "has finished loading, and only after the groups before it. A tile mesh kind in no group joins the " +
+                 "last one. At most 64 groups count; later ones join the 64th. Applied when the style is set, so a change takes " +
+                 "full effect on the next style load.")]
+        public VisibilityGroup[] VisibilityGroups = VisibilityGroup.DefaultOrder();
+    }
+
+    /// <summary>One step of a new tile's reveal: the layer kinds that appear together.</summary>
+    [Serializable]
+    public sealed class VisibilityGroup
+    {
+        public StyleLayerType[] Kinds;
+
+        /// <summary>The order a view starts with: the background, then fills and lines, then extrusions.</summary>
+        public static VisibilityGroup[] DefaultOrder() => new[]
+        {
+            new VisibilityGroup { Kinds = new[] { StyleLayerType.Background } },
+            new VisibilityGroup { Kinds = new[] { StyleLayerType.Fill, StyleLayerType.Line } },
+            new VisibilityGroup { Kinds = new[] { StyleLayerType.FillExtrusion } },
         };
     }
 

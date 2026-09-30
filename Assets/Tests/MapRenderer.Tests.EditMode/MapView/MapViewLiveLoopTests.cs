@@ -21,6 +21,8 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
+using MapRenderer.Unity.Concurrency;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
@@ -109,6 +111,302 @@ namespace MapRenderer.Tests.MapViews
                 if (view.BrgRenderer().MaterialIndexAtSorted(sortedIndex) == materialIndex) count++;
             return count;
         }
+
+        /// <summary>
+        /// A new tile's layers appear group by group, in the configured order. Arms: (1) with the source's fetch closed the source-less background
+        /// is drawn and the fill is not, and a list of one group draws nothing until the fill is ready; (2) a group appears when its last payload
+        /// is consumed, while a later group of the tile still consumes, and a group's layers appear in one flush; (3) with a second source that
+        /// lags, A's fill and labels wait for it, and one that is absent, undecodable or faulting never blocks them; (4) a rebaking shared record stays
+        /// drawn across a pan.
+        /// </summary>
+        [Test]
+        public void VisibilityGroups_ApplyToNewTilesAcrossSourcesAndRestyle()
+        {
+            foreach (bool oneGroup in new[] { false, true })
+            {
+                var gate = new UniTaskCompletionSource<bool>();
+                var src  = TestDataSource.FromFetch(async tile =>
+                {
+                    await gate.Task;
+                    return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
+                });
+                var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+                view.Config.Backend = RenderBackend.Brg;
+                view.Config.TileSelection.MinZoom = 5;
+                view.Config.TileSelection.MaxZoom = 5;
+                view.Config.TileSelection.ZoomLevelPreload = -1.0;
+                view.WithTestCamera(256);
+                view.Config.MaxConsumesPerTick    = 64;
+                view.Config.MaxMeshBuildsPerTick  = 64;
+                view.Config.MaxConcurrentTileLoads = oneGroup ? 1 : 0; // one group: the background of a tile admitted before its source record must wait too
+                if (oneGroup)
+                    view.Config.VisibilityGroups = new[]
+                    {
+                        new VisibilityGroup { Kinds = new[] { StyleLayerType.Background, StyleLayerType.Fill } },
+                    };
+
+                try
+                {
+                    view.LoadTestStyle(src, Cam(0, 0, 5.0), style: BackgroundAndFillStyle());
+                    for (int i = 0; i < 40; i++)
+                    {
+                        view.LateUpdate(); // a drain would block on the closed fetch
+                        Thread.Sleep(1);
+                    }
+
+                    Assert.AreEqual(oneGroup ? 0 : 4, EmittedFor(view, 0),
+                        $"oneGroup={oneGroup}: the background is drawn while the fill loads, unless one group holds both.");
+                    Assert.AreEqual(0, EmittedFor(view, 1), $"oneGroup={oneGroup}: the fill is not drawn before its payload is consumed.");
+
+                    gate.TrySetResult(true);
+                    view.Config.MaxConcurrentTileLoads = 12;
+                    PumpUntilSettled(view);
+                    view.LateUpdate();
+                    Assert.AreEqual(4, EmittedFor(view, 0), $"oneGroup={oneGroup}: the background is drawn once the tile is ready.");
+                    Assert.AreEqual(4, EmittedFor(view, 1), $"oneGroup={oneGroup}: the fill is drawn once the tile is ready.");
+                }
+                finally
+                {
+                    gate.TrySetResult(true);
+                    view.Teardown();
+                }
+            }
+
+            AssertAGroupShowsWhileALaterGroupOfTheSameTileIsStillConsuming(withLastExtrusion: true);
+            AssertAGroupShowsWhileALaterGroupOfTheSameTileIsStillConsuming(withLastExtrusion: false);
+            foreach (SecondSourceBehaviour behaviour in Enum.GetValues(typeof(SecondSourceBehaviour)))
+                AssertASecondSourceNeverBlocksTheFirstSourcesGroups(behaviour);
+            AssertARebakingSharedRecordStaysDrawnAcrossAPan();
+        }
+
+        /// <summary>
+        /// Deep overzoom: the source's one fill record serves four cover tiles. Its rebake is held before its consume, so it draws its previous
+        /// geometry. A pan inside the same source tile conceals the old cover tiles and reveals the new ones in one Update, and the previous
+        /// fill stays drawn: its handles keep their group, so the carried reveal shows them.
+        /// </summary>
+        private void AssertARebakingSharedRecordStaysDrawnAcrossAPan()
+        {
+            var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 14;
+            view.Config.TileSelection.MaxZoom = 18;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0;
+            view.WithTestCamera(256);
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            var ancestor = new TileId { Z = 14, X = 8192, Y = 8192 };
+            double2 centre = ancestor.ToLonLat(0.5, 0.5, 1.0);
+            try
+            {
+                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(centre.x, centre.y, 17.5),
+                    style: BackgroundAndFillStyle(), sourceMaxZoom: 14);
+                PumpUntilSettled(view);
+                view.LateUpdate();
+                Assert.AreEqual(1, EmittedFor(view, 1), "precondition: the z14 fill draws once");
+
+                view.Config.MaxConsumesPerTick = 0; // the rebake builds but never registers
+                view.Config.FillTileBufferClip = 64.0;
+                for (int i = 0; i < 5; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.IsFalse(view.TryGetBuiltTile(ancestor), "precondition: the fill record is rebaking");
+                Assert.AreEqual(1, EmittedFor(view, 1), "precondition: it draws its previous geometry");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = centre.x + 0.0046 }); // inside the same z14 tile
+                for (int i = 0; i < 3; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(1, EmittedFor(view, 1), "the previous fill stays drawn across the pan");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        private enum SecondSourceBehaviour { Lags, Absent, Corrupt, FaultsOnce }
+
+        /// <summary>
+        /// Two sources over one tile: the background (slot 0), the fills of source A (slot 1) and of source B (slot 2) share group two. A lagging B holds
+        /// group two back for both. An absent tile or an undecodable body in B is ready at once, so A's fill shows and B's has nothing. A network fault in
+        /// B is not pending: A's fill shows while B waits to retry, and B's fill shows in the Update that consumes its retry.
+        /// </summary>
+        private void AssertASecondSourceNeverBlocksTheFirstSourcesGroups(SecondSourceBehaviour behaviour)
+        {
+            var gate       = new UniTaskCompletionSource<bool>();
+            var failedOnce = new System.Collections.Concurrent.ConcurrentDictionary<TileId, bool>();
+            var sourceA    = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var sourceB    = TestDataSource.FromFetch(async tile =>
+            {
+                await UniTask.SwitchToThreadPool();
+                switch (behaviour)
+                {
+                    case SecondSourceBehaviour.Lags:
+                        await gate.Task;
+                        break;
+                    case SecondSourceBehaviour.Absent:
+                        return TileResponse.Absent(TileEncoding.Mvt);
+                    case SecondSourceBehaviour.Corrupt:
+                        return new TileResponse(new byte[] { 0x1A, 0x64 }, TileEncoding.Mvt);
+                    case SecondSourceBehaviour.FaultsOnce:
+                        if (failedOnce.TryAdd(tile, true)) throw new InvalidOperationException("scripted network failure");
+                        break;
+                }
+
+                return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
+            });
+
+            var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0;
+            view.WithTestCamera(256);
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            double now = 100.0;
+            view.View.NowSecondsOverride = () => now;
+            try
+            {
+                var style = TestStyle.Document(@"{
+                    ""version"": 8, ""name"": ""Test"",
+                    ""sources"": {
+                        ""a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
+                        ""b"": { ""type"": ""vector"", ""tiles"": [""https://example.com/b/{z}/{x}/{y}.pbf""] }
+                    },
+                    ""layers"": [
+                        { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#102030"" } },
+                        { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""a"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                        { ""id"": ""fill-b"", ""type"": ""fill"", ""source"": ""b"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 50, 50, 200, 1] } }
+                    ]
+                }");
+                var mv = view.View;
+                mv.Camera.SetProperties(Cam(0, 0, 5.0));
+                mv.Camera.SyncToCamera();
+                mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
+                mv.TileManager.SetVisibilityGroups(view.Config.VisibilityGroups);
+                mv.TileManager.SetSources(new List<TileManager.SourceSpec>
+                {
+                    new TileManager.SourceSpec("a", default, 0, int.MaxValue, () => new MvtTileFeatureSource(sourceA, new InlineWorkScheduler())),
+                    new TileManager.SourceSpec("b", default, 0, int.MaxValue, () => new MvtTileFeatureSource(sourceB, new InlineWorkScheduler())),
+                }, view.Config.Backend);
+
+                void Pump(Func<bool> done, string what)
+                {
+                    for (var settle = SettleTimeout.Start(); settle.Running;)
+                    {
+                        view.LateUpdate();
+                        Thread.Sleep(1);
+                        if (done()) return;
+                    }
+
+                    Assert.Fail($"{behaviour}: timed out waiting for {what}");
+                }
+
+                bool LabelsOfSourceAreShown(string sourceId)
+                {
+                    var keys = new List<LoadedTileKey>();
+                    view.TileManager.CollectLoadedTileKeys(keys);
+                    return keys.Exists(k => k.SourceId == sourceId && k.Shown);
+                }
+
+                Pump(() => EmittedFor(view, 0) == 4, "the background of the four tiles");
+                bool blocks = behaviour == SecondSourceBehaviour.Lags;
+                if (blocks)
+                {
+                    for (int i = 0; i < 40; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                    Assert.AreEqual(0, EmittedFor(view, 1), $"{behaviour}: A's fill waits while B still loads.");
+                    Assert.IsFalse(LabelsOfSourceAreShown("a"), $"{behaviour}: A's labels wait for the first group A fills, though the tile is shown.");
+                    gate.TrySetResult(true);
+                }
+                else
+                {
+                    Pump(() => EmittedFor(view, 1) == 4, "A's fill, with B absent, undecodable or waiting to retry");
+                }
+
+                if (behaviour == SecondSourceBehaviour.FaultsOnce)
+                {
+                    for (int i = 0; i < 10; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                    Assert.AreEqual(0, EmittedFor(view, 2), $"{behaviour}: B has nothing to show before its retry.");
+                    now = 200.0;
+                }
+
+                bool bShows = behaviour == SecondSourceBehaviour.Lags || behaviour == SecondSourceBehaviour.FaultsOnce;
+                Pump(() => EmittedFor(view, 1) == 4 && EmittedFor(view, 2) == (bShows ? 4 : 0), "the settled fills");
+                Assert.IsTrue(LabelsOfSourceAreShown("a"), $"{behaviour}: A's labels are shown once its fill group is revealed.");
+                for (int i = 0; i < 5; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(bShows ? 4 : 0, EmittedFor(view, 2), $"{behaviour}: B's fill ends {(bShows ? "shown" : "empty")}.");
+            }
+            finally
+            {
+                gate.TrySetResult(true);
+                view.Teardown();
+            }
+        }
+
+        /// <summary>
+        /// One mesh is consumed per Update, in the order extrusion, fill, fill, extrusion. The two fills (one group) appear in the same flush, once
+        /// both are consumed and while the last extrusion still waits. An extrusion consumed early stays hidden until the fills show. Without the
+        /// last extrusion the extrusion group is ready while the fills are still pending, so only the group order holds it back.
+        /// </summary>
+        private void AssertAGroupShowsWhileALaterGroupOfTheSameTileIsStillConsuming(bool withLastExtrusion)
+        {
+            var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0;
+            view.WithTestCamera(256);
+            view.Config.MaxConsumesPerTick   = 1;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            try
+            {
+                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(0, 0, 5.0), style: FillAndExtrusionStyle(withLastExtrusion));
+                bool fillBeforeTileIsBuilt = false;
+                var  ids = new List<TileId>();
+                for (int i = 0; i < 2500 && !(i > 2 && view.AllTilesSettled()); i++)
+                {
+                    view.LateUpdate(); // a drain would consume every mesh at once
+                    Thread.Sleep(1);
+                    int fills = EmittedFor(view, 1);
+                    Assert.AreEqual(fills, EmittedFor(view, 2), $"update {i}: both fills of a group appear in the same flush.");
+                    Assert.LessOrEqual(EmittedFor(view, 0), fills, $"update {i}: an extrusion consumed first stays hidden until the fills show.");
+                    if (withLastExtrusion)
+                        Assert.LessOrEqual(EmittedFor(view, 3), fills, $"update {i}: the last extrusion never appears before the fills.");
+                    ids.Clear();
+                    view.CollectLoadedTileIds(ids);
+                    int built = ids.FindAll(view.TryGetBuiltTile).Count;
+                    if (fills > built) fillBeforeTileIsBuilt = true;
+                }
+
+                view.LateUpdate(); // the backend sorts at the start of a frame, so one more reads what the last Update showed
+                if (withLastExtrusion)
+                {
+                    Assert.IsTrue(fillBeforeTileIsBuilt, "a fill was drawn while its tile's extrusion was still unconsumed.");
+                    Assert.AreEqual(4, EmittedFor(view, 3), "settled: every last extrusion is drawn.");
+                }
+
+                Assert.AreEqual(4, EmittedFor(view, 0), "settled: every first extrusion is drawn.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        private static StyleDocument FillAndExtrusionStyle(bool withLastExtrusion) => TestStyle.Document(@"{
+            ""version"": 8,
+            ""name"": ""Test"",
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                { ""id"": ""countries-extrusion-1"", ""type"": ""fill-extrusion"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-extrusion-color"": [""rgba"", 50, 50, 200, 1], ""fill-extrusion-height"": 10 } },
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                { ""id"": ""countries-fill-2"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-color"": [""rgba"", 50, 200, 50, 1] } }" + (withLastExtrusion ? @",
+                { ""id"": ""countries-extrusion-2"", ""type"": ""fill-extrusion"", ""source"": ""maplibre"", ""source-layer"": ""countries"",
+                  ""paint"": { ""fill-extrusion-color"": [""rgba"", 50, 200, 200, 1], ""fill-extrusion-height"": 20 } }" : "") + @"
+            ]
+        }");
 
         /// <summary>The fill slot's mesh for <paramref name="tile"/>: the tile's meshes hold one per slot, told apart by material index.</summary>
         private static Mesh FillMeshOf(MapView view, TileId tile)

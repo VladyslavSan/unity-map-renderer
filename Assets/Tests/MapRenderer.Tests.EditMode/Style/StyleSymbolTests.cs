@@ -16,6 +16,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Unity.Style;
+using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
@@ -400,6 +401,60 @@ namespace MapRenderer.Tests.Style
 
             Assert.Greater(layerA.TransitioningCount(), 0, "A's fill-color changed — its uniform must be easing.");
             Assert.AreEqual(0, layerC.TransitioningCount(), "C is byte-identical — nothing to ease.");
+
+            AssertARemovedLayerDrawsNothingWhenAPreparedTileReveals();
+        }
+
+        /// <summary>
+        /// A restyle that removes the middle of three fill layers tombstones its slot and keeps the other two. A prepared level that is hidden while
+        /// the restyle lands, and reveals afterwards, draws the surviving two slots and nothing of the removed one. A pin: it passes without the restyle guard it covers, so it has no RED.
+        /// </summary>
+        private static void AssertARemovedLayerDrawsNothingWhenAPreparedTileReveals()
+        {
+            string Style(bool withMiddle) => @"{
+                ""version"": 8, ""name"": ""Test"",
+                ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+                ""layers"": [
+                    { ""id"": ""a"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },"
+                + (withMiddle ? @"
+                    { ""id"": ""b"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 50, 200, 50, 1] } }," : "") + @"
+                    { ""id"": ""c"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 50, 50, 200, 1] } }
+                ]
+            }";
+
+            var view = RestyleHarness.NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            try
+            {
+                view.Config.TileSelection.MinZoom = 3;
+                view.Config.TileSelection.MaxZoom = 5;
+                view.Config.TileSelection.ZoomLevelPreload = 0.3;
+                view.Config.TileSelection.MaxConcurrentPrepareLoads = 64;
+                view.View.Camera.SetProperties(RestyleHarness.Cam(10, 10, 4.8));
+                view.View.Camera.SyncToCamera();
+                RestyleHarness.SpinToCompleted(view.SetStyle(TestStyle.Document(Style(true)), "A"));
+                RestyleHarness.PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0, "precondition: the next level is prepared, hidden.");
+
+                RestyleHarness.SpinToCompleted(view.SetStyle(TestStyle.Document(Style(false)), "B"));
+                Assert.AreEqual(3, view.View.Layers.Count, "the removed layer's slot stays: the slot count never shrinks.");
+                RestyleHarness.PumpUntilSettled(view);
+
+                view.View.Camera.Apply(new CameraPropertiesUpdate { Zoom = 5.2 });
+                RestyleHarness.PumpUntilSettled(view);
+                view.LateUpdate();
+                var drawn = new HashSet<TileId>();
+                view.EntitiesRenderer().DrawnTilesAtSlot(0, drawn);
+                Assert.Greater(drawn.Count, 0, "the first surviving layer is drawn on the revealed level.");
+                view.EntitiesRenderer().DrawnTilesAtSlot(2, drawn);
+                Assert.Greater(drawn.Count, 0, "the second surviving layer is drawn on the revealed level.");
+                view.EntitiesRenderer().DrawnTilesAtSlot(1, drawn);
+                Assert.AreEqual(0, drawn.Count, "the removed layer draws nothing.");
+            }
+            finally
+            {
+                view.Teardown();
+                UnityEngine.Object.DestroyImmediate(go);
+            }
         }
 
         // Fill, symbol, fill restyled to (C, S, A): every slot survives, only declared order changes. The

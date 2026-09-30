@@ -874,6 +874,8 @@ namespace MapRenderer.Tests.Tiles
                 int  drawItems = view.BrgRenderer().DrawItemCount();
                 int  meshes    = CountMeshObjects();
                 Assert.GreaterOrEqual(drawItems, 2, "drive precondition: the tile has two layer meshes.");
+                int shownItems = ShownItemCount(view);
+                Assert.AreEqual(drawItems, shownItems, "drive precondition: every item of the revealed tile is shown.");
 
                 view.Config.FillTileBufferClip = 64.0;
                 bool swapped = false;
@@ -883,6 +885,8 @@ namespace MapRenderer.Tests.Tiles
                     view.AwaitInFlightMeshBuilds();
                     Assert.AreEqual(drawItems, view.BrgRenderer().DrawItemCount(),
                         $"frame {f}: the draw set must not change while the tile rebuilds, or at the swap.");
+                    Assert.AreEqual(shownItems, ShownItemCount(view),
+                        $"frame {f}: the old items stay shown until the new ones replace them in one flush.");
                     Mesh[] current = view.GetTileMeshes(TrackedTile);
                     swapped = current != null && current[0] != oldMesh && view.AllTilesSettled();
                 }
@@ -910,6 +914,9 @@ namespace MapRenderer.Tests.Tiles
                 view.Teardown();
             }
         }
+
+        private static int ShownItemCount(MapView view)
+            => view.BrgRenderer().DrawItemCount() - view.BrgRenderer().HiddenDrawItemCount();
 
         private static StyleDocument TwoFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,

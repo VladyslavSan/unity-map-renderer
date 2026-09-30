@@ -246,7 +246,7 @@ switch shows tiles that are already registered.
   per-tick budget from a tile being drawn. A prepared key whose tile enters the cover is dropped from the prepared list, and the cover
   merge desires it.
 - **Labels.** A tile's labels follow its geometry. `CollectLoadedTileKeys` reports every record that has a role, flagged `Shown` while the
-  record serves a revealed tile. A `Prepare` record is reported not shown, so the store keeps its labels warm and pinned and nothing draws. A record that was shown and becomes hidden
+  record serves a revealed tile that has revealed one of the record's own groups (§4.11). A `Prepare` record is reported not shown, so the store keeps its labels warm and pinned and nothing draws. A record that was shown and becomes hidden
   while it keeps a role fades its labels out as departing. The tile counts report `Display` records only, and `PreparingTileCount` counts `Prepare` records only. At the switch the record
   becomes shown and the store restores its entry (see labels-and-symbols § 1.5; § 4.8 for a hidden tile under a hold).
 
@@ -268,7 +268,7 @@ area is covered or leaves the view, so it never outlives what is on screen.
   - The **record count** `_shownCount` gives, for each serving key, how many revealed tiles it serves. A record is shown while its count is above zero.
     A source that serves a tile from its maxzoom ancestor has one record under several cover tiles, and that record hides only when the last of them is concealed.
   - The count exists whether or not the record does, so a record that registers late reads it at once. It is a function of the area set and the serving map, so a
-    record's teardown leaves it alone, and a source-slot remap rebuilds it. `_revealed` holds one mask per shown record. A full restyle clears all of these.
+    record's teardown leaves it alone, and a source-slot remap rebuilds it. `_revealed` holds, per shown record, the groups it shows (§4.11). A full restyle clears all of these.
 - **Ready.** A tile is ready when every source that serves it has its record built, or rebuilding with its previous geometry still
   registered, and not waiting to retry, the background included. A source that does not serve the tile counts for nothing. A missing record is not ready. An absent tile and a tile that
   cannot be decoded are built and empty, so they are ready.
@@ -279,8 +279,8 @@ area is covered or leaves the view, so it never outlives what is on screen.
   3. **Zoom in.** A shown tile whose cover areas are all covered gives way to the tiles that cover them. An area is covered when it has
      no relative in the cover, when its shallowest ready tile with a record (in the cover or not) exists, or when its four children are covered. A
      `Bridge` that is shown becomes a `Hold`, and steps 2 and 3 replace it later in the same way.
-  4. A cover tile that has no shown relative and has items shows itself. This covers a new area, which fills in layer by layer, and a
-     tile that returns before its release drains.
+  4. A cover tile that has no shown relative, and has items or is ready, shows its next ready groups (§4.11). This covers a new area, which fills in
+     group by group, and a tile that returns before its release drains.
 - **One flush.** Every show and hide of an Update reaches the backend in one `FlushVisibility`: one hide call and one show call. A handle
   queued both ways in one Update ends as its last call says, because the two batches are made disjoint before the calls. The
   outgoing items are hidden, not removed. The record loses its role and waits in the release queue, so a swing-back shows it again
@@ -318,6 +318,33 @@ it would replace stays drawn meanwhile.
 | Nested-free | Per layer slot, no two drawn tiles are an ancestor and a descendant. |
 | Fault retry | A network fault is not ready, and is fetched again through a release no sooner than the cooldown, while the record has a role. |
 | Batched visibility | An Update makes at most one show call and one hide call, whatever the number of tiles that swap. |
+
+### 4.11 Visibility groups
+
+A new tile appears in groups, so its background shows before its fills and its fills before its buildings. `MapViewConfig.VisibilityGroups` is an
+ordered list of groups of layer kinds. The default is the background, then fills and lines, then extrusions. A kind in no group falls in the last
+group, and a list with no group is one group of every layer. Groups past the 64th join the 64th. A change of the list takes full effect on the next
+`SetSources`: it does not move the items of a tile that is already shown.
+
+- **The maps.** `_groupOfSlot` gives the group of each render slot, and `_groupsOfSource` gives the groups each source fills. Slots never renumber, so a
+  restyle or a change of the list only rebuilds these two maps.
+- **Pending.** A record's `PendingGroups` is derived at each consume, from the payloads it has not consumed yet. A record that is not built and has not
+  consumed yet, or is missing, holds every group of its source. A record that waits to retry holds none, so a dead source never keeps another source's
+  groups hidden.
+- **Ready.** A group of a tile is ready when no record that serves the tile holds it. An empty group is ready.
+- **Reveal.** Step 4 of the swap reveals a cover tile's groups in order, and each group only after the one before it. The first group revealed marks the
+  tile shown. A swap reveals a tile whole: it never goes group by group. A group shows at once, whatever the earlier groups, when every record of it was concealed in this swap step for another tile while it showed that
+  group, so a record shared by overzoom does not blink across a pan. A group a record never showed is not carried. A record that rebakes with its previous
+  geometry registered counts as having items.
+- **Held tiles.** A tile that leaves the cover with some groups revealed keeps revealing the others as its records finish, so a source record that
+  finishes under a held area shows.
+- **Show.** A record shows its items of the groups its tile has revealed. A new item shows at the consume that registers it, when its group is revealed. A
+  record's labels are `Shown` once its tile has revealed one of the groups the record fills, so a source whose layers are all in later groups keeps its
+  labels hidden until then.
+- **Order inside a frame.** The background's slot is the last one, and `TilePrioritySorter` breaks a tie by the higher slot first, so the background builds first.
+- **Limitation.** A record that serves several tiles by overzoom shows the union of the groups of those tiles. A tile's groups do not reveal while one of its
+  records rebakes, except a group the swap carries across a pan (see Reveal). Old geometry keeps its group indices (`OldMaterialIndices`), so a reveal
+  during a rebake shows only the old items of the revealed groups.
 
 ## 5. The bake — what a prepared tile is a function of
 

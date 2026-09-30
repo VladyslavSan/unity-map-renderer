@@ -2666,7 +2666,7 @@ namespace MapRenderer.Tests.Tiles
         private static readonly TilePriorityContext Zero = ZeroContext();
 
         /// <summary>Every entry has an identical (zero) priority key, so the sort result is decided
-        /// ENTIRELY by the (Z, X, Y, Slot) tiebreak — the reason <see cref="TilePrioritySorter"/>'s private
+        /// ENTIRELY by the (Z, X, Y, Slot descending) tiebreak — the reason <see cref="TilePrioritySorter"/>'s private
         /// <c>IsAfter</c> exists. A sorter that drops the <c>Slot</c> tiebreak produces a nondeterministic
         /// paint order no count-based test observes.</summary>
         [Test]
@@ -2687,13 +2687,13 @@ namespace MapRenderer.Tests.Tiles
             {
                 Key(3, 9, 9, 9),
                 Key(5, 1, 2, 0),
-                Key(5, 1, 5, 0),
                 Key(5, 1, 5, 1),
+                Key(5, 1, 5, 0),
                 Key(5, 3, 2, 1),
             };
 
             CollectionAssert.AreEqual(expected, list,
-                "with every priority key tied at 0, the sort must order strictly by (Z, X, Y) then Slot.");
+                "with every priority key tied at 0, the sort must order by (Z, X, Y) then Slot DESCENDING, so the background slot goes first.");
         }
 
         /// <summary><c>_keys</c> exists solely to avoid a per-sort allocation. Warms the scratch buffer to
