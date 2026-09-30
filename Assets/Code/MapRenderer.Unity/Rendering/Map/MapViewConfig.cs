@@ -190,6 +190,17 @@ namespace MapRenderer.Unity.Rendering.Map
                  "levels during a pan under tilt. 0 = switch exactly at the switch point; clamped to [0, 0.5].")]
         public double TileDetailHysteresis = 0.05;
 
+        [Tooltip("How many zoom levels before a whole level the map starts preparing the next level's tiles (and the " +
+                 "parent's on the way out). They load hidden and show in one step when the level switches. 0.05 " +
+                 "covers a slow wheel zoom; a larger value prepares earlier and holds more tiles at once. Negative " +
+                 "starts after the whole level, -1 never prepares. Clamped to [-1, 1].")]
+        public double ZoomLevelPreload = 0.05;
+
+        [Tooltip("Most prepared-ahead tiles loading at once, apart from the tiles the map is drawing. Lower keeps " +
+                 "preparing from competing with the screen; higher prepares a whole level sooner. At least 1: a prepared " +
+                 "tile is never cancelled, so the set must stay bounded.")]
+        public int MaxConcurrentPrepareLoads = 4;
+
         [Tooltip("ProjectedArea only. 1.0 stops exactly at the target on-screen size; higher = coarser cover, " +
                  "fewer tiles, lower visual quality. It cannot be tuned to match ScreenSpaceLod — the two " +
                  "rules differ per tile, not by a constant.")]

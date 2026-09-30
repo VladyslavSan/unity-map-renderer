@@ -70,6 +70,13 @@ namespace MapRenderer.Unity.View
         /// <see cref="PendingTileCount"/>, disjoint from <see cref="GraphMeasureInFlight"/>.</summary>
         public int GraphWriteInFlight { get; init; }
 
+        /// <summary>Records prepared ahead of the level switch, finished or not: loaded, registered hidden, and not
+        /// counted in <see cref="LoadedTileCount"/> or <see cref="PendingTileCount"/>.</summary>
+        public int PreparingTileCount { get; init; }
+
+        /// <summary><c>SetItemsVisible</c> calls the last Update issued: at most one to show and one to hide.</summary>
+        public int VisibilityBatchesLastTick { get; init; }
+
         /// <summary>In-flight network fetches, summed across every source pipeline.</summary>
         public int InFlightFetches { get; init; }
 

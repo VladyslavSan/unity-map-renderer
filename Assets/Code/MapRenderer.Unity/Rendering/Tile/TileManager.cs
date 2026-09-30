@@ -93,6 +93,25 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             /// <summary>How much of each tile's MVT buffer the fill meshes keep before triangulation. A change starts a new bake revision; a tile already in cover rebuilds in the background and swaps in when ready.</summary>
             public TileBufferClip BufferClip;
+
+            /// <summary>Zoom levels before a level switch that the next level's tiles start preparing, clamped to [-1, 1].
+            /// -1 never prepares; 0 prepares only inside the hysteresis overhang; negative starts after the integer.</summary>
+            public double ZoomLevelPreload;
+
+            /// <summary>Concurrency cap on in-flight prepared-ahead records, apart from <see cref="MaxConcurrentTileLoads"/>. Clamped to at
+            /// least 1, because a prepared record is never cancelled and so the set must stay bounded.</summary>
+            public int MaxConcurrentPrepareLoads;
+
+            /// <summary>The selector's zoom-level hysteresis. A finished prepared tile stays loaded this far past the preload edge.</summary>
+            public double ZoomLevelHysteresis;
+        }
+
+        /// <summary>Why a record is loaded. A tile in the cover is <see cref="Display"/>; a tile prepared ahead of the level
+        /// switch is <see cref="Prepare"/>: registered hidden and reported to no subsystem. A record with neither is released.</summary>
+        private enum TileRole
+        {
+            Display = 0,
+            Prepare,
         }
 
         // ── Mesh build payload ──────────────────────────────────────────────────────────────
@@ -148,6 +167,9 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             /// <summary>The decode handle from the fetch — null before completion, and again once this record stops owning it.</summary>
             public SharedDisposable<IDecodedTile> Decode;
+
+            /// <summary>Why the record is loaded. The default is <see cref="TileRole.Display"/>; only a prepared-ahead admission differs.</summary>
+            public TileRole Role;
         }
 
         /// <summary>Composite key for the multi-source loaded table — value-type + <see cref="System.IEquatable{T}"/> avoids boxing on every Dictionary probe.</summary>
@@ -359,6 +381,22 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly List<LoadedKey>    _desired    = new(64);
         private readonly HashSet<LoadedKey> _desiredSet = new(64);
 
+        /// <summary>Prepare keys wanting to load, admitted under their own cap. A key leaves this list when it is admitted,
+        /// when its tile leaves the preload set, or when its tile enters the cover and the key moves to <see cref="_desired"/>.</summary>
+        private readonly List<LoadedKey>    _prepareDesired    = new(64);
+        private readonly HashSet<LoadedKey> _prepareDesiredSet = new(64);
+
+        /// <summary>The tiles prepared ahead (P), and the larger set that keeps a finished prepared record loaded (K). Rebuilt with each cover recompute.</summary>
+        private readonly HashSet<TileId> _preloadSet = new();
+        private readonly HashSet<TileId> _keepSet    = new();
+
+        /// <summary>Scratch for <see cref="RecomputeRoles"/> and <see cref="PartitionPrepareLast"/>; reused.</summary>
+        private readonly List<LoadedKey> _roleChanges    = new(32);
+        private readonly List<LoadedKey> _prepareScratch = new(32);
+
+        /// <summary>True while an in-flight prepared record outlives its sets, so the next Update checks again once it finishes.</summary>
+        private bool _rolePassPending;
+
         /// <summary>Sorts <see cref="_desired"/> and <see cref="_toRelease"/> by priority key.</summary>
         private readonly TilePrioritySorter _sorter = new();
 
@@ -378,9 +416,11 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         private readonly List<int> _consumeHandles = new(8);
 
-        /// <summary>Handles registered hidden and waiting for the next <see cref="FlushVisibility"/>.</summary>
+        /// <summary>Handles waiting to be shown, and handles waiting to be hidden, at the next <see cref="FlushVisibility"/>.</summary>
         private int[] _showBatch = new int[32];
         private int   _showBatchCount;
+        private int[] _hideBatch = new int[32];
+        private int   _hideBatchCount;
 
         // Parallel to the two above — each newly-built mesh's global material index, for the cache transfer.
         private readonly List<int> _consumeMatIndices = new(8);
@@ -493,6 +533,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Also invalidated: a desired key is only valid against this registry's indexing, rebuilt below with fresh slots.
             _desired.Clear();
             _desiredSet.Clear();
+            ClearPreloadState();
 
             // No purge here: CurrentStyle is a content-derived token (see its own doc), so a changed style
             // already partitions to a different token and an unchanged one is safe to keep and reuse.
@@ -555,6 +596,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             _releaseQueued.Clear();
             _desired.Clear();
             _desiredSet.Clear();
+            ClearPreloadState();
+        }
+
+        /// <summary>Drops the prepared-ahead bookkeeping: its keys are only valid against the slot indexing it was built for. The next cover recompute rebuilds it.</summary>
+        private void ClearPreloadState()
+        {
+            _prepareDesired.Clear();
+            _prepareDesiredSet.Clear();
+            _preloadSet.Clear();
+            _keepSet.Clear();
+            _rolePassPending = false;
         }
 
         /// <summary><see cref="RestyleSourcesInPlace"/>'s backend step. This method is never reached
@@ -573,6 +625,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             _instanced?.Dispose();
             _showBatchCount = 0; // handles of the disposed backend mean nothing to the new one
+            _hideBatchCount = 0;
             _instanced = backend switch
             {
                 Map.RenderBackend.Brg =>
@@ -638,9 +691,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal int WiredFeatureSourceCount => _sources.RealSourceCount;
 
         /// <summary>Loaded/loading (tile, source) records — what the per-frame loops iterate.</summary>
-        internal int LoadedTileCount => _loaded.Count;
+        internal int LoadedTileCount => CountByRole(TileRole.Display);
 
-        /// <summary>The active set <see cref="AdmitFromDesired"/> bounds against the concurrency cap — admitted, not-yet-built records.</summary>
+        /// <summary>The active set <see cref="AdmitFromDesired"/> bounds against the concurrency cap — admitted, not-yet-built records in the cover.</summary>
         internal int ActiveLoadCount => CountActiveLoads();
 
         /// <summary>(tile,source) keys wanting to load but not yet admitted.</summary>
@@ -650,21 +703,33 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// will admit, or <see cref="TileId"/>'s default if the list is empty.</summary>
         internal TileId DesiredHeadTile => _desired.Count > 0 ? _desired[0].Tile : default;
 
-        /// <summary>Fills <paramref name="into"/> with the current loaded (source, tile) membership. Allocation-free.</summary>
+        /// <summary>Fills <paramref name="into"/> with the (source, tile) membership of the records in the cover. A record
+        /// prepared ahead is left out, so the symbol subsystem neither draws nor releases it. Allocation-free.</summary>
         internal void CollectLoadedTileKeys(List<LoadedTileKey> into)
         {
             into.Clear();
             foreach (var kv in _loaded)
             {
+                if (kv.Value.Role != TileRole.Display) continue;
                 into.Add(new LoadedTileKey(_sources.SourceIdOf(kv.Key.Slot), kv.Key.Tile));
             }
         }
 
-        /// <summary>Every currently-admitted tile's <see cref="TileId"/> (may repeat across sources).</summary>
+        /// <summary>Every tile in the cover with a record, as a <see cref="TileId"/> (may repeat across sources).</summary>
         internal void CollectLoadedTileIds(List<TileId> into)
         {
             into.Clear();
-            foreach (var kv in _loaded) into.Add(kv.Key.Tile);
+            foreach (var kv in _loaded)
+                if (kv.Value.Role == TileRole.Display) into.Add(kv.Key.Tile);
+        }
+
+        /// <summary>Records in <see cref="_loaded"/> with <paramref name="role"/>, recomputed fresh each call.</summary>
+        private int CountByRole(TileRole role)
+        {
+            int n = 0;
+            foreach (var kv in _loaded)
+                if (kv.Value.Role == role) n++;
+            return n;
         }
 
         /// <summary>Every desired-but-not-admitted tile's <see cref="TileId"/>, in priority order.</summary>
@@ -702,7 +767,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>(Tile, source) records fully released in the most recent <see cref="Update"/>.</summary>
         internal int TilesReleasedLastTick { get; private set; }
 
-        /// <summary><c>SetItemsVisible</c> calls issued by the most recent <see cref="Update"/>: 0 or 1.</summary>
+        /// <summary><c>SetItemsVisible</c> calls issued by the most recent <see cref="Update"/>: at most one to show and one to hide.</summary>
         internal int VisibilityBatchesLastTick { get; private set; }
 
         /// <summary>Current deferred-release backlog depth (records awaiting <see cref="DrainReleaseQueue"/>).</summary>
@@ -725,9 +790,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             int prologue = 0;
             int graphMeasure = 0;
             int graphWrite = 0;
+            int display = 0;
+            int preparing = 0;
             foreach (var kv in _loaded)
             {
                 LoadedTile lt = kv.Value;
+                if (lt.Role == TileRole.Prepare) { preparing++; continue; }
+                display++;
                 if (lt.Built) continue;
                 pending++;
                 if (lt.Step == BuildStep.Write && lt.Graph.IsStepComplete)
@@ -747,7 +816,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 CoverMinZoom           = minZ,
                 CoverMaxZoom           = maxZ,
                 FractionalZoom         = _coverGate.LastZoom,
-                LoadedTileCount        = _loaded.Count,
+                LoadedTileCount        = display,
+                PreparingTileCount     = preparing,
+                VisibilityBatchesLastTick = VisibilityBatchesLastTick,
                 PendingTileCount       = pending,
                 ConsumeBacklog         = backlog,
                 PrologueInFlight       = prologue,
@@ -812,7 +883,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             bool anyGeom = false;
             foreach (var kv in _loaded)
             {
-                if (!kv.Key.Tile.Equals(id)) continue;
+                if (!kv.Key.Tile.Equals(id) || kv.Value.Role != TileRole.Display) continue;
                 any = true;
                 if (!kv.Value.Built) return false;
                 if (kv.Value.DrawHandles != null || kv.Value.Meshes != null) anyGeom = true;
@@ -860,11 +931,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal Bounds ComputeSceneBounds(float tileSizeWorld)
             => _instanced != null ? _instanced.ComputeSceneBounds(tileSizeWorld) : default;
 
-        /// <summary>Test-only: true once every loaded tile has finished building and <see cref="_desired"/>
-        /// is empty — a <c>_loaded</c>-only check would miss cap-deferred tiles, which have no record until admitted.</summary>
+        /// <summary>Test-only: true once every loaded tile, in any role, has finished building and both desired lists
+        /// are empty — a <c>_loaded</c>-only check would miss cap-deferred tiles, which have no record until admitted.</summary>
         internal bool AllTilesSettled()
         {
-            if (_desired.Count > 0) return false;
+            if (_desired.Count > 0 || _prepareDesired.Count > 0) return false;
 
             foreach (var kv in _loaded)
             {
@@ -935,14 +1006,16 @@ namespace MapRenderer.Unity.Rendering.Tile
                 for (int i = 0; i < _cover.Count; i++)
                     _coverSet.Add(_cover[i]);
 
+                ComputePreloadSets(in cfg);
+
                 // Merge, not rebuild — newly-covered keys join the desired list; admission below is priority-ordered and capped.
                 for (int i = 0; i < _cover.Count; i++)
                 {
                     TileId id = _cover[i];
-                    for (int s = 0; s < _sources.Count; s++)
+                    for (int slot = 0; slot < _sources.Count; slot++)
                     {
-                        if (!_sources.AdmitsTile(s, id)) continue; // source doesn't serve this zoom/bounds
-                        var key = new LoadedKey(id, s);
+                        if (!_sources.AdmitsTile(slot, id)) continue; // source doesn't serve this zoom/bounds
+                        var key = new LoadedKey(ServingTile(id, slot), slot);
                         if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
                         if (_desiredSet.Add(key)) _desired.Add(key);
                     }
@@ -959,28 +1032,23 @@ namespace MapRenderer.Unity.Rendering.Tile
                     }
                 }
 
-                // Records whose tile left the cover are enqueued for deferred release — _releaseQueued dedups repeats.
-                _toRelease.Clear();
-                foreach (var kv in _loaded)
-                {
-                    if (!_coverSet.Contains(kv.Key.Tile))
-                        _toRelease.Add(kv.Key);
-                }
+                MergePrepareDesired();
 
-                for (int i = 0; i < _toRelease.Count; i++)
-                {
-                    LoadedKey key = _toRelease[i];
-                    if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);
-                }
+                // Re-role every record, then queue those left with no role for deferred release.
+                RecomputeRoles();
 
                 _coverGate.Commit(in cam, in cfg);
 
                 sCoverSel.Dispose();
             }
 
+            // A prepared record that outlived its sets finishes here, then is released.
+            if (_rolePassPending) RecomputeRoles();
+
             // Runs every Update, clean or dirty — admission is not gated on _coverGate, so entries drain once the camera stills.
             AdmitFromDesired(in priorityCtx, cfg.MaxConcurrentTileLoads);
-            if (_rebakePending) MarkStaleRecords(cfg.MaxConcurrentTileLoads, in priorityCtx);
+            AdmitFromPrepareDesired(in priorityCtx, cfg.MaxConcurrentPrepareLoads);
+            if (_rebakePending) MarkStaleRecords(cfg.MaxConcurrentTileLoads, cfg.MaxConcurrentPrepareLoads, in priorityCtx);
             PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick, in priorityCtx);
 
             // Drain a budgeted slice of the deferred-release backlog EVERY Update, after admission/pump.
@@ -1013,6 +1081,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Only .Projection is read on this uncapped path — cap == int.MaxValue skips the priority sort entirely.
             var admitCtx = new TilePriorityContext(_projection, default, default, default, default);
             AdmitFromDesired(in admitCtx, int.MaxValue);
+            AdmitFromPrepareDesired(in admitCtx, int.MaxValue);
 
             // Collect all unsettled records.
             var unsettled = new List<LoadedKey>(8);
@@ -1189,8 +1258,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                     _toRelease.Add(kv.Key);
             }
 
-            // Nearest-center-first paint order — the same priority the admission gate uses.
+            // Nearest-center-first paint order — the same priority the admission gate uses. Records in the cover go first
+            // (stable), so a prepared record never takes a per-tick budget from one.
             _sorter.Sort(_toRelease, in priorityCtx);
+            PartitionPrepareLast(_toRelease);
 
             int pending          = 0;
             int meshesConsumed   = 0;
@@ -1305,7 +1376,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     Processing.ISymbolTileWorkerPass symbolPass = null;
                     try
                     {
-                        if (!lt.Rebaking) symbolPass = SymbolWorkerFactory?.TryBeginBuild(sourceId, id); // a rebake changes no symbol input
+                        if (!lt.Rebaking) symbolPass = SymbolWorkerFactory?.TryBeginBuild(sourceId, id, offScreen: lt.Role == TileRole.Prepare); // a rebake changes no symbol input
                     }
                     catch (System.Exception ex)
                     {
@@ -1568,7 +1639,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
-            QueueShow(_consumeHandles); // only this call's handles: earlier calls already queued theirs
+            if (lt.Role == TileRole.Display) QueueShow(_consumeHandles); // only this call's handles: earlier calls already queued theirs; a prepared tile stays hidden
 
             bool complete = cursor >= denseCount;
             if (complete)
@@ -1638,8 +1709,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 LoadedKey key = _releaseQueue.Dequeue();
                 _releaseQueued.Remove(key);
-                // Re-validate: back in cover, or already gone (restyle) → skip without spending budget.
-                if (_coverSet.Contains(key.Tile) || !_loaded.ContainsKey(key)) continue;
+                // Re-validate: back in a role, or already gone (restyle) → skip without spending budget.
+                if (!_loaded.TryGetValue(key, out LoadedTile queued) || TryResolveRole(in key, in queued, out _)) continue;
                 ReleaseTile(key);
                 released++;
             }
@@ -1706,19 +1777,25 @@ namespace MapRenderer.Unity.Rendering.Tile
             lt.MaterialIndices = null;
         }
 
-        /// <summary>Records in <see cref="_loaded"/> not yet <see cref="LoadedTile.Built"/>, recomputed fresh
-        /// each call rather than tracked incrementally — a cached counter would need write-back on every mutation site.</summary>
-        private int CountActiveLoads()
+        /// <summary>Records in the cover not yet <see cref="LoadedTile.Built"/>, recomputed fresh each call rather than
+        /// tracked incrementally — a cached counter would need write-back on every mutation site.</summary>
+        private int CountActiveLoads() => CountInFlight(TileRole.Display);
+
+        /// <summary>Prepared-ahead records not yet built: what <see cref="TileSelectionConfig.MaxConcurrentPrepareLoads"/> bounds.</summary>
+        private int CountPrepareLoads() => CountInFlight(TileRole.Prepare);
+
+        /// <summary>Records with <paramref name="role"/> that are not yet <see cref="LoadedTile.Built"/>.</summary>
+        private int CountInFlight(TileRole role)
         {
             int n = 0;
             foreach (var kv in _loaded)
-                if (!kv.Value.Built) n++;
+                if (!kv.Value.Built && kv.Value.Role == role) n++;
             return n;
         }
 
         /// <summary>Admits one desired key: probes the cache (a hit builds synchronously without occupying
         /// an active slot), else kicks a fetch. Shared by the capped per-Update gate and the uncapped drain.</summary>
-        private void AdmitTile(TileId id, int slot, IProjection projection)
+        private void AdmitTile(TileId id, int slot, IProjection projection, TileRole role = TileRole.Display)
         {
             var key = new LoadedKey(id, slot);
 
@@ -1733,6 +1810,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     FetchCompleted   = true,
                     Built            = false,
                     TileOriginRender = origin,
+                    Role             = role,
                 };
                 return;
             }
@@ -1760,7 +1838,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (allCached)
             {
                 _prepared.Hits++;
-                _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIds);
+                _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIds, role);
                 // A cache HIT re-shows the tile with NO fetch; the symbol subsystem PULLS it back in.
             }
             else
@@ -1777,6 +1855,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     Request          = fetchReq,
                     Built            = false,
                     TileOriginRender = origin,
+                    Role             = role,
                 };
             }
         }
@@ -1820,13 +1899,170 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (admitted > 0) _desired.RemoveRange(0, admitted);
         }
 
+        /// <summary>Admits prepared-ahead keys while the in-flight prepared records stay under <paramref name="cap"/>,
+        /// so preparing never takes a slot from a tile in the cover. Runs every Update and in the drain.</summary>
+        private void AdmitFromPrepareDesired(in TilePriorityContext priorityCtx, int cap)
+        {
+            if (_prepareDesired.Count == 0) return;
+            cap = math.max(cap, 1);
+            if (cap < int.MaxValue) _sorter.Sort(_prepareDesired, in priorityCtx);
+
+            int active   = CountPrepareLoads();
+            int admitted = 0;
+            while (admitted < _prepareDesired.Count && active < cap)
+            {
+                LoadedKey key = _prepareDesired[admitted];
+                _prepareDesiredSet.Remove(key);
+                admitted++;
+                AdmitTile(key.Tile, key.Slot, priorityCtx.Projection, TileRole.Prepare);
+                if (!_loaded[key].Built) active++; // a cache hit settles at once and takes no slot
+            }
+
+            if (admitted > 0) _prepareDesired.RemoveRange(0, admitted);
+        }
+
+        /// <summary>The record tile that serves cover tile <paramref name="cover"/> for <paramref name="slot"/>: the tile itself.
+        /// The slot parameter is the seam UMR-256 uses to serve a source above its own maxzoom.</summary>
+        private static TileId ServingTile(TileId cover, int slot) => cover;
+
+        /// <summary>Fills <see cref="_preloadSet"/> (P) and <see cref="_keepSet"/> (K) from the selector's held level and the
+        /// cover: the children of each level-<c>L</c> cover tile once the zoom is within the preload lead of <c>L + 1</c>, and its
+        /// parent while it is within the lead above <c>L</c>. K uses the lead plus the zoom-level hysteresis. Both are empty
+        /// without the prepared-tile cache, which is where a prepared tile goes when it is released.</summary>
+        private void ComputePreloadSets(in TileSelectionConfig cfg)
+        {
+            _preloadSet.Clear();
+            _keepSet.Clear();
+            if (!_cacheEnabled) return;
+
+            TargetLevel target = Selector.LastTarget;
+            if (target.Level < 0) return;
+
+            double lead = math.clamp(cfg.ZoomLevelPreload, -1.0, 1.0);
+            double keep = lead + math.clamp(cfg.ZoomLevelHysteresis, 0.0, FrustumTileSelector.MaxZoomLevelHysteresis);
+            for (int i = 0; i < _cover.Count; i++)
+            {
+                TileId tile = _cover[i];
+                if (tile.Z != target.Level) continue;
+                AddPreload(tile, in target, lead, _preloadSet);
+                AddPreload(tile, in target, keep, _keepSet);
+            }
+        }
+
+        /// <summary>Adds to <paramref name="into"/> the children and parent of <paramref name="tile"/> that <paramref name="lead"/> puts
+        /// in reach of the current zoom, leaving out tiles already in the cover.</summary>
+        private void AddPreload(TileId tile, in TargetLevel target, double lead, HashSet<TileId> into)
+        {
+            if (target.Continuous >= target.Level + 1 - lead && target.Level + 1 <= target.MaxLevel)
+            {
+                for (int child = 0; child < 4; child++)
+                {
+                    var c = new TileId { Z = tile.Z + 1, X = tile.X * 2 + (child & 1), Y = tile.Y * 2 + (child >> 1) };
+                    if (!_coverSet.Contains(c)) into.Add(c);
+                }
+            }
+
+            if (target.Continuous < target.Level + lead && target.Level - 1 >= target.MinLevel && tile.Z > 0)
+            {
+                TileId parent = TileAncestry.Parent(tile);
+                if (!_coverSet.Contains(parent)) into.Add(parent);
+            }
+        }
+
+        /// <summary>Drops prepare keys whose tile left P, which includes one that entered the cover (the cover merge already
+        /// desired it), then adds a key for each P tile and admitting slot that has no record.</summary>
+        private void MergePrepareDesired()
+        {
+            for (int i = _prepareDesired.Count - 1; i >= 0; i--)
+            {
+                LoadedKey key = _prepareDesired[i];
+                if (!_preloadSet.Contains(key.Tile)) // P excludes the cover, so a tile that entered it is dropped here too
+                {
+                    _prepareDesiredSet.Remove(key);
+                    _prepareDesired.RemoveAt(i);
+                }
+            }
+
+            foreach (TileId tile in _preloadSet)
+            {
+                for (int slot = 0; slot < _sources.Count; slot++)
+                {
+                    if (!_sources.AdmitsTile(slot, tile)) continue;
+                    var key = new LoadedKey(tile, slot);
+                    if (_loaded.ContainsKey(key)) continue;
+                    if (_prepareDesiredSet.Add(key)) _prepareDesired.Add(key);
+                }
+            }
+        }
+
+        /// <summary>True iff the record has a reason to stay loaded, and which: a tile in the cover is shown, a tile in P is
+        /// prepared, and a prepared record stays while it is unfinished or inside K. An in-flight prepared record is never
+        /// cancelled for leaving P.</summary>
+        private bool TryResolveRole(in LoadedKey key, in LoadedTile lt, out TileRole role)
+        {
+            if (_coverSet.Contains(key.Tile)) { role = TileRole.Display; return true; }
+            role = TileRole.Prepare;
+            if (_preloadSet.Contains(key.Tile)) return true;
+            return lt.Role == TileRole.Prepare && (!lt.Built || _keepSet.Contains(key.Tile));
+        }
+
+        /// <summary>Gives every record its role: a record that entered the cover is shown, one that left it for P is hidden,
+        /// and one with no role joins the deferred-release queue. Runs on each cover recompute, and again while a prepared
+        /// record outlives its sets.</summary>
+        private void RecomputeRoles()
+        {
+            _roleChanges.Clear();
+            _toRelease.Clear();
+            _rolePassPending = false;
+            foreach (var kv in _loaded)
+            {
+                LoadedTile lt = kv.Value;
+                if (!TryResolveRole(kv.Key, in lt, out TileRole role)) _toRelease.Add(kv.Key);
+                else if (role != lt.Role) _roleChanges.Add(kv.Key);
+                else if (role == TileRole.Prepare && !lt.Built && !_preloadSet.Contains(kv.Key.Tile) && !_keepSet.Contains(kv.Key.Tile))
+                    _rolePassPending = true;
+            }
+
+            for (int i = 0; i < _roleChanges.Count; i++)
+            {
+                LoadedKey  key = _roleChanges[i];
+                LoadedTile lt  = _loaded[key];
+                TryResolveRole(in key, in lt, out TileRole role);
+                lt.Role = role;
+                if (role == TileRole.Display) ShowRecord(in lt);
+                else HideRecord(in lt);
+                _loaded[key] = lt;
+            }
+
+            for (int i = 0; i < _toRelease.Count; i++)
+            {
+                LoadedKey key = _toRelease[i];
+                if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);
+            }
+        }
+
+        /// <summary>Stable partition: records in the cover first, prepared records after, each group keeping its order.</summary>
+        private void PartitionPrepareLast(List<LoadedKey> keys)
+        {
+            _prepareScratch.Clear();
+            int write = 0;
+            for (int read = 0; read < keys.Count; read++)
+            {
+                LoadedKey key = keys[read];
+                if (_loaded[key].Role == TileRole.Prepare) _prepareScratch.Add(key);
+                else keys[write++] = key;
+            }
+
+            for (int i = 0; i < _prepareScratch.Count; i++) keys[write++] = _prepareScratch[i];
+        }
+
         /// <summary>Sorts <see cref="_desired"/> in place by the shared priority (helper so call sites read
         /// as intent, not mechanism).</summary>
         private void SortDesiredByPriority(in TilePriorityContext ctx) => _sorter.Sort(_desired, in ctx);
 
         /// <summary>Builds a fully-Built record directly from a cache hit — TryTakes each layer's mesh and
-        /// re-registers the non-null ones. No fetch, decode, build, or upload.</summary>
-        private LoadedTile BuildTileFromCache(TileId id, double3 origin, List<int> denseLayerIds)
+        /// re-registers the non-null ones, shown only for a <paramref name="role"/> in the cover. No fetch, decode, build, or upload.</summary>
+        private LoadedTile BuildTileFromCache(TileId id, double3 origin, List<int> denseLayerIds, TileRole role)
         {
             _consumeMeshes.Clear();
             _consumeHandles.Clear();
@@ -1847,11 +2083,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
 
             // A cache hit only probes at the current revision, so re-stamp it here — a later ReleaseTile must Put() under that same revision.
-            var lt = new LoadedTile { Built = true, FetchCompleted = true, TileOriginRender = origin, BakeRevision = _bakeRevision };
+            var lt = new LoadedTile { Built = true, FetchCompleted = true, TileOriginRender = origin, BakeRevision = _bakeRevision, Role = role };
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
-            ShowRecord(in lt);
+            if (role == TileRole.Display) ShowRecord(in lt); // a prepared tile stays hidden until it enters the cover
             return lt;
         }
 
@@ -1863,34 +2099,65 @@ namespace MapRenderer.Unity.Rendering.Tile
             QueueShow(lt.OldDrawHandles);
         }
 
+        /// <summary>Queues a record's current and, while it rebakes, previous draw handles to hide at the next flush.</summary>
+        private void HideRecord(in LoadedTile lt)
+        {
+            QueueHide(lt.DrawHandles);
+            QueueHide(lt.OldDrawHandles);
+        }
+
+        /// <summary>Queues <paramref name="handles"/> to hide at the next <see cref="FlushVisibility"/>.</summary>
+        private void QueueHide(int[] handles)
+        {
+            if (handles == null) return;
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (_hideBatchCount == _hideBatch.Length) System.Array.Resize(ref _hideBatch, _hideBatch.Length * 2);
+                _hideBatch[_hideBatchCount++] = handles[i];
+            }
+        }
+
+        /// <summary>Queues <paramref name="handles"/> to show at the next <see cref="FlushVisibility"/>.</summary>
         private void QueueShow(int[] handles)
         {
             if (handles == null) return;
             for (int i = 0; i < handles.Length; i++) QueueShow(handles[i]);
         }
 
+        /// <summary>Queues every handle in <paramref name="handles"/> to show at the next flush.</summary>
         private void QueueShow(List<int> handles)
         {
             for (int i = 0; i < handles.Count; i++) QueueShow(handles[i]);
         }
 
+        /// <summary>Queues one handle to show at the next flush.</summary>
         private void QueueShow(int handle)
         {
             if (_showBatchCount == _showBatch.Length) System.Array.Resize(ref _showBatch, _showBatch.Length * 2);
             _showBatch[_showBatchCount++] = handle;
         }
 
-        /// <summary>Shows every queued item in ONE backend call, so a tile with many layers costs one batch. Runs at the
-        /// end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
+        /// <summary>Hides every queued item in ONE backend call, then shows every queued item in ONE more, so a tile with many
+        /// layers costs one batch each way. Runs at the end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
         private void FlushVisibility()
         {
-            if (_showBatchCount == 0) return;
             if (_instanced != null)
             {
-                _instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_showBatch, 0, _showBatchCount), true);
-                VisibilityBatchesLastTick++;
+                if (_hideBatchCount > 0)
+                {
+                    _instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_hideBatch, 0, _hideBatchCount), false);
+                    VisibilityBatchesLastTick++;
+                }
+
+                if (_showBatchCount > 0)
+                {
+                    _instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_showBatch, 0, _showBatchCount), true);
+                    VisibilityBatchesLastTick++;
+                }
             }
-            _showBatchCount = 0; // the queue is dropped when _instanced is null: no backend holds those handles
+
+            _hideBatchCount = 0; // the queues are dropped when _instanced is null: no backend holds those handles
+            _showBatchCount = 0;
         }
 
         /// <summary>Tears down a record's RENDER state: destroys its meshes, unregisters its draw items, and stashes
@@ -2001,7 +2268,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Starts a rebuild of every in-cover record baked at an older revision, nearest first, while
         /// active loads stay under <paramref name="loadCap"/>. The old geometry keeps drawing until
         /// <see cref="ConsumeMeshBuild"/> swaps it. Clears <see cref="_rebakePending"/> once every record is current.</summary>
-        private void MarkStaleRecords(int loadCap, in TilePriorityContext priorityCtx)
+        private void MarkStaleRecords(int loadCap, int prepareCap, in TilePriorityContext priorityCtx)
         {
             _toRelease.Clear();
             bool anyOutstanding = false;
@@ -2021,7 +2288,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (lt.Meshes == null && lt.Decode == null) continue;
 
                 anyOutstanding = true;
-                if (_coverSet.Contains(kv.Key.Tile) && !_releaseQueued.Contains(kv.Key))
+                if ((lt.Role == TileRole.Prepare || _coverSet.Contains(kv.Key.Tile)) && !_releaseQueued.Contains(kv.Key))
                     _toRelease.Add(kv.Key);
             }
 
@@ -2029,12 +2296,18 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (_toRelease.Count == 0) return;
 
             _sorter.Sort(_toRelease, in priorityCtx);
-            int cap    = loadCap > 0 ? loadCap : int.MaxValue;
-            int active = CountActiveLoads();
-            for (int i = 0; i < _toRelease.Count && active < cap; i++)
+            PartitionPrepareLast(_toRelease);
+            int cap            = loadCap > 0 ? loadCap : int.MaxValue;
+            int prepareCapAct  = math.max(prepareCap, 1);
+            int active         = CountActiveLoads();
+            int activePrepare  = CountPrepareLoads();
+            for (int i = 0; i < _toRelease.Count; i++)
             {
                 LoadedKey  key = _toRelease[i];
                 LoadedTile lt  = _loaded[key];
+                bool prepared  = lt.Role == TileRole.Prepare;
+                // A clip change never lets a prepared rebake take a slot from one in the cover.
+                if (prepared ? activePrepare >= prepareCapAct : active >= cap) continue;
                 if (lt.Meshes != null)
                 {
                     lt.OldMeshes      = lt.Meshes;
@@ -2055,7 +2328,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 }
 
                 _loaded[key] = lt;
-                active++;
+                if (prepared) activePrepare++;
+                else active++;
             }
         }
 

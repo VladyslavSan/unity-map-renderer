@@ -151,16 +151,18 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         /// <summary>Spy <see cref="ISymbolTileWorkerFactory"/> — records every <c>TryBeginBuild</c> call and
         /// every pass it issues. <see cref="ParticipatesFor"/> gates which sources get a non-null pass;
         /// <see cref="PassFactory"/> lets a test substitute the pass (e.g. a throwing spy).</summary>
-        private sealed class SpySymbolTileWorkerFactory : ISymbolTileWorkerFactory
+        internal sealed class SpySymbolTileWorkerFactory : ISymbolTileWorkerFactory
         {
             public readonly List<(string SourceId, TileId Tile)> BeginBuildCalls = new();
+            public readonly List<bool> OffScreenCalls = new();
             public readonly List<SpySymbolTileWorkerPass> IssuedPasses = new();
             public Func<string, bool> ParticipatesFor = _ => true;
             public Func<string, TileId, SpySymbolTileWorkerPass> PassFactory;
 
-            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
+            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen)
             {
                 BeginBuildCalls.Add((sourceId, tile));
+                OffScreenCalls.Add(offScreen);
                 if (!ParticipatesFor(sourceId)) return null;
                 SpySymbolTileWorkerPass pass = PassFactory != null
                     ? PassFactory(sourceId, tile)
@@ -174,7 +176,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             public bool SymbolsCachedFor(string sourceId, TileId tile) => true;
         }
 
-        private sealed class SpySymbolTileWorkerPass : ISymbolTileWorkerPass
+        internal sealed class SpySymbolTileWorkerPass : ISymbolTileWorkerPass
         {
             public readonly string SourceId;
             public readonly TileId Tile;
@@ -196,7 +198,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        private static StyleDocument FillAndSymbolStyle() => TestStyle.Document(@"{
+        internal static StyleDocument FillAndSymbolStyle() => TestStyle.Document(@"{
             ""version"": 8,
             ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
             ""layers"": [

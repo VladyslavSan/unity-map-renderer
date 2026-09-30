@@ -47,6 +47,12 @@ namespace MapRenderer.App
         [Tooltip("Loaded records not yet Built — the load-progress lag.")]
         public int PendingTileCount;
 
+        [Tooltip("Records prepared ahead of the level switch: loaded and registered hidden, not counted above.")]
+        public int PreparingTileCount;
+
+        [Tooltip("Backend show/hide batches the last update issued (at most one each).")]
+        public int VisibilityBatchesLastTick;
+
         [Tooltip("Loaded records whose mesh build is complete but consume is budget-deferred.")]
         public int ConsumeBacklog;
 
@@ -188,6 +194,8 @@ namespace MapRenderer.App
             LoadedTileCount        = snap.LoadedTileCount;
             PendingTileCount       = snap.PendingTileCount;
             ConsumeBacklog         = snap.ConsumeBacklog;
+            PreparingTileCount     = snap.PreparingTileCount;
+            VisibilityBatchesLastTick = snap.VisibilityBatchesLastTick;
             PrologueInFlight       = snap.PrologueInFlight;
             GraphMeasureInFlight   = snap.GraphMeasureInFlight;
             GraphWriteInFlight     = snap.GraphWriteInFlight;

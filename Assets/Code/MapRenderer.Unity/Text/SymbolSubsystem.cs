@@ -430,14 +430,14 @@ namespace MapRenderer.Unity.Text
         /// <summary><see cref="Processing.ISymbolTileWorkerFactory"/> entry — MAIN THREAD, from TileManager's
         /// per-tile kick: begin a symbol build for this <paramref name="sourceId"/>/<paramref name="tile"/> if it
         /// has symbol layers and the glyph pipeline is live; null otherwise. Captures the camera zoom/projection
-        /// at the kick.</summary>
-        public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
+        /// at the kick. <paramref name="offScreen"/> opens the store entry on the kept-warm side.</summary>
+        public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen = false)
         {
             if (_builder == null) return null;
             if (!_layersBySource.TryGetValue(sourceId, out List<int> layerIndices)) return null;
 
             var key = new SymbolTileStore.Key(sourceId, tile);
-            int gen = _store.BeginBuild(key); // reserve the active slot (collected as empty until committed)
+            int gen = _store.BeginBuild(key, cached: offScreen); // reserve the slot (collected as empty until committed)
 
             // Capture the main-thread inputs BEFORE the pool-side worker step (Unity APIs are main-thread only):
             // this build's builder, the camera zoom + projection, and one processor per style layer.

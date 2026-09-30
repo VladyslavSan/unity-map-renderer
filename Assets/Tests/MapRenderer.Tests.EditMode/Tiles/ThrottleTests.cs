@@ -1926,12 +1926,15 @@ namespace MapRenderer.Tests.Tiles
             private readonly Dictionary<TileId, UniTaskCompletionSource<TileResponse>> _gates = new();
             public readonly TestDataSource Source;
 
+            /// <summary>Every tile the source was asked for, in order; a tile asked for twice shows twice.</summary>
+            public readonly List<TileId> Requested = new();
+
             public GatedSource()
             {
                 Source = new TestDataSource((id, ct) =>
                 {
                     var g = new UniTaskCompletionSource<TileResponse>();
-                    lock (_gates) _gates[id] = g;
+                    lock (_gates) { _gates[id] = g; Requested.Add(id); }
                     return g.Task;
                 });
             }
@@ -2061,21 +2064,31 @@ namespace MapRenderer.Tests.Tiles
         // ── concurrency cap respected across a full (eventually-settling) load ──────────────────────
 
         /// <summary>
-        /// Admission holds the active (admitted, not-yet-Built) set at the concurrency cap. Without a
-        /// cap, a cover-wide cover/zoom transition would fetch every newly-entering tile in one Update, and
-        /// the active set would jump straight to the full cover size. A per-tile GATE holds every fetch open
-        /// (never completing) so the active set can only GROW via admission, never shrink via completion —
-        /// isolating the cap.
+        /// Admission holds the active (admitted, not-yet-Built) set at the concurrency cap. A per-tile GATE holds every
+        /// fetch open (never completing), so the active set can only GROW via admission, isolating the cap. Tiles of
+        /// the level above prepare under their own cap, which takes no slot from the cover and no consume budget from
+        /// it. A prepare key whose tile leaves the preload set, or enters the cover, before it was admitted is never
+        /// fetched twice and never leaks a record.
         /// </summary>
         [Test]
         public void ActiveLoadCount_NeverExceedsTheConcurrencyCap_AcrossAFullLoad()
         {
+            RunConcurrencyCapScenario(zoomAfterSaturation: null);
+            RunConcurrencyCapScenario(zoomAfterSaturation: 6.2); // out of the preload set: the two unadmitted keys are dropped
+            RunConcurrencyCapScenario(zoomAfterSaturation: 5.9); // into the cover: the two unadmitted keys move to the cover's list
+        }
+
+        private void RunConcurrencyCapScenario(double? zoomAfterSaturation)
+        {
             const int cap = 4;
+            const int prepareCap = 2;
             var gated = new GatedSource();
             var go    = Track(new GameObject("ConcurrencyCap"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.TileSelection.MinZoom = 6;
-            view.Config.TileSelection.MaxZoom = 6; // a cover clearly larger than the cap
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 6; // a cover clearly larger than the cap; level 5 is prepared at zoom 6.0
+            view.Config.TileSelection.MaxConcurrentPrepareLoads = prepareCap;
             view.WithTestCamera(TestViewportPx);
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick      = 64;
@@ -2084,7 +2097,8 @@ namespace MapRenderer.Tests.Tiles
 
             try
             {
-                view.LoadTestStyle(gated.Source, Cam(0, 0, 6.0), style: FillStyle());
+                // Centred on a level-5 tile, so that tile is the nearest prepared one and, unsorted, would be consumed first.
+                view.LoadTestStyle(gated.Source, Cam(5.625, 5.616, 6.0), style: FillStyle());
 
                 int maxObservedActive = 0;
                 for (int f = 0; f < 20; f++)
@@ -2102,6 +2116,32 @@ namespace MapRenderer.Tests.Tiles
                     "exactly the cap and stop there (not fewer — a starved cap is also a failure).");
                 Assert.AreEqual(cap, view.ActiveLoadCount(),
                     "with nothing completing, the active set must sit AT the cap, not below it.");
+                Assert.AreEqual(cap, view.LoadedTileCount(),
+                    "prepared records take no slot: the cover is admitted up to the cap beside them.");
+                Assert.AreEqual(prepareCap, view.CaptureTelemetry().PreparingTileCount,
+                    "the prepare cap binds on its own, apart from the cover's.");
+
+                if (zoomAfterSaturation == null)
+                {
+                    // One consume a tick, every build finishing at once: a tile in the cover is consumed before a prepared one.
+                    view.Config.MaxConsumesPerTick = 1;
+                    gated.ReleaseAll();
+                    for (int f = 0; f < 100 && view.MeshesConsumedLastTick() == 0; f++)
+                    {
+                        view.LateUpdate();
+                        view.AwaitInFlightMeshBuilds();
+                    }
+
+                    Assert.AreEqual(1, view.MeshesConsumedLastTick(), "precondition: a mesh was consumed.");
+                    Assert.AreEqual(1, view.BrgRenderer().DrawItemCount() - view.BrgRenderer().HiddenDrawItemCount(),
+                        "the first consume is a tile in the cover, which shows, not a prepared one, which stays hidden.");
+                    view.Config.MaxConsumesPerTick = 64;
+                }
+                else
+                {
+                    view.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoomAfterSaturation.Value });
+                    for (int f = 0; f < 5; f++) view.LateUpdate();
+                }
 
                 // Release every gate (as new ones open too) and drive to full settle — the cap must throttle
                 // the load, never permanently stall it.
@@ -2116,6 +2156,15 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "the cover must eventually fully settle despite the concurrency cap.");
+
+                Assert.AreEqual(gated.Requested.Count, new HashSet<TileId>(gated.Requested).Count,
+                    "no tile is fetched twice.");
+                if (zoomAfterSaturation == 6.2)
+                    Assert.AreEqual(prepareCap, gated.Requested.FindAll(t => t.Z == 5).Count,
+                        "only the two tiles admitted before the zoom left the preload set were fetched.");
+                if (zoomAfterSaturation == 5.9)
+                    Assert.AreEqual(view.CaptureTelemetry().VisibleTileCount, view.LoadedTileCount(),
+                        "every tile of the cover is a drawn record, none a prepared leftover.");
             }
             finally
             {
@@ -2404,7 +2453,7 @@ namespace MapRenderer.Tests.Tiles
             public Func<string, bool> ParticipatesFor = _ => true;
             public Func<string, TileId, SpySymbolTileWorkerPass> PassFactory;
 
-            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
+            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen)
             {
                 BeginBuildCalls.Add((sourceId, tile));
                 if (!ParticipatesFor(sourceId)) return null;

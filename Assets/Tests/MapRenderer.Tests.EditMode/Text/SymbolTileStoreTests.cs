@@ -977,6 +977,17 @@ namespace MapRenderer.Tests.Text
             List<ShapedSymbol> back = Collect(store);
             Assert.AreEqual(1, back.Count, "the cache hit restores the kept-warm labels (the zoom-out-then-in fix)");
             Assert.AreEqual(1, back[0].FeatureIndex, "it is the SAME tile's labels");
+
+            // A tile prepared ahead opens on the kept-warm side: it commits there, is never collected nor stamped
+            // departing, and shows only once restored.
+            var prepared = Key("src", 2);
+            Commit(store, prepared, store.BeginBuild(prepared, cached: true), Symbols(2));
+            Assert.AreEqual(1, store.ActiveTileCount, "a prepared tile is not on the active side");
+            Assert.AreEqual(1, store.CachedTileCount, "it waits on the kept-warm side");
+            Assert.AreEqual(0, store.DepartingTileCount, "and is not departing");
+            Assert.AreEqual(1, Collect(store).Count, "its labels do not render before it is restored");
+            store.Restore(prepared);
+            Assert.AreEqual(2, Collect(store).Count, "restoring it draws its committed labels");
             store.Clear();
         }
 

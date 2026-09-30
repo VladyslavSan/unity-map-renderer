@@ -16,6 +16,15 @@ namespace MapRenderer.Tests
         /// <summary>Number of currently registered draw items.</summary>
         internal static int DrawItemCount(this BrgTileRenderer renderer) => renderer._items.Count;
 
+        /// <summary>Number of registered draw items that are hidden: registered but not shown by <c>SetItemsVisible</c>.</summary>
+        internal static int HiddenDrawItemCount(this BrgTileRenderer renderer)
+        {
+            int hidden = 0;
+            foreach (var item in renderer._items.Values)
+                if (item.Hidden) hidden++;
+            return hidden;
+        }
+
         /// <summary>The layer draw slot (<c>materialIndex</c>) of the draw item at sorted slot
         /// <paramref name="sortedIndex"/> — the value a <c>ComputeEmitOrder</c> entry names. Lets a caller
         /// map an emitted draw command back to the layer that produced it.</summary>

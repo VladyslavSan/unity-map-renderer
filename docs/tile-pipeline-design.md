@@ -213,6 +213,36 @@ Visibility, occlusion, the near-field zoom cap and termination are unchanged. Th
 `ProjectedAreaLodStrategy` or `FlatLodStrategy`, and they do not hold geometry: they only reduce how often the
 cover changes.
 
+### 4.7 Preparing the next level ahead
+
+A level switch draws a whole new set of tiles at once. `TileManager` loads that set before the zoom reaches the switch, so the
+switch shows tiles that are already registered.
+
+- **Roles.** A record is `Display` when its tile is in the cover and `Prepare` when its tile is in the preload set P but not in the
+  cover. A record with neither role is released through the deferred-release queue. A `Display` record that leaves the cover for P is
+  hidden, and a `Prepare` record that enters the cover is shown, each in one batch.
+- **The preload set P.** `Selector.LastTarget` gives the held level `L`, the continuous level `zc` and the selector's level range. For
+  each cover tile at level `L`, P holds its four children once `zc >= L + 1 - p`, and its parent while `zc < L + p`, where `p` is
+  `ZoomLevelPreload` (default 0.05, clamped to `[-1, 1]`, negative starts after the whole level). P stays inside the selector's level
+  range and inside each source's own range. P is empty without the prepared-tile cache, because a released prepared tile goes there.
+- **Hidden registration.** A `Prepare` record builds like a `Display` record and registers every layer hidden. It stays in `_loaded`,
+  so eviction cannot reach it. A switch is a show batch: no fetch, no build, no registration.
+- **Keep set K.** A finished `Prepare` record stays while its tile is in K, which is P computed with the lead `p + ZoomLevelHysteresis`.
+  Zoom jitter across the edge of P therefore releases nothing and rebuilds nothing. Lateral pans are not covered: they churn the set as
+  cover churn does.
+- **An in-flight `Prepare` record is never cancelled** for leaving P or K. It finishes, and if it still has no role it is released to the
+  cache. After a jump the unfinished prepared records still finish: at most `MaxConcurrentPrepareLoads` admitted ahead, plus drawn tiles
+  that were still loading when they left the cover for P.
+- **Separate caps.** Prepared keys wait in their own list and load under `MaxConcurrentPrepareLoads` (at least 1). `CountActiveLoads` counts only
+  records in the cover, and the pump and the clip-change rebake sort records in the cover first, so preparing never takes a slot or a
+  per-tick budget from a tile being drawn. A prepared key whose tile enters the cover is dropped from the prepared list, and the cover
+  merge desires it.
+- **Labels.** A `Prepare` record's symbol build opens on the store's kept-warm side with no departing stamp, so its labels do not draw.
+  `CollectLoadedTileKeys` and the tile counts report `Display` records only, and `PreparingTileCount` counts the rest. At the switch the
+  tile is reported and the store restores its entry.
+- **Limitation.** A record that leaves the cover for P hides at once, because nothing holds the old tiles until the new ones are ready.
+  After a fast zoom the old tiles can vanish before the new ones finish.
+
 ## 5. The bake — what a prepared tile is a function of
 
 A tile's mesh is baked at the tile's **integer** zoom (`TileId.Z`), never at the fractional camera zoom, and

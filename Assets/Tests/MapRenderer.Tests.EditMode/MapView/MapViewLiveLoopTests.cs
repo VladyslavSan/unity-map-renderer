@@ -157,6 +157,23 @@ namespace MapRenderer.Tests.MapViews
                 AllocationDiagnostics.AssertNotAllocating(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
                     $"BRG.Update must not allocate across {N} steady-state frames — proving the zero-alloc " +
                     "contract holds at the scale where the Entities backend trips the recorder.");
+
+                // ── (e) PREPARED AHEAD: with level 1 in range, the parents of the z2 cover are prepared, so each cover
+                // recompute derives the preload set, merges its keys and re-roles the records. That must not allocate.
+                view.Config.TileSelection.MinZoom = 1;
+                view.Config.TileSelection.MaxZoom = 3;
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.25, Latitude = 0.0 }); // a moved camera, so the cover recomputes
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0,
+                    "precondition: the parent level is prepared, so the preload set is not empty while measuring.");
+                double preparedPanLon = 0.0;
+                AllocationDiagnostics.AssertNotAllocating(() =>
+                {
+                    preparedPanLon = preparedPanLon == 0.0 ? 1.0 : 0.0;
+                    view.Camera.Apply(new CameraPropertiesUpdate { Longitude = preparedPanLon, Latitude = 0.0 });
+                    view.LateUpdate();
+                },
+                    "A cover recompute with a prepared level in play must not allocate (preload set, prepare keys, roles).");
             }
             finally
             {

@@ -35,10 +35,15 @@ namespace MapRenderer.Unity.View
         private readonly HashSet<TileId> _prevRefined = new HashSet<TileId>(256); // strict ancestors of emitted
 
         // Largest zoom-level hysteresis: the holding window is 1 + 2h wide and stays below two levels.
-        private const double MaxZoomLevelHysteresis = 0.5;
+        internal const double MaxZoomLevelHysteresis = 0.5;
 
-        // The sticky target level in use, or -1 before the first selection and after an empty viewport.
-        private int _level = -1;
+        // The held target level in use, or -1 before the first selection and after an empty viewport.
+        private int    _level = -1;
+        private double _continuous;
+
+        /// <inheritdoc/>
+        public TargetLevel LastTarget
+            => new TargetLevel { Level = _level, Continuous = _continuous, MinLevel = _minZoom, MaxLevel = _maxZoom };
 
         /// <param name="minZoom">Lower clamp for the near-field selection zoom.</param>
         /// <param name="maxZoom">Upper clamp for the near-field selection zoom.</param>
@@ -150,7 +155,8 @@ namespace MapRenderer.Unity.View
             }
 
             RememberCover(reuseBuffer);
-            _level = z;
+            _level      = z;
+            _continuous = continuous;
         }
 
         /// <summary>The target level: the previous one while <c>L - m &lt;= continuous &lt; L + 1 + m</c>, else the

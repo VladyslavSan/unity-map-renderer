@@ -17,6 +17,7 @@ using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Layers;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
@@ -115,6 +116,191 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             Assert.AreEqual(expected.r, actual.r, eps, $"{message} (R: expected={expected.r:F4} actual={actual.r:F4})");
             Assert.AreEqual(expected.g, actual.g, eps, $"{message} (G: expected={expected.g:F4} actual={actual.g:F4})");
             Assert.AreEqual(expected.b, actual.b, eps, $"{message} (B: expected={expected.b:F4} actual={actual.b:F4})");
+        }
+
+        // ── Preparing the next level ahead: loaded hidden, kept through jitter, shown in one step ───────────
+
+        private static void SetZoom(MapView view, double zoom)
+            => view.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoom });
+
+        /// <summary>Ticks, then again each frame until <paramref name="done"/> holds, so off-main work lands.</summary>
+        private static IEnumerator TickUntil(MapView view, System.Func<bool> done)
+        {
+            for (var settle = SettleTimeout.Start(); settle.Running; )
+            {
+                view.LateUpdate();
+                if (done()) yield break;
+                yield return null;
+            }
+        }
+
+        /// <summary>The backend items a shown tile draws: every registered item less the hidden ones.</summary>
+        private static int VisibleItems(MapView view) => view.BrgRenderer().DrawItemCount() - view.BrgRenderer().HiddenDrawItemCount();
+
+        /// <summary>The meshes the tiles in the cover hold, which a fully shown cover draws item for item.</summary>
+        private static int CoverMeshes(MapView view)
+        {
+            var ids = new List<TileId>();
+            view.CollectLoadedTileIds(ids);
+            int meshes = 0;
+            foreach (TileId id in ids) meshes += view.GetTileMeshes(id)?.Length ?? 0;
+            return meshes;
+        }
+
+        /// <summary>
+        /// The level after the drawn one prepares before the zoom reaches it (lead 0.3, level 4 to 5): its tiles load
+        /// HIDDEN, are not reported as loaded and get an off-screen label build, and a build in flight is never cancelled
+        /// for leaving the preload set. A finished one stays through jitter across the edge, and a switch shows it in
+        /// one batch with no fetch, in flight or rebaking too.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator PreparedLevel_LoadsHidden_SurvivesJitter_AndShowsInOneBatchAtTheSwitch()
+        {
+            var src = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go  = Track(new GameObject("MapView_Preload"));
+            var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 4;
+            view.Config.TileSelection.MaxZoom = 6;
+            view.Config.TileSelection.ZoomLevelPreload = 0.3;
+            view.Config.TileSelection.MaxConcurrentPrepareLoads = 64;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            var spy = new TileSymbolKickTests.SpySymbolTileWorkerFactory();
+            view.TileManager.SymbolWorkerFactory = spy;
+            using var gate = new System.Threading.ManualResetEventSlim(false);
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.5), style: TileSymbolKickTests.FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
+                yield return PumpUntilSettled(view);
+                var drawn = new List<TileId>();
+                view.CollectLoadedTileIds(drawn);
+                Assert.IsTrue(drawn.TrueForAll(t => t.Z == 4), "precondition: level 4 is drawn.");
+                Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "nothing is prepared outside the lead.");
+
+                // ── Inside the lead (4.72 is past 4.7): level 5 prepares, with the builds parked so they stay in flight.
+                int midFlightBefore = view.ReleasedMidFlightCount();
+                int midFetchBefore  = view.ReleasedMidFetchCount();
+                view.TileManager.MeshBuildGateForTest = gate;
+                SetZoom(view, 4.72);
+                view.LateUpdate();
+                int prepared = view.CaptureTelemetry().PreparingTileCount;
+                view.CollectLoadedTileIds(drawn);
+                Assert.AreEqual(4 * drawn.Count, prepared, "every drawn tile prepares its four children.");
+                yield return TickUntil(view, () => spy.OffScreenCalls.FindAll(o => o).Count == prepared);
+                Assert.AreEqual(prepared, spy.OffScreenCalls.FindAll(o => o).Count, "a prepared tile's label build opens off-screen.");
+                Assert.AreEqual(drawn.Count, spy.OffScreenCalls.FindAll(o => !o).Count, "a drawn tile's label build opens on-screen.");
+                Assert.IsFalse(drawn.Exists(t => t.Z == 5), "a prepared tile is not reported as loaded.");
+                var reported = new List<LoadedTileKey>();
+                view.TileManager.CollectLoadedTileKeys(reported); // what the symbol subsystem reconciles against
+                Assert.IsFalse(reported.Exists(k => k.Tile.Z == 5), "a prepared tile is not reported to the label subsystem, so none draws.");
+
+                // ── A build in flight is never cancelled for leaving the preload set, nor for leaving the keep set.
+                foreach (double zoom in new[] { 4.68, 4.5 })
+                {
+                    SetZoom(view, zoom);
+                    for (int i = 0; i < 3; i++) { view.LateUpdate(); yield return null; }
+                    Assert.AreEqual(midFlightBefore, view.ReleasedMidFlightCount(), $"zoom {zoom}: no prepared build cancelled mid-flight");
+                    Assert.AreEqual(midFetchBefore, view.ReleasedMidFetchCount(), $"zoom {zoom}: no prepared fetch cancelled");
+                    Assert.AreEqual(prepared, view.CaptureTelemetry().PreparingTileCount, $"zoom {zoom}: the prepared records stay");
+                }
+
+                // ── With the camera still, finishing releases what has no role left: nothing outlives its sets.
+                gate.Set();
+                int releasedAfterFinish = 0;
+                yield return TickUntil(view, () =>
+                {
+                    releasedAfterFinish += view.TilesReleasedLastTick();
+                    return view.CaptureTelemetry().PreparingTileCount == 0;
+                });
+                Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "a prepared record with no role left is released once it finishes.");
+                Assert.Greater(releasedAfterFinish, 0, "the release happened, not a silent drop.");
+
+                // ── Somewhere new, with the builds parked again: the level prepares in flight, then the switch shows it as it consumes.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 40.0, Latitude = 10.0 });
+                yield return PumpUntilSettled(view);
+                gate.Reset();
+                SetZoom(view, 4.72);
+                view.LateUpdate();
+                view.CollectLoadedTileIds(drawn);
+                Assert.AreEqual(4 * drawn.Count, view.CaptureTelemetry().PreparingTileCount, "the new cover prepares its children in flight.");
+                SetZoom(view, 5.06);
+                view.LateUpdate();
+                gate.Set();
+                yield return PumpUntilSettled(view);
+                Assert.Greater(view.LoadedTileCount(), 0, "the switch draws level 5.");
+                Assert.AreEqual(CoverMeshes(view), VisibleItems(view), "every mesh of a drawn tile shows, none of a prepared one does.");
+
+                // ── Jitter across the preload edge of the parents (lead 0.3 above level 5): nothing releases or rebuilds.
+                // The cover is settled at the first jitter zoom, so only the prepared records can change.
+                SetZoom(view, 5.299);
+                yield return TickUntil(view, () => view.AllTilesSettled() && view.ReleaseQueueDepth() == 0);
+                Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0, "precondition: prepared parents exist to jitter.");
+                int hits = view.PreparedCacheHits();
+                foreach (double zoom in new[] { 5.301, 5.299, 5.301, 5.299 })
+                {
+                    SetZoom(view, zoom);
+                    view.LateUpdate();
+                    yield return null;
+                    Assert.AreEqual(0, view.TilesReleasedLastTick(), $"zoom {zoom}: a finished prepared record stays through jitter");
+                    Assert.AreEqual(0, view.MeshesConsumedLastTick(), $"zoom {zoom}: nothing is re-registered");
+                    Assert.AreEqual(0, view.TileBuildsStartedLastTick(), $"zoom {zoom}: nothing starts building");
+                }
+
+                Assert.AreEqual(hits, view.PreparedCacheHits(), "jitter takes nothing from the cache.");
+                yield return PumpUntilSettled(view);
+
+                // ── The switch back down: the prepared parents show in one batch, with no fetch and no miss.
+                int misses = view.PreparedCacheMisses();
+                SetZoom(view, 4.94);
+                view.LateUpdate();
+                Assert.Greater(view.VisibilityBatchesLastTick(), 0, "the switch shows the prepared tiles.");
+                Assert.LessOrEqual(view.VisibilityBatchesLastTick(), 2, "one show batch and one hide batch at most.");
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "the switch starts no build.");
+                Assert.AreEqual(0, view.InFlightCount(), "the switch fetches nothing.");
+                Assert.AreEqual(misses, view.PreparedCacheMisses(), "the switch misses no cache.");
+                Assert.AreEqual(CoverMeshes(view), VisibleItems(view), "the shown items are the drawn tiles' meshes.");
+
+                // ── Past the keep set the finished records go to the cache.
+                SetZoom(view, 4.5);
+                yield return TickUntil(view, () => view.CaptureTelemetry().PreparingTileCount == 0);
+                Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "outside the keep set no record stays prepared.");
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0, "a released prepared tile goes to the cache.");
+
+                // ── A flip while rebaking shows the previous geometry: no hole mid-rebake.
+                SetZoom(view, 4.72);
+                yield return PumpUntilSettled(view);
+                view.CollectLoadedTileIds(drawn);
+                var childMeshes = new Dictionary<TileId, int>();
+                foreach (TileId t in drawn)
+                    for (int c = 0; c < 4; c++)
+                    {
+                        var child = new TileId { Z = 5, X = t.X * 2 + (c & 1), Y = t.Y * 2 + (c >> 1) };
+                        childMeshes[child] = view.GetTileMeshes(child)?.Length ?? 0;
+                    }
+
+                gate.Reset();
+                view.Config.FillTileBufferClip = 64.0; // a new bake revision: drawn and prepared records rebake, parked by the gate
+                view.LateUpdate();
+                SetZoom(view, 5.06);
+                yield return TickUntil(view, () => view.ReleaseQueueDepth() == 0); // a tile left with no role stays drawn until released
+                view.CollectLoadedTileIds(drawn);
+                int expectedVisible = 0;
+                foreach (TileId t in drawn) expectedVisible += childMeshes.TryGetValue(t, out int m) ? m : 0;
+                Assert.Greater(expectedVisible, 0, "precondition: the drawn level-5 tiles held meshes.");
+                Assert.AreEqual(expectedVisible, VisibleItems(view), "the flip shows the previous geometry of the rebaking tiles.");
+                gate.Set();
+                yield return PumpUntilSettled(view);
+                Assert.AreEqual(CoverMeshes(view), VisibleItems(view), "after the rebake only the new meshes of the drawn tiles show.");
+            }
+            finally
+            {
+                gate.Set();
+                view.TileManager.MeshBuildGateForTest = null;
+            }
         }
 
         // ── EG mesh registrations balance across the prepared-cache round-trip ───────────────────────
@@ -382,6 +568,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxReleasesPerTick        = releaseBudget;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0; // the test counts cover departures, not prepared-ahead records
             return (go, view);
         }
 

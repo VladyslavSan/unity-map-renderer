@@ -23,5 +23,27 @@ namespace MapRenderer.Unity.View
         /// <param name="view">Per-frame view context (camera pose + framing viewport + projection).</param>
         /// <param name="reuseBuffer">Caller-owned result buffer. Cleared then refilled.</param>
         void SelectVisibleTiles(in ViewContext view, List<TileId> reuseBuffer);
+
+        /// <summary>The target level the last <see cref="SelectVisibleTiles"/> call used, or a <see cref="TargetLevel.Level"/> of -1
+        /// before the first. <see cref="TileManager"/> reads it to derive the tiles to prepare ahead of a level switch.</summary>
+        TargetLevel LastTarget { get; }
+    }
+
+    /// <summary>The near-field level of one selection and the zoom it came from.</summary>
+    public readonly struct TargetLevel
+    {
+        /// <summary>The level in use, held inside the zoom-level hysteresis (not the floor of the camera zoom), or -1
+        /// when nothing was selected yet. Level 0 is a real level.</summary>
+        public int Level { get; init; }
+
+        /// <summary>The continuous level the camera asked for: camera zoom plus the selection offset.</summary>
+        public double Continuous { get; init; }
+
+        /// <summary>The selector's lower clamp for <see cref="Level"/>.</summary>
+        public int MinLevel { get; init; }
+
+        /// <summary>The selector's upper clamp for <see cref="Level"/>.</summary>
+        public int MaxLevel { get; init; }
+
     }
 }

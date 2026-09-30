@@ -826,6 +826,8 @@ namespace MapRenderer.Tests.Cameras
 
         private sealed class MixedZoomFakeSelector : IVisibleTileSelector
         {
+            public TargetLevel LastTarget => new TargetLevel { Level = -1 };
+
             public void SelectVisibleTiles(in ViewContext view, List<TileId> reuseBuffer)
             {
                 reuseBuffer.Clear();
