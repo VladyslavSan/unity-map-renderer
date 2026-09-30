@@ -2736,7 +2736,6 @@ namespace MapRenderer.Tests.Visual
         {
             private readonly Fill.PaintProperties _paint;
             public StyleLayer StyleLayer { get; }
-            public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;

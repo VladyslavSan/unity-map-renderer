@@ -862,7 +862,7 @@ namespace MapRenderer.Tests.Visual
         {
             Symbol.StyleLayer layer    = BuildSymbolLayer(haloColorJson);
             MapMaterialSet    settings = MapMaterialSetTestUtil.Load();
-            SymbolRenderLayer renderLayer = SymbolRenderLayer.Create(layer, settings, initialZoom: Zoom, drawIndex: 0);
+            SymbolRenderLayer renderLayer = SymbolRenderLayer.Create(layer, settings, initialZoom: Zoom);
             Assert.IsNotNull(renderLayer.WorldTextMaterial, "MapMaterialSet.SymbolTextWorld must be assigned.");
             Material mat = renderLayer.WorldTextMaterial;
 

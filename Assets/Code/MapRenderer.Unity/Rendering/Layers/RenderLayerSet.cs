@@ -12,10 +12,10 @@ namespace MapRenderer.Unity.Rendering.Layers
 {
     /// <summary>
     /// The ordered set of runtime render layers, built once per style and kept current per frame. ONE list
-    /// holds ALL painted layers, with <c>index == DrawIndex == SLOT == material index</c>; draw order rides
-    /// <c>renderQueue</c>. A new layer type drops in via <see cref="RenderLayerFactory"/>. A null
-    /// <see cref="IRenderLayer.Material"/> means only that slot's base material is unconfigured. Shared by
-    /// reference with the tile pipeline; each layer destroys its own material on dispose.
+    /// holds ALL painted layers, with <c>index == SLOT == material index</c>. A surviving layer keeps its slot
+    /// across an in-place restyle. Draw order rides <c>renderQueue</c>. A new layer type drops in via
+    /// <see cref="RenderLayerFactory"/>. A null <see cref="IRenderLayer.Material"/> means only that slot's base
+    /// material is unconfigured. Shared with the tile pipeline; each layer destroys its own material.
     /// </summary>
     internal sealed class RenderLayerSet : VerifiedDisposable
     {
@@ -86,7 +86,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             foreach (var sl in style.Layers)
             {
                 IRenderLayer layer = RenderLayerFactory.Create(
-                    sl, settings, initialZoom, drawIndex, out LayerSkipReason skipReason, out string detail);
+                    sl, settings, initialZoom, out LayerSkipReason skipReason, out string detail);
                 if (layer == null)
                 {
                     // Unsupported kind, unconfigured material, or genuinely unpainted by design — no slot;
@@ -245,7 +245,7 @@ namespace MapRenderer.Unity.Rendering.Layers
                 if (_layers[i].StyleLayer == null) continue; // already a tombstone
                 if (claimedSlots.Contains(i)) continue;
                 _layers[i].Dispose();
-                _layers[i] = new TombstoneRenderLayer(i);
+                _layers[i] = new TombstoneRenderLayer();
             }
 
             // Re-push the sheet now: re-binding zeroed _PatternRect, and the memo would otherwise suppress the

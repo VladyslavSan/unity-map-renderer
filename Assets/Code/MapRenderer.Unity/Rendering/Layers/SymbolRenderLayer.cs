@@ -26,7 +26,6 @@ namespace MapRenderer.Unity.Rendering.Layers
         internal const float TextDilationLogicalPx = 0f;
 
         public MapRenderer.Unity.Style.StyleLayer StyleLayer   { get; private set; }
-        public int                               DrawIndex    { get; }
 
         /// <summary>The text sits at <see cref="LayerSubSlot.Above"/>, over this layer's own icon at
         /// <see cref="LayerSubSlot.Base"/>. Non-obvious why: both shaders are <c>ZWrite Off</c> /
@@ -48,14 +47,14 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <c>MapMaterialSet.Validate()</c> rejects, so only a set that skipped Validate reaches it.</summary>
         public Material WorldTextMaterial { get; }
 
-        /// <summary>This layer's position in the current document's declared order (monotone in its <c>layers</c> index). Unlike
-        /// <see cref="DrawIndex"/> (the slot) it moves on an in-place reorder; symbol collision reads it.</summary>
+        /// <summary>This layer's position in the current document's declared order (monotone in its <c>layers</c> index).
+        /// Unlike the slot, it moves on an in-place reorder; symbol collision reads it.</summary>
         public int DeclaredOrder { get; private set; }
 
         /// <summary>The owned <c>Map/Symbol/IconWorld</c> clone of
         /// <c>MapMaterialSet.SymbolIconWorld</c>. <c>null</c> iff that base is unassigned (optional, warns);
-        /// then world icons stay hidden. <see cref="RenderLayerSet.Build"/> never reads it, so
-        /// <see cref="Create"/> writes its <c>renderQueue</c> at <see cref="LayerSubSlot.Base"/>.</summary>
+        /// then world icons stay hidden. <see cref="SetDrawOrder"/> writes its <c>renderQueue</c> at
+        /// <see cref="LayerSubSlot.Base"/>.</summary>
         public Material WorldIconMaterial { get; }
 
         /// <summary>The typed parsed symbol layer — MapView's source-fetch derivation reads this
@@ -69,15 +68,12 @@ namespace MapRenderer.Unity.Rendering.Layers
         internal ZoomStyleApplier Applier { get; }
 
         private SymbolRenderLayer(SymbolStyle.StyleLayer layer,
-            Material worldTextMaterial, Material worldIconMaterial, int drawIndex,
-            ZoomStyleApplier applier)
+            Material worldTextMaterial, Material worldIconMaterial, ZoomStyleApplier applier)
         {
             StyleLayer        = layer;
             SymbolLayer       = layer;
             WorldTextMaterial = worldTextMaterial;
             WorldIconMaterial = worldIconMaterial;
-            DrawIndex         = drawIndex;
-            DeclaredOrder     = drawIndex;
             Applier           = applier;
         }
 
@@ -88,7 +84,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <param name="initialZoom">Unused: construction queues a Zoom halo colour and the first
         /// <see cref="ApplyZoom"/> evaluates it. Kept so every layer kind shares one creation shape.</param>
         public static SymbolRenderLayer Create(
-            SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex)
+            SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom)
         {
             Material baseWorldTextMat = settings != null ? settings.SymbolTextWorld : null;
             Material worldTextMat = null;
@@ -111,12 +107,9 @@ namespace MapRenderer.Unity.Rendering.Layers
             {
                 worldIconMat = baseWorldIconMat.CloneWithParent();
                 worldIconMat.name = $"MapSymbolIconWorld_{layer.Id}";
-                // Build never writes this queue. Base is explicit, so the call site shows that the icon draws
-                // strictly below its own layer's text (Above).
-                worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex, LayerSubSlot.Base);
             }
 
-            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, applier);
+            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, applier);
         }
 
         /// <summary>
@@ -186,10 +179,9 @@ namespace MapRenderer.Unity.Rendering.Layers
             BindTextPaint(WorldTextMaterial, Applier, typed.Paint);
         }
 
-        /// <summary>Re-stamps BOTH materials — <see cref="Material"/> at <see cref="LayerSubSlot.Above"/>
+        /// <summary>Stamps BOTH materials — <see cref="Material"/> at <see cref="LayerSubSlot.Above"/>
         /// AND <see cref="WorldIconMaterial"/> at <see cref="LayerSubSlot.Base"/>.
-        /// <see cref="Create"/> also writes the icon queue, so it is valid before <see cref="RenderLayerSet.Build"/>
-        /// calls this method. Missing the icon here puts the text and icon of a reordered layer in different bands.</summary>
+        /// Missing the icon here puts the text and icon of a reordered layer in different bands.</summary>
         /// <param name="declaredOrder">This layer's index in the new document's declared layer order.</param>
         public void SetDrawOrder(int declaredOrder)
         {

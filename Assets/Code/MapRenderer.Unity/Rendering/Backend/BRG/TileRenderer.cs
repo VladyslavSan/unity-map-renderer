@@ -59,7 +59,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         internal readonly Dictionary<int, DrawItem> _items = new Dictionary<int, DrawItem>(64);
         private int _nextHandle;
 
-        // Per-layer materials in SLOT order (index == materialIndex == DrawIndex); draw order rides each
+        // Per-layer materials in SLOT order (index == materialIndex == slot); draw order rides each
         // DrawItem's LayerRenderQueue. mat is referenced, not owned — RenderLayerSet disposes them.
         private readonly List<(BatchMaterialID id, Material mat)> _layerMaterials
             = new List<(BatchMaterialID, Material)>(16);
@@ -100,7 +100,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>Constructs the BRG and registers each layer material — the one ordered, FULL-WIDTH
         /// per-layer list in SLOT order (<c>index == materialIndex == AddTileLayer index ==
-        /// <see cref="IRenderLayer.DrawIndex"/></c>). Materials are referenced, not owned. See
+        /// the layer's slot</c>). Materials are referenced, not owned. See
         /// `docs/tile-pipeline-design.md` for the null-placeholder note.</summary>
         /// <param name="layerMaterials">The full-width per-layer material list, indexed by slot.</param>
         /// <param name="layerShadowModes">Per-layer shadow declarations; see <see cref="ShadowModeFor"/>.</param>
@@ -212,7 +212,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
-        /// <paramref name="materialIndex"/> is the layer's global slot (<see cref="IRenderLayer.DrawIndex"/>)
+        /// <paramref name="materialIndex"/> is the layer's global slot
         /// into the full-width material list; null (non-tile-mesh) slots never receive this call.
         /// BRG draws a flat instance buffer and ignores <paramref name="tileId"/>.
         /// </summary>

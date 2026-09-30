@@ -6,7 +6,7 @@
 // mechanism tile meshes use. The shader is unlit, not a lit surface; see SymbolTextWorld_ForwardPass.hlsl
 // for the vertex math.
 //
-// Submission: a dedicated per-(tile,DrawIndex,kind) symbol renderer (WorldSymbolRenderer) sets this
+// Submission: a dedicated per-(tile,slot,kind) symbol renderer (WorldSymbolRenderer) sets this
 // material's per-frame transform via FloatingOrigin.TileToSceneRebased — never Graphics.RenderMesh, never
 // a static tile mesh.
 Shader "Map/Symbol/TextWorld"

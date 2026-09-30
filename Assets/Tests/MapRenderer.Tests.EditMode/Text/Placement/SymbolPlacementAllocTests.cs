@@ -166,7 +166,7 @@ namespace MapRenderer.Tests.Text.Placement
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(BuildStyleJson()).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(BuildStyleJson()).Layers[0], settings, 5.0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -224,7 +224,7 @@ namespace MapRenderer.Tests.Text.Placement
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
             const float TextOffsetPx = 200f;
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(BuildStyleJson(TextOffsetPx)).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(BuildStyleJson(TextOffsetPx)).Layers[0], settings, 5.0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -303,7 +303,7 @@ namespace MapRenderer.Tests.Text.Placement
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(BuildStyleJson()).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(BuildStyleJson()).Layers[0], settings, 5.0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -784,7 +784,7 @@ namespace MapRenderer.Tests.Text.Placement
                                ""text-translate-anchor"": ""viewport"" } }
             ] }";
             var renderLayer = SymbolRenderLayer.Create(
-                (SymbolStyle.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom: 5.0, drawIndex: 0);
+                (SymbolStyle.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom: 5.0);
             var layers = new List<SymbolRenderLayer> { renderLayer };
 
             using var system = new SymbolPlacementSystem(mapCamera,
@@ -1727,7 +1727,7 @@ namespace MapRenderer.Tests.Text.Placement
                 ]
             }}";
             var settings = MapMaterialSetTestUtil.Load();
-            return SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom: 5.0, drawIndex: 0);
+            return SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom: 5.0);
         }
 
         private sealed class Harness : System.IDisposable

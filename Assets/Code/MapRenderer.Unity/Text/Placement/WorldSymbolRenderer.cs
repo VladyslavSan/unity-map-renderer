@@ -51,7 +51,7 @@ namespace MapRenderer.Unity.Text.Placement
             public int IdleFrames;
         }
 
-        // The per-symbol-layer node, keyed by (tile, DrawIndex), so a layer's text and icon are siblings. It
+        // The per-symbol-layer node, keyed by (tile, slot), so a layer's text and icon are siblings. It
         // is the tree level below the tile container, which SceneTileTree does not own.
         private struct LayerNodeRec
         {
@@ -484,7 +484,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // The per-layer world material, else the fallback; an out-of-range slot resolves to the fallback. Both
-        // renderQueues are set at build time (RenderLayerSet.Build, SymbolRenderLayer.Create), so this only selects.
+        // renderQueues are set at build time (RenderLayerSet.Build, SymbolRenderLayer.SetDrawOrder), so this only selects.
         private static Material ResolveMaterial(in WorldSymbolKey key, IReadOnlyList<SymbolRenderLayer> symbolLayers,
             Material                                             fallbackTextMaterial, Material fallbackIconMaterial)
         {
@@ -570,7 +570,7 @@ namespace MapRenderer.Unity.Text.Placement
 
     /// <summary>The slot dictionary key: <c>(TileKey, Slot, Kind)</c>. <c>TileKey</c> is the tile dimension
     /// (stable across batch rebuilds); <c>Slot</c> is the <c>SymbolRenderLayer</c> material slot (== the
-    /// layer's <c>DrawIndex</c>); <c>Kind</c> discriminates text vs icon (two separate meshes/materials per
+    /// layer's slot); <c>Kind</c> discriminates text vs icon (two separate meshes/materials per
     /// tile+slot). A struct (not a tuple) so <see cref="Dictionary{TKey,TValue}"/> hashing avoids boxing.</summary>
     internal readonly struct WorldSymbolKey : IEquatable<WorldSymbolKey>
     {

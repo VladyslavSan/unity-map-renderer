@@ -387,7 +387,7 @@ namespace MapRenderer.Tests.Style
                 { ""id"": ""poi"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
                   ""layout"": { ""text-field"": ""x"" } } ] }";
             var styleLayer = (Symbol.StyleLayer)StyleParser.Parse(json).Layers[0];
-            var renderLayer = SymbolRenderLayer.Create(styleLayer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create(styleLayer, MapMaterialSetTestUtil.Load(), Zoom);
             try
             {
                 int id = Shader.PropertyToID("_SdfDilatePx");

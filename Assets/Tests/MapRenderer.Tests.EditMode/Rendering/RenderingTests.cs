@@ -772,14 +772,12 @@ namespace MapRenderer.Tests.Rendering
             var settings = SettingsWithFillExtrusionMaterial();
             StyleLayer layer = style.Layers[0];
 
-            const int drawIndex = 3;
-            IRenderLayer created = RenderLayerFactory.Create(layer, settings, 0.0, drawIndex, out _, out _);
+            IRenderLayer created = RenderLayerFactory.Create(layer, settings, 0.0, out _, out _);
             try
             {
                 Assert.IsNotNull(created, "a fill-extrusion layer with a configured material set must produce a render layer.");
                 Assert.IsInstanceOf<FillExtrusionRenderLayer>(created, "'buildings-3d' must dispatch to FillExtrusionRenderLayer.");
                 Assert.AreSame(layer, created.StyleLayer, "the render layer must reference its source StyleLayer.");
-                Assert.AreEqual(drawIndex, created.DrawIndex, "the factory must set DrawIndex from its parameter.");
                 Assert.IsInstanceOf<FillExtrusion.StyleLayer>(created.StyleLayer);
                 Assert.IsInstanceOf<ITileMeshRenderLayer>(created, "fill-extrusion is a tile-mesh layer.");
                 AssertAlwaysBlendState(created.Material, "at CREATE (absent opacity)");
@@ -839,7 +837,7 @@ namespace MapRenderer.Tests.Rendering
     public class RenderLayerCompatibilitySummaryTests : BaseTestFixture
     {
         // A circle layer — the ticket's own DONE WHEN example — interleaved with two layers that DO
-        // render, so the surviving slots' declared-order/DrawIndex sequence is observable across the skip.
+        // render, so the surviving slots' queue bands are observable across the skip.
         private const string CircleInterleavedStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1079,19 +1077,20 @@ namespace MapRenderer.Tests.Rendering
         }
 
         /// <summary>A skipped layer consumes no draw slot and does not create a gap —
-        /// the two rendering layers keep DrawIndex 0 and 1 (declared order, compacted), exactly as they
+        /// the two rendering layers keep slots 0 and 1 (declared order, compacted), exactly as they
         /// would if circle-b were absent from the style entirely. RED recipe: increment <c>drawIndex</c> in
         /// <see cref="RenderLayerSet.Build"/>'s skipped-layer branch (as well as the real-layer branch) —
-        /// line-c's DrawIndex becomes 2 instead of 1, desyncing its renderQueue slot from its Material index.</summary>
+        /// line-c's queue becomes the slot-2 band instead of the slot-1 band.</summary>
         [Test]
         public void Build_SkippedLayer_DoesNotConsumeADrawSlot_SurvivingLayersStayContiguous()
         {
             using RenderLayerSet set = Build(CircleInterleavedStyleJson);
 
             Assert.AreEqual("fill-a", set[0].StyleLayer.Id);
-            Assert.AreEqual(0, set[0].DrawIndex, "fill-a is the first declared layer — slot 0.");
+            Assert.AreEqual(LayerDrawOrder.QueueFor(0, set[0].MaterialSubSlot), set[0].Material.renderQueue,
+                "fill-a is the first declared layer — slot 0.");
             Assert.AreEqual("line-c", set[1].StyleLayer.Id);
-            Assert.AreEqual(1, set[1].DrawIndex,
+            Assert.AreEqual(LayerDrawOrder.QueueFor(1, set[1].MaterialSubSlot), set[1].Material.renderQueue,
                 "line-c must land at slot 1 — the skipped circle-b in between must not have reserved a slot.");
         }
 
@@ -1244,9 +1243,9 @@ namespace MapRenderer.Tests.Rendering
                 "only fill-a and line-d can ever draw. A count of 4 means a layer that paints nothing at " +
                 "any zoom still owns a slot, a material and a backend registration.");
             Assert.AreEqual("fill-a", set[0].StyleLayer.Id);
-            Assert.AreEqual(0, set[0].DrawIndex);
+            Assert.AreEqual(LayerDrawOrder.QueueFor(0, set[0].MaterialSubSlot), set[0].Material.renderQueue);
             Assert.AreEqual("line-d", set[1].StyleLayer.Id);
-            Assert.AreEqual(1, set[1].DrawIndex,
+            Assert.AreEqual(LayerDrawOrder.QueueFor(1, set[1].MaterialSubSlot), set[1].Material.renderQueue,
                 "line-d must land at slot 1 — neither skipped layer may reserve a slot.");
 
             var byId = new Dictionary<string, LayerSkipReason>();
@@ -1382,7 +1381,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""f"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""fill-color"": ""#ff0000"" } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _, detail: out _);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, reason: out _, detail: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, SquareFeature()); }
             finally { created?.Dispose(); }
         }
@@ -1396,7 +1395,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""fe"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""fill-extrusion-height"": 30 } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _, detail: out _);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, reason: out _, detail: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, SquareFeature()); }
             finally { created?.Dispose(); }
         }
@@ -1413,7 +1412,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""l"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""line-color"": ""#000000"" } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _, detail: out _);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, reason: out _, detail: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, LineFeature()); }
             finally { created?.Dispose(); }
         }
@@ -1479,9 +1478,6 @@ namespace MapRenderer.Tests.Rendering
             Assert.IsInstanceOf<SymbolRenderLayer>(set[2], "index 2 = declared symbol-b (BETWEEN fill and line)");
             Assert.IsInstanceOf<Line.StyleLayer>(set[3].StyleLayer, "index 3 = declared line-c");
             Assert.IsInstanceOf<Fill.StyleLayer>(set[4].StyleLayer, "index 4 = declared fill-d");
-
-            for (int i = 0; i < set.Count; i++)
-                Assert.AreEqual(i, set[i].DrawIndex, $"slot {i}'s DrawIndex must equal its declared-order index.");
         }
 
         [Test]
@@ -1589,7 +1585,7 @@ namespace MapRenderer.Tests.Rendering
                 int bandTop   = bandBase + LayerDrawOrder.SubSlotsPerLayer - 1;
 
                 Assert.AreEqual(bandBase, iconQueue,
-                    $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create, " +
+                    $"slot {i}'s WorldIconMaterial queue must be set by RenderLayerSet.Build via SetDrawOrder, " +
                     "with NO Update, at its own layer's Base sub-slot.");
                 Assert.AreEqual(LayerDrawOrder.QueueFor(i, LayerSubSlot.Above), textQueue,
                     $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material), " +
@@ -1630,10 +1626,9 @@ namespace MapRenderer.Tests.Rendering
             StyleDocument style = TestStyle.Document(RasterAndFillStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 
-            int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _, out _);
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, out _, out _);
                 if (sl.LayerType == StyleLayerType.Raster)
                 {
                     Assert.IsNull(layer, $"'{sl.Id}' (raster) is genuinely unpainted — no slot.");
@@ -1642,9 +1637,7 @@ namespace MapRenderer.Tests.Rendering
 
                 Assert.IsNotNull(layer, $"'{sl.Id}' is a renderable type and must produce an IRenderLayer.");
                 Assert.AreSame(sl, layer.StyleLayer, "the render layer must reference its source StyleLayer.");
-                Assert.AreEqual(drawIndex, layer.DrawIndex, "the factory must set DrawIndex from its parameter.");
                 layer.Dispose(); // no set owns it here — free it (correct for every kind; background also owns a GO+Mesh)
-                drawIndex++;
             }
         }
 
@@ -1654,10 +1647,9 @@ namespace MapRenderer.Tests.Rendering
             StyleDocument style = TestStyle.Document(InterleavedStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 
-            int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _, out _);
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, out _, out _);
                 switch (sl)
                 {
                     case Symbol.StyleLayer:
@@ -1669,7 +1661,6 @@ namespace MapRenderer.Tests.Rendering
                         break;
                 }
                 layer?.Dispose(); // no set owns it here — free it (background also owns a GO+Mesh)
-                drawIndex++;
             }
         }
     }

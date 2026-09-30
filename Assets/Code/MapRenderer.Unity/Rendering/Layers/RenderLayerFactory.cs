@@ -16,13 +16,12 @@ namespace MapRenderer.Unity.Rendering.Layers
     /// </summary>
     internal static class RenderLayerFactory
     {
-        /// <summary>Creates the render layer for <paramref name="layer"/> at global slot
-        /// <paramref name="drawIndex"/>, or <c>null</c> with <paramref name="reason"/> set to why
-        /// (<see cref="LayerSkipReason.None"/> for a real layer) and <paramref name="detail"/> set for
+        /// <summary>Creates the render layer for <paramref name="layer"/>, or <c>null</c> with
+        /// <paramref name="reason"/> set to why (<see cref="LayerSkipReason.None"/> for a real layer) and <paramref name="detail"/> set for
         /// <see cref="LayerSkipReason.UnsupportedFilter"/> (null otherwise). <see cref="RenderLayerSet.Build"/>
         /// collects the reasons into a style-load compatibility summary.</summary>
         public static IRenderLayer Create(
-            StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex,
+            StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom,
             out LayerSkipReason reason, out string detail)
         {
             detail = null;
@@ -51,15 +50,15 @@ namespace MapRenderer.Unity.Rendering.Layers
 
             (IRenderLayer created, LayerSkipReason skipReason) = layer switch
             {
-                Fill.StyleLayer f                          => WithMaterialReason(FillRenderLayer.TryCreate(f, settings, initialZoom, drawIndex)),
-                Line.StyleLayer l                           => WithMaterialReason(LineRenderLayer.TryCreate(l, settings, initialZoom, drawIndex)),
+                Fill.StyleLayer f                          => WithMaterialReason(FillRenderLayer.TryCreate(f, settings, initialZoom)),
+                Line.StyleLayer l                           => WithMaterialReason(LineRenderLayer.TryCreate(l, settings, initialZoom)),
                 // DrawsFromSource mirrors SymbolSubsystem.SetStyle's skip, which keeps the 1:1 slot↔subsystem
                 // ordinal mapping.
-                Symbol.StyleLayer s when DrawsFromSource(s) => (SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex), LayerSkipReason.None),
+                Symbol.StyleLayer s when DrawsFromSource(s) => (SymbolRenderLayer.Create(s, settings, initialZoom), LayerSkipReason.None),
                 // A source-less symbol layer has nothing to place — by design, not a compatibility gap.
                 Symbol.StyleLayer                           => ((IRenderLayer)null, LayerSkipReason.GenuinelyUnpainted),
-                Background.StyleLayer b                     => (BackgroundRenderLayer.Create(b, settings, initialZoom, drawIndex), LayerSkipReason.None),
-                FillExtrusion.StyleLayer fe                 => WithMaterialReason(FillExtrusionRenderLayer.TryCreate(fe, settings, initialZoom, drawIndex)),
+                Background.StyleLayer b                     => (BackgroundRenderLayer.Create(b, settings, initialZoom), LayerSkipReason.None),
+                FillExtrusion.StyleLayer fe                 => WithMaterialReason(FillExtrusionRenderLayer.TryCreate(fe, settings, initialZoom)),
                 _                                            => ((IRenderLayer)null, LayerSkipReason.UnsupportedKind),
             };
             reason = skipReason;

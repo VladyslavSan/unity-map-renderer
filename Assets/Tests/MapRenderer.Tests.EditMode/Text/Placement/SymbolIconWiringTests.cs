@@ -148,7 +148,7 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = Track(BuildSettings());
             Track(settings.SymbolTextWorld);
             Track(settings.SymbolIconWorld);
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
@@ -300,7 +300,7 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = Track(BuildSettings());
             Track(settings.SymbolTextWorld);
             Track(settings.SymbolIconWorld);
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };

@@ -50,21 +50,19 @@ namespace MapRenderer.Unity.Rendering.Layers
         private double                      _lastZoom;
 
         public MapRenderer.Unity.Style.StyleLayer StyleLayer  { get; private set; }
-        public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
 
         private FillRenderLayer(
             Fill.StyleLayer layer, Material material, Fill.PaintProperties paint,
-            Fill.LayoutProperties layout, ZoomStyleApplier applier, int drawIndex, double initialZoom)
+            Fill.LayoutProperties layout, ZoomStyleApplier applier, double initialZoom)
         {
             StyleLayer = layer;
             Material   = material;
             _paint     = paint;
             _layout    = layout;
             Applier    = applier;
-            DrawIndex  = drawIndex;
             // Seed the pattern-scale zoom: TryCreate bypasses ApplyZoom, and a zoom of 0 gives WorldAbsolute a
             // whole-world repeat count for a sprite that resolves before the first Update.
             _lastZoom  = initialZoom;
@@ -77,7 +75,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// the layer: <see cref="RenderLayerSet.Build"/> records it as <c>LayerSkipReason.MaterialUnconfigured</c>.
         /// </summary>
         public static FillRenderLayer TryCreate(
-            Fill.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
+            Fill.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom)
         {
             Material mat = Materials.MaterialFactory.CreateFillMaterial(settings);
             if (mat == null) return null;
@@ -93,7 +91,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract).
             applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
-            return new FillRenderLayer(layer, mat, paint, layer.Layout, applier, drawIndex, initialZoom);
+            return new FillRenderLayer(layer, mat, paint, layer.Layout, applier, initialZoom);
         }
 
         /// <inheritdoc cref="IFadeableRenderLayer.FadesGradually"/>

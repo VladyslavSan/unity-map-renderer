@@ -1037,7 +1037,6 @@ namespace MapRenderer.Tests.Tiles
             public NoGeometryTileMeshRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
 
             public StyleLayer       StyleLayer      { get; }
-            public int              DrawIndex       => 0;
             public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material         Material        => null;
@@ -1271,7 +1270,6 @@ namespace MapRenderer.Tests.Tiles
         private sealed class CountedGraphInputRenderLayer : ITileMeshRenderLayer
         {
             public StyleLayer StyleLayer { get; }
-            public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
@@ -1302,7 +1300,6 @@ namespace MapRenderer.Tests.Tiles
         private sealed class ThrowingGraphInputRenderLayer : ITileMeshRenderLayer
         {
             public StyleLayer StyleLayer { get; }
-            public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
@@ -1850,7 +1847,6 @@ namespace MapRenderer.Tests.Tiles
         {
             private readonly Fill.PaintProperties _paint;
             public StyleLayer StyleLayer { get; }
-            public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors FillRenderLayer
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;

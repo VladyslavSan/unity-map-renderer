@@ -28,19 +28,17 @@ namespace MapRenderer.Unity.Rendering.Layers
         private FillExtrusion.PaintProperties _paint;
 
         public MapRenderer.Unity.Style.StyleLayer StyleLayer  { get; private set; }
-        public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.On;
         public Material                          Material    { get; }
 
         private FillExtrusionRenderLayer(
-            FillExtrusion.StyleLayer layer, Material material, ZoomStyleApplier applier, int drawIndex)
+            FillExtrusion.StyleLayer layer, Material material, ZoomStyleApplier applier)
         {
             StyleLayer = layer;
             Material   = material;
             Applier    = applier;
             _paint     = layer.Paint;
-            DrawIndex  = drawIndex;
         }
 
         /// <summary>
@@ -52,10 +50,9 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <param name="layer">The parsed fill-extrusion style layer.</param>
         /// <param name="settings">The material set to clone the FILL-EXTRUSION base material from.</param>
         /// <param name="initialZoom">The zoom to seed the first uniform push at.</param>
-        /// <param name="drawIndex">This layer's global SLOT, threaded straight into the instance.</param>
         /// <returns>The new render layer, or <c>null</c> when the material set is unconfigured.</returns>
         public static FillExtrusionRenderLayer TryCreate(
-            FillExtrusion.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
+            FillExtrusion.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom)
         {
             Material mat = Materials.MaterialFactory.CreateFillExtrusionMaterial(settings);
             if (mat == null) return null;
@@ -68,7 +65,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract).
             applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
-            return new FillExtrusionRenderLayer(layer, mat, applier, drawIndex);
+            return new FillExtrusionRenderLayer(layer, mat, applier);
         }
 
         /// <summary>A constant <c>false</c>: the visibility fade (entering/leaving the zoom range) snaps

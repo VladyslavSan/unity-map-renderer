@@ -349,9 +349,9 @@ namespace MapRenderer.Tests.Visual
     // The render-layer model's acceptance teeth. Non-obvious why: a persistent per-slot MeshRenderer renders
     // under a manual Camera.Render(), but a Graphics.RenderMesh submit renders 0 px headless.
     //
-    // SymbolRenderLayer.Create bypasses RenderLayerSet.Build, so each test writes `TransparentQueue + drawIndex`
+    // SymbolRenderLayer.Create bypasses RenderLayerSet.Build, so each test writes `TransparentQueue + slot`
     // itself. These tests order TEXT against text or a line, never an icon-vs-text pair, so the sub-slot band and
-    // the WorldIconMaterial queue that Create writes are inert here.
+    // the WorldIconMaterial queue that SetDrawOrder writes are inert here.
     //
     // Tooth 1's occluder is a wide LINE ribbon, so it uses the real production line vertex layout; queue
     // compositing does not depend on the layer kind. Ink-sensitive tests first render the symbol ALONE and
@@ -542,9 +542,10 @@ namespace MapRenderer.Tests.Visual
             var greenSymbolColor = new Color32(26, 217, 26, 255); // (0.1, 0.85, 0.1) in 0-255
             var redOccluderColor = new Color(0.85f, 0.1f, 0.1f, 1f);
 
-            // Create(drawIndex: 1) writes the icon queue QueueFor(1, Base) = 3002, above the text's 3001 set
+            // SetDrawOrder(1) writes the icon queue QueueFor(1, Base) = 3002, above the text's 3001 set
             // next. That is inert: this test renders no icon quad.
-            var renderLayer = SymbolRenderLayer.Create(symbolLayer, settings, 8.0, drawIndex: 1);
+            var renderLayer = SymbolRenderLayer.Create(symbolLayer, settings, 8.0);
+            renderLayer.SetDrawOrder(1);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned (asserted by MapMaterialSetTestUtil.Load).");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
 
@@ -598,10 +599,10 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Tooth 2: declared order among symbol layers — later DrawIndex wins the overlap ───────────────
+        // ── Tooth 2: declared order among symbol layers — the later layer wins the overlap ───────────────
 
         [Test]
-        public void TwoSymbolLayers_SameAnchor_LaterDrawIndexWins_SwapFlipsWinner()
+        public void TwoSymbolLayers_SameAnchor_LaterLayerWins_SwapFlipsWinner()
         {
             var saved = SetupLitAmbient();
             var (camGo, cam, mapCamera, frame) = BuildOverheadScene();
@@ -621,8 +622,10 @@ namespace MapRenderer.Tests.Visual
             // text-color: white on both layers — see the identical note on this file's first test.
             StyleDocument style = TestStyle.Document(StyleJson);
             var settings = MapMaterialSetTestUtil.Load();
-            var layerA = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0, drawIndex: 1);
-            var layerB = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[1], settings, 8.0, drawIndex: 2);
+            var layerA = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0);
+            var layerB = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[1], settings, 8.0);
+            layerA.SetDrawOrder(1);
+            layerB.SetDrawOrder(2);
             layerA.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
             layerB.Material.renderQueue = LayerDrawOrder.TransparentQueue + 2;
 
@@ -666,7 +669,7 @@ namespace MapRenderer.Tests.Visual
                 snap.Render(cam);
                 double[] bFirst = SampleAround(snap.Pixels, ix, iy);
                 Assert.Greater(bFirst[2], bFirst[0],
-                    $"layer B (DrawIndex 2, later/higher queue) must win the overlap — sampled (R,B)=({bFirst[0]:F3},{bFirst[2]:F3}) should read layer B's blue.");
+                    $"layer B (slot 2, later/higher queue) must win the overlap — sampled (R,B)=({bFirst[0]:F3},{bFirst[2]:F3}) should read layer B's blue.");
 
                 // Swap declared order (mutate renderQueue in place — same materials, same presenters).
                 layerA.Material.renderQueue = LayerDrawOrder.TransparentQueue + 2;
@@ -713,7 +716,7 @@ namespace MapRenderer.Tests.Visual
             // text-color: white — see the identical note on this file's first test.
             StyleDocument style = TestStyle.Document(StyleJson);
             var settings = MapMaterialSetTestUtil.Load();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0);
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 0;
 
             var inkColor = new Color32(230, 230, 230, 255); // near-white ink, distinct from the near-black background
@@ -824,7 +827,7 @@ namespace MapRenderer.Tests.Visual
             }";
             var settings = MapMaterialSetTestUtil.Load();
             var renderLayer = SymbolRenderLayer.Create(
-                (Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+                (Symbol.StyleLayer)TestStyle.Document(StyleJson).Layers[0], settings, 5.0);
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 0;
 
             var buffer = new SymbolTileBuffer();

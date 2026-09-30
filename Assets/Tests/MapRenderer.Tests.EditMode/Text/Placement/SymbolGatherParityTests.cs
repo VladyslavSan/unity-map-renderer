@@ -1162,7 +1162,7 @@ namespace MapRenderer.Tests.Text.Placement
                 ]
             }}";
             var settings = MapMaterialSetTestUtil.Load();
-            return SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom, drawIndex: 0);
+            return SymbolRenderLayer.Create((Symbol.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom);
         }
 
         // ── The zoom gate (`!cand.Suppressed` in the emit `show` expression) overrides the deferred verdict in the
@@ -1677,9 +1677,14 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(twoLayers, layered.Origin, sortKey: 0f, text: "A", feature: 0, quads: NQuads(1), materialIndex: 0);
             AddPoint(twoLayers, layered.Origin, sortKey: 0f, text: "B", feature: 1, quads: NQuads(2), materialIndex: 1);
             var settings = MapMaterialSetTestUtil.Load();
-            SymbolRenderLayer LayerAt(string id, int drawIndex) => SymbolRenderLayer.Create(
-                (Symbol.StyleLayer)TestStyle.Document(@"{ ""version"": 8, ""layers"": [ { ""id"": ""ID"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"", ""layout"": { ""text-field"": ""{NAME}"" } } ] }".Replace("ID", id)).Layers[0],
-                settings, 5.0, drawIndex);
+            SymbolRenderLayer LayerAt(string id, int declaredOrder)
+            {
+                SymbolRenderLayer created = SymbolRenderLayer.Create(
+                    (Symbol.StyleLayer)TestStyle.Document(@"{ ""version"": 8, ""layers"": [ { ""id"": ""ID"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"", ""layout"": { ""text-field"": ""{NAME}"" } } ] }".Replace("ID", id)).Layers[0],
+                    settings, 5.0);
+                created.SetDrawOrder(declaredOrder);
+                return created;
+            }
             SymbolRenderLayer layer0 = LayerAt("l0", 0);
             SymbolRenderLayer layer1 = LayerAt("l1", 1);
             try

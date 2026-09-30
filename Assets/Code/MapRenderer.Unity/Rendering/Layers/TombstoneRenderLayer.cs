@@ -12,10 +12,7 @@ namespace MapRenderer.Unity.Rendering.Layers
     /// for THIS TYPE instead — `docs/tile-pipeline-design.md` says why.</summary>
     internal sealed class TombstoneRenderLayer : IRenderLayer
     {
-        public TombstoneRenderLayer(int slot) => DrawIndex = slot;
-
         public StyleLayer        StyleLayer  => null;
-        public int               DrawIndex   { get; }
         public LayerSubSlot      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode CastShadows => ShadowCastingMode.Off;
         public Material          Material    => null;

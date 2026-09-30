@@ -244,7 +244,7 @@ namespace MapRenderer.Tests.Text.Placement
                   ""paint"": { ""text-translate"": [""interpolate"",[""linear""],[""zoom""],0,[0,0],10,[14,6]] } }
             ] }";
             var renderLayer = SymbolRenderLayer.Create(
-                (SymbolStyle.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom: 0.0, drawIndex: 0);
+                (SymbolStyle.StyleLayer)TestStyle.Document(styleJson).Layers[0], settings, initialZoom: 0.0);
             var movedLayers = new List<SymbolRenderLayer> { renderLayer };
 
             // A POINT draws through the world path: the translate is an additive, unrotated Offset delta

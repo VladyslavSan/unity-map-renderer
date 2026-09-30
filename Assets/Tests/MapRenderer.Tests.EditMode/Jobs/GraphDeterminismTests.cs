@@ -2657,7 +2657,6 @@ namespace MapRenderer.Tests.Jobs
             public RecordingTileMeshRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
 
             public StyleLayer       StyleLayer      { get; }
-            public int              DrawIndex       => 0;
             public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material         Material        => null;

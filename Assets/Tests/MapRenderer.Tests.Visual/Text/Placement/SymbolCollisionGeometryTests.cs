@@ -705,7 +705,7 @@ namespace MapRenderer.Tests.Visual
                 ] }";
                 renderLayer = SymbolRenderLayer.Create(
                     (StyleLayer)MapRenderer.Tests.TestStyle.Document(styleJson).Layers[0], settings,
-                    initialZoom: 14.0, drawIndex: 0);
+                    initialZoom: 14.0);
                 var layers = new List<SymbolRenderLayer> { renderLayer };
 
                 system = new SymbolPlacementSystem(scene.MapCam,

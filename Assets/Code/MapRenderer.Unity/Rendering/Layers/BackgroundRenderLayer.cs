@@ -16,7 +16,6 @@ namespace MapRenderer.Unity.Rendering.Layers
     internal sealed class BackgroundRenderLayer : IRenderLayer, IFadeableRenderLayer
     {
         public MapRenderer.Unity.Style.StyleLayer StyleLayer  { get; private set; }
-        public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; } // owned fill-base clone; null iff FillMaterial unassigned (slot kept, never shows)
@@ -26,12 +25,11 @@ namespace MapRenderer.Unity.Rendering.Layers
         internal ZoomStyleApplier Applier { get; }
 
         private BackgroundRenderLayer(
-            MapRenderer.Unity.Style.StyleLayer layer, Material material, ZoomStyleApplier applier, int drawIndex)
+            MapRenderer.Unity.Style.StyleLayer layer, Material material, ZoomStyleApplier applier)
         {
             StyleLayer = layer;
             Material   = material;
             Applier    = applier;
-            DrawIndex  = drawIndex;
         }
 
         /// <summary>Never returns null (the pattern of <see cref="SymbolRenderLayer.Create"/>): background
@@ -39,11 +37,11 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <see cref="Material"/> null (<see cref="Materials.MaterialFactory"/> warns) and it never shows. It
         /// takes no <c>parent</c>, because it owns no scene GameObject.</summary>
         public static BackgroundRenderLayer Create(
-            Background.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
+            Background.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom)
         {
             Material mat = Materials.MaterialFactory.CreateBackgroundMaterial(settings);
             if (mat == null)
-                return new BackgroundRenderLayer(layer, null, null, drawIndex);
+                return new BackgroundRenderLayer(layer, null, null);
 
             Background.PaintProperties paint = layer.Paint;
             var applier = new ZoomStyleApplier(mat);
@@ -55,7 +53,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             // (RenderLayerSet.ApplyZoom). Background has no px-valued paint, so the ratio is inert here.
             applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
 
-            return new BackgroundRenderLayer(layer, mat, applier, drawIndex);
+            return new BackgroundRenderLayer(layer, mat, applier);
         }
 
         // zoom-expression background-color/opacity; no px-valued paint, so the ratio is inert.

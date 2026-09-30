@@ -48,21 +48,19 @@ namespace MapRenderer.Unity.Rendering.Layers
         internal ZoomStyleApplier Applier { get; }
 
         public MapRenderer.Unity.Style.StyleLayer StyleLayer  { get; private set; }
-        public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
 
         private LineRenderLayer(
             Line.StyleLayer layer, Material material, Line.PaintProperties paint,
-            Line.LayoutProperties layout, ZoomStyleApplier applier, int drawIndex)
+            Line.LayoutProperties layout, ZoomStyleApplier applier)
         {
             StyleLayer = layer;
             Material   = material;
             _paint     = paint;
             _layout    = layout;
             Applier    = applier;
-            DrawIndex  = drawIndex;
         }
 
         /// <summary>
@@ -72,7 +70,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// the layer: <see cref="RenderLayerSet.Build"/> records it as <c>LayerSkipReason.MaterialUnconfigured</c>.
         /// </summary>
         public static LineRenderLayer TryCreate(
-            Line.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
+            Line.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom)
         {
             Material mat = Materials.MaterialFactory.CreateLineMaterial(settings);
             if (mat == null) return null;
@@ -87,7 +85,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract).
             applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
-            return new LineRenderLayer(layer, mat, paint, layout, applier, drawIndex);
+            return new LineRenderLayer(layer, mat, paint, layout, applier);
         }
 
         /// <inheritdoc cref="IFadeableRenderLayer.FadesGradually"/>

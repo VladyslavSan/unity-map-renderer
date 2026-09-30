@@ -280,8 +280,8 @@ order, draw order, material index and backend slot at once cannot express a reor
 collapsing all four into a fresh `0..N-1` sequence — which forces the full rebuild of § "Restyle: the full
 rebuild" above, every tile's mesh for every layer.
 
-**Slot vs draw order.** `IRenderLayer.DrawIndex` is purely the **slot**: the backend `materialIndex`, the
-`LoadedTile.MaterialIndices` entry, `PreparedKey`'s layer id. `RenderLayerSet.Build` sets it once and it is
+**Slot vs draw order.** A layer's slot is its index in `RenderLayerSet`: the backend `materialIndex`, the
+`LoadedTile.MaterialIndices` entry, `PreparedKey`'s layer id. `RenderLayerSet.Build` assigns it once and it is
 stable across a restyle for a surviving layer. **Draw order** is a separate quantity — the layer's position in
 the current document's `layers` array — written only into `Material.renderQueue` through
 `IRenderLayer.SetDrawOrder` (`LayerDrawOrder.QueueFor`). A fresh `Build` is the only place the two coincide,

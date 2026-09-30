@@ -1353,7 +1353,7 @@ namespace MapRenderer.Tests.Tiles
                 view.TileManager.CollectLoadedTileKeys(keys);
                 Assert.AreEqual(loaded, keys.Count);
 
-                Material backgroundMaterial = view.Layers[0].Material; // the ONLY layer — DrawIndex 0
+                Material backgroundMaterial = view.Layers[0].Material; // the ONLY layer — slot 0
                 Assert.IsNotNull(backgroundMaterial);
 
                 foreach (var key in keys)
@@ -1371,7 +1371,7 @@ namespace MapRenderer.Tests.Tiles
                         $"the background quad's mesh at {key.Tile} must be non-empty.");
                     Assert.AreSame(backgroundMaterial, mr.sharedMaterial,
                         $"the background quad at {key.Tile} must draw with the background layer's material " +
-                        "(its declared DrawIndex/material slot).");
+                        "(its declared slot).");
                 }
 
                 Assert.AreEqual(loaded, gor.ContainerCount(), "exactly one container per covered tile — no extras.");

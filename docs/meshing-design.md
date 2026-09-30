@@ -545,7 +545,6 @@ feature-driven layer (fill, line, fill-extrusion) also implements. Abridged — 
 internal interface IRenderLayer : IDisposable
 {
     StyleLayer        StyleLayer      { get; }
-    int               DrawIndex       { get; }  // the slot: backend materialIndex; stable across an in-place restyle
     ShadowCastingMode CastShadows     { get; }  // transported verbatim by every backend
     LayerSubSlot      MaterialSubSlot { get; }  // Base, or Above for symbol text over its own icon
     Material          Material        { get; }  // owned by the layer; queue = draw-order band + MaterialSubSlot
@@ -580,7 +579,7 @@ has-a-background check), so a second source-less kind would need its own such br
   owning a queue BAND (`LayerDrawOrder.QueueFor(declaredOrder, subSlot)`): fill/line/background use only
   `LayerSubSlot.Base`; a symbol layer's icon takes `Base` and its own text `Above`, so the badge always draws
   under the number it frames. `RenderLayerSet.Build` makes slot == draw order == material index, and the list
-  contains every painted layer. An in-place restyle keeps each surviving layer's slot (`DrawIndex`) and
+  contains every painted layer. An in-place restyle keeps each surviving layer's slot and
   restamps its band from the new declared order (`SetDrawOrder`), so the two can diverge
   (`docs/tile-pipeline-design.md` § "Partial-survival restyle — slot vs draw order, the tombstone, the three
   exits"). Only genuinely unpainted kinds (unknown, unsupported) and unconfigured-material layers take no

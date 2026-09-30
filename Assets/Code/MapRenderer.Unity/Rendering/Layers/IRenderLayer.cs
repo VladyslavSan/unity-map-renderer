@@ -8,21 +8,15 @@ namespace MapRenderer.Unity.Rendering.Layers
 {
     /// <summary>
     /// One runtime render object per declared, renderable style layer — the uniform base over every
-    /// painted layer kind (fill, line, symbol, background, fill-extrusion). Each layer declares its
-    /// global SLOT (<see cref="DrawIndex"/>) and whether it casts shadows (<see cref="CastShadows"/>). The
-    /// static-geometry contract lives on <see cref="ITileMeshRenderLayer"/>, not here.
+    /// painted layer kind (fill, line, symbol, background, fill-extrusion). The slot is defined on
+    /// <see cref="RenderLayerSet"/>. Each layer also declares whether it casts shadows
+    /// (<see cref="CastShadows"/>). The static-geometry contract lives on <see cref="ITileMeshRenderLayer"/>,
+    /// not here.
     /// </summary>
     internal interface IRenderLayer : IDisposable
     {
         /// <summary>The parsed style data (source, filter, source-layer, id) this layer renders from.</summary>
         StyleLayer StyleLayer { get; }
-
-        /// <summary>This layer's <b>slot</b> — the backend <c>materialIndex</c>, the
-        /// <c>LoadedTile.MaterialIndices</c> entry, and <c>PreparedKey</c>'s layer id. Set once by
-        /// <see cref="RenderLayerSet.Build"/> and <b>stable across a restyle</b> for a surviving layer
-        /// (<see cref="RenderLayerSet.TryRestyleInPlace"/>). Not the queue input — see
-        /// <see cref="SetDrawOrder"/> for that.</summary>
-        int DrawIndex { get; }
 
         /// <summary>Whether this layer's geometry is drawn into the shadow map. A per-render-KIND decision,
         /// not a style property: only <c>fill-extrusion</c> returns <see cref="ShadowCastingMode.On"/> —
@@ -31,7 +25,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// floating dark quad. Receiving is unconditional for tile geometry, separate from this axis — Off
         /// means does-not-CAST, not does-not-receive. Non-local invariant:
         /// <see cref="Backend.ITileRenderBackend"/>'s three implementations TRANSPORT this value verbatim,
-        /// indexed by <see cref="DrawIndex"/>, and must never re-derive it from the layer type or the
+        /// indexed by slot, and must never re-derive it from the layer type or the
         /// material, or the three backends drift apart.</summary>
         ShadowCastingMode CastShadows { get; }
 
@@ -65,10 +59,9 @@ namespace MapRenderer.Unity.Rendering.Layers
         /// <param name="nowSeconds">The restyle's wall-clock instant (armed-at, before any delay).</param>
         void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds);
 
-        /// <summary>Stamps this layer's queue band from <paramref name="declaredOrder"/> — its position in
-        /// the CURRENT document's declared order (monotone in the <c>layers</c> index), which may differ from <see cref="DrawIndex"/> (the
-        /// slot) after a partial-survival reorder. A no-op when <see cref="Material"/> is null (that slot's
-        /// own base material is unconfigured).</summary>
+        /// <summary>Stamps this layer's queue band from <paramref name="declaredOrder"/>, its position in the
+        /// CURRENT document's declared order. It differs from the slot after a partial-survival reorder.
+        /// A no-op when <see cref="Material"/> is null (that slot's own base material is unconfigured).</summary>
         /// <param name="declaredOrder">This layer's index in the new document's declared layer order.</param>
         void SetDrawOrder(int declaredOrder);
     }

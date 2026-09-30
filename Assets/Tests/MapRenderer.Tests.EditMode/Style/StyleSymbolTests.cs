@@ -99,7 +99,7 @@ namespace MapRenderer.Tests.Style
                 "{\"version\":8,\"layers\":[{\"id\":\"labels\",\"type\":\"symbol\",\"source\":\"s\"," +
                 "\"source-layer\":\"l\",\"layout\":{\"text-field\":\"{NAME}\"}," +
                 "\"paint\":{\"text-color\":\"#996633\"}}]}");
-            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom);
             try
             {
                 Color c = renderLayer.WorldTextMaterial.GetColor(Shader.PropertyToID("_TextColor"));
@@ -121,7 +121,7 @@ namespace MapRenderer.Tests.Style
                 "{\"version\":8,\"layers\":[{\"id\":\"labels\",\"type\":\"symbol\",\"source\":\"s\"," +
                 "\"source-layer\":\"l\",\"layout\":{\"text-field\":\"{NAME}\"}," +
                 "\"paint\":{\"text-color\":[\"rgba\",153,102,51,0.5]}}]}");
-            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom);
             try
             {
                 Color c = renderLayer.WorldTextMaterial.GetColor(Shader.PropertyToID("_TextColor"));
@@ -193,7 +193,7 @@ namespace MapRenderer.Tests.Style
 
             SymbolRenderLayer renderLayer = null;
             Assert.DoesNotThrow(() =>
-                renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0),
+                renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom),
                 "a data-driven text-color must not throw at Create — Evaluate(zoom) is never called for it.");
             try
             {
@@ -218,7 +218,7 @@ namespace MapRenderer.Tests.Style
                 "{\"version\":8,\"layers\":[{\"id\":\"labels\",\"type\":\"symbol\",\"source\":\"s\"," +
                 "\"source-layer\":\"l\",\"layout\":{\"text-field\":\"{NAME}\"}," +
                 "\"paint\":{\"text-color\":\"#996633\",\"text-halo-color\":[\"get\",\"hc\"]}}]}");
-            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom);
             try
             {
                 Color c = renderLayer.WorldTextMaterial.GetColor(Shader.PropertyToID("_TextColor"));

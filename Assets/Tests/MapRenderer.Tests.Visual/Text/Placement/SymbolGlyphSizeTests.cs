@@ -870,7 +870,7 @@ namespace MapRenderer.Tests.Visual
             var (glyphAtlas, quads, bounds) = BuildGlyphA();
             StyleDocument style = TestStyle.Document(SymbolStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
-            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, SweptZoom, drawIndex: 0);
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, SweptZoom);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned.");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
 
