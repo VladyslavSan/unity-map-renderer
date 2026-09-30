@@ -1706,7 +1706,7 @@ namespace MapRenderer.Tests.Tiles
                 FillRenderLayer.ProfilerMarkerNames.ApplyZoomFills,
                 LineRenderLayer.ProfilerMarkerNames.ApplyZoomLines,
                 LineRenderLayer.ProfilerMarkerNames.ApplyZoomLineDash,
-                MapView.ProfilerMarkerNames.InstancedRebuild,
+                TileManager.ProfilerMarkerNames.InstancedRebuild,
                 MapView.ProfilerMarkerNames.ManagerUpdate,
                 TileManager.ProfilerMarkerNames.MeshDataAllocate,
                 TileManager.ProfilerMarkerNames.AddTileLayer,

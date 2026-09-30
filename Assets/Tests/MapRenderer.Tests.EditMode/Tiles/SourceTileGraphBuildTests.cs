@@ -67,7 +67,7 @@ namespace MapRenderer.Tests.Tiles
         {
             public readonly List<SpySymbolTileWorkerPass> IssuedPasses = new();
 
-            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen)
+            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
             {
                 var pass = new SpySymbolTileWorkerPass();
                 IssuedPasses.Add(pass);

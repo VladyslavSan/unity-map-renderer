@@ -2453,7 +2453,7 @@ namespace MapRenderer.Tests.Tiles
             public Func<string, bool> ParticipatesFor = _ => true;
             public Func<string, TileId, SpySymbolTileWorkerPass> PassFactory;
 
-            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen)
+            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
             {
                 BeginBuildCalls.Add((sourceId, tile));
                 if (!ParticipatesFor(sourceId)) return null;

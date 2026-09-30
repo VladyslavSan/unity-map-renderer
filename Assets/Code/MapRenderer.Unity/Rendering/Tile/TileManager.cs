@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
@@ -41,7 +42,12 @@ namespace MapRenderer.Unity.Rendering.Tile
             internal const string MeshUpload       = "MapRenderer.Mesh.Upload";
             internal const string AddTileLayer     = "MapRenderer.Tile.AddLayer";
             internal const string MeshDataAllocate = "MapRenderer.Tile.MeshDataAllocate";
+            internal const string InstancedRebuild = "MapRenderer.Tile.InstancedRebuild";
         }
+
+        // Drive the render backend per frame (on Entities this ticks the EG system groups).
+        private static readonly ProfilerMarker PmInstancedRebuild =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.InstancedRebuild);
 
         private static readonly ProfilerMarker PmCoverSelect =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.CoverSelect);
@@ -470,6 +476,12 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly List<TileId>    _swapCovering  = new(32);
         private readonly List<LoadedKey> _retryScratch  = new(8);
 
+        /// <summary>The scene frame of the last <see cref="Update"/>, which <see cref="DrainMeshBuilds"/> places its tiles from.</summary>
+        private Backend.SceneFrame _lastSceneFrame;
+
+        /// <summary>True once an <see cref="Update"/> has stored <see cref="_lastSceneFrame"/>.</summary>
+        private bool _hasLastSceneFrame;
+
         /// <summary>The clock and retry cooldown of the current <see cref="Update"/>; the drain reads the last values.</summary>
         private double _nowSeconds;
         private double _fetchRetrySeconds;
@@ -861,7 +873,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             into.Clear();
             foreach (var kv in _loaded)
             {
-                if (IsCondemned(kv.Key, kv.Value)) continue; // a swapped-out tile's labels end with its tile, not with its release
+                if (IsCondemned(kv.Key)) continue; // a swapped-out tile's labels end with its tile, not with its release
                 into.Add(new LoadedTileKey(_sources.SourceIdOf(kv.Key.Slot), kv.Key.Tile, shown: IsRecordVisible(kv.Key)));
             }
         }
@@ -885,15 +897,15 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>True iff the record waits in the release queue with no role. A swapped-out record keeps its old stored role until its
-        /// release drains, and one that regained a role (a swing-back) is not condemned although it is still queued.</summary>
-        private bool IsCondemned(LoadedKey key, in LoadedTile lt) => _releaseQueued.Contains(key) && !TryResolveRole(in key, in lt, out _);
+        /// release drains. <see cref="RecomputeRoles"/> takes a record that regains a role (a swing-back) off the queue.</summary>
+        private bool IsCondemned(LoadedKey key) => _releaseQueued.Contains(key);
 
         /// <summary>Records in <see cref="_loaded"/> with <paramref name="role"/>, recomputed fresh each call.</summary>
         private int CountByRole(TileRole role)
         {
             int n = 0;
             foreach (var kv in _loaded)
-                if (kv.Value.Role == role && !IsCondemned(kv.Key, kv.Value)) n++;
+                if (kv.Value.Role == role && !IsCondemned(kv.Key)) n++;
             return n;
         }
 
@@ -962,7 +974,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             foreach (var kv in _loaded)
             {
                 LoadedTile lt = kv.Value;
-                bool condemned = IsCondemned(kv.Key, lt);
+                bool condemned = IsCondemned(kv.Key);
                 if (lt.Role == TileRole.Prepare) { if (!condemned) preparing++; continue; }
                 if (lt.Role == TileRole.Hold) { if (!condemned) held++; }
                 else if (lt.Role == TileRole.Bridge) { if (!condemned) bridged++; }
@@ -1025,13 +1037,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Invalidates the cached cover-selection key so the next <see cref="Update"/> re-selects the
         /// cover. Called when the camera is re-wired (<see cref="Map.View.SetCamera"/>).</summary>
         public void InvalidateCover() => _coverGate.Invalidate();
-
-        /// <summary>Rebuilds the per-tile object-to-world transforms (and refreshes backend state) for all
-        /// loaded tiles from <paramref name="frame"/>. Called by MapView once per frame.</summary>
-        public void InstancedRebuild(in Backend.SceneFrame frame)
-        {
-            _instanced?.Rebuild(frame);
-        }
 
         /// <summary>
         /// Pushes each layer's visibility to the backend as a per-slot draw gate, so a layer that paints
@@ -1122,12 +1127,24 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>One frame of the tile loop — a thin shell over <see cref="UpdateCore"/> so telemetry
         /// refreshes after every return from it, the <c>Selector == null</c> early return included (a
-        /// dirty-frame-only update would freeze when the map goes still). A throw from <see cref="UpdateCore"/> skips the refresh.</summary>
+        /// dirty-frame-only update would freeze when the map goes still). A throw from <see cref="UpdateCore"/> skips the refresh.
+        /// The frame ends with the backend's <c>Rebuild</c>, so every item this Update registered or revealed is placed and drawn this frame.</summary>
         /// <param name="nowSeconds">The clock retries are timed against.</param>
-        public void Update(CameraProperties cam, TileSelectionConfig cfg, double nowSeconds)
+        /// <param name="sceneFrame">The frame's camera-relative origin and rebase, which the backend places every tile from.</param>
+        public void Update(CameraProperties cam, TileSelectionConfig cfg, double nowSeconds, in Backend.SceneFrame sceneFrame)
         {
             UpdateCore(cam, cfg, nowSeconds);
+            RebuildBackend(in sceneFrame);
             _telemetry = CaptureTelemetry();
+        }
+
+        /// <summary>Places every loaded tile from <paramref name="sceneFrame"/> and remembers the frame for <see cref="DrainMeshBuilds"/>.</summary>
+        private void RebuildBackend(in Backend.SceneFrame sceneFrame)
+        {
+            _lastSceneFrame    = sceneFrame;
+            _hasLastSceneFrame = true;
+            using (PmInstancedRebuild.Auto())
+                _instanced?.Rebuild(in sceneFrame);
         }
 
         private void UpdateCore(CameraProperties cam, TileSelectionConfig cfg, double nowSeconds)
@@ -1384,6 +1401,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             ServiceRetries();
             SwapStep();
             FlushVisibility();
+            if (_hasLastSceneFrame) RebuildBackend(in _lastSceneFrame);
         }
 
         /// <summary>Waits for in-flight fetch and mesh-build tasks on <c>_loaded</c> tiles, parking off the
@@ -1572,7 +1590,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     Processing.ISymbolTileWorkerPass symbolPass = null;
                     try
                     {
-                        if (!lt.Rebaking) symbolPass = SymbolWorkerFactory?.TryBeginBuild(sourceId, id, offScreen: lt.Role == TileRole.Prepare); // a rebake changes no symbol input
+                        if (!lt.Rebaking) symbolPass = SymbolWorkerFactory?.TryBeginBuild(sourceId, id); // a rebake changes no symbol input
                     }
                     catch (System.Exception ex)
                     {
@@ -1839,6 +1857,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Append this call's new meshes/handles/indices to the tile's arrays — one realloc per partial frame, load time only.
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
+            int handlesBefore = lt.DrawHandles?.Length ?? 0;
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
             bool complete = cursor >= denseCount;
@@ -1855,7 +1874,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Only this call's handles: earlier calls already queued theirs. A record follows its tile: its items show for the groups the
             // tile has revealed, and a tile's reveal belongs to the swap step.
             if (_consumeHandles.Count > 0 && FollowsShownTile(key, in lt, out ulong shownGroups))
-                QueueShowGroups(_consumeHandles, _consumeMatIndices, shownGroups);
+                QueueShowGroups(lt.DrawHandles.AsSpan(handlesBefore), lt.MaterialIndices.AsSpan(handlesBefore), shownGroups);
 
             if (complete)
             {
@@ -1877,6 +1896,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             lt.MeshBuildTask = default;
             lt.Graph         = null;
             lt.Built         = true;
+            lt.PendingGroups = 0;
         }
 
         /// <summary>Appends freshly-built meshes to a tile's tracked-Mesh array (grows by realloc).</summary>
@@ -1912,8 +1932,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 payloads[li]?.Dispose();
         }
 
-        /// <summary>Releases up to <paramref name="budget"/> queued records this Update (0 = uncapped). Each
-        /// key is re-validated — one back in a role, or already cleared by a restyle, is skipped without spending budget.</summary>
+        /// <summary>Releases up to <paramref name="budget"/> queued records this Update (0 = uncapped). A key that is no longer queued, or
+        /// whose record is gone, is skipped without spending budget.</summary>
         private void DrainReleaseQueue(int budget)
         {
             if (_releaseQueue.Count == 0) return;
@@ -1923,9 +1943,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             while (released < cap && _releaseQueue.Count > 0)
             {
                 LoadedKey key = _releaseQueue.Dequeue();
-                _releaseQueued.Remove(key);
-                // Re-validate: back in a role, or already gone (restyle) → skip without spending budget.
-                if (!_loaded.TryGetValue(key, out LoadedTile queued) || TryResolveRole(in key, in queued, out _)) continue;
+                // A key that left the set regained a role (RecomputeRoles); a key missing from _loaded was torn down (a source left). Neither spends budget.
+                if (!_releaseQueued.Remove(key) || !_loaded.ContainsKey(key)) continue;
                 ReleaseTile(key);
                 released++;
             }
@@ -2241,7 +2260,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 LoadedTile lt = kv.Value;
                 if (!TryResolveRole(kv.Key, in lt, out TileRole role)) _toRelease.Add(kv.Key);
-                else if (role != lt.Role) _roleChanges.Add(kv.Key);
+                else if (role != lt.Role || _releaseQueued.Contains(kv.Key)) _roleChanges.Add(kv.Key); // a queued record that regained a role leaves the queue
                 else if (role == TileRole.Prepare && !lt.Built && !lt.WaitingRetry && !_preloadSet.Contains(kv.Key) && !_keepSet.Contains(kv.Key))
                     _rolePassPending = true;
             }
@@ -2253,6 +2272,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 TryResolveRole(in key, in lt, out TileRole role);
                 lt.Role = role;
                 _loaded[key] = lt;
+                _releaseQueued.Remove(key);
             }
 
             for (int i = 0; i < _toRelease.Count; i++)
@@ -2327,28 +2347,18 @@ namespace MapRenderer.Unity.Rendering.Tile
             shownGroups = 0;
             if (!_shownCount.ContainsKey(key)) return false;
             if (_revealed.TryGetValue(key, out shownGroups)) return true;
-            if (!TryResolveRole(in key, in lt, out _)) return false;
+            if (IsCondemned(key)) return false;
             if (!_shownGroups.TryGetValue(key, out shownGroups) || shownGroups == 0) return false;
             _revealed[key] = shownGroups;
             return true;
         }
 
         /// <summary>Queues the handles whose layer group is in <paramref name="groups"/> to show.</summary>
-        private void QueueShowGroups(int[] handles, int[] materialIndices, ulong groups)
+        private void QueueShowGroups(ReadOnlySpan<int> handles, ReadOnlySpan<int> materialIndices, ulong groups)
         {
-            if (handles == null) return;
             for (int i = 0; i < handles.Length; i++)
             {
-                int materialIndex = materialIndices != null && i < materialIndices.Length ? materialIndices[i] : -1;
-                if ((GroupBit(materialIndex) & groups) != 0) QueueShow(handles[i]);
-            }
-        }
-
-        private void QueueShowGroups(List<int> handles, List<int> materialIndices, ulong groups)
-        {
-            for (int i = 0; i < handles.Count; i++)
-            {
-                int materialIndex = i < materialIndices.Count ? materialIndices[i] : -1;
+                int materialIndex = i < materialIndices.Length ? materialIndices[i] : -1;
                 if ((GroupBit(materialIndex) & groups) != 0) QueueShow(handles[i]);
             }
         }
@@ -2746,6 +2756,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private void ServiceRetries()
         {
             _retryScratch.Clear();
+            // Non-local invariant: a queued record must not restart, or it counts as having a role while no pass unqueues it and the drain cancels it.
             foreach (var kv in _loaded)
                 if (kv.Value.WaitingRetry && _nowSeconds >= kv.Value.RetryAtSeconds && !_releaseQueued.Contains(kv.Key))
                     _retryScratch.Add(kv.Key);
@@ -2772,19 +2783,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _hideBatch[_hideBatchCount++] = handles[i];
                 _lastQueuedShow[handles[i]] = false;
             }
-        }
-
-        /// <summary>Queues <paramref name="handles"/> to show at the next <see cref="FlushVisibility"/>.</summary>
-        private void QueueShow(int[] handles)
-        {
-            if (handles == null) return;
-            for (int i = 0; i < handles.Length; i++) QueueShow(handles[i]);
-        }
-
-        /// <summary>Queues every handle in <paramref name="handles"/> to show at the next flush.</summary>
-        private void QueueShow(List<int> handles)
-        {
-            for (int i = 0; i < handles.Count; i++) QueueShow(handles[i]);
         }
 
         /// <summary>Queues one handle to show at the next flush.</summary>

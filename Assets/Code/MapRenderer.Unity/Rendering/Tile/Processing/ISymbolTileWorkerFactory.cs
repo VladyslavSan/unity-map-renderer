@@ -18,9 +18,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// and the glyph pipeline is live. Returns null for no participation (a mesh-only source, or no
         /// glyph pipeline). Does the main-thread prologue: reserve the store slot + generation, capture
         /// camera zoom + projection, build the per-layer processors + context.</summary>
-        /// <param name="offScreen">True for a tile prepared ahead of the switch: its entry opens on the kept-warm
-        /// side, so no label draws until the tile is reported as loaded.</param>
-        ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen);
+        ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile);
 
         /// <summary>MAIN THREAD (admission time, <see cref="Tile.TileManager"/>'s prepared-cache probe): the
         /// counterpart to <see cref="TryBeginBuild"/> — true iff serving this tile from the prepared mesh

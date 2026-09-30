@@ -1606,7 +1606,7 @@ namespace MapRenderer.Tests.Visual
     /// <summary>
     /// GameObject backend wired through the live MapView/TileManager path: selecting RenderBackend.GameObject
     /// constructs the GameObject renderer (and neither instanced backend), consume creates per-tile
-    /// containers, and the per-frame InstancedRebuild positions them via FloatingOrigin.TileLocalToScene.
+    /// containers, and the backend Rebuild that ends TileManager.Update positions them via FloatingOrigin.TileLocalToScene.
     /// Mirrors MapViewEntitiesBackendTests' wiring tooth. GPU-independent (reads the live transform).
     /// </summary>
     [TestFixture]
@@ -1649,8 +1649,23 @@ namespace MapRenderer.Tests.Visual
             {
                 var cam0 = MakeCam(0, 0, 0.0);
                 view.LoadTestStyle(src, cam0, style: MinimalStyle());
+
+                // The Update that registers the first tile places its container too: TileManager.Update ends with the backend Rebuild.
+                var firstGo = view.GameObjectRenderer();
+                for (int f = 0; f < 500 && firstGo.ContainerCount() == 0; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+
+                Assert.Greater(firstGo.ContainerCount(), 0, "precondition: a container was created");
+                float3 expectedFirst = FloatingOrigin.TileLocalToScene(
+                    FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }), cam0.CenterMercator());
+                Assert.Greater(System.Math.Abs(expectedFirst.x), 1f, "precondition: the placed x is not the identity x");
+                Assert.That(firstGo.Container(new TileId { Z = 0, X = 0, Y = 0 }).position.x, Is.EqualTo(expectedFirst.x).Within(0.1f),
+                    "the first Update that registers a tile also places its container");
+
                 PumpUntilSettled(view);
-                view.LateUpdate(); // the drain created the containers after the last Rebuild; this one places them
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the GameObject backend.");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -1688,7 +1703,7 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Entities backend through MapView/TileManager: one entity per tile-layer, positioned by InstancedRebuild
+    // Entities backend through MapView/TileManager: one entity per tile-layer, positioned by the backend Rebuild
     // via FloatingOrigin.TileLocalToScene. GPU-independent: it reads each entity's LocalToWorld.
 
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -1763,6 +1778,27 @@ namespace MapRenderer.Tests.Visual
             {
                 var cam0 = MakeCam(0, 0, 0.0);
                 view.LoadTestStyle(src, cam0, style: MinimalStyle());
+
+                // The Update that registers the first tile places it too: TileManager.Update ends with the backend Rebuild.
+                var firstEnt = view.EntitiesRenderer();
+                for (int f = 0; f < 500 && firstEnt.DrawItemCount() == 0; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+
+                Assert.Greater(firstEnt.DrawItemCount(), 0, "precondition: a tile registered");
+                float3 expectedFirst = FloatingOrigin.TileLocalToScene(
+                    FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }), cam0.CenterMercator());
+                Assert.Greater(System.Math.Abs(expectedFirst.x), 1f, "precondition: the placed x is not the identity x");
+                for (int h = 0; h < firstEnt.DrawItemCount() + 100; h++)
+                {
+                    var (fx, fz) = firstEnt.GetInstanceTranslation(h);
+                    if (float.IsNaN(fx)) continue;
+                    Assert.That(fx, Is.EqualTo(expectedFirst.x).Within(0.1f), "the first Update that registers a tile also places it");
+                    break;
+                }
+
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the Entities backend.");

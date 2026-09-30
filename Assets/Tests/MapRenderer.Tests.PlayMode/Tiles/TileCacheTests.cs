@@ -149,7 +149,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         /// <summary>
         /// The level after the drawn one prepares before the zoom reaches it (lead 0.3, level 4 to 5): its tiles load
-        /// HIDDEN, are not reported as loaded and get an off-screen label build, and a build in flight is never cancelled
+        /// HIDDEN, are not reported as loaded and begin their label build like any other tile, and a build in flight is never cancelled
         /// for leaving the preload set. A finished one stays through jitter across the edge, and a switch shows it in
         /// one batch with no fetch, in flight or rebaking too.
         /// </summary>
@@ -190,9 +190,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 int prepared = view.CaptureTelemetry().PreparingTileCount;
                 view.CollectLoadedTileIds(drawn);
                 Assert.AreEqual(4 * drawn.Count, prepared, "every drawn tile prepares its four children.");
-                yield return TickUntil(view, () => spy.OffScreenCalls.FindAll(o => o).Count == prepared);
-                Assert.AreEqual(prepared, spy.OffScreenCalls.FindAll(o => o).Count, "a prepared tile's label build opens off-screen.");
-                Assert.AreEqual(drawn.Count, spy.OffScreenCalls.FindAll(o => !o).Count, "a drawn tile's label build opens on-screen.");
+                yield return TickUntil(view, () => spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count == prepared);
+                Assert.AreEqual(prepared, spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count, "every prepared tile begins its label build.");
                 Assert.IsFalse(drawn.Exists(t => t.Z == 5), "a prepared tile is not reported as loaded.");
                 var reported = new List<LoadedTileKey>();
                 view.TileManager.CollectLoadedTileKeys(reported); // what the symbol subsystem reconciles against

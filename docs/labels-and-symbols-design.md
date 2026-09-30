@@ -120,9 +120,9 @@ is load-bearing:
    sceneFrame       = BuildSceneFrame(...)      // floating origin: origin = look-at, + ENU rebase
 
 2. Layers.ApplyZoom(...)                        // zoom uniforms, px→device basis, before anything else moves
-   TileManager.Update(cameraProperties, ...)    // the slow clock (tile lifecycle) — cover select + request/release
-   TileManager.InstancedRebuild(sceneFrame)     // place tile meshes relative to the origin
-   //   (after Update, so a swap's items are in this frame's draw list)
+   TileManager.Update(cameraProperties, ..., sceneFrame) // the slow clock (tile lifecycle) — cover select + request/release,
+                                                          // then the backend Rebuild places the tile meshes relative to the
+                                                          // origin, so a swap's items are in this frame's draw list
 
 3. if SymbolSubsystem.HasSymbolLayers:
      TileManager.CollectLoadedTileKeys(scratch)         // PULL the current loaded set
@@ -236,9 +236,9 @@ A tile that is loaded but serves no revealed tile (a prepared tile, or a child u
 and a hidden tile is never evicted. `SymbolTileStore.ReconcileActiveSet` takes it as a *hidden* key: its entry moves to
 the cached side and is pinned, so the FIFO eviction skips it, even with the cache off. The store owns that decision, not
 the tile manager, which only reports `Shown`. An entry that was collected at least once fades out as departing, pinned,
-when it becomes hidden; one that was never collected moves to the pinned cached side with no stamp. A Prepare record's
-symbol build opens on the cached side; a hidden Display record's opens active and moves there in the same frame's
-reconcile, before any collect, so it is never collected. A hidden entry returns to the active side when its key is
+when it becomes hidden; one that was never collected moves to the pinned cached side with no stamp. A hidden record's symbol build opens
+active and moves there in the same frame's reconcile, so a build never collects as active; an entry collected before
+fades out as departing, as above. A hidden entry returns to the active side when its key is
 *shown*. With the cache off, a cached entry whose key is no longer loaded is dropped. So a tile's labels appear with its
 geometry, and during a hold only the held tile's labels draw.
 

@@ -68,7 +68,6 @@ namespace MapRenderer.Unity.Rendering.Map
             internal const string LateUpdate       = "MapRenderer.View.LateUpdate";
             internal const string CameraAdvance    = "MapRenderer.Camera.Advance";
             internal const string ApplyZoom        = "MapRenderer.View.ApplyZoom";
-            internal const string InstancedRebuild = "MapRenderer.View.InstancedRebuild";
             internal const string ManagerUpdate    = "MapRenderer.Tile.ManagerUpdate";
             internal const string SceneFrame       = "MapRenderer.View.SceneFrame";
             internal const string SymbolCollect    = "MapRenderer.Symbol.Collect";
@@ -86,10 +85,6 @@ namespace MapRenderer.Unity.Rendering.Map
         // Push zoom uniforms into every layer material (scales with layer count).
         private static readonly ProfilerMarker PmApplyZoom =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoom);
-
-        // Drive the render backend per frame (on Entities this ticks the EG system groups).
-        private static readonly ProfilerMarker PmInstancedRebuild =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.InstancedRebuild);
 
         // Cover select + request/release + build pump (CoverSelect/FetchPoll nest under it).
         private static readonly ProfilerMarker PmManagerUpdate =
@@ -642,12 +637,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
             EnsureSelector();
             using (PmManagerUpdate.Auto())
-                TileManager.Update(cameraProperties, BuildTileSelectionConfig(), NowSeconds);
-
-            // Camera-relative rendering: place all loaded tiles relative to the look-at origin.
-            // Non-obvious why: this follows Update so the backend's draw list holds every item the swap registered and revealed this frame.
-            using (PmInstancedRebuild.Auto())
-                TileManager.InstancedRebuild(sceneFrame);
+                TileManager.Update(cameraProperties, BuildTileSelectionConfig(), NowSeconds, in sceneFrame);
 
             // Pull the sprite sheet, which the symbol subsystem owns and fetches, into the fill-pattern layers each
             // frame. SetSprites early-outs on an unchanged pair.

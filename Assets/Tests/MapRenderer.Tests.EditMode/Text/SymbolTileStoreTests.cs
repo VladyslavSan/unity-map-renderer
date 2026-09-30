@@ -978,16 +978,6 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, back.Count, "the cache hit restores the kept-warm labels (the zoom-out-then-in fix)");
             Assert.AreEqual(1, back[0].FeatureIndex, "it is the SAME tile's labels");
 
-            // A tile prepared ahead opens on the kept-warm side: it commits there, is never collected nor stamped
-            // departing, and shows only once restored.
-            var prepared = Key("src", 2);
-            Commit(store, prepared, store.BeginBuild(prepared, cached: true), Symbols(2));
-            Assert.AreEqual(1, store.ActiveTileCount, "a prepared tile is not on the active side");
-            Assert.AreEqual(1, store.CachedTileCount, "it waits on the kept-warm side");
-            Assert.AreEqual(0, store.DepartingTileCount, "and is not departing");
-            Assert.AreEqual(1, Collect(store).Count, "its labels do not render before it is restored");
-            store.Restore(prepared);
-            Assert.AreEqual(2, Collect(store).Count, "restoring it draws its committed labels");
             store.Clear();
         }
 
@@ -1111,13 +1101,13 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, back[0].FeatureIndex, "the SAME tile's labels");
             store.Clear();
 
-            // A hidden child opens cached and stays uncollected, unfaded and unevicted at cacheCap 1; it collects once shown.
+            // A hidden child opens active, and its reconcile moves it before any collect: unfaded, unevicted at cacheCap 1.
             // The markers are distinct identities, so point dedup cannot hide a doubled label.
             var hiddenStore = new SymbolTileStore(cacheCap: 1);
             var parent = Key("src", 2);
             var child  = Key("src", 3);
             Commit(hiddenStore, parent, hiddenStore.BeginBuild(parent), Symbols(2));
-            Commit(hiddenStore, child, hiddenStore.BeginBuild(child, cached: true), Symbols(3));
+            Commit(hiddenStore, child, hiddenStore.BeginBuild(child), Symbols(3));
             hiddenStore.ReconcileActiveSet(Loaded(parent), hidden: Loaded(child), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
             Assert.AreEqual(1, Collect(hiddenStore).Count, "only the shown tile's labels are collected");
             Assert.AreEqual(0, hiddenStore.DepartingTileCount, "a hidden tile that never drew does not fade");
@@ -1148,6 +1138,17 @@ namespace MapRenderer.Tests.Text
             fadeStore.ReconcileActiveSet(Loaded(), hidden: Loaded(drawn), keepWarmOnRelease: true, nowSeconds: 10.6, departingGraceSeconds: 0.5);
             Assert.AreEqual(0, fadeStore.DepartingTileCount, "the stamp is not renewed, so the fade ends");
             Assert.IsTrue(fadeStore.HasCommittedBlock(drawn), "…and the pinned entry stays warm");
+
+            // A departing key that is fetched again opens active, and fades out again when it is hidden again.
+            fadeStore.Clear();
+            var refetched = Key("src", 9);
+            Commit(fadeStore, refetched, fadeStore.BeginBuild(refetched), Symbols(9));
+            Assert.AreEqual(1, Collect(fadeStore).Count, "the tile's labels are collected");
+            fadeStore.ReconcileActiveSet(Loaded(), hidden: Loaded(refetched), keepWarmOnRelease: true, nowSeconds: 20.0, departingGraceSeconds: 0.5);
+            fadeStore.BeginBuild(refetched); // the re-fetch of a hidden tile
+            Assert.AreEqual(0, fadeStore.DepartingTileCount, "the re-fetch pulls the entry back to the active side");
+            fadeStore.ReconcileActiveSet(Loaded(), hidden: Loaded(refetched), keepWarmOnRelease: true, nowSeconds: 20.1, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, fadeStore.DepartingTileCount, "a re-fetched tile fades out again, it does not pop");
             fadeStore.Clear();
 
             // An active tile that was never collected goes hidden with no stamp, and stays pinned.

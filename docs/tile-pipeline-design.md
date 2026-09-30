@@ -285,8 +285,8 @@ area is covered or leaves the view, so it never outlives what is on screen.
   queued both ways in one Update ends as its last call says, because the two batches are made disjoint before the calls. The
   outgoing items are hidden, not removed. The record loses its role and waits in the release queue, so a swing-back shows it again
   without registering it again. `MaxReleasesPerTick` bounds that teardown and never the swap.
-  `MapView.LateUpdate` runs the backend's `Rebuild` after `TileManager.Update`, so the flush's shows are in that frame's draw list.
-  A swap has no one-frame hole on any backend.
+  `TileManager.Update` ends with the backend's `Rebuild`, after the flush, so the flush's shows are in that frame's draw list.
+  A swap has no one-frame hole on any backend. `DrainMeshBuilds` ends the same way, from the last frame `Update` saw.
 - **The guard.** A tile's first reveal belongs to the swap step, which looks at the tiles around it. Registering items never starts
   it. `FollowsShownTile` is the guard. It is false unless the record serves a revealed tile (its shown count is above zero). A record
   already marked shown passes with no role check. Any other record needs a role, and the guard then marks it shown (it writes `_revealed`).

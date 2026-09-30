@@ -335,15 +335,13 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         internal sealed class SpySymbolTileWorkerFactory : ISymbolTileWorkerFactory
         {
             public readonly List<(string SourceId, TileId Tile)> BeginBuildCalls = new();
-            public readonly List<bool> OffScreenCalls = new();
             public readonly List<SpySymbolTileWorkerPass> IssuedPasses = new();
             public Func<string, bool> ParticipatesFor = _ => true;
             public Func<string, TileId, SpySymbolTileWorkerPass> PassFactory;
 
-            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile, bool offScreen)
+            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
             {
                 BeginBuildCalls.Add((sourceId, tile));
-                OffScreenCalls.Add(offScreen);
                 if (!ParticipatesFor(sourceId)) return null;
                 SpySymbolTileWorkerPass pass = PassFactory != null
                     ? PassFactory(sourceId, tile)

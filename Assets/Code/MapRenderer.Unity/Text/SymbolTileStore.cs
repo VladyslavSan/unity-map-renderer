@@ -100,18 +100,8 @@ namespace MapRenderer.Unity.Text
         ///
         /// <para>An existing tile's symbols are kept (only the generation bumps), so a rebuilding/reappearing tile
         /// keeps drawing its last symbols until the new build commits instead of flashing empty.</para></summary>
-        /// <param name="cached">True for a tile prepared ahead of cover: the entry opens kept-warm, with no departing
-        /// stamp, and is not collected until <see cref="Restore"/>. An entry already active builds as usual.</param>
-        public int BeginBuild(Key key, bool cached = false)
+        public int BeginBuild(Key key)
         {
-            if (cached && !_active.ContainsKey(key))
-            {
-                Entry prepared = FindCurrent(key) ?? new Entry();
-                prepared.Generation = ++_genCounter;
-                EnqueueCached(key, prepared); // clears any departing stamp; may evict the oldest kept-warm entry
-                return prepared.Generation;
-            }
-
             Entry entry = FindCurrent(key); // active or cached (a re-fetch of an out-of-cover tile)
             RemoveCached(key);              // pull it fully onto the active side; keep its symbols
             int gen = ++_genCounter;

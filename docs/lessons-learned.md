@@ -261,13 +261,14 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   (Seen: S53a — installing the Entities packages made 1–4 such tests flake per full run; all passed in
   isolation.)
 
-- **A render backend must be rebuilt AFTER the tile update in the frame.** `MapView.LateUpdate` runs
-  `TileManager.Update` and then `InstancedRebuild`, so an item that a swap registers and reveals in a frame is in
-  the backend's draw list and placed in that same frame. The opposite order hid a swap's last-registered child
-  from BRG's sorted draw list for one frame (a one-frame hole where the parent was already concealed). Entities
-  and GameObjects position a new entity or container at the next `Rebuild`, which runs in the same frame, so
-  neither keeps a creation-time position. Every production creation happens inside `TileManager.Update`; only a
-  test drain (`DrainMeshBuilds`) creates outside it. (Seen: S53b follow-up; UMR-270.)
+- **A render backend must be rebuilt AFTER the tile update in the frame, and the code holds that order.**
+  `TileManager.Update` ends with the backend's `Rebuild`, and so does `DrainMeshBuilds`, so an item that a swap
+  registers and reveals in a frame is in the backend's draw list and placed in that same frame. The opposite order
+  hid a swap's last-registered child from BRG's sorted draw list for one frame (a one-frame hole where the parent
+  was already concealed). Entities and GameObjects position a new entity or container at the `Rebuild` of the same
+  frame, so neither keeps a creation-time position. The one-tick position arms in `MapViewEntitiesBackendTests`
+  and `MapViewGameObjectBackendTests` fail if `Rebuild` moves before `Update` or leaves it. (Seen: S53b
+  follow-up; UMR-270, UMR-272.)
 
 - **A "generous" FIXED `RenderBounds` box is NOT a safe never-cull hack — it must ENCLOSE the mesh, and a
   fixed box centred at the origin fails at low zoom.** EG frustum-culls each entity by
