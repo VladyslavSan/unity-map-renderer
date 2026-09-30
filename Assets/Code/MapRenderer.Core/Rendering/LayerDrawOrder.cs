@@ -51,18 +51,18 @@ namespace MapRenderer.Core.Rendering
 
         /// <summary>
         /// Render queue for one declared layer's sub-slot: the one home of the formula
-        /// <c>TransparentQueue + drawIndex * SubSlotsPerLayer + subSlot</c>. Every caller derives its queue
+        /// <c>TransparentQueue + declaredOrder * SubSlotsPerLayer + subSlot</c>. Every caller derives its queue
         /// from this, one layer at a time.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException">
-        /// If <paramref name="drawIndex"/> is negative, or the resulting queue would exceed
+        /// If <paramref name="declaredOrder"/> is negative, or the resulting queue would exceed
         /// <see cref="QueueCeiling"/>.
         /// </exception>
-        public static int QueueFor(int drawIndex, LayerSubSlot subSlot = LayerSubSlot.Base)
+        public static int QueueFor(int declaredOrder, LayerSubSlot subSlot = LayerSubSlot.Base)
         {
-            if (drawIndex < 0)
-                throw new ArgumentOutOfRangeException(nameof(drawIndex),
-                    drawIndex, "drawIndex must be non-negative.");
+            if (declaredOrder < 0)
+                throw new ArgumentOutOfRangeException(nameof(declaredOrder),
+                    declaredOrder, "declaredOrder must be non-negative.");
 
             // A cast can produce an undeclared sub-slot, which lands in the NEXT layer's band and breaks disjoint
             // bands: `QueueFor(i, (LayerSubSlot)SubSlotsPerLayer)` == `QueueFor(i + 1, Base)`.
@@ -71,12 +71,12 @@ namespace MapRenderer.Core.Rendering
                     $"sub-slot must be a declared {nameof(LayerSubSlot)} value (0..{SubSlotsPerLayer - 1}); " +
                     "an out-of-band sub-slot would spill into the next layer's queue band.");
 
-            // `long` throughout: in int arithmetic a large drawIndex overflows to negative, slipping past the
+            // `long` throughout: in int arithmetic a large declaredOrder overflows to negative, slipping past the
             // ceiling check below and returning a NEGATIVE queue.
-            long queue = (long)TransparentQueue + (long)drawIndex * SubSlotsPerLayer + (int)subSlot;
+            long queue = (long)TransparentQueue + (long)declaredOrder * SubSlotsPerLayer + (int)subSlot;
             if (queue > QueueCeiling)
-                throw new ArgumentOutOfRangeException(nameof(drawIndex), drawIndex,
-                    $"drawIndex {drawIndex} sub-slot {subSlot} would need queue {queue}, which exceeds " +
+                throw new ArgumentOutOfRangeException(nameof(declaredOrder), declaredOrder,
+                    $"declaredOrder {declaredOrder} sub-slot {subSlot} would need queue {queue}, which exceeds " +
                     $"Unity's render-queue ceiling ({QueueCeiling}). The integer-queue interim cannot " +
                     "represent this many layers; use the BatchRendererGroup target.");
             return (int)queue;

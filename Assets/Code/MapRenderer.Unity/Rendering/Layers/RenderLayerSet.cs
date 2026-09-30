@@ -82,7 +82,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             ClearLayers();
             if (style == null) return;
 
-            int drawIndex = 0;
+            int declaredOrder = 0;
             foreach (var sl in style.Layers)
             {
                 IRenderLayer layer = RenderLayerFactory.Create(
@@ -96,13 +96,13 @@ namespace MapRenderer.Unity.Rendering.Layers
                     continue;
                 }
 
-                layer.SetDrawOrder(drawIndex); // no-op when that slot's own base material is unconfigured
+                layer.SetDrawOrder(declaredOrder); // no-op when that slot's own base material is unconfigured (== the slot at build)
                 _layers.Add(layer);
                 // Seeded from the SAME predicate each TryCreate hands ZoomStyleApplier.SeedFade, so this
                 // ease and the material's multiplier agree on the first frame.
                 float seed = sl.IsVisibleAtZoom(initialZoom) ? 1f : 0f;
                 _fades.Add(new LayerFade { Current = seed, Origin = seed, Target = seed });
-                drawIndex++;
+                declaredOrder++;
             }
         }
 

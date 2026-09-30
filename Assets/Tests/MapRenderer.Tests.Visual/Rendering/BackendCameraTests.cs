@@ -211,7 +211,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Draw order mechanism tooth (GPU-independent): the BRG backend emits draw commands in
         /// ascending renderQueue order (declared layer order = painter's algorithm). With one fill layer, the
-        /// single draw command's renderQueue equals the material's (LayerDrawOrder.QueueFor(drawIndex), Base
+        /// single draw command's renderQueue equals the material's (LayerDrawOrder.QueueFor(declaredOrder), Base
         /// sub-slot).
         /// </summary>
         [Test]

@@ -560,7 +560,7 @@ snapshot per tile build, on the load path.
   so removing a layer mid-list renumbers every later layer and their cached meshes are keyed wrong. Each
   crossing would cost a full re-decode and re-mesh of the whole cover, and 38 of `liberty.json`'s 111 layers
   declare a `minzoom` or a `maxzoom`. The slot model cannot express "absent at this zoom, present at another"
-  either: a skipped layer **compacts** the numbering, since `RenderLayerSet.Build` increments `drawIndex` only
+  either: a skipped layer **compacts** the numbering, since `RenderLayerSet.Build` increments `declaredOrder` only
   on the real-layer branch. `TombstoneRenderLayer` (§ "Partial-survival restyle — slot vs draw order, the
   tombstone, the three exits" above) removes a layer while holding its slot width, which fixes `LayerId` and
   `LoadedTile.MaterialIndices` but is **not** sufficient — the style token would additionally have to stop

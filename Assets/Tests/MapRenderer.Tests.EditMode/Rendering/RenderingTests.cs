@@ -1078,7 +1078,7 @@ namespace MapRenderer.Tests.Rendering
 
         /// <summary>A skipped layer consumes no draw slot and does not create a gap —
         /// the two rendering layers keep slots 0 and 1 (declared order, compacted), exactly as they
-        /// would if circle-b were absent from the style entirely. RED recipe: increment <c>drawIndex</c> in
+        /// would if circle-b were absent from the style entirely. RED recipe: increment <c>declaredOrder</c> in
         /// <see cref="RenderLayerSet.Build"/>'s skipped-layer branch (as well as the real-layer branch) —
         /// line-c's queue becomes the slot-2 band instead of the slot-1 band.</summary>
         [Test]

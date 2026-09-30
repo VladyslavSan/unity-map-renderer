@@ -245,8 +245,8 @@ public enum LayerSubSlot { Base = 0, Above = 1 }      // ordering role WITHIN on
 public const int SubSlotsPerLayer = 2;                // == the enum's value count == the queue stride
 public const int QueueCeiling     = 5000;             // Unity clamps renderQueue to [0, 5000]
 
-public static int QueueFor(int drawIndex, LayerSubSlot subSlot = LayerSubSlot.Base)
-    => TransparentQueue + drawIndex * SubSlotsPerLayer + (int)subSlot;
+public static int QueueFor(int declaredOrder, LayerSubSlot subSlot = LayerSubSlot.Base)
+    => TransparentQueue + declaredOrder * SubSlotsPerLayer + (int)subSlot;
 ```
 
 - Layer *i* owns the contiguous band `[base + i·S, base + i·S + S−1]`. Every sub-slot of layer *i* is
@@ -258,12 +258,11 @@ public static int QueueFor(int drawIndex, LayerSubSlot subSlot = LayerSubSlot.Ba
 - A future kind that needs a third sub-slot adds an enum value and bumps `SubSlotsPerLayer`; no caller
   re-derives the arithmetic.
 
-`RenderLayerSet.Build` keeps one generic call per layer, `IRenderLayer.SetDrawOrder(drawIndex)`. A
-single-material layer writes its `Material` at `QueueFor(drawIndex, MaterialSubSlot)`, and
+`RenderLayerSet.Build` keeps one generic call per layer, `IRenderLayer.SetDrawOrder(declaredOrder)`. A
+single-material layer writes its `Material` at `QueueFor(declaredOrder, MaterialSubSlot)`, and
 `IRenderLayer.MaterialSubSlot` is `Base` for fill, line, background and fill-extrusion and `Above` for a
 symbol layer. `SymbolRenderLayer.SetDrawOrder` stamps both its materials, the text at `Above` and the icon at
-`Base`. `Create` also writes the icon at `Base`, so the material has a valid queue before `Build` calls
-`SetDrawOrder`.
+`Base`.
 
 **Rejected: a capability interface probed with `is`.** Draw order is a property every layer has, not a
 capability some have; hiding a global ordering invariant behind a type test is the wrong shape even though

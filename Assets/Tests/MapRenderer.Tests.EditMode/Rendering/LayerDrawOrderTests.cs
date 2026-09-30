@@ -84,17 +84,17 @@ namespace MapRenderer.Tests.Rendering
         }
 
         [Test]
-        public void QueueFor_NegativeDrawIndex_Throws()
+        public void QueueFor_NegativeDeclaredOrder_Throws()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => LayerDrawOrder.QueueFor(-1));
         }
 
         // N7 — the ceiling must cover the BAND'S TOP (the last layer's Above sub-slot), not just its Base.
-        // Verified RED against a stride-1 formula, which would accept drawIndex 1000 here.
+        // Verified RED against a stride-1 formula, which would accept declaredOrder 1000 here.
         [Test]
         public void QueueFor_AboveSubSlotExceedingCeiling_Throws()
         {
-            // drawIndex 1000's Above sub-slot is 5001 — over the ceiling — even though its own Base
+            // declaredOrder 1000's Above sub-slot is 5001 — over the ceiling — even though its own Base
             // sub-slot (5000) does not throw. The two must be checked independently.
             Assert.DoesNotThrow(() => LayerDrawOrder.QueueFor(1000, LayerSubSlot.Base));
             Assert.Throws<ArgumentOutOfRangeException>(

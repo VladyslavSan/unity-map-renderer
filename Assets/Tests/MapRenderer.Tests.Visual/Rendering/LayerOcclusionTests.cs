@@ -166,8 +166,8 @@ namespace MapRenderer.Tests.Visual
             Track(cameraGo);
             var lightGo = Track(BuildLight());
             {
-                // Style A: fill declared BELOW background (fill first, drawIndex 0; background second,
-                // drawIndex 1 — higher queue, drawn on top). Background must occlude the fill at centre.
+                // Style A: fill declared BELOW background (fill first, declaredOrder 0; background second,
+                // declaredOrder 1 — higher queue, drawn on top). Background must occlude the fill at centre.
                 const string styleA = @"{
     ""version"": 8,
     ""layers"": [
@@ -181,7 +181,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.Greater(aCenter[1], aCenter[0], "Background declared ABOVE the fill must occlude it at centre (green-dominant).");
                 Assert.Greater(aCenter[1], aCenter[2], "Background declared ABOVE the fill must occlude it at centre (green-dominant).");
 
-                // Style B: background BELOW fill (drawIndex 0 vs 1). The fill must win at centre, and the
+                // Style B: background BELOW fill (declaredOrder 0 vs 1). The fill must win at centre, and the
                 // background must still show at the corner.
                 const string styleB = @"{
     ""version"": 8,

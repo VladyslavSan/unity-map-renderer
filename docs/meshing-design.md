@@ -629,7 +629,7 @@ has-a-background check), so a second source-less kind would need its own such br
   `MapView.BuildSourceSpecs` ("which sources to fetch") and the label subsystem ("which layers are mine") derive
   from the built `RenderLayerSet`, not from re-walking `style.Layers` with their own `is` checks.
 
-**The numbering.** Queue = `3000 + drawIndex × 2 + subSlot`. For a declared interleave `background,
+**The numbering.** Queue = `3000 + declaredOrder × 2 + subSlot`. For a declared interleave `background,
 fill(land), line(road), symbol(road-label), fill(building), symbol(place-label)`:
 
 ```
