@@ -34,9 +34,12 @@
 # Do not trust the exit code of the run. Unity has been observed returning BOTH 0 and 1 for the
 # same kind of compile failure, and when compilation fails it does not rewrite
 # Logs/test-results.xml — so a naive reader sees the PREVIOUS run's green summary for code
-# that never built. Two defences, neither relying on the exit code: any existing results are
-# moved aside before launching (see RESULTS_PREV), so "results absent" is unambiguous; and the
-# log is grepped for `error CS`. A VERDICT line is printed last, so `| tail` always shows it.
+# that never built. Two defences, neither relying on the exit code: any existing results, and the
+# per-platform copies test-results-<platform>.xml / test-run-<platform>.log, are moved aside to
+# `.prev` names before anything else runs (see RESULTS_PREV), so "results absent" is unambiguous
+# even after an exit 6 or 7; and the log is grepped for `error CS`. A single-platform run also moves
+# the OTHER platform's files aside, so a file under a platform's name always means this launch wrote
+# it. A VERDICT line is printed last, so `| tail` always shows it.
 # Each platform prints its own `VERDICT [<platform>]:` line, and Both mode prints a combined
 # `VERDICT:` line after them — so "read the last VERDICT line" stays the whole answer.
 #
@@ -76,6 +79,15 @@ LOG="$ROOT/Logs/test-run.log"
 # before Unity) because exit 6 fires routinely during iteration, and a stale test-results.xml left
 # in place on that path would look exactly like this run's — the same hazard the header describes.
 [ -f "$RESULTS" ] && mv -f "$RESULTS" "$RESULTS_PREV"
+# The per-platform copies go aside here too, as test-results-<platform>.prev.xml and
+# test-run-<platform>.prev.log: AGENTS.md sends readers to them, so after an exit 6 or 7 they must not
+# still hold the PREVIOUS launch's results under this launch's name.
+for platform in EditMode PlayMode; do
+  [ -f "$ROOT/Logs/test-results-$platform.xml" ] \
+    && mv -f "$ROOT/Logs/test-results-$platform.xml" "$ROOT/Logs/test-results-$platform.prev.xml"
+  [ -f "$ROOT/Logs/test-run-$platform.log" ] \
+    && mv -f "$ROOT/Logs/test-run-$platform.log" "$ROOT/Logs/test-run-$platform.prev.log"
+done
 
 # ── Doc-comment limits: Tools/check-doc-comments.py (git diff against main, no Unity) ─────────
 # Runs before the fast loop: it takes well under a second. Warn-and-continue when python3 does not run,
