@@ -198,6 +198,9 @@ namespace MapRenderer.Tests
         /// <summary>Number of layer MESHES uploaded + registered in the most recent Update — the per-frame mesh-count budget observable.</summary>
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
 
+        /// <summary><c>SetItemsVisible</c> calls the most recent Update issued — 0 or 1, whatever the number of meshes it registered.</summary>
+        public static int VisibilityBatchesLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.VisibilityBatchesLastTick : 0;
+
         /// <summary>(tile, source) records fully released in the most recent Update's DrainReleaseQueue.</summary>
         public static int TilesReleasedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesReleasedLastTick : 0;
         /// <summary>Current deferred-release backlog depth (records that left cover and await drain).</summary>

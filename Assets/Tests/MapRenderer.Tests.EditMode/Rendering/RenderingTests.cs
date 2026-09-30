@@ -52,11 +52,11 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Tests.Rendering
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // BackendDrawGateTests — a gated-out layer slot submits no draw item, in every backend
+    // BackendDrawGateTests — a gated-out or hidden item submits no draw, in every backend
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // The per-slot DRAW gate (ITileRenderBackend.SetLayerVisible): a gated layer submits no draw item. Each
-    // backend is read on its OWN mechanism, and the gated slot is the middle one, so an off-by-one reads red.
+    // The slot gate (SetLayerVisible) and the item flag (SetItemsVisible): an item draws only when both allow it.
+    // Each backend is read on its OWN mechanism; the gated slot is the middle one, so an off-by-one reads red.
     [TestFixture]
     public class BackendDrawGateTests : BaseTestFixture
     {
@@ -122,6 +122,7 @@ namespace MapRenderer.Tests.Rendering
         /// A gated slot is absent from the emit order in BOTH views, whether an item is registered before or
         /// after the slot is gated (BRG reads the gate while it computes the emit order). The light view is
         /// asserted separately: a gated building would otherwise keep casting a shadow with nothing above it.
+        /// An item is born hidden, and a show batch through a gated slot stays undrawn in either call order.
         /// A slot that leaves and returns through <c>SetLayerMaterials</c> comes back drawn.
         /// </summary>
         [Test]
@@ -130,17 +131,18 @@ namespace MapRenderer.Tests.Rendering
             // ── Gate AFTER registration ──
             using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var meshes = new List<Mesh>();
                 using BrgTileRenderer r = new BrgTileRenderer(MaterialsOf(set), AllCast);
-                for (int i = 0; i < 3; i++)
-                {
-                    var mesh = Track(new Mesh());
-                    meshes.Add(mesh);
-                    r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-                }
+                var handles = new int[3];
+                for (int i = 0; i < 3; i++) handles[i] = r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
                 r.Rebuild(SceneFrame.Mercator(double2.zero));
 
                 var emit = new List<int>();
+                Assert.AreEqual(0, r.ComputeEmitOrder(emit, BatchCullingViewType.Camera),
+                    "a fresh item must be born hidden: nothing emits until SetItemsVisible.");
+                r.SetItemsVisible(new[] { 9999 }, true); // an unknown handle is a no-op
+                Assert.AreEqual(0, r.ComputeEmitOrder(emit, BatchCullingViewType.Camera),
+                    "an unknown handle must not show anything.");
+                r.SetItemsVisible(handles, true);
                 Assert.AreEqual(3, r.ComputeEmitOrder(emit, BatchCullingViewType.Camera),
                     "anti-vacuity: before the gate every slot must emit, or its absence proves nothing.");
 
@@ -162,15 +164,11 @@ namespace MapRenderer.Tests.Rendering
             // ── Gate BEFORE registration ──
             using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var meshes = new List<Mesh>();
                 using BrgTileRenderer r = new BrgTileRenderer(MaterialsOf(set), AllCast);
-                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
-                for (int i = 0; i < 3; i++)
-                {
-                    var mesh = Track(new Mesh());
-                    meshes.Add(mesh);
-                    r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-                }
+                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register, then show
+                var handles = new int[3];
+                for (int i = 0; i < 3; i++) handles[i] = r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
+                r.SetItemsVisible(handles, true);
                 r.Rebuild(SceneFrame.Mercator(double2.zero));
 
                 CollectionAssert.AreEqual(new[] { 0, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
@@ -186,7 +184,7 @@ namespace MapRenderer.Tests.Rendering
                 r.SetLayerVisible(GatedSlot, false);
                 r.SetLayerMaterials(mats.GetRange(0, 1), AllCast); // the gated slot leaves
                 r.SetLayerMaterials(mats, AllCast);                // ...and returns
-                for (int i = 0; i < 3; i++) r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
+                for (int i = 0; i < 3; i++) r.AddShownTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
                 r.Rebuild(SceneFrame.Mercator(double2.zero));
                 CollectionAssert.AreEqual(new[] { 0, 1, 2 }, EmittedSlots(r, BatchCullingViewType.Camera),
                     "the material list and the draw gate must stay the same width: a stale gate flag must " +
@@ -197,10 +195,9 @@ namespace MapRenderer.Tests.Rendering
         // ── GameObjects ───────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Only the gated slot's renderer disables, and that holds REGARDLESS of whether an item is
-        /// registered before or after the slot is gated — the ordinary case, since tiles keep finishing
-        /// while a layer is out of its zoom range. The backend pools its layer children and enables the
-        /// renderer per rent, so a fresh item lands drawn unless <c>AddTileLayer</c> consults the gate.
+        /// Only the gated slot's renderer disables, REGARDLESS of whether an item is registered, shown or
+        /// gated first — tiles keep finishing while a layer is out of its zoom range. A fresh item is born
+        /// hidden, and lifting the gate does not draw an item that is still hidden.
         /// A slot that leaves and returns through <c>SetLayerMaterials</c> comes back drawn.
         /// </summary>
         [Test]
@@ -209,15 +206,13 @@ namespace MapRenderer.Tests.Rendering
             // ── Gate AFTER registration ──
             using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var meshes = new List<Mesh>();
                 using GameObjectTileRenderer r = new GameObjectTileRenderer(MaterialsOf(set), LayerNames, AllCast);
                 var handles = new int[3];
+                for (int i = 0; i < 3; i++) handles[i] = r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
                 for (int i = 0; i < 3; i++)
-                {
-                    var mesh = Track(new Mesh());
-                    meshes.Add(mesh);
-                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-                }
+                    Assert.IsFalse(r.IsItemDrawn(handles[i]), $"slot {i}: a fresh item must be born hidden.");
+                r.SetItemsVisible(new[] { 9999 }, true); // an unknown handle is a no-op
+                r.SetItemsVisible(handles, true);
                 for (int i = 0; i < 3; i++)
                     Assert.IsTrue(r.IsItemDrawn(handles[i]),
                         $"anti-vacuity: slot {i} must draw before the gate is applied.");
@@ -228,27 +223,26 @@ namespace MapRenderer.Tests.Rendering
                         $"slot {i}: only the gated slot may stop drawing. Disabling every renderer would " +
                         "pass a one-slot check and blank the map.");
 
+                r.SetItemsVisible(new[] { handles[GatedSlot] }, false); // hide while gated
                 r.SetLayerVisible(GatedSlot, true);
+                Assert.IsFalse(r.IsItemDrawn(handles[GatedSlot]),
+                    "lifting the gate must not draw an item that is still hidden.");
+                r.SetItemsVisible(new[] { handles[GatedSlot] }, true);
                 Assert.IsTrue(r.IsItemDrawn(handles[GatedSlot]), "lifting the gate must restore the slot.");
             }
 
             // ── Gate BEFORE registration ──
             using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var meshes = new List<Mesh>();
                 using GameObjectTileRenderer r = new GameObjectTileRenderer(MaterialsOf(set), LayerNames, AllCast);
-                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
+                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register, then show
                 var handles = new int[3];
-                for (int i = 0; i < 3; i++)
-                {
-                    var mesh = Track(new Mesh());
-                    meshes.Add(mesh);
-                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-                }
+                for (int i = 0; i < 3; i++) handles[i] = r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
+                r.SetItemsVisible(handles, true);
 
                 for (int i = 0; i < 3; i++)
                     Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
-                        $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+                        $"slot {i}: an item shown into a gated slot must stay NOT drawn.");
             }
 
             // ── A slot that leaves and returns through SetLayerMaterials comes back drawn ──
@@ -259,7 +253,7 @@ namespace MapRenderer.Tests.Rendering
                 r.SetLayerVisible(GatedSlot, false);
                 r.SetLayerMaterials(mats.GetRange(0, 1), AllCast); // the gated slot leaves
                 r.SetLayerMaterials(mats, AllCast);                // ...and returns
-                int handle = r.AddTileLayer(Track(new Mesh()), TileOrigin(), GatedSlot, Tile);
+                int handle = r.AddShownTileLayer(Track(new Mesh()), TileOrigin(), GatedSlot, Tile);
                 Assert.IsTrue(r.IsItemDrawn(handle),
                     "the material list and the draw gate must stay the same width: a stale gate flag must " +
                     "not hide a slot that returns.");
@@ -269,10 +263,9 @@ namespace MapRenderer.Tests.Rendering
         // ── Entities ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Only the gated slot carries <c>DisableRendering</c>, and that holds REGARDLESS of whether an
-        /// item is registered before or after the slot is gated. Both layer prototypes are built without
-        /// <c>DisableRendering</c>, so a fresh instance arrives drawn unless <c>AddTileLayer</c> consults
-        /// the gate.
+        /// Only the gated slot carries <c>DisableRendering</c>, REGARDLESS of whether an item is registered,
+        /// shown or gated first. Both prototypes carry it, so a fresh item is born hidden, and lifting the
+        /// gate does not draw an item that is still hidden.
         /// A slot that leaves and returns through <c>SetLayerMaterials</c> comes back drawn.
         /// </summary>
         [Test]
@@ -281,15 +274,14 @@ namespace MapRenderer.Tests.Rendering
             // ── Gate AFTER registration ──
             using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var meshes = new List<Mesh>();
                 using EntitiesTileRenderer r = new EntitiesTileRenderer(MaterialsOf(set), LayerNames, AllCast);
                 var handles = new int[3];
+                for (int i = 0; i < 3; i++) handles[i] = r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
                 for (int i = 0; i < 3; i++)
-                {
-                    var mesh = Track(new Mesh());
-                    meshes.Add(mesh);
-                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-                }
+                    Assert.IsFalse(r.IsItemDrawn(handles[i]), $"slot {i}: a fresh item must be born hidden.");
+                r.SetItemsVisible(new[] { 9999 }, true); // an unknown handle is a no-op
+
+                r.SetItemsVisible(handles, true);
                 for (int i = 0; i < 3; i++)
                     Assert.IsTrue(r.IsItemDrawn(handles[i]),
                         $"anti-vacuity: slot {i} must draw before the gate is applied.");
@@ -299,7 +291,11 @@ namespace MapRenderer.Tests.Rendering
                     Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
                         $"slot {i}: only the gated slot may carry DisableRendering.");
 
+                r.SetItemsVisible(new[] { handles[GatedSlot] }, false); // hide while gated
                 r.SetLayerVisible(GatedSlot, true);
+                Assert.IsFalse(r.IsItemDrawn(handles[GatedSlot]),
+                    "lifting the gate must not draw an item that is still hidden.");
+                r.SetItemsVisible(new[] { handles[GatedSlot] }, true);
                 Assert.IsTrue(r.IsItemDrawn(handles[GatedSlot]),
                     "lifting the gate must REMOVE DisableRendering — an add-only gate strands a layer that " +
                     "zooms back into its range.");
@@ -308,20 +304,15 @@ namespace MapRenderer.Tests.Rendering
             // ── Gate BEFORE registration ──
             using (RenderLayerSet set = ThreeFillLayerSet())
             {
-                var meshes = new List<Mesh>();
                 using EntitiesTileRenderer r = new EntitiesTileRenderer(MaterialsOf(set), LayerNames, AllCast);
-                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register
+                r.SetLayerVisible(GatedSlot, false); // gate FIRST, then register, then show
                 var handles = new int[3];
-                for (int i = 0; i < 3; i++)
-                {
-                    var mesh = Track(new Mesh());
-                    meshes.Add(mesh);
-                    handles[i] = r.AddTileLayer(mesh, TileOrigin(), i, Tile);
-                }
+                for (int i = 0; i < 3; i++) handles[i] = r.AddTileLayer(Track(new Mesh()), TileOrigin(), i, Tile);
+                r.SetItemsVisible(handles, true);
 
                 for (int i = 0; i < 3; i++)
                     Assert.AreEqual(i != GatedSlot, r.IsItemDrawn(handles[i]),
-                        $"slot {i}: an item registered into a gated slot must arrive NOT drawn.");
+                        $"slot {i}: an item shown into a gated slot must stay NOT drawn.");
             }
 
             // ── A slot that leaves and returns through SetLayerMaterials comes back drawn ──
@@ -332,7 +323,7 @@ namespace MapRenderer.Tests.Rendering
                 r.SetLayerVisible(GatedSlot, false);
                 r.SetLayerMaterials(mats.GetRange(0, 1), AllCast); // the gated slot leaves
                 r.SetLayerMaterials(mats, AllCast);                // ...and returns
-                int handle = r.AddTileLayer(Track(new Mesh()), TileOrigin(), GatedSlot, Tile);
+                int handle = r.AddShownTileLayer(Track(new Mesh()), TileOrigin(), GatedSlot, Tile);
                 Assert.IsTrue(r.IsItemDrawn(handle),
                     "the material list and the draw gate must stay the same width: a stale gate flag must " +
                     "not hide a slot that returns.");
@@ -388,7 +379,7 @@ namespace MapRenderer.Tests.Rendering
                 using ITileRenderBackend backend = makeBackend(mats);
                 var mesh = Track(new Mesh());
                 meshes.Add(mesh);
-                int handle = backend.AddTileLayer(mesh, double3.zero, 1, new TileId { Z = 0, X = 0, Y = 0 });
+                int handle = backend.AddShownTileLayer(mesh, double3.zero, 1, new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.GreaterOrEqual(handle, 0);
                 backend.Rebuild(SceneFrame.Mercator(double2.zero));
             }
@@ -483,7 +474,7 @@ namespace MapRenderer.Tests.Rendering
             {
                 var mesh = Track(new Mesh());
                 meshes.Add(mesh);
-                r.AddTileLayer(mesh, origin, i, Tile);
+                r.AddShownTileLayer(mesh, origin, i, Tile);
             }
 
             for (int i = 0; i < 3; i++)
@@ -512,7 +503,7 @@ namespace MapRenderer.Tests.Rendering
             {
                 var mesh = Track(new Mesh());
                 meshes.Add(mesh);
-                handles[i] = r.AddTileLayer(mesh, origin, i, Tile);
+                handles[i] = r.AddShownTileLayer(mesh, origin, i, Tile);
             }
 
             for (int i = 0; i < 3; i++)
@@ -540,7 +531,7 @@ namespace MapRenderer.Tests.Rendering
             {
                 var mesh = Track(new Mesh());
                 meshes.Add(mesh);
-                r.AddTileLayer(mesh, origin, i, Tile);
+                r.AddShownTileLayer(mesh, origin, i, Tile);
             }
             r.Rebuild(SceneFrame.Mercator(double2.zero));
 
@@ -583,7 +574,7 @@ namespace MapRenderer.Tests.Rendering
             {
                 var mesh = Track(new Mesh());
                 meshes.Add(mesh);
-                r.AddTileLayer(mesh, origin, i, Tile);
+                r.AddShownTileLayer(mesh, origin, i, Tile);
             }
             r.Rebuild(SceneFrame.Mercator(double2.zero));
 
@@ -658,9 +649,9 @@ namespace MapRenderer.Tests.Rendering
             var meshes = new List<Mesh>();
             var scratch = new List<int>();
 
-            int h0 = brg.AddTileLayer(TrackedMesh(meshes), double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
-            int h1 = brg.AddTileLayer(TrackedMesh(meshes), double3.zero, 0, new TileId { Z = 1, X = 0, Y = 0 });
-            int h2 = brg.AddTileLayer(TrackedMesh(meshes), double3.zero, 0, new TileId { Z = 2, X = 0, Y = 0 });
+            int h0 = brg.AddShownTileLayer(TrackedMesh(meshes), double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
+            int h1 = brg.AddShownTileLayer(TrackedMesh(meshes), double3.zero, 0, new TileId { Z = 1, X = 0, Y = 0 });
+            int h2 = brg.AddShownTileLayer(TrackedMesh(meshes), double3.zero, 0, new TileId { Z = 2, X = 0, Y = 0 });
 
             brg.Rebuild(SceneFrame.Mercator(double2.zero));
             Assert.AreEqual(3, brg.ComputeEmitOrder(scratch, BatchCullingViewType.Camera),

@@ -1406,9 +1406,9 @@ namespace MapRenderer.Tests.Visual
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-                int h0 = r.AddTileLayer(mesh, o, 0, tid);
-                int h1 = r.AddTileLayer(mesh, o, 0, tid);
-                int h2 = r.AddTileLayer(mesh, o, 0, tid);
+                int h0 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h1 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h2 = r.AddShownTileLayer(mesh, o, 0, tid);
 
                 Assert.AreEqual(3, r.DrawItemCount(), "Three draw items registered.");
                 Assert.AreEqual(1, r.ContainerCount(), "Three layers of one tile share a single container.");
@@ -1446,7 +1446,7 @@ namespace MapRenderer.Tests.Visual
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
 
-                int h0 = r.AddTileLayer(mesh, o, 0, tid);
+                int h0 = r.AddShownTileLayer(mesh, o, 0, tid);
                 Transform first = r.Container(tid).GetChild(0);
                 Assert.IsNotNull(first, "precondition: the layer child exists.");
 
@@ -1455,7 +1455,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsFalse(first.gameObject.activeInHierarchy,
                     "a parked child must leave the LIVE tree — it parks under the backend's inactive pool node.");
 
-                r.AddTileLayer(mesh, o, 0, tid);
+                r.AddShownTileLayer(mesh, o, 0, tid);
                 Transform second = r.Container(tid).GetChild(0);
                 Assert.AreSame(first, second, "the pool must hand back the SAME child GameObject.");
 
@@ -1484,8 +1484,8 @@ namespace MapRenderer.Tests.Visual
             // ── Names supplied: two layers sharing one material still get distinct, layer-specific names ──
             using (var r = new GameObjectTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
             {
-                r.AddTileLayer(mesh, o, 0, tid);
-                r.AddTileLayer(mesh, o, 1, tid);
+                r.AddShownTileLayer(mesh, o, 0, tid);
+                r.AddShownTileLayer(mesh, o, 1, tid);
 
                 Transform container = r.Container(tid);
                 Assert.AreEqual("water", container.GetChild(0).name,
@@ -1499,7 +1499,7 @@ namespace MapRenderer.Tests.Visual
             // ── No names supplied: falls back to the material name ──
             using (var r = new GameObjectTileRenderer(new[] { mat }))
             {
-                r.AddTileLayer(mesh, o, 0, tid);
+                r.AddShownTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.Container(tid).GetChild(0).name,
                     "With no layer names, the GameObject name falls back to the material name (back-compat).");
             }
@@ -1508,8 +1508,8 @@ namespace MapRenderer.Tests.Visual
             using (var r = new GameObjectTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
             {
                 r.SetLayerMaterials(new Material[] { null, mat }, null);
-                r.AddTileLayer(mesh, o, 0, tid);
-                r.AddTileLayer(mesh, o, 1, tid);
+                r.AddShownTileLayer(mesh, o, 0, tid);
+                r.AddShownTileLayer(mesh, o, 1, tid);
 
                 Transform container = r.Container(tid);
                 Assert.AreEqual("road-primary", container.GetChild(1).name,
@@ -1526,7 +1526,7 @@ namespace MapRenderer.Tests.Visual
             using var r = new GameObjectTileRenderer(new[] { mat });
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid);
+                r.AddShownTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid);
                 Transform layer = r.Container(tid).GetChild(0);
 
                 var mf = layer.GetComponent<MeshFilter>();
@@ -1550,7 +1550,7 @@ namespace MapRenderer.Tests.Visual
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(tid);
                 double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
-                int h = r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
+                int h = r.AddShownTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
 
                 r.Rebuild(SceneFrame.Mercator(sceneOrigin0));
                 float3 expected0 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
@@ -1592,7 +1592,7 @@ namespace MapRenderer.Tests.Visual
                 r.Rebuild(SceneFrame.Mercator(sceneOrigin));
 
                 // Tile consumed AFTER the Rebuild — must NOT be created at the origin.
-                int h = r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
+                int h = r.AddShownTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
 
                 var (x, z) = r.GetInstanceTranslation(h);
                 Assert.That(x, Is.EqualTo(expected.x).Within(0.01f),
@@ -1612,7 +1612,7 @@ namespace MapRenderer.Tests.Visual
             var (mesh, mat) = FixtureFill();
             var r = new GameObjectTileRenderer(new[] { mat });
             var tid = new TileId { Z = 0, X = 0, Y = 0 };
-            r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid);
+            r.AddShownTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid);
             Transform root = r.Root();
             Assert.IsNotNull(root, "Root must exist before dispose.");
             GameObject rootGo = root.gameObject;
@@ -1624,7 +1624,7 @@ namespace MapRenderer.Tests.Visual
 
             // After dispose the root is destroyed and use throws; reading a disposed backend is a caller bug,
             // so no accessor answers it with a plausible null or 0.
-            Assert.Throws<System.ObjectDisposedException>(() => r.AddTileLayer(
+            Assert.Throws<System.ObjectDisposedException>(() => r.AddShownTileLayer(
                 mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid),
                 "a disposed backend must reject use, not absorb it.");
         }

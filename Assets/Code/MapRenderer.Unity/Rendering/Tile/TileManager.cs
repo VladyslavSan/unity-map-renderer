@@ -378,6 +378,10 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         private readonly List<int> _consumeHandles = new(8);
 
+        /// <summary>Handles registered hidden and waiting for the next <see cref="FlushVisibility"/>.</summary>
+        private int[] _showBatch = new int[32];
+        private int   _showBatchCount;
+
         // Parallel to the two above — each newly-built mesh's global material index, for the cache transfer.
         private readonly List<int> _consumeMatIndices = new(8);
 
@@ -568,6 +572,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private void BuildBackend(Map.RenderBackend backend)
         {
             _instanced?.Dispose();
+            _showBatchCount = 0; // handles of the disposed backend mean nothing to the new one
             _instanced = backend switch
             {
                 Map.RenderBackend.Brg =>
@@ -696,6 +701,9 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>(Tile, source) records fully released in the most recent <see cref="Update"/>.</summary>
         internal int TilesReleasedLastTick { get; private set; }
+
+        /// <summary><c>SetItemsVisible</c> calls issued by the most recent <see cref="Update"/>: 0 or 1.</summary>
+        internal int VisibilityBatchesLastTick { get; private set; }
 
         /// <summary>Current deferred-release backlog depth (records awaiting <see cref="DrainReleaseQueue"/>).</summary>
         internal int ReleaseQueueDepth => _releaseQueue.Count;
@@ -977,6 +985,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Drain a budgeted slice of the deferred-release backlog EVERY Update, after admission/pump.
             DrainReleaseQueue(cfg.MaxReleasesPerTick);
+
+            FlushVisibility();
         }
 
         /// <summary>Zeroes the six per-tick counters — cover recomputes, builds started, tiles/vertices/meshes
@@ -993,6 +1003,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             TilesConsumedLastTick     = 0;
             MeshesConsumedLastTick    = 0;
             TilesReleasedLastTick     = 0;
+            VisibilityBatchesLastTick = 0;
         }
 
         /// <summary>Deterministic drain: blocks until every in-flight fetch/mesh-build task completes and
@@ -1106,6 +1117,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 _loaded[key] = lt;
             }
+
+            FlushVisibility();
         }
 
         /// <summary>Waits for in-flight fetch and mesh-build tasks on <c>_loaded</c> tiles, parking off the
@@ -1555,6 +1568,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
+            QueueShow(_consumeHandles); // only this call's handles: earlier calls already queued theirs
 
             bool complete = cursor >= denseCount;
             if (complete)
@@ -1837,7 +1851,46 @@ namespace MapRenderer.Unity.Rendering.Tile
             AppendMeshes(ref lt.Meshes, _consumeMeshes);
             AppendInts(ref lt.DrawHandles,     _consumeHandles);
             AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
+            ShowRecord(in lt);
             return lt;
+        }
+
+        /// <summary>The one path by which a record's items become visible: queues its current and, while it rebakes,
+        /// previous draw handles for the next <see cref="FlushVisibility"/>. Showing a shown item changes nothing.</summary>
+        private void ShowRecord(in LoadedTile lt)
+        {
+            QueueShow(lt.DrawHandles);
+            QueueShow(lt.OldDrawHandles);
+        }
+
+        private void QueueShow(int[] handles)
+        {
+            if (handles == null) return;
+            for (int i = 0; i < handles.Length; i++) QueueShow(handles[i]);
+        }
+
+        private void QueueShow(List<int> handles)
+        {
+            for (int i = 0; i < handles.Count; i++) QueueShow(handles[i]);
+        }
+
+        private void QueueShow(int handle)
+        {
+            if (_showBatchCount == _showBatch.Length) System.Array.Resize(ref _showBatch, _showBatch.Length * 2);
+            _showBatch[_showBatchCount++] = handle;
+        }
+
+        /// <summary>Shows every queued item in ONE backend call, so a tile with many layers costs one batch. Runs at the
+        /// end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
+        private void FlushVisibility()
+        {
+            if (_showBatchCount == 0) return;
+            if (_instanced != null)
+            {
+                _instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_showBatch, 0, _showBatchCount), true);
+                VisibilityBatchesLastTick++;
+            }
+            _showBatchCount = 0; // the queue is dropped when _instanced is null: no backend holds those handles
         }
 
         /// <summary>Tears down a record's RENDER state: destroys its meshes, unregisters its draw items, and stashes

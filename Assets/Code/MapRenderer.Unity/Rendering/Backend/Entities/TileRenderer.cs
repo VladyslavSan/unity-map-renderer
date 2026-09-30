@@ -34,6 +34,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             public BatchMeshID MeshId;   // stall #3: the EG-registered mesh id, for UnregisterMesh on removal
             public int         MaterialIndex; // the layer slot this entity was created at — lets
                                                // SetLayerMaterials find every item a retired slot must retire
+            public bool        Hidden;    // item-level flag (SetItemsVisible); drawn only when also slot-visible
         }
 
         // One per live tile: the named parent of its layer entities. Rebuild moves the whole subtree by writing
@@ -62,6 +63,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // Persistent list for one RemoveItems() batch: its layer entities plus the tile roots it empties,
         // destroyed in ONE DestroyEntity structural change. Disposed in DoDispose.
         private NativeList<Entity> _destroyList;
+
+        // Persistent list for one SetItemsVisible() batch: the entities whose DisableRendering tag moves.
+        private NativeList<Entity> _toggleList;
 
         // ── ID-based layer creation: materials register once, meshes on add, no RenderMeshArray per entity ──
         // An ID-based MaterialMeshInfo points each entity at them; shared prototypes avoid per-entity migration.
@@ -157,6 +161,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             World.DefaultGameObjectInjectionWorld = _world; // Entities Graphics reads the default world.
             _em = _world.EntityManager;
             _destroyList = new NativeList<Entity>(64, Allocator.Persistent);
+            _toggleList  = new NativeList<Entity>(64, Allocator.Persistent);
 
             _initGroup = _world.GetExistingSystemManaged<InitializationSystemGroup>();
             _simGroup  = _world.GetExistingSystemManaged<SimulationSystemGroup>();
@@ -259,6 +264,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 prototype, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
             _em.AddComponent(prototype,
                 new ComponentTypeSet(ComponentType.ReadWrite<Parent>(), ComponentType.ReadWrite<LocalTransform>()));
+            _em.AddComponent<DisableRendering>(prototype); // every layer entity is born hidden
             _em.AddComponent<Prefab>(prototype); // exclude prototype from rendering/queries; Instantiate strips it
             return prototype;
         }
@@ -287,7 +293,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _layerVisible[slot] = visible;
 
             int n = 0;
-            foreach (var kv in _items) if (kv.Value.MaterialIndex == slot) n++;
+            foreach (var kv in _items) if (kv.Value.MaterialIndex == slot && !kv.Value.Hidden) n++;
             if (n == 0) return;
 
             var affected = new NativeArray<Entity>(n, Allocator.Temp);
@@ -295,7 +301,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             {
                 int w = 0;
                 foreach (var kv in _items)
-                    if (kv.Value.MaterialIndex == slot) affected[w++] = kv.Value.Entity;
+                    if (kv.Value.MaterialIndex == slot && !kv.Value.Hidden) affected[w++] = kv.Value.Entity;
 
                 // ONE structural change for the whole slot, not one per entity — the same batching reason
                 // RemoveItems destroys its entities in a single DestroyEntity(NativeArray) call.
@@ -303,6 +309,27 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 else         _em.AddComponent<DisableRendering>(affected);
             }
             finally { affected.Dispose(); }
+        }
+
+        /// <inheritdoc cref="ITileRenderBackend.SetItemsVisible"/>
+        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
+        {
+            if (IsDisposed || _world is not { IsCreated: true }) return;
+
+            // Only items whose drawn state changes need the tag moved: a slot-gated item already carries it.
+            _toggleList.Clear();
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (!_items.TryGetValue(handles[i], out var item) || item.Hidden == !visible) continue;
+                item.Hidden = !visible;
+                _items[handles[i]] = item;
+                if (Visible(item.MaterialIndex) && _em.Exists(item.Entity)) _toggleList.Add(item.Entity);
+            }
+            if (_toggleList.Length == 0) return;
+
+            // ONE structural change for the whole batch.
+            if (visible) _em.RemoveComponent<DisableRendering>(_toggleList.AsArray());
+            else         _em.AddComponent<DisableRendering>(_toggleList.AsArray());
         }
 
         // ── Instrumentation counters ────────────────────────────────────────────────────────────
@@ -471,16 +498,15 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 #endif
             }
 
-            // An item added into an already-hidden slot must not draw until the gate lifts (the prototypes
-            // carry no DisableRendering, so this is the only place that state reaches a fresh instance).
-            if (!Visible(materialIndex)) _em.AddComponent<DisableRendering>(e);
-
             var rec = _tileRoots[tileId];
             rec.ChildCount++;
             _tileRoots[tileId] = rec;
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec { Entity = e, TileId = tileId, MeshId = meshId, MaterialIndex = materialIndex };
+            _items[handle] = new ItemRec
+            {
+                Entity = e, TileId = tileId, MeshId = meshId, MaterialIndex = materialIndex, Hidden = true
+            };
             return handle;
         }
 
@@ -610,6 +636,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         protected override void DoDispose()
         {
             _destroyList.Dispose();
+            _toggleList.Dispose();
             _items.Clear();
             _tileRoots.Clear();
             if (_world != null && _world.IsCreated)

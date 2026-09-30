@@ -216,9 +216,9 @@ namespace MapRenderer.Tests.Visual
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-                int h0 = r.AddTileLayer(mesh, o, 0, tid);
-                int h1 = r.AddTileLayer(mesh, o, 0, tid);
-                int h2 = r.AddTileLayer(mesh, o, 0, tid);
+                int h0 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h1 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h2 = r.AddShownTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(3, r.DrawItemCount(), "Three draw items registered.");
                 Assert.IsTrue(r.EntityExists(h0) && r.EntityExists(h1) && r.EntityExists(h2),
                     "All three entities must be live.");
@@ -256,9 +256,9 @@ namespace MapRenderer.Tests.Visual
 
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-                int h0 = r.AddTileLayer(mesh, o, 0, tid);
-                int h1 = r.AddTileLayer(mesh, o, 1, tid);
-                int h2 = r.AddTileLayer(mesh, o, 0, tid);
+                int h0 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h1 = r.AddShownTileLayer(mesh, o, 1, tid);
+                int h2 = r.AddShownTileLayer(mesh, o, 0, tid);
 
                 Assert.AreEqual(1, r.RenderMeshArraysCreated,
                     "AddTileLayer must NOT create a per-entity RenderMeshArray — still just " +
@@ -272,7 +272,7 @@ namespace MapRenderer.Tests.Visual
 
                 // Re-add then single-RemoveItem — mirrors a prepared-cache revisit re-registering the cached
                 // mesh via BuildTileFromCache→AddTileLayer, then evicting again. Must stay balanced.
-                int h3 = r.AddTileLayer(mesh, o, 0, tid);
+                int h3 = r.AddShownTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(1, r.RegisteredMeshCount);
                 r.RemoveItem(h3);
                 Assert.AreEqual(0, r.RegisteredMeshCount, "RemoveItem unregisters too (not just RemoveItems).");
@@ -290,9 +290,9 @@ namespace MapRenderer.Tests.Visual
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-                int h0 = r.AddTileLayer(mesh, o, 0, tid);
-                int h1 = r.AddTileLayer(mesh, o, 1, tid);
-                int h2 = r.AddTileLayer(mesh, o, 2, tid);
+                int h0 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h1 = r.AddShownTileLayer(mesh, o, 1, tid);
+                int h2 = r.AddShownTileLayer(mesh, o, 2, tid);
                 Assert.AreEqual(3, r.DrawItemCount());
                 Assert.AreEqual(1, r.TileRootCount());
 
@@ -333,9 +333,9 @@ namespace MapRenderer.Tests.Visual
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
-                int h0 = r.AddTileLayer(mesh, o, 0, tid);
-                int h1 = r.AddTileLayer(mesh, o, 1, tid);
-                int h2 = r.AddTileLayer(mesh, o, 2, tid);
+                int h0 = r.AddShownTileLayer(mesh, o, 0, tid);
+                int h1 = r.AddShownTileLayer(mesh, o, 1, tid);
+                int h2 = r.AddShownTileLayer(mesh, o, 2, tid);
                 Assert.AreEqual(3, r.DrawItemCount(),
                     "precondition: real handles must be registered so RemoveItems REACHES the _em.Exists touch — " +
                     "an empty span would skip the loop and pass vacuously without exercising the guard.");
@@ -381,8 +381,8 @@ namespace MapRenderer.Tests.Visual
             // ── Names supplied: two layers sharing one material still get distinct, layer-specific names ──
             using (var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
             {
-                int hWater = r.AddTileLayer(mesh, o, 0, tid);
-                int hRoad  = r.AddTileLayer(mesh, o, 1, tid);
+                int hWater = r.AddShownTileLayer(mesh, o, 0, tid);
+                int hRoad  = r.AddShownTileLayer(mesh, o, 1, tid);
 
                 Assert.AreEqual("water", r.GetLayerEntityName(hWater),
                     "Layer entity must be named after its style layer id, not the shared material name.");
@@ -395,7 +395,7 @@ namespace MapRenderer.Tests.Visual
             // ── No names supplied: falls back to the material name ──
             using (var r = new EntitiesTileRenderer(new[] { mat }))
             {
-                int h = r.AddTileLayer(mesh, o, 0, tid);
+                int h = r.AddShownTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
                     "With no layer names, the entity name falls back to the material name (back-compat).");
             }
@@ -404,8 +404,8 @@ namespace MapRenderer.Tests.Visual
             using (var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" }))
             {
                 r.SetLayerMaterials(new Material[] { null, mat }, null);
-                int hRetired  = r.AddTileLayer(mesh, o, 0, tid);
-                int hSurvivor = r.AddTileLayer(mesh, o, 1, tid);
+                int hRetired  = r.AddShownTileLayer(mesh, o, 0, tid);
+                int hSurvivor = r.AddShownTileLayer(mesh, o, 1, tid);
 
                 Assert.AreEqual("road-primary", r.GetLayerEntityName(hSurvivor),
                     "A surviving slot keeps its style-layer name across SetLayerMaterials.");
@@ -425,7 +425,7 @@ namespace MapRenderer.Tests.Visual
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(tid);
                 double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
-                int h = r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
+                int h = r.AddShownTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
 
                 r.Rebuild(SceneFrame.Mercator(sceneOrigin0));
                 float3 expected0 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
@@ -474,7 +474,7 @@ namespace MapRenderer.Tests.Visual
                 r.Rebuild(SceneFrame.Mercator(sceneOrigin));
 
                 // Tile consumed AFTER the Rebuild — must NOT be created at the origin.
-                int h = r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
+                int h = r.AddShownTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
 
                 var (x, z) = r.GetInstanceTranslation(h);
                 Assert.That(x, Is.EqualTo(expected.x).Within(0.01f),
@@ -515,7 +515,7 @@ namespace MapRenderer.Tests.Visual
             using var r = new EntitiesTileRenderer(new[] { mat });
             {
                 var tid = new TileId { Z = 3, X = 0, Y = 0 };
-                int h = r.AddTileLayer(mesh, double3.zero, 0, tid);
+                int h = r.AddShownTileLayer(mesh, double3.zero, 0, tid);
 
                 var (center, extents) = r.GetRenderBoundsLocal(h);
                 float3 lo = center - extents;
@@ -545,7 +545,7 @@ namespace MapRenderer.Tests.Visual
             var (mesh, mat) = FixtureFill();
             World before = World.DefaultGameObjectInjectionWorld;
             var r = new EntitiesTileRenderer(new[] { mat });
-            r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }).ToRenderOrigin(), 0, new TileId { Z = 0, X = 0, Y = 0 });
+            r.AddShownTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }).ToRenderOrigin(), 0, new TileId { Z = 0, X = 0, Y = 0 });
 
             r.Dispose();
             Assert.IsTrue(r.IsDisposed, "IsDisposed must be true after Dispose.");
@@ -565,7 +565,7 @@ namespace MapRenderer.Tests.Visual
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
-                r.AddTileLayer(mesh, o.ToRenderOrigin(), 0, tid);
+                r.AddShownTileLayer(mesh, o.ToRenderOrigin(), 0, tid);
                 // Warm up (JIT + first-tick system allocations).
                 for (int i = 0; i < 5; i++) r.Rebuild(SceneFrame.Mercator(o));
 
@@ -636,7 +636,7 @@ namespace MapRenderer.Tests.Visual
                 controlGo.SetActive(false);
 
                 using var r = new EntitiesTileRenderer(new[] { mat });
-                r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, new TileId { Z = 0, X = 0, Y = 0 });
+                r.AddShownTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, new TileId { Z = 0, X = 0, Y = 0 });
                 r.Rebuild(SceneFrame.Mercator(tileOrigin));
                 snapEg.Render(cam);
 
@@ -698,7 +698,7 @@ namespace MapRenderer.Tests.Visual
             using var backend = new GameObjectTileRenderer(new[] { mat });
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             {
-                backend.AddTileLayer(mesh, tileOriginRender, 0, tid);
+                backend.AddShownTileLayer(mesh, tileOriginRender, 0, tid);
                 backend.Rebuild(frame);
 
                 // ── Numerical proof: the backend applied the globe rebase (rotation + rebased position). ──
@@ -827,7 +827,7 @@ namespace MapRenderer.Tests.Visual
             {
                 // ── Register and Rebuild ──────────────────────────────────────────────────────
                 // materialIndex=0: FillCount=0 → lines[0] is at index 0.
-                int h = brg.AddTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
+                int h = brg.AddShownTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
                 brg.Rebuild(SceneFrame.Mercator(double2.zero));
 
                 // ── _Width readback (the direct line-prop pack proof) ─────────────────────────

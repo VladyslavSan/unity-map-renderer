@@ -38,6 +38,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             public int             LayerRenderQueue;   // material.renderQueue — sort key
             public double3         TileOriginRender;   // SW-corner projected render origin (Mercator: (mercX,0,mercZ))
             public int             MaterialIndex;      // index into _layerMaterials for prop readback
+            public bool            Hidden;             // item-level flag (SetItemsVisible); emits only when also slot-visible
         }
 
         // ── BRG state ─────────────────────────────────────────────────────────────────────────
@@ -239,6 +240,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 LayerRenderQueue = mat.renderQueue,
                 TileOriginRender = tileOriginRender,
                 MaterialIndex    = materialIndex,
+                Hidden           = true,
             };
             return handle;
         }
@@ -251,6 +253,19 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         {
             if (IsDisposed) return;
             _items.Remove(handle);
+        }
+
+        /// <summary>BRG visibility is one flag write per item, so the batch is just the loop.
+        /// See <see cref="ITileRenderBackend.SetItemsVisible"/>.</summary>
+        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
+        {
+            if (IsDisposed) return;
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (!_items.TryGetValue(handles[i], out DrawItem item)) continue;
+                item.Hidden = !visible;
+                _items[handles[i]] = item;
+            }
         }
 
         /// <summary>BRG removal is a plain dict remove, so the batch is just the loop — no structural-change
@@ -573,7 +588,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             for (int i = 0; i < _sortedItems.Count; i++)
             {
                 if (!_items.TryGetValue(_sortedItems[i].handle, out DrawItem item)) continue;
-                if (!Visible(item.MaterialIndex)) continue;
+                if (item.Hidden || !Visible(item.MaterialIndex)) continue;
                 if (shadowView && ShadowModeFor(item.MaterialIndex) == ShadowCastingMode.Off) continue;
                 dst.Add(i);
             }

@@ -339,7 +339,7 @@ namespace MapRenderer.Tests.Visual
                 new List<Material> { mat },
                 new List<string> { "buildings-3d" },
                 new List<ShadowCastingMode> { ShadowCastingMode.On });
-            backend.AddTileLayer(mesh, double3.zero, 0, Tile);
+            backend.AddShownTileLayer(mesh, double3.zero, 0, Tile);
             backend.SetLayerVisible(0, drawn);
 
             using var camBag = new ObjectDisposalBag();

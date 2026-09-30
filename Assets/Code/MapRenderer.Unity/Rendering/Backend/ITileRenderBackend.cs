@@ -25,9 +25,19 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// which <see cref="Rebuild"/> places relative to the frame's scene origin. <paramref name="materialIndex"/>
         /// is the layer's global slot into the full-width material list; null (non-tile-mesh) slots never get it.
         /// <paramref name="tileId"/> groups a tile's layers under one named parent for debugging
-        /// (<see cref="BRG.TileRenderer"/> ignores it). Returns a handle for <see cref="RemoveItem"/>.
+        /// (<see cref="BRG.TileRenderer"/> ignores it).
         /// </summary>
+        /// <returns>A handle for <see cref="RemoveItem"/>. The item stays hidden until <see cref="SetItemsVisible"/>.</returns>
         int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId);
+
+        /// <summary>
+        /// Shows or hides draw items in ONE backend operation where the backend supports it. An item draws
+        /// only when its own flag is shown AND its slot passes <see cref="SetLayerVisible"/>, in either call
+        /// order. Idempotent for unknown handles.
+        /// </summary>
+        /// <param name="handles">Handles returned by <see cref="AddTileLayer"/>.</param>
+        /// <param name="visible">True to show the items, false to hide them.</param>
+        void SetItemsVisible(ReadOnlySpan<int> handles, bool visible);
 
         /// <summary>Removes a previously registered draw item. Idempotent for unknown handles.</summary>
         void RemoveItem(int handle);

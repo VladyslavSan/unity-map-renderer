@@ -177,6 +177,13 @@ and GameObjects fall back to a `RemoveItem` loop, and every implementation is id
 handle. `RenderTeardownRecord` unregisters through it. With a release budget of 4 and 30 layers a worst frame
 costs at most 4 structural changes instead of 450.
 
+**Visibility.** `AddTileLayer` registers an item hidden, and `ITileRenderBackend.SetItemsVisible` shows or hides items in
+one backend operation. An item draws only when its own flag is shown and its slot passes `SetLayerVisible`, in either
+call order. On Entities both prototypes carry `DisableRendering`, so a hidden birth costs no extra structural change, and
+a show batch is one `RemoveComponent` over the items whose slot is not gated. `TileManager` queues every registered
+handle and shows them in one call at the end of `Update` and of `DrainMeshBuilds`, so a tile's layers show in the frame
+they register, at a cost of one structural change per frame instead of one per layer.
+
 ### 4.6 The selector damps its own LOD flicker
 
 Two thresholds flip under a small camera move: the target level at each integer zoom, and a tile's stop-or-subdivide
@@ -626,7 +633,7 @@ snapshot per tile build, on the load path.
 `VisibleOpacityEpsilon`), `LayerDrawOrder.QueueFor`, `IFadeableRenderLayer`,
 `FillExtrusionRenderLayer` (`TryCreate`, `FadesGradually`).
 `MapRenderer.Unity/Rendering/Backend/`: `ITileRenderBackend` (`AddTileLayer`, `RemoveItem`, `RemoveItems`,
-`SetLayerMaterials`, `SetLayerVisible`), `Entities/TileRenderer` (the layer prototypes, `RegisterMesh` /
+`SetLayerMaterials`, `SetLayerVisible`, `SetItemsVisible`), `Entities/TileRenderer` (the layer prototypes, `RegisterMesh` /
 `UnregisterMesh`), `BRG/TileRenderer` (`ComputeEmitOrder`, `DrawItem.LayerRenderQueue`),
 `GameObjects/TileRenderer`.
 `MapRenderer.Unity/Rendering/Materials/`: `MapMaterialSet.Validate`, `MaterialFactory`,

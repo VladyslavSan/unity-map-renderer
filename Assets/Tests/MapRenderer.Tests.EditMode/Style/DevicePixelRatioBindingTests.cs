@@ -359,7 +359,7 @@ namespace MapRenderer.Tests.Style
             using var brg  = new BrgTileRenderer(new[] { mat });
             var mesh = Track(new Mesh());
             {
-                int handle = brg.AddTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
+                int handle = brg.AddShownTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
                 brg.Rebuild(SceneFrame.Mercator(double2.zero));
 
                 float packedWidth = brg.GetInstancePropValue(handle, widthId);

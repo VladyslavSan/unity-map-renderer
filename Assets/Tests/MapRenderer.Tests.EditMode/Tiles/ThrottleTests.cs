@@ -634,6 +634,8 @@ namespace MapRenderer.Tests.Tiles
                     $"{meshesConsumed} (backlog = {totalBacklogMeshes}).");
                 Assert.IsFalse(view.AllTilesSettled(),
                     "Budget must defer the rest — not settled after one budgeted pump.");
+                Assert.AreEqual(1, view.VisibilityBatchesLastTick(),
+                    $"the {meshesConsumed} meshes registered this tick must show in ONE batch, not one call per mesh.");
 
                 yield return null;
                 yield return null;

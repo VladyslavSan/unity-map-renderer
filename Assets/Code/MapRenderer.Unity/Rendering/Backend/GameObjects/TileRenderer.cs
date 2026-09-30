@@ -28,6 +28,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             public TileId   TileId;   // which tile container this layer hangs under
             public int      MaterialIndex; // the layer slot this child was bound at — lets
                                             // SetLayerMaterials find every item a retired slot must retire
+            public bool     Hidden;   // item-level flag (SetItemsVisible); drawn only when also slot-visible
         }
 
         private readonly List<Material> _layerMaterials = new List<Material>();
@@ -94,7 +95,21 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
             foreach (var kv in _items)
                 if (kv.Value.MaterialIndex == slot)
-                    kv.Value.Node.Renderer.enabled = visible;
+                    kv.Value.Node.Renderer.enabled = visible && !kv.Value.Hidden;
+        }
+
+        /// <summary>Each child is its own <c>Renderer.enabled</c> write, so the batch is just the loop.
+        /// See <see cref="ITileRenderBackend.SetItemsVisible"/>.</summary>
+        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
+        {
+            if (IsDisposed) return;
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (!_items.TryGetValue(handles[i], out var item)) continue;
+                item.Hidden = !visible;
+                _items[handles[i]] = item;
+                item.Node.Renderer.enabled = visible && Visible(item.MaterialIndex);
+            }
         }
 
         // Placeholder name for a freshly built node; AttachAt renames it per style layer on every rent.
@@ -177,14 +192,12 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             // Per rent, not per node: the pool recycles a node across layers with different declarations.
             node.Renderer.shadowCastingMode = ShadowModeFor(materialIndex);
             node.Renderer.receiveShadows    = true;
-            // Not unconditionally true: MeshNode builds and releases DISABLED, and an item added into a
-            // slot that is already hidden must stay that way until the gate lifts.
-            node.Renderer.enabled        = Visible(materialIndex);
+            // No enabled write: MeshNode builds and releases DISABLED, so the item is born hidden.
 
             _tree.AddChild(tileId);
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec { Node = node, TileId = tileId, MaterialIndex = materialIndex };
+            _items[handle] = new ItemRec { Node = node, TileId = tileId, MaterialIndex = materialIndex, Hidden = true };
             return handle;
         }
 
