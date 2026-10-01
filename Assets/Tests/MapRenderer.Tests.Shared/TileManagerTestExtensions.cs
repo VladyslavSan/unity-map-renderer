@@ -55,6 +55,13 @@ namespace MapRenderer.Tests
             for (int i = 0; i < manager._desired.Count; i++) into.Add(manager._desired[i].Tile);
         }
 
+        /// <summary>The tile ids of the last selected cover.</summary>
+        internal static void CollectCoverTileIds(this TileManager manager, List<TileId> into)
+        {
+            into.Clear();
+            into.AddRange(manager._selection.Cover);
+        }
+
         /// <summary>Records waiting in the deferred-release queue.</summary>
         internal static int ReleaseQueueDepth(this TileManager manager) => manager._releaseQueue.Count;
 

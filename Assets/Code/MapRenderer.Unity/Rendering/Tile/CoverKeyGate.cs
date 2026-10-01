@@ -13,8 +13,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         private double _tilt;
         private double _viewportX;
         private double _viewportY;
-        private double _preload;
-        private double _hysteresis;
         private bool   _initialised;
 
         /// <summary>Starts dirty so the first <see cref="MarkStaleIfMoved"/> always recomputes;
@@ -34,8 +32,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             _initialised = false;
         }
 
-        /// <summary>Marks the gate dirty if any framing input, or the preload lead or zoom-level hysteresis that shape the
-        /// prepared set, differs from the last <see cref="Commit"/>.
+        /// <summary>Marks the gate dirty if any framing input differs from the last <see cref="Commit"/>. A change of the
+        /// selector's own inputs goes through <see cref="Invalidate"/>.
         /// Compares by EXACT <c>!=</c>, not a tolerance — a sub-tile camera nudge must still trip this, so
         /// the cover recompute keeps tracking it (pinned by <c>TileManagerLoadPriorityTests</c> and
         /// <c>TileLoadMeasurementTests</c>).</summary>
@@ -48,9 +46,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 cam.Heading.Degrees     != _heading   ||
                 cam.Tilt.Degrees        != _tilt      ||
                 cfg.FramingViewportPx.x != _viewportX ||
-                cfg.FramingViewportPx.y != _viewportY ||
-                cfg.ZoomLevelPreload    != _preload   ||
-                cfg.ZoomLevelHysteresis != _hysteresis)
+                cfg.FramingViewportPx.y != _viewportY)
             {
                 _dirty = true;
             }
@@ -67,8 +63,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             _tilt        = cam.Tilt.Degrees;
             _viewportX   = cfg.FramingViewportPx.x;
             _viewportY   = cfg.FramingViewportPx.y;
-            _preload     = cfg.ZoomLevelPreload;
-            _hysteresis  = cfg.ZoomLevelHysteresis;
             _initialised = true;
 
             _dirty = false;

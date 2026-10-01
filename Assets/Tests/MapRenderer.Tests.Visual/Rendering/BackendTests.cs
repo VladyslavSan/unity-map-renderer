@@ -320,7 +320,7 @@ namespace MapRenderer.Tests.Visual
         // Non-local invariant: on Play-mode Stop, Unity disposes every Entities World BEFORE
         // MapViewComponent.OnDestroy reaches RemoveItems. Without the _world.IsCreated guard, RemoveItems would
         // throw ObjectDisposedException and abort DoDispose mid-loop. This tooth pins that guard directly,
-        // not MapView.Teardown's separate catch.
+        // not MapView.Teardown's separate catch. The slot gate and the item visibility batch share the guard.
 
         [Test]
         public void RemoveItems_AfterWorldDisposedExternally_DoesNotTouchDeadEntityManager()
@@ -349,6 +349,11 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsFalse(r.IsDisposed,
                     "precondition: the backend itself is NOT disposed (only its World) — so the existing " +
                     "IsDisposed early-return is NOT what saves us; the _world.IsCreated guard is.");
+
+                // The slot gate reaches the registered entities too, so it must skip the dead EntityManager as well.
+                Assert.DoesNotThrow(() => r.SetLayerVisible(1, false),
+                    "SetLayerVisible must tolerate an externally-disposed World (ApplySlotGate's _world.IsCreated guard) instead " +
+                    "of adding a component through the deallocated EntityManager.");
 
                 // The tooth: RemoveItems must skip the dead EntityManager, not throw out of teardown.
                 Assert.DoesNotThrow(() => r.RemoveItems(new[] { h0, h1, h2 }),

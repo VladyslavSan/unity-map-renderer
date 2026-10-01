@@ -804,9 +804,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 // Negative skips the clip stage; zero cuts at the tile boundary. The decode lives in the value
                 // type so the parity oracles build their reference arm under the same window.
                 BufferClip           = TileBufferClip.FromInspectorUnits(_config.FillTileBufferClip),
-                ZoomLevelPreload          = _config.TileSelection.ZoomLevelPreload,
                 MaxConcurrentPrepareLoads = _config.TileSelection.MaxConcurrentPrepareLoads,
-                ZoomLevelHysteresis       = _config.TileSelection.ZoomLevelHysteresis,
                 FetchRetrySeconds         = _config.TileSelection.FetchRetrySeconds,
             };
 

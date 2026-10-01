@@ -1747,6 +1747,19 @@ namespace MapRenderer.Tests.Tiles
                 CollectionAssert.AreNotEquivalent(directCover2, directCover1,
                     "precondition: aggressiveness 2.0 and 1.0 must select different covers at this fixture " +
                     "pose, or the parity checks above prove nothing about whether the knob reached the strategy.");
+
+                // A still camera follows the knob: the new selector marks the cover stale, so the next Update recomputes.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 13.405, Latitude = 52.52, Zoom = 13.0, Tilt = 60.0 });
+                view.Config.TileSelection.ProjectedAreaAggressiveness = 2.0;
+                view.LateUpdate();
+                var coverAtTwo = new List<TileId>();
+                view.View.TileManager.CollectCoverTileIds(coverAtTwo);
+                view.Config.TileSelection.ProjectedAreaAggressiveness = 1.0;
+                view.LateUpdate(); // the camera has not moved
+                var coverAtOne = new List<TileId>();
+                view.View.TileManager.CollectCoverTileIds(coverAtOne);
+                CollectionAssert.AreNotEquivalent(coverAtTwo, coverAtOne,
+                    "an Inspector edit of a selector input must change the cover on the next Update, with the camera still");
             }
             finally { view.Teardown(); }
         }

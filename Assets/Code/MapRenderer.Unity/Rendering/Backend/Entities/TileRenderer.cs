@@ -256,6 +256,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <c>DisableRendering</c>, so it is left alone.</summary>
         protected override void ApplySlotGate(int slot, bool visible)
         {
+            if (_world is not { IsCreated: true }) return;
             int n = 0;
             foreach (var kv in _items) if (kv.Value.MaterialIndex == slot && !kv.Value.Hidden) n++;
             if (n == 0) return;

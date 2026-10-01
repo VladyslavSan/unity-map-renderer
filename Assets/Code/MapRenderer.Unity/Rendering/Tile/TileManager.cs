@@ -100,16 +100,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// <summary>How much of each tile's MVT buffer the fill meshes keep before triangulation. A change starts a new bake revision; a tile already in cover rebuilds in the background and swaps in when ready.</summary>
             public TileBufferClip BufferClip;
 
-            /// <summary>Zoom levels before a level switch that the next level's tiles start preparing, clamped to [-1, 1].
-            /// -1 never prepares; 0 prepares only inside the hysteresis overhang; negative starts after the integer.</summary>
-            public double ZoomLevelPreload;
-
             /// <summary>Concurrency cap on in-flight prepared-ahead records, apart from <see cref="MaxConcurrentTileLoads"/>. Clamped to at
             /// least 1, because a prepared record is never cancelled and so the set must stay bounded.</summary>
             public int MaxConcurrentPrepareLoads;
-
-            /// <summary>The selector's zoom-level hysteresis. A finished prepared tile stays loaded this far past the preload edge.</summary>
-            public double ZoomLevelHysteresis;
 
             /// <summary>Seconds a record waits after a network fault before its fetch starts again. Decode errors and absent tiles never retry.</summary>
             public double FetchRetrySeconds;
@@ -366,11 +359,22 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True while some in-cover record may still hold geometry from an older bake revision. Set by a
         /// revision bump and cleared by <see cref="MarkStaleRecords"/> once every record is current.</summary>
         private bool _rebakePending;
-        /// <summary>The visible-tile selection seam (default <see cref="FrustumTileSelector"/>), owning the per-tick request/release transition.</summary>
-        internal IVisibleTileSelector Selector { get; set; }
+        private IVisibleTileSelector _selector;
+
+        /// <summary>The visible-tile selection seam (default <see cref="FrustumTileSelector"/>), owning the per-tick request/release transition.
+        /// Setting it marks the cover stale, so a new selector applies on a still camera.</summary>
+        internal IVisibleTileSelector Selector
+        {
+            get => _selector;
+            set
+            {
+                _selector = value;
+                _coverGate.Invalidate();
+            }
+        }
 
         // Reused buffers — never reallocated in steady state.
-        private readonly TileSelection _selection = new();
+        internal readonly TileSelection _selection = new();
 
         // Keyed by (tile, source-slot) — one record per (tile, source).
         internal readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new();
