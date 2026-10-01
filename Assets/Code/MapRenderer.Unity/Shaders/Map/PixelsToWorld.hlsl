@@ -94,10 +94,8 @@ float MapPixelsToWorld(float3 centerWS, float3 dirWS)
         refPx = length(ndcDelta * 0.5 * _ScreenParams.xy) * (clipRef.w / clipCenter.w);
     }
 
-    // Clamp the measured span so an edge-on direction (refPx → 0) cannot send the scale to infinity. This
-    // is a real limit, not just a NaN guard: for a direction nearly parallel to the view axis (a southward
-    // offset with the camera tilted at the horizon) the offset falls SHORT of the styled pixel count rather
-    // than exploding.
+    // Clamp the measured span so refPx → 0 cannot send the scale to infinity. An edge-on direction still
+    // reaches about H/10 times the flat scale, so the fill band caps its own displacement (Fill_VertexModify.hlsl).
     return refMag / max(refPx, 0.1);
 }
 

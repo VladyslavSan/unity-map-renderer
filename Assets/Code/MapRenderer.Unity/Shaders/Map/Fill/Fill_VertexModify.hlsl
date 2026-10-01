@@ -53,6 +53,9 @@
 // The displacement is strictly OUTWARD and `band.z == 0` takes the branch away entirely, so an interior
 // vertex moves by bitwise zero. That is the mechanism, not an optimisation: any inward component would put
 // ramp coverage inside the boundary and reintroduce background bleed at every abutting edge.
+// The most a band vertex may move, as a fraction of its view depth.
+static const float MaxBandReachOverDepth = 0.05;
+
 void MapVertexModify(inout float3 positionOS, float3 normalOS, float4 tangentOS,
                      float3 band, out float side)
 {
@@ -76,8 +79,12 @@ void MapVertexModify(inout float3 positionOS, float3 normalOS, float4 tangentOS,
             float  miter     = length(outwardWS);
             float3 dirWS     = outwardWS / miter;
 
-            positionOS += mul((float3x3)GetWorldToObjectMatrix(),
-                              dirWS * (miter * (1.0 + _FillOutlineWidthPx) * MapPixelsToWorld(bandCenterWS, dirWS)));
+            // Non-obvious why: an edge-on direction (the globe limb) sends MapPixelsToWorld to about H/10 times the flat scale, so the
+            // whole displacement stays within MaxBandReachOverDepth of the vertex's view depth, whatever the miter, width or viewport.
+            float bandDepth = abs(TransformWorldToHClip(bandCenterWS).w);
+            float bandReach = min(miter * (1.0 + _FillOutlineWidthPx) * MapPixelsToWorld(bandCenterWS, dirWS), MaxBandReachOverDepth * bandDepth);
+
+            positionOS += mul((float3x3)GetWorldToObjectMatrix(), dirWS * bandReach);
         }
     }
 

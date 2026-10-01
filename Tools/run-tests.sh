@@ -2,7 +2,10 @@
 # Headless Unity test runner for unity-map-renderer.
 # Self-locating: run from anywhere inside the repo.
 #
-#   Tools/run-tests.sh [Both|EditMode|PlayMode] [testFilter]   (default: Both, no filter)
+#   Tools/run-tests.sh [--offline] [Both|EditMode|PlayMode] [testFilter]   (default: Both, no filter)
+#
+# --offline (any position) forwards `-testCategory "!Online"`, so no test that needs the network runs. Without it
+# every test runs, including the ones in Category("Online"); one without network ends inconclusive (exit 8).
 #
 # Both — the DEFAULT, and the gate a stage is declared done against — runs EditMode and then
 # PlayMode, one Unity at a time (the project lock is exclusive), and stops at the first platform
@@ -53,11 +56,22 @@ set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
 . "$ROOT/Tools/lib.sh"   # this_project_editor_open, shared with build.sh
-FILTER="${2:-}"
-case "${1:-Both}" in
-  EditMode|PlayMode) PLATFORMS="${1}" ;;
+USAGE="usage: Tools/run-tests.sh [--offline] [Both|EditMode|PlayMode] [testFilter]"
+OFFLINE=""
+OFFLINE_CATEGORY="!Online"
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --offline) OFFLINE=1 ;;
+    --*) echo "unknown option '$arg'" >&2; echo "$USAGE" >&2; exit 2 ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+FILTER="${POSITIONAL[1]:-}"
+case "${POSITIONAL[0]:-Both}" in
+  EditMode|PlayMode) PLATFORMS="${POSITIONAL[0]}" ;;
   Both)              PLATFORMS="EditMode PlayMode" ;;
-  *) echo "unknown test platform '${1}' — expected Both, EditMode or PlayMode" >&2; exit 2 ;;
+  *) echo "unknown test platform '${POSITIONAL[0]}' — expected Both, EditMode or PlayMode" >&2; echo "$USAGE" >&2; exit 2 ;;
 esac
 
 # The `unity` CLI reads ProjectVersion.txt and locates the editor itself — the same division of
@@ -160,7 +174,7 @@ run_unity() { # $1 = platform, $2 = results path, $3 = editor log path
     ${FILTER:+--filter "$FILTER"} \
     --output "$2" \
     --no-banner --non-interactive \
-    -- -logFile "$3"
+    -- ${OFFLINE:+-testCategory} ${OFFLINE:+"$OFFLINE_CATEGORY"} -logFile "$3"
 }
 
 # Cold- OR stale-shader-cache warm-up pass.
@@ -248,13 +262,14 @@ run_platform() { # $1 = EditMode|PlayMode
     return 5
   fi
 
-  local run_tag run_result run_total run_passed run_failed
+  local run_tag run_result run_total run_passed run_failed run_inconclusive
   run_tag="$(grep -oE '<test-run [^>]*' "$RESULTS" | head -1)"
   run_attr() { printf '%s' "$run_tag" | grep -oE "(^| )$1=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
   run_result="$(run_attr result)"
   run_total="$(run_attr total)"
   run_passed="$(run_attr passed)"
   run_failed="$(run_attr failed)"
+  run_inconclusive="$(run_attr inconclusive)"
 
   if [ "${run_failed:-0}" != "0" ] || [ "$run_result" != "Passed" ]; then
     echo "VERDICT [$platform]: TESTS FAILED — result=$run_result total=$run_total passed=$run_passed failed=$run_failed$SKIP_NOTE" >&2
@@ -268,13 +283,24 @@ run_platform() { # $1 = EditMode|PlayMode
     return 5
   fi
 
+  # Unity exits 8 when nothing failed but a test ended inconclusive, e.g. an Online test with no network.
+  if [ "$code" = "8" ] && [ "${run_inconclusive:-0}" != "0" ]; then
+    echo "VERDICT [$platform]: INCONCLUSIVE — nothing failed, but $run_inconclusive test(s) ended inconclusive (an Online test" >&2
+    echo "  cannot reach the network, or a test called Assert.Inconclusive). $run_passed/$run_total passed; see $RESULTS.$SKIP_NOTE" >&2
+    return 8
+  fi
+
   if [ "$code" != "0" ]; then
     echo "VERDICT [$platform]: all $run_total tests passed, but \`unity test\` exited $code (its own" >&2
     echo "  code, not this script's table — 6 means it reached no verdict) — investigate $LOG.$SKIP_NOTE" >&2
     return "$code"
   fi
 
-  echo "VERDICT [$platform]: PASS — $run_passed/$run_total tests passed, compiled clean, results written by this run.$SKIP_NOTE"
+  local match_note=""
+  if [ -n "$FILTER" ] && [ "${run_total:-0}" = "0" ]; then
+    match_note=" The filter matched no test${OFFLINE:+ (--offline excludes Category(\"Online\") tests)}."
+  fi
+  echo "VERDICT [$platform]: PASS — $run_passed/$run_total tests passed, compiled clean, results written by this run.$SKIP_NOTE$match_note"
   return 0
 }
 

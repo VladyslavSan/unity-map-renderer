@@ -1959,6 +1959,317 @@ namespace MapRenderer.Tests.Visual
                 "about (256,256) — an offender at r near that is at the LIMB, where the surface tangent is " +
                 $"edge-on and MapPixelsToWorld hits its clamp.{detail}");
         }
+
+        // Non-obvious why: the live Editor camera at a device-pixel ratio of 2, with a synthetic tip near the globe limb whose outward
+        // direction runs along the view ray. There an uncapped band vertex is thrown past the camera and the band paints a wedge.
+        // The oracle is the mesh: every ink pixel the band adds lies within the band's own reach of a projected triangle. RED: no cap.
+        [Test]
+        public void TheBandOfASharpTipAtTheGlobeLimbStaysWithinReachOfItsMesh()
+        {
+            const int width = 1925;
+            const int height = 1164;
+            const double devicePixelRatio = 2.0;
+            (Color32[] hard, _, _) = RenderLimbTip(width, height, devicePixelRatio, fillAntialiasing: false);
+            (Color32[] banded, List<float2> triangles, double uncappedReachOverDepth) = RenderLimbTip(width, height, devicePixelRatio, fillAntialiasing: true);
+
+            // Arms the RED: the wedge needs a band vertex that, uncapped, is thrown further than its own view depth, which puts it past the camera
+            // plane. A tip a few degrees off this window only binds the cap and paints no wedge, so the oracle below would pass without the cap.
+            Assert.Greater(uncappedReachOverDepth, 1.0,
+                $"precondition: no band vertex of the tip would be thrown past its own view depth uncapped (largest {uncappedReachOverDepth:F3} of it), " +
+                "so this scene no longer arms the wedge, and a missing cap would pass unseen.");
+
+            int reach = (int)math.ceil(FillBandJob.MiterLimit * (1.0 + devicePixelRatio)) + 1;
+            const int margin = 16;
+            var gained = new bool[width * height];
+            int gainedCount = 0;
+            for (int y = margin; y < height - margin; y++)
+                for (int x = margin; x < width - margin; x++)
+                {
+                    int i = y * width + x;
+                    if (math.abs(banded[i].r - hard[i].r) + math.abs(banded[i].g - hard[i].g) + math.abs(banded[i].b - hard[i].b) <= 8) continue;
+                    gained[i] = true;
+                    gainedCount++;
+                }
+
+            Assert.Greater(triangles.Count, 0, "precondition: the tip's mesh is built and in front of the camera, so the check is not vacuous.");
+
+            var touched = new bool[gained.Length];
+            float squareRadius = reach + 0.5f;
+            for (int t = 0; t + 2 < triangles.Count; t += 3)
+            {
+                float2 a = triangles[t];
+                float2 b = triangles[t + 1];
+                float2 c = triangles[t + 2];
+                int xMin = math.max(margin, (int)math.floor(math.min(a.x, math.min(b.x, c.x)) - squareRadius));
+                int xMax = math.min(width - margin - 1, (int)math.ceil(math.max(a.x, math.max(b.x, c.x)) + squareRadius));
+                int yMin = math.max(margin, (int)math.floor(math.min(a.y, math.min(b.y, c.y)) - squareRadius));
+                int yMax = math.min(height - margin - 1, (int)math.ceil(math.max(a.y, math.max(b.y, c.y)) + squareRadius));
+                for (int y = yMin; y <= yMax; y++)
+                    for (int x = xMin; x <= xMax; x++)
+                    {
+                        int i = y * width + x;
+                        if (gained[i] && !touched[i] && TriangleTouchesSquare(a, b, c, new float2(x + 0.5f, y + 0.5f), squareRadius)) touched[i] = true;
+                    }
+            }
+
+            int offenders = 0;
+            for (int i = 0; i < gained.Length; i++)
+                if (gained[i] && !touched[i]) offenders++;
+
+            Assert.AreEqual(0, offenders,
+                $"{offenders} of {gainedCount} band pixels lie more than {reach} px from any projected mesh triangle. The band reaches at most " +
+                $"{FillBandJob.MiterLimit} widths along a join bisector, each {1.0 + devicePixelRatio} px, so a larger spread is a band vertex displaced further than it claims.");
+        }
+
+        /// <summary>The largest, over the tip's band vertices that face the camera, ratio of the UNCAPPED band displacement to the vertex's view
+        /// depth. It replays the vertex stage: the surface frame, the <c>MapPixelsToWorld</c> probe with its 0.1 px floor, then miter · (1 + width) · scale.</summary>
+        private static double LargestUncappedReachOverDepth(
+            Mesh mesh, Matrix4x4 toWorld, Camera camera, int width, int height, float outlineWidthPx)
+        {
+            Matrix4x4 view = camera.worldToCameraMatrix;
+            Matrix4x4 projection = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true);
+            Matrix4x4 viewProjection = projection * view;
+            Vector3[] vertices = mesh.vertices;
+            Vector3[] normals = mesh.normals;
+            var tangents = new List<Vector4>();
+            mesh.GetTangents(tangents);
+            var bands = new List<Vector3>();
+            mesh.GetUVs(3, bands);
+            double largest = 0.0;
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                Vector3 band = bands[i];
+                if (band.z <= 0.5f || band.x * band.x + band.y * band.y <= 0f) continue;
+                Vector3 centre = toWorld.MultiplyPoint3x4(vertices[i]);
+                Vector3 up = toWorld.MultiplyVector(normals[i]).normalized;
+                if (!(Vector3.Dot(view.MultiplyVector(up), view.MultiplyPoint3x4(centre)) < 0f)) continue;
+                Vector3 east = toWorld.MultiplyVector(new Vector3(tangents[i].x, tangents[i].y, tangents[i].z)).normalized;
+                Vector3 north = Vector3.Cross(east, up);
+                Vector3 outward = east * band.x + north * band.y;
+                float miter = outward.magnitude;
+                Vector3 direction = outward / miter;
+
+                Vector4 clipCentre = viewProjection * new Vector4(centre.x, centre.y, centre.z, 1f);
+                float referenceMetres = math.abs(clipCentre.w) / math.max(math.abs(projection.m11), 1e-6f) * 0.02f;
+                Vector3 probe = centre + direction * referenceMetres;
+                Vector4 clipProbe = viewProjection * new Vector4(probe.x, probe.y, probe.z, 1f);
+                float referencePx = 0.01f * height;
+                if (Vector3.Dot(direction, direction) > 1e-12f && clipCentre.w > 1e-5f && clipProbe.w > 1e-5f)
+                {
+                    var ndcDelta = new Vector2(clipProbe.x / clipProbe.w - clipCentre.x / clipCentre.w, clipProbe.y / clipProbe.w - clipCentre.y / clipCentre.w);
+                    referencePx = new Vector2(ndcDelta.x * 0.5f * width, ndcDelta.y * 0.5f * height).magnitude * (clipProbe.w / clipCentre.w);
+                }
+
+                double reach = miter * (1.0 + outlineWidthPx) * (referenceMetres / math.max(referencePx, 0.1f));
+                largest = math.max(largest, reach / math.max(math.abs(clipCentre.w), 1e-6f));
+            }
+
+            return largest;
+        }
+
+        /// <summary>Renders one sharp polygon tip near the globe limb from the live Editor camera, and projects its mesh triangles to pixels.
+        /// Also returns <see cref="LargestUncappedReachOverDepth"/> for the tip's mesh.</summary>
+        private static (Color32[] Pixels, List<float2> Triangles, double UncappedReachOverDepth) RenderLimbTip(int width, int height, double devicePixelRatio, bool fillAntialiasing)
+        {
+            // Mercator-plane tip at (24.7 E, 66.3 N): apex angle 31 degrees, outward bisector 210 degrees clockwise from north.
+            const string polygon = "[[24.7,66.3],[25.84766,68.02166],[27.9693,67.55866],[24.7,66.3]]";
+            string styleJson = @"{ ""version"": 8,
+                ""sources"": { ""s"": { ""type"": ""geojson"", ""data"": { ""type"": ""Feature"", ""properties"": {},
+                    ""geometry"": { ""type"": ""Polygon"", ""coordinates"": [" + polygon + @"] } } } },
+                ""layers"": [
+                    { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#ffffff"" } },
+                    { ""id"": ""tip"", ""type"": ""fill"", ""source"": ""s"",
+                      ""paint"": { ""fill-color"": ""#d8e8c8"", ""fill-opacity"": 0.7, ""fill-outline-color"": ""rgba(95, 208, 100, 1)"" } } ] }";
+
+            using var bag = new ObjectDisposalBag();
+            var lightGo = bag.Track(new GameObject("LimbTipLight"));
+            Light light = lightGo.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.intensity = 1f;
+            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+
+            var view = bag.Track(new GameObject("LimbTipMapView")).AddComponent<MapRenderer.Unity.Rendering.Map.MapViewComponent>().WithTestMaterials();
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick = int.MaxValue;
+            view.Config.DevicePixelRatioMode = MapRenderer.Unity.Rendering.Map.DevicePixelRatioMode.Manual;
+            view.Config.DevicePixelRatio = devicePixelRatio;
+            var cameraGo = bag.Track(new GameObject("LimbTipCamera"));
+            Camera camera = cameraGo.AddComponent<Camera>();
+            var target = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            camera.targetTexture = target;
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = OceanBg;
+            camera.enabled = false;
+            var properties = new MapRenderer.Core.Geo.CameraProperties(
+                new GeoCoordinate3D { Latitude = 52.39103, Longitude = 10.73984, Altitude = 0.0 }, 6.304, 0.0, 46.5);
+            var mapCamera = new MapRenderer.Unity.Rendering.Map.MapCamera(camera, properties, projection: new SphericalProjection());
+            view.SetCamera(mapCamera);
+            try
+            {
+                var setStyle = view.SetStyle(MapRenderer.Unity.Style.StyleParser.Parse(styleJson, fillAntialiasing), "limb-tip").Preserve();
+                MapRenderer.Unity.Rendering.Tile.UniTaskParkExtensions.WaitOffPlayerLoop(in setStyle, 20000);
+                setStyle.GetAwaiter().GetResult();
+                MapViewPump.PumpUntilSettledByAwaiting(view);
+                for (int frame = 0; frame < 10; frame++) view.LateUpdate();
+                mapCamera.SyncToCamera();
+
+                var triangles = new List<float2>();
+                double uncappedReachOverDepth = 0.0;
+                var keys = new List<MapRenderer.Unity.Rendering.Tile.LoadedTileKey>();
+                view.TileManager.CollectLoadedTileKeys(keys);
+                var seen = new HashSet<MapRenderer.Core.Geo.TileId>();
+                var entities = global::Unity.Entities.World.DefaultGameObjectInjectionWorld.EntityManager;
+                Matrix4x4 viewProjection = camera.projectionMatrix * camera.worldToCameraMatrix;
+                foreach (var key in keys)
+                {
+                    Mesh[] meshes = view.GetTileMeshes(key.Tile);
+                    int[] materialIndices = view.GetTileMaterialIndices(key.Tile);
+                    if (meshes == null || !seen.Add(key.Tile)) continue;
+                    float4x4 toWorld = entities.GetComponentData<global::Unity.Transforms.LocalToWorld>(view.TileManager.EntitiesRenderer()._tileRoots[key.Tile].Root).Value;
+                    for (int m = 0; m < meshes.Length; m++)
+                    {
+                        if (view.View.Layers.Layers[materialIndices[m]].StyleLayer?.Id != "tip") continue;
+                        var tipLayer = (MapRenderer.Unity.Rendering.Layers.FillRenderLayer)view.View.Layers.Layers[materialIndices[m]];
+                        var worldMatrix = new Matrix4x4(toWorld.c0, toWorld.c1, toWorld.c2, toWorld.c3);
+                        uncappedReachOverDepth = math.max(uncappedReachOverDepth, LargestUncappedReachOverDepth(
+                            meshes[m], worldMatrix, camera, width, height, tipLayer.Material.GetFloat("_FillOutlineWidthPx")));
+                        Vector3[] vertices = meshes[m].vertices;
+                        int[] indices = meshes[m].triangles;
+                        for (int t = 0; t + 2 < indices.Length; t += 3)
+                        {
+                            var pixels = new float2[3];
+                            bool inFront = true;
+                            for (int v = 0; v < 3; v++)
+                            {
+                                float3 world = math.transform(toWorld, (float3)vertices[indices[t + v]]);
+                                Vector4 clip = viewProjection * new Vector4(world.x, world.y, world.z, 1f);
+                                if (clip.w <= 0f) { inFront = false; break; }
+                                pixels[v] = new float2((clip.x / clip.w * 0.5f + 0.5f) * width, (clip.y / clip.w * 0.5f + 0.5f) * height);
+                            }
+                            if (inFront) { triangles.Add(pixels[0]); triangles.Add(pixels[1]); triangles.Add(pixels[2]); }
+                        }
+                    }
+                }
+
+                using var snap = new SnapshotRenderer(width, height);
+                snap.Render(camera);
+                return ((Color32[])snap.Pixels.Pixels.Clone(), triangles, uncappedReachOverDepth);
+            }
+            finally
+            {
+                view.Teardown();
+                target.Release();
+                UnityEngine.Object.DestroyImmediate(target);
+            }
+        }
+
+        // Non-obvious why: this is the maintainer's live view (Liberty park of tile 5/18/8, globe, tilt 46.5), because a wedge of band ink
+        // showed only at a device-pixel ratio of 2 and every smaller render hid it. RED: the band paints a third of the frame.
+        [Test]
+        [Category("Online")] // fetches real OpenStreetMap-derived tile data, which the repo does not bundle
+        [TestCase(1925, 1164, 2.0)]
+        [TestCase(962, 582, 1.0)]
+        public void TheBandOfAGlobeParkTileStaysNearItsPolygons(int width, int height, double devicePixelRatio)
+        {
+            byte[] tileBytes = FetchParkTile();
+            Color32[] hard = RenderParkTile(tileBytes, width, height, devicePixelRatio, fillAntialiasing: false);
+            Color32[] banded = RenderParkTile(tileBytes, width, height, devicePixelRatio, fillAntialiasing: true);
+
+            int ink = 0;
+            for (int i = 0; i < hard.Length; i++)
+                if (math.abs(banded[i].r - hard[i].r) + math.abs(banded[i].g - hard[i].g) + math.abs(banded[i].b - hard[i].b) > 8) ink++;
+
+            Assert.Greater(ink, 0, "precondition: the band paints some ink, so the check is not vacuous.");
+            Assert.LessOrEqual(ink, hard.Length / 100,
+                $"the band painted {ink} of {hard.Length} pixels at a device-pixel ratio of {devicePixelRatio}. The tile's parks fill a few " +
+                "hundred pixels of this view, so a larger spread is a band triangle far from any polygon.");
+        }
+
+        /// <summary>The pinned OpenFreeMap planet build, so the tile's bytes cannot drift between runs.</summary>
+        private const string ParkTileTemplate = "https://tiles.openfreemap.org/planet/20260927_080001_pt/{z}/{x}/{y}.pbf";
+
+        /// <summary>Fetches tile 5/18/8 from the pinned planet build with a bounded wait. The repo's own transport needs the player loop,
+        /// which a blocking EditMode test would stall, so this uses <c>HttpClient</c>. An unreachable server or a retired build makes the test inconclusive.</summary>
+        private static byte[] FetchParkTile()
+        {
+            const int timeoutSeconds = 15;
+            string url = ParkTileTemplate.Replace("{z}", "5").Replace("{x}", "18").Replace("{y}", "8");
+            try
+            {
+                using var client = new System.Net.Http.HttpClient { Timeout = System.TimeSpan.FromSeconds(timeoutSeconds) };
+                System.Net.Http.HttpResponseMessage response = System.Threading.Tasks.Task.Run(() => client.GetAsync(url)).GetAwaiter().GetResult();
+                if (!response.IsSuccessStatusCode) Assert.Inconclusive($"{url}: HTTP {(int)response.StatusCode}, so the pinned planet build may be retired.");
+                return System.Threading.Tasks.Task.Run(() => response.Content.ReadAsByteArrayAsync()).GetAwaiter().GetResult();
+            }
+            catch (System.Exception ex) when (ex is not AssertionException && ex is not InconclusiveException)
+            {
+                Assert.Inconclusive($"{url}: could not fetch within {timeoutSeconds} s ({ex.GetType().Name}: {ex.Message}). The test needs network access.");
+                return null;
+            }
+        }
+
+        /// <summary>Renders the park layer of tile 5/18/8 on a globe from the live Editor camera, in a fresh view each time.</summary>
+        private static Color32[] RenderParkTile(byte[] tileBytes, int width, int height, double devicePixelRatio, bool fillAntialiasing)
+        {
+            const string styleJson = @"{ ""version"": 8,
+                ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+                ""layers"": [
+                    { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#ffffff"" } },
+                    { ""id"": ""park"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""park"",
+                      ""paint"": { ""fill-color"": ""#d8e8c8"", ""fill-opacity"": 0.7, ""fill-outline-color"": ""rgba(95, 208, 100, 1)"" } } ] }";
+            var tile = new MapRenderer.Core.Geo.TileId { Z = 5, X = 18, Y = 8 };
+            var source = new TestDataSource((id, ct) => id.Equals(tile)
+                ? Cysharp.Threading.Tasks.UniTask.FromResult(new MapRenderer.Core.Data.TileResponse(tileBytes, MapRenderer.Core.Data.TileEncoding.Mvt))
+                : Cysharp.Threading.Tasks.UniTask.FromResult(MapRenderer.Core.Data.TileResponse.Absent(MapRenderer.Core.Data.TileEncoding.Mvt)));
+
+            using var bag = new ObjectDisposalBag();
+            var lightGo = bag.Track(new GameObject("ParkBandLight"));
+            Light light = lightGo.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.intensity = 1f;
+            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+
+            var view = bag.Track(new GameObject("ParkBandMapView")).AddComponent<MapRenderer.Unity.Rendering.Map.MapViewComponent>().WithTestMaterials();
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick = int.MaxValue;
+            view.Config.DevicePixelRatioMode = MapRenderer.Unity.Rendering.Map.DevicePixelRatioMode.Manual;
+            view.Config.DevicePixelRatio = devicePixelRatio;
+            var cameraGo = bag.Track(new GameObject("ParkBandCamera"));
+            Camera camera = cameraGo.AddComponent<Camera>();
+            var target = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            camera.targetTexture = target;
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = OceanBg;
+            camera.enabled = false;
+            var properties = new MapRenderer.Core.Geo.CameraProperties(
+                new GeoCoordinate3D { Latitude = 52.39103, Longitude = 10.73984, Altitude = 0.0 }, 6.304, 0.0, 46.5);
+            var mapCamera = new MapRenderer.Unity.Rendering.Map.MapCamera(camera, properties, projection: new SphericalProjection());
+            view.SetCamera(mapCamera);
+            MapRenderer.Unity.Style.StyleDocument style = MapRenderer.Unity.Style.StyleParser.Parse(styleJson, fillAntialiasing);
+            try
+            {
+                view.LoadTestStyle(source, properties, style: style, symbolsIntentionallyUnwired: true);
+                for (int i = 0; i < 4000; i++)
+                {
+                    view.LateUpdate();
+                    view.AwaitInFlightMeshBuilds();
+                    if (i > 3 && view.LoadedTileCount() > 0 && view.AllTilesSettled()) break;
+                }
+                for (int frame = 0; frame < 10; frame++) view.LateUpdate();
+                mapCamera.SyncToCamera();
+                using var snap = new SnapshotRenderer(width, height);
+                snap.Render(camera);
+                return (Color32[])snap.Pixels.Pixels.Clone();
+            }
+            finally
+            {
+                view.Teardown();
+                target.Release();
+                UnityEngine.Object.DestroyImmediate(target);
+            }
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────

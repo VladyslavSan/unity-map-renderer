@@ -988,6 +988,18 @@ namespace MapRenderer.Tests.Structure
                 "only case that ships. Use an `if` block instead.");
         }
 
+        [Test]
+        public void FillVertexModify_CapsTheBandReachOverTheViewDepth()
+        {
+            // Non-obvious why: without the cap an edge-on band vertex at the globe limb is thrown past the camera and near-clips
+            // into a wedge of band ink at a device-pixel ratio of 2 (GlobeFillBandRenderTests.TheBandOfAGlobeParkTileStaysNearItsPolygons).
+            string code = ShaderPropertyParser.StripHlslComments(
+                File.ReadAllText(ShaderPropertyParser.MapShaderPath("Fill_VertexModify.hlsl"), Encoding.UTF8));
+
+            Assert.That(Regex.IsMatch(code, @"min\s*\([^;]*MapPixelsToWorld\s*\([^;]*MaxBandReachOverDepth\s*\*\s*bandDepth"), Is.True,
+                "Fill_VertexModify.hlsl must cap the band's whole displacement, which uses MapPixelsToWorld, at MaxBandReachOverDepth times its view depth.");
+        }
+
         // ── Shader feature pragmas (required for tooth #1 normal map, tooth #3 specular) ──
 
         /// <summary>Required shader-feature pragmas in Fill.shader: ForwardLit's normal map (tooth #1) and

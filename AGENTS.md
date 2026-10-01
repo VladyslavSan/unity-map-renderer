@@ -107,6 +107,11 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 | `5` | no results produced for this run (crash), or an unfiltered run matched zero tests |
 | `6` | the `Tools/core-tests` fast loop failed (or ran zero tests) — Unity was never launched |
 | `7` | `Tools/check-doc-comments.py` found a doc-comment limit or citation finding in the diff, or failed to run — Unity was never launched |
+| `8` | nothing failed, but a test ended inconclusive — an `Online` test without network (see below) |
+
+**Online tests** (`[Category("Online")]`) fetch real map data from the network, and they run on every run. Pass `--offline`
+(`./Tools/run-tests.sh --offline [platform] [filter]`) to skip them: it forwards `-testCategory "!Online"`. With no
+network an Online test is inconclusive, and the script exits `8`. The convention is in `docs/test-conventions.md` § 8.
 
 Running both runners does not change that table: the code is the **first failing platform's**, and `0`
 means every platform ran green.

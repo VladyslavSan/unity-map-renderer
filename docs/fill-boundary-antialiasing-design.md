@@ -144,6 +144,22 @@ the band's outer vertex sits there, so the outline is as wide as the band along 
 **Limitation:** a sharp reflex corner keeps the clipped miter (`MiterLimit`), and the outline of each of its two walls
 tapers toward the corner.
 
+## A band vertex moves at most 5% of its view depth
+
+A band vertex moves at most `MaxBandReachOverDepth` (5%) of its view depth `|clip.w|`, in `Fill_VertexModify.hlsl`. The
+cap is on the whole displacement, `miter · (1 + W) · scale`, not on the scale alone. Two things make it necessary. The
+px→world probe returns a scale that grows without bound along an edge-on direction (its 0.1 px floor limits it only to about
+`H/10` times the flat scale). And a long offset along the tangent plane leaves the camera's linear range: at the globe limb
+the tangent plane contains the view ray, so a vertex thrown along it lands behind the near plane or past the far plane, and
+the clip turns the band quad into a wedge of ink. A scale cap would not cover this, because the miter multiplies after it.
+
+The bound is a fraction of depth, so it holds whatever the miter, the width or the viewport. It binds only within a few
+degrees of the view ray.
+
+**Limitation:** the cap thins the band within about `asin(miter · (1 + W) / (0.0425 · H))` of the view ray, which is the
+horizon for a plain edge. It also trims joins whose `miter · (1 + W)` exceeds about `0.0425 · H` device px, where `H` is the
+viewport height in px and `W` is `_FillOutlineWidthPx`. A larger reflex miter on a small viewport meets this bound sooner.
+
 ## The residual rim, accepted (maintainer call)
 
 Two polygons **of the same layer abutting inside one tile** share no such predicate: each one's band ramps
