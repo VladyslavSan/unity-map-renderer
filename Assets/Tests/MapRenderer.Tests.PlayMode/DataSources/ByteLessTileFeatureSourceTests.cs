@@ -18,6 +18,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Jobs.Tiles;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.PlayMode.DataSources
 {
@@ -67,16 +68,6 @@ namespace MapRenderer.Tests.PlayMode.DataSources
             mv.TileManager.SetSources(specs, view.Config.Backend);
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         // ── A bytes-less ITileFeatureSource flows through the UNCHANGED per-layer fan-out ─────────────────
         [UnityTest]
         public IEnumerator ByteLessSource_FlowsThroughTheUnchangedFanOut_ProducesTheFullExtentQuad()
@@ -115,7 +106,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
             try
             {
                 LoadTestStyleWithFeatureSource(view, fake, Cam(0, 0, 0.0), style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: the tile must settle.");
                 Assert.Greater(fake.GetTileCalls, 0, "sanity: the byteless source must have been consulted.");

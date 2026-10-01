@@ -12,6 +12,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Cameras;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.Tiles
 {
@@ -41,9 +42,6 @@ namespace MapRenderer.Tests.Tiles
         {
             public readonly MapView View;
             public readonly DrawnTileWatcher Watcher;
-            private readonly Dictionary<int, UniTaskCompletionSource<bool>> _gates = new();
-            private readonly Dictionary<TileId, UniTaskCompletionSource<bool>> _tileGates = new();
-            private readonly byte[] _bytes = SampleTileFixture.Bytes();
             private double _now;
 
             public Rig(MapView view)
@@ -52,40 +50,10 @@ namespace MapRenderer.Tests.Tiles
                 Watcher = new DrawnTileWatcher(view, BackgroundSlot, FillSlot);
             }
 
+            /// <summary>The source's fetch gates: a zoom or a tile is held back until the test opens it.</summary>
+            public GatedTileSource Gates { get; } = GatedTileSource.Open();
+
             public TileManagerFacade Manager => new TileManagerFacade(View);
-
-            public UniTask<TileResponse> Fetch(TileId tile) => FetchAsync(tile);
-
-            private async UniTask<TileResponse> FetchAsync(TileId tile)
-            {
-                if (_gates.TryGetValue(tile.Z, out var gate)) await gate.Task;
-                if (_tileGates.TryGetValue(tile, out var tileGate)) await tileGate.Task;
-                return new TileResponse(_bytes, TileEncoding.Mvt);
-            }
-
-            /// <summary>Holds back one tile's fetch until <see cref="OpenTile"/>.</summary>
-            public void CloseTile(TileId tile) => _tileGates[tile] = new UniTaskCompletionSource<bool>();
-
-            public void OpenTile(TileId tile)
-            {
-                if (_tileGates.Remove(tile, out var gate)) gate.TrySetResult(true);
-            }
-
-            public void CloseGate(int zoom) => _gates[zoom] = new UniTaskCompletionSource<bool>();
-
-            /// <summary>Opens every closed gate, so a failing test does not leave fetches hung in teardown.</summary>
-            public void OpenAllGates()
-            {
-                foreach (var gate in _gates.Values) gate.TrySetResult(true);
-                _gates.Clear();
-                foreach (var gate in _tileGates.Values) gate.TrySetResult(true);
-                _tileGates.Clear();
-            }
-
-            public void OpenGate(int zoom)
-            {
-                if (_gates.Remove(zoom, out var gate)) gate.TrySetResult(true);
-            }
 
             public void Move(double zoom, double lon = 0.0)
                 => View.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoom, Longitude = lon, Latitude = 0.0 });
@@ -109,16 +77,7 @@ namespace MapRenderer.Tests.Tiles
             public bool Settled => View.LoadedTileCount() > 0 && View.AllTilesSettled();
 
             /// <summary>Ticks until <paramref name="done"/> is true, checking every tick.</summary>
-            public void Pump(Func<bool> done, string what)
-            {
-                for (var settle = SettleTimeout.Start(); settle.Running;)
-                {
-                    Tick();
-                    if (done()) return;
-                }
-
-                Assert.Fail($"timed out waiting for: {what}");
-            }
+            public void Pump(Func<bool> done, string what) => PumpUntil(View, done, what, Watcher.Check);
 
             public void PumpUntilSettled() => Pump(() => Settled, "the cover to settle");
 
@@ -156,7 +115,7 @@ namespace MapRenderer.Tests.Tiles
             view.Config.MaxReleasesPerTick     = 1;
             view.WithTestCamera(px: 2400, projection: projection == "globe" ? new SphericalProjection() : null);
             var rig = new Rig(view);
-            view.LoadTestStyle(TestDataSource.FromFetch(rig.Fetch), Cam(5.5), TestStyle.Document(StyleJson));
+            view.LoadTestStyle(rig.Gates.Source, Cam(5.5), TestStyle.Document(StyleJson));
             rig.Clock(0.0);
             return rig;
         }
@@ -181,7 +140,7 @@ namespace MapRenderer.Tests.Tiles
                 int firstLevelTiles = rig.ShownBackground.Count;
 
                 // Zoom in with the finer level's fetch closed: the coarse tiles stay up, for as long as it takes (no time limit).
-                rig.CloseGate(6);
+                rig.Gates.CloseZoom(6);
                 rig.Move(6.5);
                 for (int i = 0; i < 60; i++)
                 {
@@ -197,15 +156,15 @@ namespace MapRenderer.Tests.Tiles
                 // are ready, and every other family swaps.
                 TileId slow = FindInteriorChild(rig);
                 TileId slowParent = TileAncestry.Parent(slow);
-                rig.CloseTile(slow);
-                rig.OpenGate(6);
+                rig.Gates.CloseTile(slow);
+                rig.Gates.OpenZoom(6);
                 rig.Pump(() => view.TileManager.Telemetry.PendingTileCount == 1, "every finer tile but one to be ready");
                 Assert.IsTrue(rig.ShownBackground.Contains(slowParent), "a coarse tile stays up while one child of its family is not ready");
                 foreach (TileId shown in rig.ShownBackground)
                     Assert.IsFalse(TileAncestry.IsStrictAncestor(slowParent, shown), "and none of its ready children is drawn beside it");
                 Assert.Less(rig.ShownBackground.Count, firstLevelTiles, "the families that are ready have swapped");
 
-                rig.OpenTile(slow);
+                rig.Gates.OpenTile(slow);
                 rig.PumpUntilSettled();
                 AssertSettled(rig);
                 Assert.AreEqual(0, rig.Manager.Held, "a settled view holds nothing");
@@ -224,7 +183,7 @@ namespace MapRenderer.Tests.Tiles
             }
             finally
             {
-                rig.OpenAllGates();
+                rig.Gates.OpenEverything();
                 view.Teardown();
             }
 
@@ -239,22 +198,22 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 rig.View.Config.MaxConcurrentTileLoads = 1; // the background of a tile loads first, and its source record only after it shows
-                rig.CloseGate(5);
+                rig.Gates.CloseZoom(5);
                 rig.Pump(() => rig.ShownBackground.Count > 0, "the background to show while the source loads");
                 for (int i = 0; i < 5; i++) rig.Tick(); // the source record is admitted, and stays in flight behind the gate
                 Assert.AreEqual(0, rig.Watcher.ShownFill.Count, "precondition: no fill shows before its source finishes");
 
-                rig.CloseGate(6);
+                rig.Gates.CloseZoom(6);
                 rig.Move(6.5);
                 for (int i = 0; i < 5; i++) rig.Tick();
                 Assert.Greater(rig.Manager.Held, 0, "precondition: the revealed level-5 tiles are held");
 
-                rig.OpenGate(5);
+                rig.Gates.OpenZoom(5);
                 rig.Pump(() => HasLevel(rig.Watcher.ShownFill, 5), "the held tiles' source records to show");
             }
             finally
             {
-                rig.OpenAllGates();
+                rig.Gates.OpenEverything();
                 rig.View.Teardown();
             }
         }
@@ -315,7 +274,7 @@ namespace MapRenderer.Tests.Tiles
         {
             MapView view = rig.View;
             view.Config.MaxConsumesPerTick = 0;
-            rig.CloseGate(8);
+            rig.Gates.CloseZoom(8);
             rig.Move(7.5);
             for (int i = 0; i < 5; i++) rig.Tick();
             rig.Move(8.5); // the level-7 records are in flight and leave the cover
@@ -326,7 +285,7 @@ namespace MapRenderer.Tests.Tiles
             rig.Pump(() => HasLevel(rig.ShownBackground, 7), "the intermediate level to step in");
             Assert.Greater(rig.Manager.Held, 0, "the intermediate level is now the held one");
 
-            rig.OpenGate(8);
+            rig.Gates.OpenZoom(8);
             rig.PumpUntilSettled();
             AssertSettled(rig);
             Assert.AreEqual(0, rig.Manager.Held);
@@ -381,14 +340,14 @@ namespace MapRenderer.Tests.Tiles
             MapView view = rig.View;
             view.Config.TileSelection.ZoomLevelPreload = 0.3;
             view.Config.TileSelection.MaxConcurrentPrepareLoads = 64;
-            rig.CloseGate(8);
+            rig.Gates.CloseZoom(8);
             rig.Move(8.85, lon: 60.0); // level 8 is new here, and the level-9 tiles are its preload set
             for (int i = 0; i < 10; i++) rig.Tick();
             Assert.IsTrue(HasLevel(rig.ShownBackground, 9), "the level-9 tiles stay drawn while level 8 loads");
             Assert.Greater(rig.Manager.Held, 0, "they are held, not prepared");
             AssertReportedToSymbols(view, rig.ShownBackground, strict: false);
 
-            rig.OpenGate(8);
+            rig.Gates.OpenZoom(8);
             rig.PumpUntilSettled();
             AssertSettled(rig);
         }

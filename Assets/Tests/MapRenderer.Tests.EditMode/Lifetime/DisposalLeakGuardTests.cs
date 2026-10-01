@@ -26,6 +26,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
+using static MapRenderer.Tests.MapViewPump;
 namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>
@@ -58,20 +59,6 @@ namespace MapRenderer.Tests.Lifetime
             ]
         }");
 
-
-        /// <summary>
-        /// Pumps Update until all tiles settle or maxFrames is reached.
-        /// </summary>
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         /// <summary>
         /// Counts Mesh objects currently alive in the scene (excluding those owned by the test

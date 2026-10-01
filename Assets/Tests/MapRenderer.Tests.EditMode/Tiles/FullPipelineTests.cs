@@ -62,6 +62,7 @@ using MapRenderer.Unity.View.Cameras;
 using System.Threading.Tasks;
 using MapRenderer.Unity.Concurrency;
 using Object = UnityEngine.Object;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.Tiles
@@ -1650,17 +1651,6 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-
-        private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         /// <summary>A compile-time check: every entry is a <c>const</c> in its owner's nested
         /// <c>ProfilerMarkerNames</c>, so deleting or renaming a production marker breaks this file's compile.

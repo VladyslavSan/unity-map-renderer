@@ -49,6 +49,7 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Jobs.Geometry;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
 using Object = UnityEngine.Object;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.Tiles
@@ -379,18 +380,6 @@ namespace MapRenderer.Tests.Tiles
             t.GetAwaiter().GetResult();
         }
 
-        /// <summary>Settles the cover with <c>AwaitInFlightMeshBuilds</c>, not <c>DrainMeshBuilds</c>: the
-        /// symbol pass rides the mesh kick task, so only the awaiting form lets a label build land.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 2000)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                view.AwaitInFlightMeshBuilds();
-            }
-        }
-
         private static SymbolTileStore Store(MapView view) => view.View.SymbolSubsystem.Store();
 
         /// <summary>Pumps until the tracked tile has a committed symbol block, and reports whether it got one.
@@ -449,7 +438,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 SpinToCompleted(view.SetStyle(FillAndLabelStyleA(), "A"));
-                PumpUntilSettled(view);
+                PumpUntilSettledByAwaiting(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
                 Assert.IsTrue(PumpUntilLabelsCommitted(view),
                     "drive precondition: the fixture must actually commit labels under A — without this the " +
@@ -458,12 +447,12 @@ namespace MapRenderer.Tests.Tiles
                 PanOutOfCover(view);
                 view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must leave cover.");
-                PumpUntilSettled(view);
+                PumpUntilSettledByAwaiting(view);
                 Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
                     "drive precondition: the pan-out must have transferred entries into the cache.");
 
                 SpinToCompleted(view.SetStyle(OtherStyleB(), "B"));
-                PumpUntilSettled(view);
+                PumpUntilSettledByAwaiting(view);
                 SpinToCompleted(view.SetStyle(FillAndLabelStyleA(), "A"));
                 Assert.IsNull(Store(view).DebugBlockFor(TrackedKey),
                     "drive precondition: the restyle must have dropped the warm symbol block — that asymmetry " +
@@ -500,14 +489,14 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 SpinToCompleted(view.SetStyle(FillAndLabelStyleA(), "A"));
-                PumpUntilSettled(view);
+                PumpUntilSettledByAwaiting(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
                 Assert.IsTrue(PumpUntilLabelsCommitted(view), "drive precondition: labels must commit under A.");
 
                 PanOutOfCover(view);
                 view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must leave cover.");
-                PumpUntilSettled(view);
+                PumpUntilSettledByAwaiting(view);
                 Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
                     "drive precondition: the pan-out must have transferred entries into the cache.");
                 Assert.IsNotNull(Store(view).DebugBlockFor(TrackedKey),
@@ -551,20 +540,6 @@ namespace MapRenderer.Tests.Tiles
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
-
-        /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
-        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
-        /// them. No frame yielding — EditMode needs immediate Object.Destroy semantics for the lifetime teeth.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 2000)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         private static int CountMeshObjects() => Resources.FindObjectsOfTypeAll<Mesh>().Length;
 
@@ -3462,20 +3437,6 @@ namespace MapRenderer.Tests.Tiles
             var t = task.Preserve();
             t.WaitOffPlayerLoop(timeoutMs);
             t.GetAwaiter().GetResult();
-        }
-
-        /// <summary>Also requires <c>DesiredCount() == 0</c>: <c>AllTilesSettled()</c> alone can fire once
-        /// every so-far-ADMITTED tile is built, before a capped admission has drained the rest of a
-        /// multi-tile cover into the loaded set.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 2000)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.DesiredCount() == 0 && view.AllTilesSettled())
-                    return;
-            }
         }
 
         /// <summary>An inline vector `tiles[]` source with one fill layer, plus whatever extra source keys

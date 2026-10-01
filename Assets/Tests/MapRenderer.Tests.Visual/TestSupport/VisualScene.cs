@@ -12,6 +12,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using RenderBackend = MapRenderer.Unity.Rendering.Map.RenderBackend;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests
 {
@@ -279,7 +280,7 @@ namespace MapRenderer.Tests
             string json = BuildStyleJson();
             StyleDocument doc = TestStyle.Document(json);
             SpinToCompleted(_mapView.SetStyle(doc, "visual-scene"));
-            PumpUntilSettled(_mapView);
+            PumpUntilSettledByAwaiting(_mapView);
 
             // Warm-up (WarmupFrames): pump extra LateUpdate/Rebuild ticks so the Entities-Graphics BRG batch is
             // cullable before the snapshot — rendering on the settle frame itself is blank (see WarmupFrames).
@@ -311,22 +312,6 @@ namespace MapRenderer.Tests
             var t = task.Preserve();
             t.WaitOffPlayerLoop(timeoutMs);
             t.GetAwaiter().GetResult();
-        }
-
-        /// <summary>Pumps <c>LateUpdate</c> until every loaded tile has settled — mirrors
-        /// <c>GeoJsonSourceTests.PumpUntilSettled</c>. <c>AllTilesSettled</c> counts a disjoint tile's
-        /// definitively-absent null handle as settled. Non-obvious why: it pumps the real <c>LateUpdate</c>
-        /// Update, which harvests symbols, not <c>TileManager.DrainMeshBuilds</c>, which passes no
-        /// <c>symbolPass</c>. <see cref="TileManager.AwaitInFlightMeshBuilds"/> between ticks only waits; it
-        /// consumes and harvests nothing.</summary>
-        private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                view.AwaitInFlightMeshBuilds();
-            }
         }
 
         /// <summary>Pumps <c>LateUpdate</c> until the MapView-owned <c>SymbolPlacementSystem</c> has both

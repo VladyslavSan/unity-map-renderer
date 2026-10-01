@@ -23,6 +23,7 @@ using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile.Processing;
+using static MapRenderer.Tests.MapViewPump;
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
@@ -59,22 +60,6 @@ namespace MapRenderer.Tests.MapViews
             ]
         }");
 
-
-        /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
-        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
-        /// them. The async-settle behavioural tooth lives in the PlayMode half
-        /// (MapRenderer.Tests.PlayMode.MapViews.MapViewLiveLoopTests); this half's GC.Alloc verdicts need
-        /// EditMode's alloc isolation, so they warm up with this deterministic drain.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 2500)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         private static StyleDocument BackgroundAndFillStyle() => TestStyle.Document(@"{
             ""version"": 8,
@@ -124,12 +109,8 @@ namespace MapRenderer.Tests.MapViews
         {
             foreach (bool oneGroup in new[] { false, true })
             {
-                var gate = new UniTaskCompletionSource<bool>();
-                var src  = TestDataSource.FromFetch(async tile =>
-                {
-                    await gate.Task;
-                    return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
-                });
+                var gated = GatedTileSource.Closed();
+                var src   = gated.Source;
                 var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
                 view.Config.Backend = RenderBackend.Brg;
                 view.Config.TileSelection.MinZoom = 5;
@@ -158,7 +139,7 @@ namespace MapRenderer.Tests.MapViews
                         $"oneGroup={oneGroup}: the background is drawn while the fill loads, unless one group holds both.");
                     Assert.AreEqual(0, EmittedFor(view, 1), $"oneGroup={oneGroup}: the fill is not drawn before its payload is consumed.");
 
-                    gate.TrySetResult(true);
+                    gated.OpenAll();
                     view.Config.MaxConcurrentTileLoads = 12;
                     PumpUntilSettled(view);
                     view.LateUpdate();
@@ -167,7 +148,7 @@ namespace MapRenderer.Tests.MapViews
                 }
                 finally
                 {
-                    gate.TrySetResult(true);
+                    gated.OpenAll();
                     view.Teardown();
                 }
             }
@@ -238,12 +219,8 @@ namespace MapRenderer.Tests.MapViews
         /// </summary>
         private void AssertAnInPlaceEditOfAGroupFollowsOnNewTiles()
         {
-            var gate = new UniTaskCompletionSource<bool>();
-            var src  = TestDataSource.FromFetch(async tile =>
-            {
-                await gate.Task;
-                return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
-            });
+            var gated = GatedTileSource.Closed();
+            var src   = gated.Source;
             var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;
             view.Config.TileSelection.MinZoom = 5;
@@ -270,7 +247,7 @@ namespace MapRenderer.Tests.MapViews
             }
             finally
             {
-                gate.TrySetResult(true);
+                gated.OpenAll();
                 view.Teardown();
             }
         }
@@ -282,12 +259,8 @@ namespace MapRenderer.Tests.MapViews
         /// </summary>
         private void AssertARuntimeChangeOfTheGroupsFollowsOnNewTiles()
         {
-            var gate = new UniTaskCompletionSource<bool>();
-            var src  = TestDataSource.FromFetch(async tile =>
-            {
-                await gate.Task;
-                return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
-            });
+            var gated = GatedTileSource.Closed();
+            var src   = gated.Source;
             var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;
             view.Config.TileSelection.MinZoom = 5;
@@ -313,7 +286,7 @@ namespace MapRenderer.Tests.MapViews
                 for (int i = 0; i < 40; i++) { view.LateUpdate(); Thread.Sleep(1); }
                 Assert.AreEqual(0, EmittedFor(view, 0), "a new tile's background waits for its fill: one group holds both");
 
-                gate.TrySetResult(true);
+                gated.OpenAll();
                 PumpUntilSettled(view);
                 view.LateUpdate();
                 Assert.AreEqual(4, EmittedFor(view, 0), "the new tiles' background is drawn once the tiles are ready");
@@ -321,7 +294,7 @@ namespace MapRenderer.Tests.MapViews
             }
             finally
             {
-                gate.TrySetResult(true);
+                gated.OpenAll();
                 view.Teardown();
             }
         }
@@ -434,17 +407,7 @@ namespace MapRenderer.Tests.MapViews
                     new TileManager.SourceSpec("b", default, 0, int.MaxValue, () => new MvtTileFeatureSource(sourceB, new InlineWorkScheduler())),
                 }, view.Config.Backend);
 
-                void Pump(Func<bool> done, string what)
-                {
-                    for (var settle = SettleTimeout.Start(); settle.Running;)
-                    {
-                        view.LateUpdate();
-                        Thread.Sleep(1);
-                        if (done()) return;
-                    }
-
-                    Assert.Fail($"{behaviour}: timed out waiting for {what}");
-                }
+                void Pump(Func<bool> done, string what) => PumpUntil(view, done, $"{behaviour}: {what}");
 
                 bool LabelsOfSourceAreShown(string sourceId)
                 {
@@ -658,12 +621,9 @@ namespace MapRenderer.Tests.MapViews
 
                 // The source's ancestor is admitted and finishes AFTER a z15 background tile is shown (one load slot, camera on that tile): its
                 // fill shows once it registers, although it has no record marked shown yet.
-                var gate     = new UniTaskCompletionSource<bool>();
-                var gatedSrc = TestDataSource.FromFetch(async tile =>
-                {
-                    if (tile.Z == 14) await gate.Task;
-                    return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
-                });
+                var gated = GatedTileSource.Open();
+                gated.CloseZoom(14);
+                var gatedSrc = gated.Source;
                 MapView gatedView = NewView(-1.0);
                 gatedView.Config.MaxConcurrentTileLoads = 1;
                 try
@@ -679,7 +639,7 @@ namespace MapRenderer.Tests.MapViews
 
                     Assert.AreEqual(1, EmittedFor(gatedView, 0), "precondition: one z15 background tile is shown while the source's ancestor loads.");
                     Assert.AreEqual(0, EmittedFor(gatedView, 1), "precondition: the source's ancestor has not registered.");
-                    gate.TrySetResult(true);
+                    gated.OpenZoom(14);
                     for (var settle = SettleTimeout.Start(); settle.Running && !gatedView.TryGetBuiltTile(ancestor);)
                     {
                         gatedView.LateUpdate();
@@ -691,7 +651,7 @@ namespace MapRenderer.Tests.MapViews
                 }
                 finally
                 {
-                    gate.TrySetResult(true);
+                    gated.OpenZoom(14);
                     gatedView.Teardown();
                 }
             }
@@ -834,6 +794,15 @@ namespace MapRenderer.Tests.MapViews
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
+            // The state arms (e) and (f) each start from, so neither depends on the other: levels 1 to 3, the z2 cover settled.
+            void SettleAtLevelsOneToThree(MapView settledView)
+            {
+                settledView.Config.TileSelection.MinZoom = 1;
+                settledView.Config.TileSelection.MaxZoom = 3;
+                settledView.Camera.Apply(new CameraPropertiesUpdate { Zoom = 2.0, Heading = 0.0, Tilt = 0.0, Longitude = 0.25, Latitude = 0.0 });
+                PumpUntilSettled(settledView);
+            }
+
             try
             {
                 // Warm up: load the whole cover and let every tile settle. A real (full-world) bounds gate
@@ -905,36 +874,51 @@ namespace MapRenderer.Tests.MapViews
 
                 // ── (e) PREPARED AHEAD: with level 1 in range, the parents of the z2 cover are prepared, so each cover
                 // recompute derives the preload set, merges its keys and re-roles the records. That must not allocate.
-                view.Config.TileSelection.MinZoom = 1;
-                view.Config.TileSelection.MaxZoom = 3;
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.25, Latitude = 0.0 }); // a moved camera, so the cover recomputes
-                PumpUntilSettled(view);
-                Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0,
-                    "precondition: the parent level is prepared, so the preload set is not empty while measuring.");
-                double preparedPanLon = 0.0;
-                AllocationDiagnostics.AssertNotAllocating(() =>
+                try
                 {
-                    preparedPanLon = preparedPanLon == 0.0 ? 1.0 : 0.0;
-                    view.Camera.Apply(new CameraPropertiesUpdate { Longitude = preparedPanLon, Latitude = 0.0 });
-                    view.LateUpdate();
-                },
-                    "A cover recompute with a prepared level in play must not allocate (preload set, prepare keys, roles).");
+                    SettleAtLevelsOneToThree(view);
+                    Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0,
+                        "precondition: the parent level is prepared, so the preload set is not empty while measuring.");
+                    double preparedPanLon = 0.0;
+                    AllocationDiagnostics.AssertNotAllocating(() =>
+                    {
+                        preparedPanLon = preparedPanLon == 0.0 ? 1.0 : 0.0;
+                        view.Camera.Apply(new CameraPropertiesUpdate { Longitude = preparedPanLon, Latitude = 0.0 });
+                        view.LateUpdate();
+                    },
+                        "A cover recompute with a prepared level in play must not allocate (preload set, prepare keys, roles).");
+                }
+                finally
+                {
+                    view.Config.TileSelection.MinZoom = 2;
+                    view.Config.TileSelection.MaxZoom = 2;
+                }
 
                 // ── (f) HELD: the z2 tiles wait for z3 tiles that are built but not yet registered (consume blocked). The swap
                 // step walks their areas on every Update, and a holding tick must not allocate.
-                view.Config.MaxConsumesPerTick = 0;
-                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 3.5 });
-                for (int frame = 0; frame < 3000; frame++)
+                try
                 {
-                    view.LateUpdate();
-                    view.AwaitInFlightMeshBuilds();
-                    TileTelemetrySnapshot waiting = view.CaptureTelemetry();
-                    if (waiting.PendingTileCount > 0 && waiting.ConsumeBacklog == waiting.PendingTileCount) break;
-                }
+                    SettleAtLevelsOneToThree(view);
+                    view.Config.MaxConsumesPerTick = 0;
+                    view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 3.5 });
+                    for (int frame = 0; frame < 3000; frame++)
+                    {
+                        view.LateUpdate();
+                        view.AwaitInFlightMeshBuilds();
+                        TileTelemetrySnapshot waiting = view.CaptureTelemetry();
+                        if (waiting.PendingTileCount > 0 && waiting.ConsumeBacklog == waiting.PendingTileCount) break;
+                    }
 
-                Assert.Greater(view.CaptureTelemetry().HeldTileCount, 0, "precondition: the z2 tiles are held, so the swap step has areas to walk.");
-                AllocationDiagnostics.AssertNotAllocating(() => view.LateUpdate(),
-                    "A tick that holds a tile for unregistered finer tiles must not allocate (the swap step's area walk).");
+                    Assert.Greater(view.CaptureTelemetry().HeldTileCount, 0, "precondition: the z2 tiles are held, so the swap step has areas to walk.");
+                    AllocationDiagnostics.AssertNotAllocating(() => view.LateUpdate(),
+                        "A tick that holds a tile for unregistered finer tiles must not allocate (the swap step's area walk).");
+                }
+                finally
+                {
+                    view.Config.MaxConsumesPerTick = 64;
+                    view.Config.TileSelection.MinZoom = 2;
+                    view.Config.TileSelection.MaxZoom = 2;
+                }
             }
             finally
             {

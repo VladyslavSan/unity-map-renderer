@@ -30,6 +30,7 @@ using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.MapViews
@@ -184,20 +185,6 @@ namespace MapRenderer.Tests.MapViews
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
                            ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
-
-        /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
-        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
-        /// them. No frame yielding — mirrors <c>PreparedCacheTests.PumpUntilSettled</c>.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 2500)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         [Test]
         public void MapTelemetryPanel_Pull_NoOpsCleanly_WhenUnwired()
@@ -393,22 +380,6 @@ namespace MapRenderer.Tests.MapViews
             ]
         }");
 
-
-        /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
-        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
-        /// them. The async-settle behavioural teeth (deferral, parity, release + tilt) live in the PlayMode half
-        /// (MapRenderer.Tests.PlayMode.MapViews.MapViewAsyncMeshBuildTests); this half's off-main / profiler /
-        /// drain-determinism teeth need EditMode, so they warm up with this deterministic drain.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 2500)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         // ── Gap: no test times the worst single-frame stall; the marker count below stands in ─
 

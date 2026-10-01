@@ -42,6 +42,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Rendering.Tile;
 using Fill = MapRenderer.Unity.Style.Fill;
 using Object = UnityEngine.Object;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.Tiles
@@ -1670,21 +1671,6 @@ namespace MapRenderer.Tests.Tiles
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 },
                 zoom, 0.0, 0.0);
-
-        /// <summary>Deterministic settle (mirrors <c>Tiles/PreparedCacheTests.PumpUntilSettled</c>):
-        /// <c>DrainMeshBuilds</c> spins each tick's kicked builds to completion so the next tick consumes
-        /// them. The <c>LoadedTileCount() &gt; 0</c> guard is load-bearing — <c>AllTilesSettled()</c> is
-        /// vacuously true on an empty cover, before anything has ever been admitted.</summary>
-        private static void PumpUntilSettled(MapView view, int maxTicks = 200)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         private static StyleDocument ThreeSourceStyle() => TestStyle.Document(@"{
             ""version"": 8, ""name"": ""T7ThreeSources"",

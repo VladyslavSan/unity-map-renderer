@@ -24,6 +24,7 @@ using MapRenderer.Unity.Rendering.Layers;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.PlayMode.Tiles
@@ -59,17 +60,6 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
-
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    yield break;
-                yield return null;
-            }
-        }
 
         /// <summary>
         /// Independent ground truth: the uniform baked vertex color a FRESH <see cref="SyncMeshWrite.Fill"/>
@@ -153,17 +143,6 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static void SetZoom(MapView view, double zoom)
             => view.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoom });
 
-        /// <summary>Ticks, then again each frame until <paramref name="done"/> holds, so off-main work lands.</summary>
-        private static IEnumerator TickUntil(MapView view, System.Func<bool> done)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (done()) yield break;
-                yield return null;
-            }
-        }
-
         /// <summary>The backend items a shown tile draws: every registered item less the hidden ones.</summary>
         private static int VisibleItems(MapView view) => view.BrgRenderer().DrawItemCount() - view.BrgRenderer().HiddenDrawItemCount();
 
@@ -205,7 +184,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(10, 10, 4.5), style: TileSymbolKickTests.FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 var drawn = new List<TileId>();
                 view.CollectLoadedTileIds(drawn);
                 Assert.IsTrue(drawn.TrueForAll(t => t.Z == 4), "precondition: level 4 is drawn.");
@@ -220,7 +199,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 int prepared = view.CaptureTelemetry().PreparingTileCount;
                 view.CollectLoadedTileIds(drawn);
                 AssertPreparedIsTheLevelFiveCover(view, "inside the lead");
-                yield return TickUntil(view, () => spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count == prepared);
+                yield return PumpUntilAcrossFrames(view, () => spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count == prepared);
                 Assert.AreEqual(prepared, spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count, "every prepared tile begins its label build.");
                 Assert.IsFalse(drawn.Exists(t => t.Z == 5), "a prepared tile is not reported as loaded.");
                 var reported = new List<LoadedTileKey>();
@@ -241,7 +220,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 // ── With the camera still, finishing releases what has no role left: nothing outlives its sets.
                 gate.Set();
                 int releasedAfterFinish = 0;
-                yield return TickUntil(view, () =>
+                yield return PumpUntilAcrossFrames(view, () =>
                 {
                     releasedAfterFinish += view.TilesReleasedLastTick();
                     return view.CaptureTelemetry().PreparingTileCount == 0;
@@ -251,7 +230,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 // ── Somewhere new, with the builds parked again: the level prepares in flight, then the switch shows it as it consumes.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 40.0, Latitude = 10.0 });
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 gate.Reset();
                 SetZoom(view, 4.72);
                 view.LateUpdate();
@@ -261,7 +240,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 SetZoom(view, 5.06);
                 view.LateUpdate();
                 gate.Set();
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.Greater(view.LoadedTileCount(), 0, "the switch draws level 5.");
                 view.CollectLoadedTileIds(drawn);
                 Assert.IsTrue(drawn.TrueForAll(preparedBeforeSwitch.Contains), "every tile the switch draws was prepared before it.");
@@ -270,7 +249,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 // ── Jitter across the preload edge of the parents (lead 0.3 above level 5): nothing releases or rebuilds.
                 // The cover is settled at the first jitter zoom, so only the prepared records can change.
                 SetZoom(view, 5.299);
-                yield return TickUntil(view, () => view.AllTilesSettled() && view.ReleaseQueueDepth() == 0);
+                yield return PumpUntilAcrossFrames(view, () => view.AllTilesSettled() && view.ReleaseQueueDepth() == 0);
                 Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0, "precondition: prepared parents exist to jitter.");
                 int hits = view.PreparedCacheHits();
                 foreach (double zoom in new[] { 5.301, 5.299, 5.301, 5.299 })
@@ -284,7 +263,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 }
 
                 Assert.AreEqual(hits, view.PreparedCacheHits(), "jitter takes nothing from the cache.");
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 // ── The switch back down: the prepared parents show in one batch, with no fetch and no miss.
                 int misses = view.PreparedCacheMisses();
@@ -299,13 +278,13 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 // ── Past the keep set the finished records go to the cache.
                 SetZoom(view, 4.5);
-                yield return TickUntil(view, () => view.CaptureTelemetry().PreparingTileCount == 0);
+                yield return PumpUntilAcrossFrames(view, () => view.CaptureTelemetry().PreparingTileCount == 0);
                 Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "outside the keep set no record stays prepared.");
                 Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0, "a released prepared tile goes to the cache.");
 
                 // ── A flip while rebaking shows the previous geometry: no hole mid-rebake.
                 SetZoom(view, 4.72);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 view.CollectLoadedTileIds(drawn);
                 var childMeshes = new Dictionary<TileId, int>();
                 foreach (TileId t in drawn)
@@ -319,14 +298,14 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.Config.FillTileBufferClip = 64.0; // a new bake revision: drawn and prepared records rebake, parked by the gate
                 view.LateUpdate();
                 SetZoom(view, 5.06);
-                yield return TickUntil(view, () => view.ReleaseQueueDepth() == 0); // a tile left with no role stays drawn until released
+                yield return PumpUntilAcrossFrames(view, () => view.ReleaseQueueDepth() == 0); // a tile left with no role stays drawn until released
                 view.CollectLoadedTileIds(drawn);
                 int expectedVisible = 0;
                 foreach (TileId t in drawn) expectedVisible += childMeshes.TryGetValue(t, out int m) ? m : 0;
                 Assert.Greater(expectedVisible, 0, "precondition: the drawn level-5 tiles held meshes.");
                 Assert.AreEqual(expectedVisible, VisibleItems(view), "the flip shows the previous geometry of the rebaking tiles.");
                 gate.Set();
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual(CoverMeshes(view), VisibleItems(view), "after the rebake only the new meshes of the drawn tiles show.");
             }
             finally
@@ -357,16 +336,16 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 int rNear = view.RegisteredMeshCount();
                 Assert.Greater(rNear, 0, "loading the near cover must register >=1 EG mesh (Entities backend).");
 
                 for (int cycle = 0; cycle < 3; cycle++)
                 {
                     view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                    yield return PumpUntilSettled(view);
+                    yield return PumpUntilSettledAcrossFrames(view);
                     view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
-                    yield return PumpUntilSettled(view);
+                    yield return PumpUntilSettledAcrossFrames(view);
                     Assert.AreEqual(rNear, view.RegisteredMeshCount(),
                         $"cycle {cycle}: EG mesh registrations must return to the post-load count. A drift means a " +
                         "RegisterMesh on the cache-revisit path is not balanced by an UnregisterMesh on eviction.");
@@ -396,7 +375,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "TrackedTile must be built on first visit.");
 
                 Assert.Greater(view.PreparedCacheMisses(), 0,
@@ -411,13 +390,13 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
                 view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate(); // the recompute (cover diff + probe) runs in THIS tick
                 int kicksOnRevisitTick = view.TileBuildsStartedLastTick();
                 int hitsOnRevisitTick  = view.PreparedCacheHits();
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "TrackedTile must be re-built (from cache) on revisit.");
 
@@ -473,7 +452,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                     "Fixture must be zoom-sensitive enough that the id.Z bake differs from a Z2 bake (non-vacuous).");
 
                 view.LoadTestStyle(src, Cam(10, 10, Z1), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
 
                 Color colorAtZ1Visit = FirstVertexColor(view.GetTileMeshes(TrackedTile)[0]);
@@ -483,12 +462,12 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
                 view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0, Zoom = Z2 });
                 view.LateUpdate();
                 int kicksOnRevisit = view.TileBuildsStartedLastTick();
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
                 Assert.AreEqual(0, kicksOnRevisit,
@@ -526,14 +505,14 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "After the first (real) prepare, NativeArrays must already be back at baseline.");
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
                 view.LateUpdate();
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "The cache stores Mesh, never NativeArrays — must remain at baseline while a tile is cached.");
 
@@ -542,7 +521,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 // Limitation: TileBuildsStartedLastTick counts admitted tiles, so it misses a write kick on a
                 // DIFFERENT cover tile in this Update; it still proves the revisit is a hit, not a re-prepare.
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "Revisit must be a hit, not a re-prepare.");
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "After a cache-hit revisit, NativeArray count must remain at baseline.");
             }
@@ -575,19 +554,6 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             ]
         }");
 
-        /// <summary>Pumps the MapView across real frames until its cover has settled, yielding a frame each
-        /// iteration so the ThreadPool mesh build lands (never Thread.Sleep — a blocked thread does not
-        /// advance the player loop). Callers are <c>[UnityTest]</c> coroutines: <c>yield return</c> this.</summary>
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         private static (GameObject go, MapView view) NewView(int releaseBudget)
         {
             var go   = new GameObject("MapView_Stall2");
@@ -615,7 +581,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 7.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 int loadedBefore = view.LoadedTileCount();
                 Assert.GreaterOrEqual(loadedBefore, 3, "need > budget tiles so the release budget actually defers work.");
 
@@ -656,7 +622,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 7.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 int loadedBefore = view.LoadedTileCount();
                 Assert.GreaterOrEqual(loadedBefore, 4, "need enough tiles that a naive pan-back would free clearly > the transient.");
 

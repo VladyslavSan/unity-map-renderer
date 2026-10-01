@@ -1061,7 +1061,7 @@ namespace MapRenderer.Tests.Style
                 double now = 0.0;
                 view.View.NowSecondsOverride = () => now;
                 RestyleHarness.SpinToCompleted(view.SetStyle(BoundedFillStyle(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 var backend = view.EntitiesRenderer();
                 Assert.IsNotNull(backend, "drive precondition: the Entities backend must be active.");
@@ -1119,7 +1119,7 @@ namespace MapRenderer.Tests.Style
             try
             {
                 RestyleHarness.SpinToCompleted(view.SetStyle(BoundedFillStyle(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 Assert.Greater(view.LoadedTileCount(), 0,
                     "anti-vacuity: the cover must be non-empty BEFORE the crossing, or 'nothing was " +
@@ -1134,7 +1134,7 @@ namespace MapRenderer.Tests.Style
                 // Cross the bound WITHOUT leaving the tile: zoom only, same centre, same z4 cover.
                 view.View.Camera.Apply(new CameraPropertiesUpdate { Zoom = ZoomInsideBound });
                 view.LateUpdate();
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 Assert.AreEqual(tilesBefore, view.LoadedTileCount(),
                     "crossing a layer's minzoom must not change the loaded cover.");
@@ -1254,7 +1254,7 @@ namespace MapRenderer.Tests.Style
             try
             {
                 RestyleHarness.SpinToCompleted(view.SetStyle(ThreeFillsAbc(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 Assert.AreEqual(3, view.Layers.Count,
                     "drive precondition: A's three fill layers must all build.");
@@ -1338,7 +1338,7 @@ namespace MapRenderer.Tests.Style
             try
             {
                 RestyleHarness.SpinToCompleted(view.SetStyle(ExtrusionThenFillStyle(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
                 Assert.AreEqual(2, view.Layers.Count,
                     "drive precondition: extrusion+fill must both be present, at slots [0,1].");
                 var tokenBefore = view.TileManager.CurrentStyle;
@@ -1384,7 +1384,7 @@ namespace MapRenderer.Tests.Style
             try
             {
                 RestyleHarness.SpinToCompleted(view.SetStyle(ThreeFillsAbc(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 Assert.AreEqual(3, view.Layers.Count,
                     "drive precondition: A's three fill layers must all build.");
@@ -1403,7 +1403,7 @@ namespace MapRenderer.Tests.Style
                 view.View.CommitProbe = null;
 
                 RestyleHarness.SpinToCompleted(view.SetStyle(ThreeFillsAbc_FilterChangedOnB(), "B"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 foreach (Mesh m in meshesBefore)
                     Assert.IsTrue(m == null,
@@ -1451,7 +1451,7 @@ namespace MapRenderer.Tests.Style
             try
             {
                 RestyleHarness.SpinToCompleted(view.SetStyle(ThreeFillsAbc(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 var loadedBefore = new List<TileId>();
                 view.CollectLoadedTileIds(loadedBefore);
@@ -1534,7 +1534,7 @@ namespace MapRenderer.Tests.Style
             try
             {
                 RestyleHarness.SpinToCompleted(view.SetStyle(ThreeFillsAbc(), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 Assert.AreEqual(3, view.Layers.Count,
                     "drive precondition: A's three fill layers must all build.");
@@ -1549,7 +1549,7 @@ namespace MapRenderer.Tests.Style
                 var seen = new List<(CommitPhase Phase, int Live)>();
                 view.View.CommitProbe = phase => seen.Add((phase, LiveMaterialCount(view)));
                 RestyleHarness.SpinToCompleted(view.SetStyle(ThreeFillsAbc_FilterChangedOnB(), "B"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
                 view.View.CommitProbe = null;
 
                 // Clause 1 — the bound, at EVERY recorded entry (SourcesTeardownRecord records several).

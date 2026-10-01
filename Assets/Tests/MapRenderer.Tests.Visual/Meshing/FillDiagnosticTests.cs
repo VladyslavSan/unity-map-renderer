@@ -28,6 +28,7 @@ using Unity.Mathematics;
 using MapRenderer.Unity.Jobs.Tiles;
 using MapRenderer.Unity.Jobs.Mvt;
 using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -48,17 +49,6 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapViewStyledFillTests : BaseTestFixture
     {
-
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         // ─── inline 2-fill-layer style (for draw-count and draw-order teeth) ────────────────────
 

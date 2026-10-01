@@ -12,6 +12,7 @@ using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Rendering.Materials;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.PlayMode.MapViews
 {
@@ -47,16 +48,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             return view;
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         [UnityTest]
         public IEnumerator DelayedRestyle_NullingFillMaterialMidResolution_ThrowsAtCommit_BeforeMutation()
         {
@@ -67,7 +58,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             {
                 // Style A commits normally (all three bases assigned).
                 yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
                 Assert.IsNotNull(bgMaterialA);

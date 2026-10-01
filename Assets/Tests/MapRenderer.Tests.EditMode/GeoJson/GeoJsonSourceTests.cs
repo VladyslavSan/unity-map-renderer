@@ -22,6 +22,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.GeoJsons
 {
@@ -101,16 +102,6 @@ namespace MapRenderer.Tests.GeoJsons
             var t = task.Preserve();
             t.WaitOffPlayerLoop(timeoutMs);
             t.GetAwaiter().GetResult();
-        }
-
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-            }
         }
 
         /// <summary>The world-space (x, z) the authored tile-local corner projects to, RELATIVE to the tile's

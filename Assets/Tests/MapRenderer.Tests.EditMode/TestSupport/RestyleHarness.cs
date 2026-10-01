@@ -23,20 +23,6 @@ namespace MapRenderer.Tests
         internal static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        /// <summary>Settles the cover without Thread.Sleep: each tick kicks builds, then
-        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick
-        /// consumes them.</summary>
-        internal static void PumpUntilSettled(MapViewComponent view, int maxTicks = 2000)
-        {
-            for (int f = 0; f < maxTicks; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
-
         /// <summary>Process-wide live <see cref="Mesh"/> count — a DELTA instrument, never an absolute.
         /// Capture before the fixture builds anything and compare after teardown.</summary>
         internal static int CountMeshObjects() => Resources.FindObjectsOfTypeAll<Mesh>().Length;

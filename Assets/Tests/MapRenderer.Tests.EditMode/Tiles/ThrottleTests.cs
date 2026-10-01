@@ -53,6 +53,7 @@ using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.Jobs.Mvt;
 using Object = UnityEngine.Object;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.Tiles
 {
@@ -257,17 +258,6 @@ namespace MapRenderer.Tests.Tiles
                 }
             ]
         }");
-
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
 
         // ── shared helper ────────────────────────────────────────────────────────────────────
 
@@ -827,18 +817,6 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        /// <summary>Pumps Update() until every loaded tile has settled or a spin budget is hit.</summary>
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    return;
-            }
-        }
-
         // ── Tooth (a): TileScheduler.Request fast paths are alloc-free ─────────────────────────────
 
         /// <summary>
@@ -1318,19 +1296,6 @@ namespace MapRenderer.Tests.Tiles
             return (go, view);
         }
 
-        /// <summary>Pumps the MapView across editor frames until its cover has settled, yielding a frame
-        /// each iteration (never Thread.Sleep — a blocked thread does not advance the player loop and races
-        /// the async decode/mesh-build). Callers are <c>[UnityTest]</c> coroutines: <c>yield return</c> this.</summary>
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         // ── Tooth 1: per-covered-tile registration (primary semantic tooth) ──────────────────────────
 
         [UnityTest]
@@ -1341,7 +1306,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 view.LoadTestStyle(null, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 int loaded = view.LoadedTileCount();
                 Assert.Greater(loaded, 1,
@@ -1777,7 +1742,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 view.LoadTestStyle(neverCalled, Cam(0, 0, 3), TestStyle.Document(BackgroundOnlyStyle()));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.AllTilesSettled());
                 Assert.Greater(view.LoadedTileCount(), 0, "background must still load and register.");
@@ -1918,38 +1883,6 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        /// <summary>A per-tile GATED data source: every fetch stays pending until <see cref="Release"/> is
-        /// called for that specific tile — deterministic control over admission/consume timing (no reliance
-        /// on ThreadPool wall-clock races).</summary>
-        private sealed class GatedSource
-        {
-            private readonly Dictionary<TileId, UniTaskCompletionSource<TileResponse>> _gates = new();
-            public readonly TestDataSource Source;
-
-            /// <summary>Every tile the source was asked for, in order; a tile asked for twice shows twice.</summary>
-            public readonly List<TileId> Requested = new();
-
-            public GatedSource()
-            {
-                Source = new TestDataSource((id, ct) =>
-                {
-                    var g = new UniTaskCompletionSource<TileResponse>();
-                    lock (_gates) { _gates[id] = g; Requested.Add(id); }
-                    return g.Task;
-                });
-            }
-
-            /// <summary>Completes every gate opened SO FAR with real tile bytes (idempotent — already-
-            /// completed gates just no-op on TrySetResult).</summary>
-            public void ReleaseAll()
-            {
-                List<UniTaskCompletionSource<TileResponse>> snapshot;
-                lock (_gates) snapshot = new List<UniTaskCompletionSource<TileResponse>>(_gates.Values);
-                foreach (var g in snapshot)
-                    g.TrySetResult(new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt));
-            }
-        }
-
         // ── WHICH tile builds first, by IDENTITY, under a 1-kick-per-tick budget ────────────────────
 
         /// <summary>
@@ -1967,7 +1900,7 @@ namespace MapRenderer.Tests.Tiles
             (double lonA, double latA) = CenterOf(tileA);
             (double lonB, double latB) = CenterOf(tileB);
 
-            var gated = new GatedSource();
+            var gated = GatedTileSource.HoldingEachRequest();
             var go    = Track(new GameObject("CenterFirst"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
@@ -2007,7 +1940,7 @@ namespace MapRenderer.Tests.Tiles
 
                 // Complete every fetch at once. The inline decode finishes before this returns, so the next
                 // tick ranks the FULL cover, not a partial ready-set.
-                gated.ReleaseAll();
+                gated.ReleaseRequested();
 
                 // Exactly TWO ticks, no pump-until scan: tick 1 absorbs every fetch, tick 2 kicks the single
                 // highest-priority candidate from the complete ready-set.
@@ -2082,7 +2015,7 @@ namespace MapRenderer.Tests.Tiles
         {
             const int cap = 4;
             const int prepareCap = 2;
-            var gated = new GatedSource();
+            var gated = GatedTileSource.HoldingEachRequest();
             var go    = Track(new GameObject("ConcurrencyCap"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;
@@ -2125,7 +2058,7 @@ namespace MapRenderer.Tests.Tiles
                 {
                     // One consume a tick, every build finishing at once: a tile in the cover is consumed before a prepared one.
                     view.Config.MaxConsumesPerTick = 1;
-                    gated.ReleaseAll();
+                    gated.ReleaseRequested();
                     for (int f = 0; f < 100 && view.MeshesConsumedLastTick() == 0; f++)
                     {
                         view.LateUpdate();
@@ -2148,7 +2081,7 @@ namespace MapRenderer.Tests.Tiles
                 for (int f = 0; f < 500 && !view.AllTilesSettled(); f++)
                 {
                     view.LateUpdate();
-                    gated.ReleaseAll();
+                    gated.ReleaseRequested();
                     view.AwaitInFlightMeshBuilds();
                     Assert.LessOrEqual(view.ActiveLoadCount(), cap,
                         $"tick {f} (settling): active load count must never exceed the cap.");
@@ -2242,7 +2175,7 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void RecomputeThatMovesTheCenter_PromotesTheNewCenter_ToTheDesiredHead()
         {
-            var gated = new GatedSource();
+            var gated = GatedTileSource.HoldingEachRequest();
             var centerA = new TileId { Z = 5, X = 12, Y = 13 };
             var centerB = new TileId { Z = 5, X = 13, Y = 12 }; // diagonal neighbor — was peripheral to A
             (double lonA, double latA) = CenterOf(centerA);
@@ -2285,7 +2218,7 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 // Open the gates BEFORE teardown: DoDispose parks 10 s on each still-pending fetch.
-                gated.ReleaseAll();
+                gated.ReleaseRequested();
                 view.Teardown();
             }
         }
@@ -2354,7 +2287,7 @@ namespace MapRenderer.Tests.Tiles
         private static TileId RunToFirstAdmission(double lon, double lat, double tilt,
             TilePriorityStrategy strategy, out List<TileId> cover)
         {
-            var gated = new GatedSource();
+            var gated = GatedTileSource.HoldingEachRequest();
             using var bag = new ObjectDisposalBag();
             var go    = bag.Track(new GameObject("StrategyToggle"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
@@ -2387,7 +2320,7 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 // Open the gates BEFORE teardown: DoDispose parks 10 s on each still-pending fetch.
-                gated.ReleaseAll();
+                gated.ReleaseRequested();
                 view.Teardown();
             }
         }
@@ -2403,7 +2336,7 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void AdmissionAndPrioritySort_UnderSustainedChurn_DoesNotAllocateGCMemory()
         {
-            var gated = new GatedSource();
+            var gated = GatedTileSource.HoldingEachRequest();
             var go    = Track(new GameObject("ZeroAlloc"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend                = RenderBackend.Brg; // zero-alloc path
@@ -2431,7 +2364,7 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 // Open the gates BEFORE teardown: DoDispose parks 10 s on each still-pending fetch.
-                gated.ReleaseAll();
+                gated.ReleaseRequested();
                 view.Teardown();
             }
         }

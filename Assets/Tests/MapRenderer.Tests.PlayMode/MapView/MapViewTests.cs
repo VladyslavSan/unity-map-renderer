@@ -32,6 +32,7 @@ using MapRenderer.Unity.Jobs.Mvt;
 using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 using System.IO;
 using MapRenderer.Unity.Rendering.Source;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.PlayMode.MapViews
@@ -69,20 +70,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                   ""paint"": { ""fill-color"": [""rgba"", 50, 50, 200, 1] } }
             ]
         }");
-
-        /// <summary>Pumps Update() until every loaded tile has settled or <c>SettleTimeout</c> elapses (real frames,
-        /// so the ThreadPool mesh build actually progresses — mirrors
-        /// <c>MapViewAsyncMeshBuildTests.PumpUntilSettled</c>).</summary>
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    yield break;
-                yield return null;
-            }
-        }
 
         /// <summary>A fetch that stays in-flight until <paramref name="release"/> is cancelled, then resolves
         /// absent — mirrors <c>TileFetchCancellationTests.SpinThenFault</c>, but resolves cleanly instead of
@@ -122,7 +109,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 4.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 var snap = view.CaptureTelemetry();
                 Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
@@ -148,7 +135,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // Non-obvious why: at 512 px per tile the count is constant from z2 up over this viewport
                 // (z0=1, z1=4, z2+=16), so zoom 4 → 1 is the smallest change that alters it.
                 view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 1.0 });
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 int changed = view.CaptureTelemetry().VisibleTileCount;
 
                 Assert.Greater(changed, 0);
@@ -179,7 +166,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: TwoSourceStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 var snap = view.CaptureTelemetry();
                 Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
@@ -256,7 +243,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must settle before measuring the settled state");
 
                 var snap = view.CaptureTelemetry();
@@ -291,7 +278,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 var afterLoad = view.CaptureTelemetry();
                 Assert.IsTrue(afterLoad.PreparedCacheEnabled, "positive control: default config has the cache enabled");
@@ -324,7 +311,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "tile must strictly DECREASE EntryCount (a shallow impl that never drains EntryCount, or " +
                     "that only grows it, fails this).");
 
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
             }
             finally
             {
@@ -351,7 +338,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 var snap = view.CaptureTelemetry();
                 Assert.IsFalse(snap.PreparedCacheEnabled, "the snapshot must reflect the disabled toggle.");
@@ -385,7 +372,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 var panelGo = innerBag.Track(new GameObject("TelemetryPanel"));
                 var panel = panelGo.AddComponent<MapTelemetryPanel>();
@@ -442,7 +429,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.Greater(view.CaptureTelemetry().VisibleTileCount, 0,
                     "positive control: there IS a non-zero level to read, so a zero below means 'not written'.");
@@ -511,7 +498,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.AllTilesSettled(), "the camera must be still and the cover clean before measuring.");
 
                 int settledVisible = view.CaptureTelemetry().VisibleTileCount;
@@ -578,21 +565,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             ]
         }");
 
-        /// <summary>
-        /// Pumps Update() until every loaded tile has settled or <c>SettleTimeout</c> elapses. Real frames give the
-        /// ThreadPool mesh build wall-clock to progress (never Thread.Sleep).
-        /// </summary>
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    yield break;
-                yield return null;
-            }
-        }
-
         // ── Cover-key: TILT must trigger a cover recompute (frustum selector integration) ─────────
 
         /// <summary>
@@ -620,14 +592,14 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             {
                 // Overhead (tilt 0) cover.
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 int flat = view.LoadedTileCount();
                 Assert.Greater(flat, 0, "flat (overhead) cover must be non-empty");
 
                 // Change ONLY the tilt to 60° — lon/lat/zoom/heading are identical.
                 view.Camera.Apply(new CameraPropertiesUpdate { Tilt = 60 });
                 view.LateUpdate();
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 int tilted = view.LoadedTileCount();
 
                 Assert.Greater(tilted, flat,
@@ -677,7 +649,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "synchronously in the same Update() call that starts it.");
 
                 // Now let the async task complete and drain naturally.
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "After draining, all tiles must eventually settle.");
@@ -716,7 +688,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built by the async live loop");
@@ -818,7 +790,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "Original tile (5,16,16) must be evicted after panning.");
 
                 // Let everything settle (new cover tiles build).
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 // After full settle, the evicted original tile must still be absent.
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
@@ -940,16 +912,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             return view;
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         [UnityTest]
         public IEnumerator DelayedRestyle_KeepsPreviousBackgroundRendered_UntilCommit()
         {
@@ -959,7 +921,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             {
                 // Style A: background-only (no fetching layer, so its own SetStyle commits synchronously).
                 yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
                 Assert.IsNotNull(bgMaterialA);
@@ -976,7 +938,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // Release the gate — resolution completes, the commit runs.
                 gate.Release();
                 yield return SpinToSucceeded(restyleTask);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.AreEqual("B", view.StyleId, "after commit, the NEW identity must be reported.");
                 Assert.AreEqual(2, view.Layers.Count, "after commit, the NEW (two-layer) RenderLayerSet is live.");
@@ -992,7 +954,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual("A", view.StyleId);
                 var layersRef = view.Layers; // same instance across restyle (rebuilt in place)
                 Material bgMaterialA = view.Layers[0].Material;
@@ -1026,7 +988,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 yield return SpinToSucceeded(view.SetStyle(TestStyle.Document(BackgroundOnlyStyle("#00ff00")), "A"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
 
@@ -1072,17 +1034,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             ]
         }");
 
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
-                    yield break;
-                yield return null;
-            }
-        }
-
         // ── cover drives selection + eviction releases container ───────────────────────────
         [UnityTest]
         public IEnumerator MapView_CoverDrivesTileSelection_AndEvictionReleases()
@@ -1101,7 +1052,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 // The cover tracks the framing viewport span, so assert the behaviour (center built, far
                 // pan evicts + re-covers), never a frozen count.
@@ -1111,7 +1062,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
                 // Pan far east (lon=170) → new cover does NOT overlap the old one.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170, Latitude = 0 });
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.Greater(view.LoadedTileCount(), 0, "cover must be re-selected (non-empty) after the pan");
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
@@ -1148,16 +1099,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             var t = task.Preserve();
             for (var settle = SettleTimeout.Start(); settle.Running && !t.Status.IsCompleted(); ) yield return null;
             t.GetAwaiter().GetResult();
-        }
-
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
         }
 
         private static MapView NewView(out GameObject go)
@@ -1208,7 +1149,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 yield return Await(view.SetStyle(styleUri));   // file:// style doc → parse → resolve (inline) → wire
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "the file:// tile must build from the local fixture");
@@ -1235,7 +1176,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             {
                 var style = TestStyle.Document(OneFillStyle("src", tilesTemplate.Replace("\\", "/")));
                 yield return Await(view.SetStyle(style, "inline-style"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.AreEqual(0, docFetches,
                     "an inline-tiles[] source must trigger NO TileJSON document fetch (fetch-side short-circuit).");
@@ -1269,7 +1210,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                                     ""paint"": { ""fill-color"": [""rgba"",200,50,50,1] } } ]
                 }");
                 yield return Await(view.SetStyle(style, "tilejson-style"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.AreEqual(1, docFetches, "a url-only source fetches its TileJSON exactly once");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -1309,7 +1250,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     ]
                 }");
                 yield return Await(view.SetStyle(style, "multi"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(perTemplate.ContainsKey("https://a/{z}/{x}/{y}.pbf"), "source A pipeline built");
                 Assert.IsTrue(perTemplate.ContainsKey("https://b/{z}/{x}/{y}.pbf"), "source B pipeline built");
@@ -1346,7 +1287,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""A"", ""source-layer"":""countries"",
                                     ""paint"": { ""fill-color"": [""rgba"",200,50,50,1] } } ]
                 }"), "v1"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.AreEqual(1, constructsForA, "source A constructed once on first SetStyle");
                 int fetchesAfterV1 = srcA.FetchCount;
                 Assert.Greater(fetchesAfterV1, 0, "source A fetched its tile on v1");
@@ -1358,7 +1299,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""A"", ""source-layer"":""countries"",
                                     ""paint"": { ""fill-color"": [""rgba"",50,200,50,1] } } ]
                 }"), "v2"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.AreEqual(1, constructsForA,
                     "an UNCHANGED source must NOT be re-created on restyle (kept pipeline ⇒ identity preserved)");
@@ -1415,16 +1356,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             t.GetAwaiter().GetResult();
         }
 
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         [UnityTest]
         public IEnumerator MixedStyle_ResolvesOnlyTheFillsSource_NoRasterOrBackgroundFetch()
         {
@@ -1443,7 +1374,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             try
             {
                 yield return SpinToCompleted(view.SetStyle(TestStyle.Document(MixedStyle), "mixed"));
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.AreEqual(0, docFetches,
                     "no TileJSON/document load may be issued for the raster (or background) layer.");

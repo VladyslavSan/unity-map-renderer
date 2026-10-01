@@ -27,6 +27,7 @@ using MapRenderer.Unity.Rendering.Layers;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
+using static MapRenderer.Tests.MapViewPump;
 
 
 namespace MapRenderer.Tests.PlayMode.Tiles
@@ -414,18 +415,6 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             return (go, view);
         }
 
-        /// <summary>Pumps across real frames until the cover settles, yielding a frame each iteration so the
-        /// off-main decode lands and the next LateUpdate's PumpPending fires the symbol kick.</summary>
-        private static IEnumerator PumpUntilSettled(MapView view)
-        {
-            for (var settle = SettleTimeout.Start(); settle.Running; )
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
-                yield return null;
-            }
-        }
-
         // ── Symbol rides the kick, sharing ONE decode ───────────────────────────────────────────────────
         [UnityTest]
         public IEnumerator SymbolRidesKick_SharingOneDecode()
@@ -444,7 +433,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                     ProfilerCategory.Scripts, "MapRenderer.Tile.Decode", capacity: recorderCapacity,
                     options: ProfilerRecorderOptions.SumAllSamplesInFrame);
 
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: the tile must settle.");
                 yield return null; yield return null; // let the profiler commit accumulated samples
 
@@ -487,7 +476,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "sanity: the tile reaches Built either way — ConsumeMeshBuild's faulted-task guard settles " +
@@ -527,7 +516,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle(), symbolsIntentionallyUnwired: true);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: both sources' tiles must settle.");
 
                 var loadedKeys = new List<LoadedTileKey>();
@@ -565,7 +554,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             {
                 // The mesh source names a layer the tile lacks, so no record has draw handles: only readiness can show the tile.
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle(meshSourceLayer: "absent"), symbolsIntentionallyUnwired: true);
-                yield return PumpUntilSettled(view);
+                yield return PumpUntilSettledAcrossFrames(view);
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: both sources' tiles must settle.");
 
                 var loadedKeys = new List<LoadedTileKey>();

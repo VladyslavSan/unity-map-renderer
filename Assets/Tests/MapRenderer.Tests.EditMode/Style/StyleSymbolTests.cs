@@ -432,15 +432,15 @@ namespace MapRenderer.Tests.Style
                 view.View.Camera.SetProperties(RestyleHarness.Cam(10, 10, 4.8));
                 view.View.Camera.SyncToCamera();
                 RestyleHarness.SpinToCompleted(view.SetStyle(TestStyle.Document(Style(true)), "A"));
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
                 Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0, "precondition: the next level is prepared, hidden.");
 
                 RestyleHarness.SpinToCompleted(view.SetStyle(TestStyle.Document(Style(false)), "B"));
                 Assert.AreEqual(3, view.View.Layers.Count, "the removed layer's slot stays: the slot count never shrinks.");
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
 
                 view.View.Camera.Apply(new CameraPropertiesUpdate { Zoom = 5.2 });
-                RestyleHarness.PumpUntilSettled(view);
+                MapViewPump.PumpUntilSettled(view);
                 view.LateUpdate();
                 var drawn = new HashSet<TileId>();
                 view.EntitiesRenderer().DrawnTilesAtSlot(0, drawn);

@@ -26,6 +26,7 @@ using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -1625,16 +1626,6 @@ namespace MapRenderer.Tests.Visual
         }");
 
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-            }
-        }
-
         [Test]
         public void GameObjectBackend_BuildsContainers_AtTileLocalToScene_AndIsExclusive()
         {
@@ -1725,16 +1716,6 @@ namespace MapRenderer.Tests.Visual
             } ]
         }");
 
-
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-            }
-        }
 
         // ── Backend selection is exclusive: selecting BRG constructs no Entities renderer ───────
 

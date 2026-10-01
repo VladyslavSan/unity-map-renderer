@@ -29,6 +29,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests.Text.Placement; // TestSymbolPlan
 using Symbol = MapRenderer.Unity.Style.Symbol;
+using static MapRenderer.Tests.MapViewPump;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -100,16 +101,6 @@ namespace MapRenderer.Tests.Visual
             // A cover need not be a solid block, so its bounding-box centre can land in an uncovered gap.
             view.Config.Backend = RenderBackend.GameObject;
             return (go, view);
-        }
-
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
-        {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                view.DrainMeshBuilds();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-            }
         }
 
         /// <summary>The world-space bounds of ONE specific loaded (background) tile — its container's own
