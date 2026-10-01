@@ -744,6 +744,29 @@ namespace MapRenderer.Tests.DataSources
     // DataSourceRenderPathTests — TemplatedTileSource (file://) through the render pipeline
     // ───────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>Fetches a tile from a <see cref="TemplatedTileSource"/> with a bounded wait, for tests whose fetch completes on the ThreadPool.</summary>
+    internal static class BoundedFetch
+    {
+        private const int TimeoutMs = 10000;
+
+        /// <summary>Fetches <paramref name="tileId"/> and parks off the PlayerLoop. A fetch not done in time fails with its status, the elapsed
+        /// time and the pool state, so a stall can be told from a late completion.</summary>
+        internal static TileResponse FetchBounded(TemplatedTileSource source, TileId tileId)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var fetchTask = source.FetchAsync(tileId);
+            if (!fetchTask.WaitOffPlayerLoop(TimeoutMs))
+            {
+                ThreadPool.GetAvailableThreads(out int availableWorkers, out _);
+                ThreadPool.GetMinThreads(out int minWorkers, out _);
+                Assert.Fail($"TemplatedTileSource.FetchAsync must complete within {TimeoutMs} ms. Status {fetchTask.Status}; elapsed {clock.ElapsedMilliseconds} ms; " +
+                            $"pool workers available {availableWorkers}, minimum {minWorkers}.");
+            }
+
+            return fetchTask.GetAwaiter().GetResult();
+        }
+    }
+
     /// <summary>
     /// <see cref="TemplatedTileSource"/> over a <c>file://</c> template feeds the render path: its bytes give
     /// the same vertex CONTENT HASH (not just count) through decode → assemble → TileToGeoJob →
@@ -771,13 +794,7 @@ namespace MapRenderer.Tests.DataSources
             {
                 var address = new TileUrlTemplate { Template = "file://" + Path.Combine(tempRoot, "{z}", "{x}", "{y}.mvt") };
                 using var fileSource = new TemplatedTileSource(address, TileEncoding.Mvt);
-                // FetchAsync completes on the ThreadPool, so GetResult() at once throws "Not yet completed".
-                // Park until the fetch completes.
-                var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
-                fetchTask.WaitOffPlayerLoop(10000);
-                Assert.IsTrue(fetchTask.Status.IsCompleted(),
-                    "TemplatedTileSource.FetchAsync must complete within 10 seconds.");
-                var fileResp = fetchTask.GetAwaiter().GetResult();
+                var fileResp = BoundedFetch.FetchBounded(fileSource, new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsTrue(fileResp.HasData, "TemplatedTileSource must return HasData=true");
                 fileBytes = fileResp.Bytes;
             }
@@ -934,7 +951,7 @@ namespace MapRenderer.Tests.DataSources
         // -----------------------------------------------------------------------------------------
 
         [Test]
-        public async Task ByteIdentity_FileSource_ReturnsSameBytesAsFixture()
+        public void ByteIdentity_FileSource_ReturnsSameBytesAsFixture()
         {
             byte[] fixtureBytes = LoadFixtureBytes();
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
@@ -951,7 +968,7 @@ namespace MapRenderer.Tests.DataSources
                 var address = new TileUrlTemplate { Template = "file://" + Path.Combine(tempRoot, "{z}", "{x}", "{y}.mvt") };
                 using (var fileSource = new TemplatedTileSource(address, TileEncoding.Mvt))
                 {
-                    fileResponse = await fileSource.FetchAsync(tileId);
+                    fileResponse = BoundedFetch.FetchBounded(fileSource, tileId);
                 }
 
                 Assert.IsTrue(fileResponse.HasData,  "the file source: HasData must be true");
