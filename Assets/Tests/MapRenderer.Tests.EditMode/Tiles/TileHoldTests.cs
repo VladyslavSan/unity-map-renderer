@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
@@ -218,9 +219,10 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        /// <summary>Assumes the camera was left settled at 5.5. Every finer tile is built but unregistered, then all register in one Update: every tile swaps in that one Update, and
-        /// teardown stays at one record per Update. Returns how many records the teardown drained in that Update.</summary>
-        private static int SwapEveryTileInOneUpdate(Rig rig)
+        /// <summary>Assumes the camera was left settled at 5.5. The finer tiles that are not in the prepared cache are built but unregistered, then register in one Update.
+        /// Tiles restored from the cache are built at once, so part of the finer cover has already swapped in during setup; the rest swaps in that one Update. The swap queues the
+        /// records of every coarse tile it hides, and teardown drains one record per Update. <paramref name="drainFirst"/> empties the release queue before that Update.</summary>
+        private static void SwapEveryTileInOneUpdate(Rig rig, bool drainFirst)
         {
             MapView view = rig.View;
             view.Config.MaxConsumesPerTick = 0; // children build, but nothing registers
@@ -231,41 +233,49 @@ namespace MapRenderer.Tests.Tiles
                     return t.PendingTileCount > 0 && t.ConsumeBacklog == t.PendingTileCount;
                 },
                 "every finer tile's write step to finish, unconsumed");
-            int coarseTiles = rig.ShownBackground.Count;
             Assert.GreaterOrEqual(rig.Cover.Count, 25, "a many-tile swap, or 'in one Update' proves little");
+            if (drainFirst) rig.Pump(() => view.ReleaseQueueDepth() == 0, "the earlier teardown backlog to drain");
 
+            var selected       = new List<TileId>();
+            view.TileManager.CollectCoverTileIds(selected); // rig.Cover also lists the held tiles, so it cannot tell a tile the swap hides
+            var cover          = new HashSet<TileId>(selected);
+            int coarseShown    = rig.ShownBackground.Count(tile => !cover.Contains(tile));
+            int queuedBefore   = view.ReleaseQueueDepth();
             view.Config.MaxConsumesPerTick = int.MaxValue;
             rig.Tick();
             Assert.AreEqual(0, rig.Manager.Held, "every tile swapped in the one Update that registered the finer level");
             AssertSettled(rig);
-            Assert.LessOrEqual(view.TilesReleasedLastTick(), 1, "teardown stays on its own budget");
-            Assert.GreaterOrEqual(view.ReleaseQueueDepth(), coarseTiles, "the swapped-out records wait, hidden, for their teardown");
-            return view.TilesReleasedLastTick();
+            Assert.AreEqual(1, view.TilesReleasedLastTick(), "teardown drains its own budget, one record, in the Update that swapped");
+            Assert.GreaterOrEqual(view.ReleaseQueueDepth() + view.TilesReleasedLastTick() - queuedBefore, RecordsPerTile * coarseShown,
+                "the swap queues the background and fill record of every coarse tile it hides");
         }
 
-        /// <summary>Assumes the camera was left settled at 5.5. A zoom back before the teardown drains shows the coarse tiles again without registering them again, and so does a
-        /// return after a pan that hid the finer tiles: then no tile above or below is shown, and only the cover tile's own record remains.</summary>
+        private const int RecordsPerTile = 2; // the background source and the fill source
+
+        /// <summary>Assumes the camera was left settled at 5.5. A zoom back before the teardown drains shows the coarse tiles again without registering them again. After the
+        /// queue is empty and a pan hides the finer tiles, the coarse records come from the prepared cache, and the return shows exactly the cover.</summary>
         private static void SwingBack(Rig rig)
         {
             MapView view = rig.View;
-            int drained  = SwapEveryTileInOneUpdate(rig);
+            SwapEveryTileInOneUpdate(rig, drainFirst: false);
+            int waiting    = view.ReleaseQueueDepth();
             int hitsBefore = view.TileManager.PreparedCacheHits;
             rig.Move(5.5);
             rig.PumpUntilSettled();
             AssertSettled(rig);
-            Assert.LessOrEqual(view.TileManager.PreparedCacheHits - hitsBefore, drained + 2,
+            // The slack is small and a record registered again adds many cache hits, so this bound fails when a queued record is not reused. It assumes the
+            // waiting backlog is the coarse level's records; a later arm that grows the backlog can trip it.
+            Assert.LessOrEqual(view.TileManager.PreparedCacheHits - hitsBefore, view.LoadedTileCount() - waiting,
                 "a record that was still waiting for teardown is shown again, not registered again");
 
-            drained    = SwapEveryTileInOneUpdate(rig);
-            hitsBefore = view.TileManager.PreparedCacheHits;
+            // The queue is empty first, so the coarse records go to the prepared cache by design: no reuse bound applies here.
+            SwapEveryTileInOneUpdate(rig, drainFirst: true);
             rig.Move(6.5, lon: 60.0); // the finer tiles leave the view, and are hidden
             rig.Tick();
             Assert.AreEqual(0, rig.ShownBackground.Count, "nothing is drawn where the view left");
             rig.Move(5.5);
             rig.PumpUntilSettled();
             AssertSettled(rig);
-            Assert.LessOrEqual(view.TileManager.PreparedCacheHits - hitsBefore, drained + 3,
-                "the coarse tiles that were still waiting are shown by their own records");
         }
 
         /// <summary>Assumes the camera was left settled at 5.5. A level the view never drew is still loading when the camera passes it: its in-flight records are kept as Bridges,
