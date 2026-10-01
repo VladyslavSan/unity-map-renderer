@@ -187,7 +187,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// <summary>The <see cref="Update"/> clock reading at which a <see cref="WaitingRetry"/> record fetches again.</summary>
             public double RetryAtSeconds;
 
-            /// <summary>The visibility groups that still hold a payload this record has not consumed, valid only once <see cref="GroupsDerived"/>.</summary>
+            /// <summary>The visibility groups that still hold a payload this record has not consumed, valid only while the record is not Built and <see cref="GroupsDerived"/> is true.</summary>
             public ulong PendingGroups;
 
             /// <summary>True once a consume call derived <see cref="PendingGroups"/>. Before that a record that is not Built counts as pending for
@@ -1642,7 +1642,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             lt.MeshBuildTask = default;
             lt.Graph         = null;
             lt.Built         = true;
-            lt.PendingGroups = 0;
         }
 
         /// <summary>Appends freshly-built meshes to a tile's tracked-Mesh array (grows by realloc).</summary>
@@ -2324,7 +2323,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 lt.MaterialIndices = null;
                 lt.ConsumeCursor   = 0;
                 lt.GroupsDerived   = false; // the rebuild holds every group of its source until a consume says otherwise
-                lt.PendingGroups   = 0;
                 lt.Built           = false;
                 lt.Rebaking        = true;
                 if (lt.Decode == null && !_sources.IsSourceless(key.Slot))

@@ -27,7 +27,8 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <paramref name="tileId"/> groups a tile's layers under one named parent for debugging
         /// (<see cref="BRG.TileRenderer"/> ignores it).
         /// </summary>
-        /// <returns>A handle for <see cref="RemoveItems"/>. The item stays hidden until <see cref="SetItemsVisible"/>.</returns>
+        /// <returns>A handle for <see cref="RemoveItems"/>. The item stays hidden until <see cref="SetItemsVisible"/>.
+        /// This backend never reuses a handle.</returns>
         int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId);
 
         /// <summary>

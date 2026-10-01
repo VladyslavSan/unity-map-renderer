@@ -147,7 +147,7 @@ namespace MapRenderer.Tests.Rendering
         /// The one visibility contract, for every backend: a fresh item is born hidden, an unknown handle is a no-op, and only
         /// the gated slot stops drawing, whether the gate is applied after or before registration. Lifting the gate restores the
         /// slot but not an item that is still hidden, and a slot that leaves and returns through <c>SetLayerMaterials</c> comes
-        /// back drawn. BRG also drops a gated slot from the LIGHT view: a gated building would otherwise keep casting a shadow.
+        /// back drawn. A removed handle is never reused. BRG also drops a gated slot from the LIGHT view: a gated building would otherwise keep casting a shadow.
         /// </summary>
         [TestCase("Brg")]
         [TestCase("Entities")]
@@ -219,6 +219,18 @@ namespace MapRenderer.Tests.Rendering
                 Assert.IsTrue(IsDrawn(r, handle, GatedSlot),
                     "the material list and the draw gate must stay the same width: a stale gate flag must not " +
                     "hide a slot that returns.");
+            }
+
+            // ── A removed handle stays dead: a new item never inherits it ──
+            using (RenderLayerSet set = ThreeFillLayerSet())
+            {
+                using ITileRenderBackend r = NewBackend(kind, MaterialsOf(set));
+                int removed = r.AddTileLayer(Track(new Mesh()), TileOrigin(), 0, Tile);
+                r.RemoveItems(new[] { removed });
+                int reborn = r.AddTileLayer(Track(new Mesh()), TileOrigin(), 0, Tile);
+                Assert.AreNotEqual(removed, reborn, "a handle is never reused after its item is removed.");
+                r.SetItemsVisible(new[] { removed }, true);
+                Assert.IsFalse(IsDrawn(r, reborn, 0), "a show addressed to a removed handle must not reach the item registered after it.");
             }
         }
     }
