@@ -1195,11 +1195,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 for (int i = 0; i < _cover.Count; i++)
                 {
                     _coverSet.Add(_cover[i]);
-                    for (TileId up = _cover[i]; up.Z > 0;)
-                    {
-                        up = TileAncestry.Parent(up);
+                    foreach (TileId up in TileAncestry.Ancestors(_cover[i]))
                         if (!_coverAncestors.Add(up)) break; // its own ancestors are already in
-                    }
                 }
 
                 // Merge, not rebuild — newly-covered keys join the desired list; admission below is priority-ordered and capped.
@@ -1207,10 +1204,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 for (int i = 0; i < _cover.Count; i++)
                 {
                     TileId id = _cover[i];
-                    for (int slot = 0; slot < _sources.Count; slot++)
+                    foreach (LoadedKey key in ServingKeys(id))
                     {
-                        if (!_sources.AdmitsTile(slot, id)) continue; // source doesn't serve this zoom/bounds
-                        var key = new LoadedKey(_sources.ServingTile(slot, id), slot);
                         _servedKeys.Add(key);
                         if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
                         if (_desiredSet.Add(key)) _desired.Add(key);
@@ -2185,8 +2180,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (target.Continuous >= target.Level + 1 - lead && target.Level + 1 <= target.MaxLevel)
             {
-                for (int child = 0; child < 4; child++)
-                    AddPreloadKeys(new TileId { Z = tile.Z + 1, X = tile.X * 2 + (child & 1), Y = tile.Y * 2 + (child >> 1) }, into);
+                for (int child = 0; child < TileAncestry.ChildCount; child++)
+                    AddPreloadKeys(TileAncestry.Child(tile, child), into);
             }
 
             if (target.Continuous < target.Level + lead && target.Level - 1 >= target.MinLevel && tile.Z > 0)
@@ -2196,12 +2191,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Adds the record key each admitting slot serves <paramref name="tile"/> with, unless that key already serves a cover tile.</summary>
         private void AddPreloadKeys(TileId tile, HashSet<LoadedKey> into)
         {
-            for (int slot = 0; slot < _sources.Count; slot++)
-            {
-                if (!_sources.AdmitsTile(slot, tile)) continue;
-                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
+            foreach (LoadedKey key in ServingKeys(tile))
                 if (!_servedKeys.Contains(key)) into.Add(key);
-            }
         }
 
         /// <summary>Drops prepare keys whose tile left P, which includes one that entered the cover (the cover merge already
@@ -2373,9 +2364,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Adds <paramref name="delta"/> (+1 or -1) to the shown-descendant count of every strict ancestor of <paramref name="tile"/>.</summary>
         private void CountShownBelow(TileId tile, int delta)
         {
-            for (TileId up = tile; up.Z > 0;)
+            foreach (TileId up in TileAncestry.Ancestors(tile))
             {
-                up = TileAncestry.Parent(up);
                 _shownBelow.TryGetValue(up, out int n);
                 n += delta;
                 if (n > 0) _shownBelow[up] = n; else _shownBelow.Remove(up);
@@ -2390,10 +2380,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             foreach (TileId tile in _revealedTiles)
             {
                 ulong tileGroups = GroupsRevealed(tile);
-                for (int slot = 0; slot < _sources.Count; slot++)
+                foreach (LoadedKey key in ServingKeys(tile))
                 {
-                    if (!_sources.AdmitsTile(slot, tile)) continue;
-                    var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
                     _shownCount.TryGetValue(key, out int n);
                     _shownCount[key] = n + 1;
                     _shownGroups.TryGetValue(key, out ulong union);
@@ -2417,11 +2405,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         private bool HasRelativeInCover(TileId tile)
         {
             if (_coverAncestors.Contains(tile)) return true;
-            for (TileId up = tile; up.Z > 0;)
-            {
-                up = TileAncestry.Parent(up);
+            foreach (TileId up in TileAncestry.Ancestors(tile))
                 if (_coverSet.Contains(up)) return true;
-            }
 
             return false;
         }
@@ -2435,11 +2420,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         private bool HasShownAncestor(TileId tile)
         {
-            for (TileId up = tile; up.Z > 0;)
-            {
-                up = TileAncestry.Parent(up);
+            foreach (TileId up in TileAncestry.Ancestors(tile))
                 if (IsShown(up)) return true;
-            }
 
             return false;
         }
@@ -2453,11 +2435,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         private bool HasAncestorInCover(TileId tile)
         {
-            for (TileId up = tile; up.Z > 0;)
-            {
-                up = TileAncestry.Parent(up);
+            foreach (TileId up in TileAncestry.Ancestors(tile))
                 if (_coverSet.Contains(up)) return true;
-            }
 
             return false;
         }
@@ -2465,6 +2444,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True iff some source has a record for <paramref name="tile"/>.</summary>
         private bool HasRecord(TileId tile)
         {
+            // Every slot, admitted or not: an overzoomed tile outside a source's bounds is still served by its maxzoom ancestor's record.
             for (int slot = 0; slot < _sources.Count; slot++)
                 if (_loaded.ContainsKey(new LoadedKey(_sources.ServingTile(slot, tile), slot))) return true;
             return false;
@@ -2475,10 +2455,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// serve the tile counts for nothing. An absent or undecodable tile is built, so it is ready and empty.</summary>
         private bool IsReady(TileId tile)
         {
-            for (int slot = 0; slot < _sources.Count; slot++)
+            foreach (LoadedKey key in ServingKeys(tile))
             {
-                if (!_sources.AdmitsTile(slot, tile)) continue;
-                if (!_loaded.TryGetValue(new LoadedKey(_sources.ServingTile(slot, tile), slot), out LoadedTile lt)) return false;
+                if (!_loaded.TryGetValue(key, out LoadedTile lt)) return false;
                 if (!(lt.Built || (lt.Rebaking && lt.OldDrawHandles != null)) || lt.WaitingRetry) return false;
             }
 
@@ -2490,10 +2469,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (!_revealedTiles.Add(tile)) return false;
             CountShownBelow(tile, +1);
-            for (int slot = 0; slot < _sources.Count; slot++)
+            foreach (LoadedKey key in ServingKeys(tile))
             {
-                if (!_sources.AdmitsTile(slot, tile)) continue;
-                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
                 _shownCount.TryGetValue(key, out int n);
                 _shownCount[key] = n + 1;
                 if (n == 0) _shownGroups[key] = 0;
@@ -2521,11 +2498,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (!MarkTileShown(tile)) return;
             _groupMask.Remove(tile);
-            for (int slot = 0; slot < _sources.Count; slot++)
-            {
-                if (!_sources.AdmitsTile(slot, tile)) continue;
-                RevealGroups(new LoadedKey(_sources.ServingTile(slot, tile), slot), ulong.MaxValue);
-            }
+            foreach (LoadedKey key in ServingKeys(tile))
+                RevealGroups(key, ulong.MaxValue);
         }
 
         /// <summary>Conceals <paramref name="tile"/>. A record that serves it hides when its count goes from 1 to 0, so a record that still
@@ -2535,10 +2509,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (!_revealedTiles.Remove(tile)) return;
             _groupMask.Remove(tile);
             CountShownBelow(tile, -1);
-            for (int slot = 0; slot < _sources.Count; slot++)
+            foreach (LoadedKey key in ServingKeys(tile))
             {
-                if (!_sources.AdmitsTile(slot, tile)) continue;
-                var key = new LoadedKey(_sources.ServingTile(slot, tile), slot);
                 if (!_shownCount.TryGetValue(key, out int n)) continue;
                 if (n > 1) { _shownCount[key] = n - 1; continue; }
                 _shownCount.Remove(key);
@@ -2570,11 +2542,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 MarkTileShown(tile);
                 revealed |= bit;
                 _groupMask[tile] = revealed;
-                for (int slot = 0; slot < _sources.Count; slot++)
-                {
-                    if (!_sources.AdmitsTile(slot, tile)) continue;
-                    RevealGroups(new LoadedKey(_sources.ServingTile(slot, tile), slot), bit);
-                }
+                foreach (LoadedKey key in ServingKeys(tile))
+                    RevealGroups(key, bit);
 
                 any = true;
             }
@@ -2587,10 +2556,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         private bool GroupCarried(TileId tile, ulong bit)
         {
             bool any = false;
-            for (int slot = 0; slot < _sources.Count; slot++)
+            foreach (LoadedKey key in ServingKeys(tile))
             {
-                if (!_sources.AdmitsTile(slot, tile) || (_groupsOfSource[slot] & bit) == 0) continue;
-                if (!_concealedThisStep.TryGetValue(new LoadedKey(_sources.ServingTile(slot, tile), slot), out ulong shown) || (shown & bit) == 0) return false;
+                if ((_groupsOfSource[key.Slot] & bit) == 0) continue;
+                if (!_concealedThisStep.TryGetValue(key, out ulong shown) || (shown & bit) == 0) return false;
                 any = true;
             }
 
@@ -2602,11 +2571,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// none, so a dead source never keeps another source's groups hidden.</summary>
         private bool GroupReady(TileId tile, ulong bit)
         {
-            for (int slot = 0; slot < _sources.Count; slot++)
-            {
-                if (!_sources.AdmitsTile(slot, tile)) continue;
-                if ((PendingGroups(new LoadedKey(_sources.ServingTile(slot, tile), slot)) & bit) != 0) return false;
-            }
+            foreach (LoadedKey key in ServingKeys(tile))
+                if ((PendingGroups(key) & bit) != 0) return false;
 
             return true;
         }
@@ -2695,9 +2661,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             ancestor = default;
             bool found = false;
-            for (TileId up = shown; up.Z > 0;)
+            foreach (TileId up in TileAncestry.Ancestors(shown))
             {
-                up = TileAncestry.Parent(up);
                 bool inCover = _coverSet.Contains(up);
                 if ((inCover || HasRecord(up)) && !IsShown(up) && IsReady(up))
                 {
@@ -2714,11 +2679,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True iff each child area of <paramref name="tile"/> is covered, filling <see cref="_swapCovering"/> with the ready tiles that cover it.</summary>
         private bool ChildrenCovered(TileId tile)
         {
-            for (int child = 0; child < 4; child++)
-            {
-                var c = new TileId { Z = tile.Z + 1, X = tile.X * 2 + (child & 1), Y = tile.Y * 2 + (child >> 1) };
-                if (!AreaCovered(c)) return false;
-            }
+            for (int child = 0; child < TileAncestry.ChildCount; child++)
+                if (!AreaCovered(TileAncestry.Child(tile, child))) return false;
 
             return true;
         }
@@ -2738,8 +2700,48 @@ namespace MapRenderer.Unity.Rendering.Tile
             return above && ChildrenCovered(tile);
         }
 
+        /// <summary>The record key of every slot that admits <paramref name="tile"/>, in slot order.
+        /// An allocation-free <c>foreach</c> source. It lives here because <c>LoadedKey</c> is this
+        /// class's nested type, and the registry's public surface is pinned.</summary>
+        private ServingKeyWalk ServingKeys(TileId tile) => new ServingKeyWalk(_sources, tile);
+
+        /// <summary>The struct enumerator behind <see cref="ServingKeys"/>. It is mutable and <c>GetEnumerator</c>
+        /// returns a copy, so never call <c>MoveNext</c> on a stored value.</summary>
+        private struct ServingKeyWalk
+        {
+            private readonly SourceRegistry _sources;
+            private readonly TileId _tile;
+            private int _slot;
+            private LoadedKey _current;
+
+            public ServingKeyWalk(SourceRegistry sources, TileId tile)
+            {
+                _sources = sources;
+                _tile    = tile;
+                _slot    = -1;
+                _current = default;
+            }
+
+            public LoadedKey Current => _current;
+
+            public ServingKeyWalk GetEnumerator() => this;
+
+            public bool MoveNext()
+            {
+                while (++_slot < _sources.Count)
+                {
+                    if (!_sources.AdmitsTile(_slot, _tile)) continue;
+                    _current = new LoadedKey(_sources.ServingTile(_slot, _tile), _slot);
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
         private bool HasDrawHandles(TileId tile)
         {
+            // Every slot, admitted or not: an overzoomed tile outside a source's bounds is still served by its maxzoom ancestor's record.
             for (int slot = 0; slot < _sources.Count; slot++)
                 if (_loaded.TryGetValue(new LoadedKey(_sources.ServingTile(slot, tile), slot), out LoadedTile lt) && (lt.DrawHandles != null || lt.OldDrawHandles != null)) return true;
             return false;

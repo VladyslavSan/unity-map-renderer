@@ -133,11 +133,8 @@ namespace MapRenderer.Tests
         private static bool AreaShown(TileId tile, HashSet<TileId> shown)
         {
             if (shown.Contains(tile)) return true;
-            for (TileId up = tile; up.Z > 0;)
-            {
-                up = TileAncestry.Parent(up);
+            foreach (TileId up in TileAncestry.Ancestors(tile))
                 if (shown.Contains(up)) return true;
-            }
 
             double area = 0.0;
             foreach (TileId d in shown)

@@ -195,11 +195,8 @@ namespace MapRenderer.Unity.View
                 Y = math.clamp((int)(unit.y * (1 << level)), 0, last),
             };
             if (_prevEmitted.Contains(tile) || _prevRefined.Contains(tile)) return true;
-            for (TileId above = tile; above.Z > 0; )
-            {
-                above = TileAncestry.Parent(above);
+            foreach (TileId above in TileAncestry.Ancestors(tile))
                 if (_prevEmitted.Contains(above)) return true;
-            }
 
             return false;
         }
@@ -226,20 +223,15 @@ namespace MapRenderer.Unity.View
             {
                 TileId t = cover[i];
                 _prevEmitted.Add(t);
-                for (TileId above = TileAncestry.Parent(t); above.Z > 0; above = TileAncestry.Parent(above))
-                    if (!_prevRefined.Add(above)) break;
+                foreach (TileId above in TileAncestry.Ancestors(t))
+                    if (!_prevRefined.Add(above)) break; // its own ancestors are already in
             }
         }
 
         private void PushChildren(TileId t)
         {
-            int cz = t.Z + 1;
-            int cx = t.X * 2;
-            int cy = t.Y * 2;
-            _stack.Add(new TileId { Z = cz, X = cx,     Y = cy     });
-            _stack.Add(new TileId { Z = cz, X = cx + 1, Y = cy     });
-            _stack.Add(new TileId { Z = cz, X = cx,     Y = cy + 1 });
-            _stack.Add(new TileId { Z = cz, X = cx + 1, Y = cy + 1 });
+            for (int child = 0; child < TileAncestry.ChildCount; child++)
+                _stack.Add(TileAncestry.Child(t, child));
         }
 
         /// <summary>True iff tile <paramref name="t"/> meets the frustum (and, on a globe, is not entirely
