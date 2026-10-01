@@ -136,7 +136,7 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>A tile left cover. <paramref name="transferredToCache"/> true ⇒ meshes went to the prepared
         /// cache, so keep its symbols warm (evicting oldest if over cap); false ⇒ true eviction, drop them.</summary>
-        public void Release(Key key, bool transferredToCache)
+        internal void Release(Key key, bool transferredToCache)
         {
             if (_active.TryGetValue(key, out Entry e))
             {
@@ -159,7 +159,7 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>A tile re-entered cover via a prepared-cache HIT (no fetch): move its kept-warm symbols back
         /// to the active set so they render again. A no-op if nothing was cached for it.</summary>
-        public void Restore(Key key)
+        internal void Restore(Key key)
         {
             // Bump only when the move happens; a no-op restore leaves collect unchanged.
             if (RemoveCached(key, out Entry e)) { _active[key] = e; MarkCollectDirty(); }
@@ -255,7 +255,8 @@ namespace MapRenderer.Unity.Text
         private readonly List<Key> _reconcileRelease = new List<Key>();
         private readonly List<Key> _reconcileRestore = new List<Key>();
 
-        // Keys of loaded tiles whose geometry is not visible, as of the last reconcile: FIFO eviction skips them. Bounded by the loaded records.
+        // Keys of loaded tiles whose geometry is not visible (bounded by the loaded records): FIFO eviction skips them.
+        // Rebuilt at the start of each reconcile; read only by EnqueueCached, which production reaches only inside it.
         private readonly HashSet<Key> _pinned = new HashSet<Key>();
 
         /// <summary>PULL model: reconcile the active set against the loaded tiles. An active tile in neither list is released (kept warm iff
@@ -268,6 +269,8 @@ namespace MapRenderer.Unity.Text
         {
             // No MarkCollectDirty() here: this runs every frame, so a self-bump would defeat the memo. Real
             // effects bump inside Release/Restore/PurgeExpiredDeparting.
+
+            // 1. Build the loaded and pinned sets.
             _loadedKeys.Clear();
             _pinned.Clear();
             for (int i = 0; i < shown.Count; i++) _loadedKeys.Add(shown[i]);
@@ -277,14 +280,14 @@ namespace MapRenderer.Unity.Text
                 _pinned.Add(hidden[i]);
             }
 
-            // Restore cached tiles that re-entered loaded (RemoveCached clears the departing stamp → fades back in).
+            // 2. Restore cached tiles that re-entered loaded (RemoveCached clears the departing stamp → fades back in).
             _reconcileRestore.Clear();
             for (int i = 0; i < shown.Count; i++)
                 if (_cachedIndex.ContainsKey(shown[i])) _reconcileRestore.Add(shown[i]);
             for (int i = 0; i < _reconcileRestore.Count; i++)
                 Restore(_reconcileRestore[i]);
 
-            // Release actives that left the loaded set (collect first — cannot mutate _active while iterating).
+            // 3. Release actives that left the loaded set (collect first — cannot mutate _active while iterating).
             _reconcileRelease.Clear();
             foreach (KeyValuePair<Key, Entry> kv in _active)
                 if (!_loadedKeys.Contains(kv.Key)) _reconcileRelease.Add(kv.Key);
@@ -298,7 +301,7 @@ namespace MapRenderer.Unity.Text
                     _departing[key] = nowSeconds + departingGraceSeconds;
             }
 
-            // With the cache off, a cached tile that is no longer loaded is a true drop (a hidden tile that left loaded).
+            // 4. With the cache off, a cached tile that is no longer loaded is a true drop (a hidden tile that left loaded).
             if (!keepWarmOnRelease)
             {
                 _reconcileRelease.Clear();
@@ -307,7 +310,7 @@ namespace MapRenderer.Unity.Text
                 for (int i = 0; i < _reconcileRelease.Count; i++) Release(_reconcileRelease[i], false);
             }
 
-            // A loaded tile that is not visible stays pinned in the cache. A drawn one fades out first, as on any tile exit.
+            // 5. A loaded tile that is not visible stays pinned in the cache. A drawn one fades out first, as on any exit.
             for (int i = 0; i < hidden.Count; i++)
             {
                 Key key = hidden[i];
@@ -317,6 +320,7 @@ namespace MapRenderer.Unity.Text
                 MarkCollectDirty();
             }
 
+            // 6. Drop the departing stamps whose grace elapsed or whose entry was evicted.
             PurgeExpiredDeparting(nowSeconds);
         }
 
