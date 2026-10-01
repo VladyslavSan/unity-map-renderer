@@ -359,7 +359,8 @@ This repository stores no OpenStreetMap-derived tile data. A test that needs rea
   one per tile. An HTTP status such as 404 does not mark a source down.
 - **The test-tile repository** `unity-map-renderer-test-tiles` holds the same bytes as the pinned build
   (`tiles/{z}/{x}/{y}.pbf`), the goldens, a `manifest.json` and the ODbL licence with attribution. It is the durable
-  source when OpenFreeMap retires the build. Serve it with `python3 -m http.server 8000` in its directory, or fill the
+  source when OpenFreeMap retires the build. It lives in a separate, private repository, `VladyslavSan/unity-map-renderer-test-tiles`.
+  Without a checkout of it next to this repo, the golden tests end Inconclusive. Serve it with `python3 -m http.server 8000` in its directory, or fill the
   cache once with `Tools/fetch-test-tiles.sh`.
 - **Environment.** `UMR_TEST_TILES_URL` sets the local server (default `http://localhost:8000`).
   `UMR_TEST_TILES_REMOTE_URL` replaces the OpenFreeMap `{z}/{x}/{y}` template, for example to prove the Inconclusive
