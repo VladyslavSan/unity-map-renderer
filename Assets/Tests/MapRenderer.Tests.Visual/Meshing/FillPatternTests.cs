@@ -1609,10 +1609,10 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Renders the z0 countries fixture on a sphere, with or without the boundary band.</summary>
         /// <param name="pose">Camera position and up vector; the camera always looks at the origin.</param>
         /// <param name="suppressBand">True to build the same mesh with no band geometry at all.</param>
-        /// <param name="superSample">Render at this multiple and box-downsample, to see sub-pixel geometry.</param>
-        /// <returns>The frame's RGBA32 pixels, row-major from the bottom-left.</returns>
-        private static Frame RenderGlobe(
-            (Vector3 Position, Vector3 Up) pose, bool suppressBand, int superSample = 1)
+        /// <returns>The frame's RGBA32 pixels, row-major from the bottom-left, and the triangles the GPU draws
+        /// as pixel positions, three consecutive entries each.</returns>
+        private static (Frame Frame, List<float2> Triangles) RenderGlobe(
+            (Vector3 Position, Vector3 Up) pose, bool suppressBand)
         {
             using var bag = new ObjectDisposalBag();
             var (mapGo, material) = FillSceneHelper.BuildFillGo(
@@ -1646,32 +1646,140 @@ namespace MapRenderer.Tests.Visual
             camera.backgroundColor = OceanBg;
             camera.enabled = false;
 
-            using var snap = new SnapshotRenderer(SnapPx * superSample, SnapPx * superSample);
-            snap.Render(camera);
-            Color32[] raw = snap.Pixels.Pixels;
-            if (superSample == 1) return new Frame((Color32[])raw.Clone(), SnapPx, SnapPx);
+            List<float2> triangles = ProjectDrawnTriangles(
+                camera, mapGo.GetComponent<MeshFilter>(), suppressBand ? "band-free" : "banded");
 
-            // Box-downsample: a pixel any sub-sample covered carries ink. Non-obvious why: a MAX-deviation
-            // reduction gives the identical offender count on both poses, so the residual is not an averaging artefact.
-            int wide = SnapPx * superSample;
-            var small = new Color32[SnapPx * SnapPx];
-            for (int y = 0; y < SnapPx; y++)
-                for (int x = 0; x < SnapPx; x++)
-                {
-                    int acc0 = 0;
-                    int acc1 = 0;
-                    int acc2 = 0;
-                    for (int sy = 0; sy < superSample; sy++)
-                        for (int sx = 0; sx < superSample; sx++)
-                        {
-                            Color32 s2 = raw[(y * superSample + sy) * wide + x * superSample + sx];
-                            acc0 += s2.r; acc1 += s2.g; acc2 += s2.b;
-                        }
-                    int n2 = superSample * superSample;
-                    small[y * SnapPx + x] = new Color32(
-                        (byte)(acc0 / n2), (byte)(acc1 / n2), (byte)(acc2 / n2), 255);
-                }
-            return new Frame(small, SnapPx, SnapPx);
+            using var snap = new SnapshotRenderer(SnapPx, SnapPx);
+            snap.Render(camera);
+            return (new Frame((Color32[])snap.Pixels.Pixels.Clone(), SnapPx, SnapPx), triangles);
+        }
+
+        /// <summary>
+        /// Projects the triangles of <paramref name="filter"/>'s mesh that the GPU draws to pixel positions. Cull Back
+        /// drops a triangle by the sign of its screen area; the front sign is read off small, non-degenerate triangles
+        /// that plainly face the camera. A zero-area triangle (every band quad before the shader displaces it) stays
+        /// only when a vertex is on the camera's side of the horizon. The sphere's centre is the tile render origin
+        /// negated. Clip space, since <c>SnapshotRenderer</c> sets the pixel rect only later.
+        /// </summary>
+        /// <param name="label">Names the mesh in the reported winding tally.</param>
+        private static List<float2> ProjectDrawnTriangles(Camera camera, MeshFilter filter, string label)
+        {
+            const float degenerateArea = 1e-3f;
+            Mesh mesh = filter.sharedMesh;
+            Matrix4x4 toWorld = filter.transform.localToWorldMatrix;
+            Matrix4x4 viewProjection = Matrix4x4.Perspective(
+                camera.fieldOfView, 1f, camera.nearClipPlane, camera.farClipPlane) * camera.worldToCameraMatrix;
+            Vector3 eye = camera.transform.position;
+            double3 origin = TileRenderOrigin.Project(new TileId { Z = 0, X = 0, Y = 0 }, new SphericalProjection());
+            Vector3 centre = toWorld.MultiplyPoint3x4(new Vector3((float)-origin.x, (float)-origin.y, (float)-origin.z));
+            Vector3[] vertices = mesh.vertices;
+            int[] indices = mesh.triangles;
+
+            var projected = new List<float2>();
+            var plainlyFront = new List<bool>();
+            var nearSide = new List<bool>();
+            for (int t = 0; t + 2 < indices.Length; t += 3)
+            {
+                Vector3 a = toWorld.MultiplyPoint3x4(vertices[indices[t]]);
+                Vector3 b = toWorld.MultiplyPoint3x4(vertices[indices[t + 1]]);
+                Vector3 c = toWorld.MultiplyPoint3x4(vertices[indices[t + 2]]);
+                Vector4 clipA = viewProjection * new Vector4(a.x, a.y, a.z, 1f);
+                Vector4 clipB = viewProjection * new Vector4(b.x, b.y, b.z, 1f);
+                Vector4 clipC = viewProjection * new Vector4(c.x, c.y, c.z, 1f);
+                if (clipA.w <= 0f || clipB.w <= 0f || clipC.w <= 0f) continue;
+
+                float radius = (a - centre).magnitude;
+                Vector3 centroid = (a + b + c) / 3f;
+                bool small = (b - a).magnitude < 0.1f * radius && (c - a).magnitude < 0.1f * radius;
+                plainlyFront.Add(small && Vector3.Dot((centroid - centre).normalized, (eye - centroid).normalized) > 0.3f);
+                nearSide.Add(Vector3.Dot(a - centre, eye - a) >= 0f || Vector3.Dot(b - centre, eye - b) >= 0f
+                             || Vector3.Dot(c - centre, eye - c) >= 0f);
+                projected.Add(ClipToPixel(clipA));
+                projected.Add(ClipToPixel(clipB));
+                projected.Add(ClipToPixel(clipC));
+            }
+
+            int positive = 0;
+            int negative = 0;
+            int degenerate = 0;
+            for (int t = 0; t < projected.Count / 3; t++)
+            {
+                if (!plainlyFront[t]) continue;
+                float area = SignedArea(projected[3 * t], projected[3 * t + 1], projected[3 * t + 2]);
+                if (math.abs(area) <= degenerateArea) degenerate++;
+                else if (area > 0f) positive++;
+                else negative++;
+            }
+            TestContext.WriteLine($"[globe band {label}] small camera-facing triangles: {positive} wound +, " +
+                                  $"{negative} wound -, {degenerate} zero-area");
+            Assert.That(math.min(positive, negative), Is.LessThan(0.1 * (positive + negative)),
+                "most non-degenerate triangles that plainly face the camera must share one screen winding.");
+            float frontSign = positive >= negative ? 1f : -1f;
+
+            var corners = new List<float2>();
+            for (int t = 0; t < projected.Count / 3; t++)
+            {
+                float area = SignedArea(projected[3 * t], projected[3 * t + 1], projected[3 * t + 2]);
+                bool drawn = math.abs(area) <= degenerateArea ? nearSide[t] : area * frontSign > 0f;
+                if (!drawn) continue;
+                corners.Add(projected[3 * t]);
+                corners.Add(projected[3 * t + 1]);
+                corners.Add(projected[3 * t + 2]);
+            }
+            return corners;
+        }
+
+        /// <summary>Twice the signed area of the triangle in pixels; the sign is its screen winding.</summary>
+        private static float SignedArea(float2 a, float2 b, float2 c)
+            => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+        /// <summary>A clip-space position as a pixel position, y up from the bottom-left like <see cref="Frame"/>.</summary>
+        private static float2 ClipToPixel(Vector4 clip)
+            => new float2((clip.x / clip.w * 0.5f + 0.5f) * SnapPx, (clip.y / clip.w * 0.5f + 0.5f) * SnapPx);
+
+        /// <summary>
+        /// True when triangle <paramref name="a"/>, <paramref name="b"/>, <paramref name="c"/> touches the axis-aligned
+        /// square of half-size <paramref name="radius"/> about <paramref name="centre"/> (separating-axis test).
+        /// </summary>
+        private static bool TriangleTouchesSquare(float2 a, float2 b, float2 c, float2 centre, float radius)
+        {
+            if (math.max(a.x, math.max(b.x, c.x)) < centre.x - radius || math.min(a.x, math.min(b.x, c.x)) > centre.x + radius) return false;
+            if (math.max(a.y, math.max(b.y, c.y)) < centre.y - radius || math.min(a.y, math.min(b.y, c.y)) > centre.y + radius) return false;
+
+            for (int edge = 0; edge < 3; edge++)
+            {
+                float2 from = edge == 0 ? a : edge == 1 ? b : c;
+                float2 to   = edge == 0 ? b : edge == 1 ? c : a;
+                float2 normal = new float2(from.y - to.y, to.x - from.x);
+                float squareReach = radius * (math.abs(normal.x) + math.abs(normal.y));
+                float squareCentre = math.dot(normal, centre);
+                float p0 = math.dot(normal, a);
+                float p1 = math.dot(normal, b);
+                float p2 = math.dot(normal, c);
+                if (math.min(p0, math.min(p1, p2)) > squareCentre + squareReach) return false;
+                if (math.max(p0, math.max(p1, p2)) < squareCentre - squareReach) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Euclidean pixel distance from <paramref name="point"/> to a triangle; 0 when inside it.</summary>
+        private static float DistanceToTriangle(float2 point, float2 a, float2 b, float2 c)
+        {
+            float Cross(float2 u, float2 v) => u.x * v.y - u.y * v.x;
+            float s0 = Cross(b - a, point - a);
+            float s1 = Cross(c - b, point - b);
+            float s2 = Cross(a - c, point - c);
+            if ((s0 >= 0f && s1 >= 0f && s2 >= 0f) || (s0 <= 0f && s1 <= 0f && s2 <= 0f)) return 0f;
+            return math.min(DistanceToSegment(point, a, b), math.min(DistanceToSegment(point, b, c), DistanceToSegment(point, c, a)));
+        }
+
+        /// <summary>Euclidean pixel distance from <paramref name="point"/> to the segment from <paramref name="from"/>
+        /// to <paramref name="to"/>.</summary>
+        private static float DistanceToSegment(float2 point, float2 from, float2 to)
+        {
+            float2 span = to - from;
+            float t = math.saturate(math.dot(point - from, span) / math.max(math.dot(span, span), 1e-12f));
+            return math.length(point - (from + span * t));
         }
 
         /// <summary>One pixel's RGB.</summary>
@@ -1689,19 +1797,13 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Rendered band-on against band-off on the same globe: background pixels GAIN ink (the band renders,
         /// un-culled), no pixel LOSES ink (nothing moved inward), and every gained pixel lies within
-        /// <see cref="FillBandJob.MiterLimit"/> + 1 px of geometry in the 8× supersampled band-free frame.
+        /// <see cref="FillBandJob.MiterLimit"/> + 1 px of a banded-mesh triangle, projected through the camera.
         ///
         /// <para>Non-obvious why: the reach is <c>MiterLimit</c> + 1, not 1, because the band stays one pixel
         /// wide PERPENDICULAR to the edge, so at a sharp spike its outer vertex sits up to <c>MiterLimit</c> px
         /// along the bisector (<c>FillBandJobTests.AMiterKeepsThePerpendicularWidthThroughARightAngle</c>); the
-        /// + 1 is the pixel that vertex lands in. The oracle is the 8× frame because an island narrower than a pixel
-        /// renders as nothing at 1× while its band is correctly drawn.</para>
-        ///
-        /// <para>Limitation: features too thin even for 8× leave hairline offenders, so the bound is a COUNT,
-        /// not zero — measured 45 oblique and 78 pole-on, asserted 60 and 100 as GPU slack, against 290 and 351
-        /// for a ×2 displacement. An exact oracle would test distance to the band's ring SEGMENTS; a mask of
-        /// band-triangle edges with both ends at side 0 missed the limb. Project through clip space, not
-        /// <c>Camera.WorldToScreenPoint</c>: <c>SnapshotRenderer</c> sets the pixel rect only later.</para>
+        /// + 1 is the pixel that vertex lands in. The oracle is the mesh, not a supersampled render, because an
+        /// island narrower than any sample pitch renders as nothing while its band is correctly drawn.</para>
         ///
         /// <para>No interior-purity check: countries share internal edges, where the band overlaps the
         /// neighbour's interior by design. Covered instead by
@@ -1711,7 +1813,7 @@ namespace MapRenderer.Tests.Visual
         /// </summary>
         [Test]
         public void TheGlobeFillsSilhouetteGainsInkOutward_WithinTheMiterLimit()
-            => AssertTheBandGrowsOutwardWithinAMiter(ObliquePose, "oblique", oracleBlindPixels: 60);
+            => AssertTheBandGrowsOutwardWithinAMiter(ObliquePose, "oblique");
 
         /// <summary>
         /// The same contract straight down the polar axis. Pole-on the equator IS the silhouette, so coastline
@@ -1723,19 +1825,17 @@ namespace MapRenderer.Tests.Visual
         /// </summary>
         [Test]
         public void PoleOn_WhereTheLimbCarriesFillBoundary_TheBandIsStillBoundedByAMiter()
-            => AssertTheBandGrowsOutwardWithinAMiter(PolarPose, "polar", oracleBlindPixels: 100);
+            => AssertTheBandGrowsOutwardWithinAMiter(PolarPose, "polar");
 
         /// <summary>Renders one pose band-on against band-off and asserts the whole outward-growth contract.
         /// </summary>
         /// <param name="pose">Camera position and up vector.</param>
         /// <param name="poseName">Short label for the reported measurements.</param>
-        /// <param name="oracleBlindPixels">Offenders the 8× oracle cannot explain: measurement plus GPU slack, see
-        /// <c>TheGlobeFillsSilhouetteGainsInkOutward_WithinTheMiterLimit</c>.</param>
         private static void AssertTheBandGrowsOutwardWithinAMiter(
-            (Vector3 Position, Vector3 Up) pose, string poseName, int oracleBlindPixels)
+            (Vector3 Position, Vector3 Up) pose, string poseName)
         {
-            Frame hard = RenderGlobe(pose, suppressBand: true);
-            Frame banded = RenderGlobe(pose, suppressBand: false);
+            Frame hard = RenderGlobe(pose, suppressBand: true).Frame;
+            (Frame banded, List<float2> triangles) = RenderGlobe(pose, suppressBand: false);
 
             int n = SnapPx * SnapPx;
             double3 background = At(hard, 0);
@@ -1776,42 +1876,57 @@ namespace MapRenderer.Tests.Visual
                 $"the band added {gained} px against {ink} px of fill — far too many for a one-pixel rim " +
                 "around the silhouettes. That is a geometry shift, not antialiasing.");
 
-            // Reach: every gained pixel sits within a miter of geometry in the band-free build SUPERSAMPLED 8×.
-            // Non-obvious why: ANY deviation from background counts here, not the 3-LSB tolerance, because a
-            // sub-pixel sliver is what this reference exists to find. A failure reports each offender's
-            // separation and its radius, since the limb sits at a known radius.
-            Frame superHard = RenderGlobe(pose, suppressBand: true, superSample: 8);
-            const double faintest = 0.5 / 255.0;
-            var hasGeometry = new bool[n];
-            for (int i = 0; i < n; i++)
-                hasGeometry[i] = math.length(At(superHard, i) - background) > faintest;
-
+            // Reach: each gained pixel has a banded-mesh triangle within a square of half-size reach + 0.5 px.
+            // Band quads are zero-area (the undisplaced ring edge), so the oracle is independent of the defect.
             int reach = (int)FillBandJob.MiterLimit + 1;
-            const int probe = 16;
-            int worst = 0;
+            const int margin = 16;
+            var gainedPixel = new bool[n];
+            for (int y = margin; y < SnapPx - margin; y++)
+                for (int x = margin; x < SnapPx - margin; x++)
+                {
+                    int i = y * SnapPx + x;
+                    gainedPixel[i] = isBackground[i] && math.length(At(banded, i) - background) > Tolerance;
+                }
+
+            var touched = new bool[n];
+            float squareRadius = reach + 0.5f;
+            for (int t = 0; t + 2 < triangles.Count; t += 3)
+            {
+                float2 a = triangles[t];
+                float2 b = triangles[t + 1];
+                float2 c = triangles[t + 2];
+                int xMin = math.max(margin, (int)math.floor(math.min(a.x, math.min(b.x, c.x)) - squareRadius));
+                int xMax = math.min(SnapPx - margin - 1, (int)math.ceil(math.max(a.x, math.max(b.x, c.x)) + squareRadius));
+                int yMin = math.max(margin, (int)math.floor(math.min(a.y, math.min(b.y, c.y)) - squareRadius));
+                int yMax = math.min(SnapPx - margin - 1, (int)math.ceil(math.max(a.y, math.max(b.y, c.y)) + squareRadius));
+                for (int y = yMin; y <= yMax; y++)
+                    for (int x = xMin; x <= xMax; x++)
+                    {
+                        int i = y * SnapPx + x;
+                        if (!gainedPixel[i] || touched[i]) continue;
+                        if (TriangleTouchesSquare(a, b, c, new float2(x + 0.5f, y + 0.5f), squareRadius)) touched[i] = true;
+                    }
+            }
+
+            float worst = 0f;
             int offenders = 0;
             var offenderIndices = new List<int>();
             var detail = new System.Text.StringBuilder();
-            for (int y = probe; y < SnapPx - probe; y++)
-                for (int x = probe; x < SnapPx - probe; x++)
-                {
-                    int i = y * SnapPx + x;
-                    if (!isBackground[i]) continue;
-                    if (math.length(At(banded, i) - background) <= Tolerance) continue;
+            for (int i = 0; i < n; i++)
+            {
+                if (!gainedPixel[i] || touched[i]) continue;
+                offenders++;
+                offenderIndices.Add(i);
+                if (offenders > 200) continue;
 
-                    int nearest = int.MaxValue;
-                    for (int dy = -probe; dy <= probe; dy++)
-                        for (int dx = -probe; dx <= probe; dx++)
-                            if (hasGeometry[(y + dy) * SnapPx + (x + dx)])
-                                nearest = math.min(nearest, math.max(math.abs(dx), math.abs(dy)));
-                    if (nearest <= reach) continue;
-
-                    offenders++;
-                    offenderIndices.Add(i);
-                    worst = math.max(worst, nearest == int.MaxValue ? probe : nearest);
-                    if (offenders <= 10)
-                        detail.Append($" ({x},{y}) sep={nearest} r={math.length(new double2(x - 256.0, y - 256.0)):F1}");
-                }
+                var centre = new float2(i % SnapPx + 0.5f, i / SnapPx + 0.5f);
+                float nearest = float.MaxValue;
+                for (int t = 0; t + 2 < triangles.Count; t += 3)
+                    nearest = math.min(nearest, DistanceToTriangle(centre, triangles[t], triangles[t + 1], triangles[t + 2]));
+                worst = math.max(worst, nearest);
+                if (offenders <= 10)
+                    detail.Append($" ({i % SnapPx},{i / SnapPx}) sep={nearest:F1} r={math.length(centre - 256f):F1}");
+            }
 
             // How much band ink lands at the limb, where the px->world differential is least
             // trustworthy. Reported, not asserted — it is a quantity to know, not a contract.
@@ -1822,7 +1937,7 @@ namespace MapRenderer.Tests.Visual
                     nearLimb++;
 
             TestContext.WriteLine($"[globe band {poseName}] ink={ink} gained={gained} lost={lost} reach={reach} " +
-                                  $"offenders={offenders} worst={worst} gained-near-limb={nearLimb}");
+                                  $"offenders={offenders} worst={worst:F1} gained-near-limb={nearLimb}");
 
             if (offenders > 0)
             {
@@ -1835,10 +1950,9 @@ namespace MapRenderer.Tests.Visual
                     SnapshotRenderer.WritePngFromRgba32(new Frame(mask, SnapPx, SnapPx), $"band-limb-{poseName}-offenders.png"));
             }
 
-            Assert.LessOrEqual(offenders, oracleBlindPixels,
-                $"{offenders} pixel(s) gained ink from the band more than {reach} px from any geometry in " +
-                $"the 8x supersampled band-free reference, above the {oracleBlindPixels} allowed for this " +
-                $"oracle's blind spot; worst separation {worst} px. The band reaches at " +
+            Assert.AreEqual(0, offenders,
+                $"{offenders} pixel(s) gained ink from the band more than {reach} px from any banded-mesh " +
+                $"triangle; worst separation {worst:F1} px (first 200 offenders). The band reaches at " +
                 $"most {FillBandJob.MiterLimit} px along a join bisector, so ink beyond that is a " +
                 "displacement that is not the size it claims. The globe's " +
                 "silhouette in this fixture has radius 231.2 px " +
