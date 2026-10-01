@@ -407,33 +407,12 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True while an in-flight prepared record outlives its sets, so the next Update checks again once it finishes.</summary>
         private bool _rolePassPending;
 
-        /// <summary>The areas currently shown: the revealed cover, Hold and Bridge tiles. Every relative question of the swap reads this set.</summary>
-        private readonly HashSet<TileId> _revealedTiles = new();
-
-        /// <summary>For each serving key, how many revealed tiles it serves. The count exists whether or not the record does, so a record
-        /// that registers late reads it at once. It is a pure function of <see cref="_revealedTiles"/> and the serving map, so teardown leaves it alone.</summary>
-        private readonly Dictionary<LoadedKey, int> _shownCount = new();
-
-        /// <summary>The records currently shown, with the visibility groups they show: the existing records whose <see cref="_shownCount"/> is
-        /// above zero and whose <see cref="_shownGroups"/> is not empty.</summary>
-        private readonly Dictionary<LoadedKey, ulong> _revealed = new();
-
-        /// <summary>For each serving key in <see cref="_shownCount"/>, the visibility groups revealed on the tiles it serves (their union). It
-        /// exists whether or not the record does, so a record that registers late shows only the groups already revealed.</summary>
-        private readonly Dictionary<LoadedKey, ulong> _shownGroups = new();
-
-        /// <summary>The groups revealed so far on a tile revealed group by group. A tile revealed by the swap has no entry and shows all groups.</summary>
-        private readonly Dictionary<TileId, ulong> _groupMask = new();
+        /// <summary>The areas the swap has shown, the groups revealed on them, and the shown tiles each record key serves.</summary>
+        private readonly RevealedAreas _areas;
 
         private readonly List<TileId> _partialTiles = new();
-        /// <summary>The records this swap step concealed, each with the groups it showed when it went.</summary>
-        private readonly Dictionary<LoadedKey, ulong> _concealedThisStep = new();
-
         /// <summary>The order a new tile's layers appear in: render slot to group, and source slot to the groups it fills.</summary>
         private readonly VisibilityGroupMap _groups = new();
-
-        /// <summary>For each tile, how many revealed tiles lie strictly below it: the test for "has a shown descendant".</summary>
-        private readonly Dictionary<TileId, int> _shownBelow = new();
 
         /// <summary>Scratch for <see cref="SwapStep"/>, <see cref="ServiceRetries"/> and <see cref="RecomputeRoles"/>; reused.</summary>
         private readonly List<TileId>    _swapTiles     = new(32);
@@ -558,6 +537,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _layers       = layers;
             _cacheEnabled = cacheConfig.Enabled;
             _prepared     = new PreparedTileCache(cacheConfig.ByteBudget, cacheConfig.MaxCount);
+            _areas        = new RevealedAreas(_sources);
         }
 
         // ── Lifecycle / injection ────────────────────────────────────────────────────────────
@@ -587,12 +567,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _desired.Clear();
             _desiredSet.Clear();
             ClearPreloadState();
-            _revealed.Clear(); // every record is gone, and the backend is rebuilt below
-            _revealedTiles.Clear();
-            _shownCount.Clear();
-            _shownGroups.Clear();
-            _groupMask.Clear();
-            _shownBelow.Clear();
+            _areas.Clear(); // every record is gone, and the backend is rebuilt below
 
             // No purge here: CurrentStyle is a content-derived token (see its own doc), so a changed style
             // already partitions to a different token and an unchanged one is safe to keep and reuse.
@@ -650,10 +625,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 var newKey = new LoadedKey(oldKey.Tile, newSlot);
                 _loaded.Remove(oldKey);
                 _loaded[newKey] = lt;
-                if (_revealed.Remove(oldKey, out ulong mask)) _revealed[newKey] = mask;
             }
 
-            RebuildShownCounts();
+            _areas.Recount();
 
             // Deferred-release/desired bookkeeping is per-tick derived state, invalid against the just-
             // rebuilt slot indexing regardless of what survived — cleared unconditionally, as before.
@@ -682,12 +656,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// consume, and holds its whole source until then.</summary>
         private void RemapRevealedGroups(int[] previousGroupOfSlot)
         {
-            if (_loaded.Count == 0 && _groupMask.Count == 0) return;
-
-            var tiles = new List<TileId>(_groupMask.Keys);
-            foreach (TileId tile in tiles)
-                _groupMask[tile] = _groups.RemapMask(_groupMask[tile], previousGroupOfSlot);
-            RebuildShownCounts();
+            _areas.Remap(_groups, previousGroupOfSlot);
 
             var keys = new List<LoadedKey>(_loaded.Keys);
             foreach (LoadedKey key in keys)
@@ -810,9 +779,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// question the symbol side asks about visibility. A source with no mesh layer follows the tile alone.</summary>
         private bool IsRecordVisible(LoadedKey key)
         {
-            if (!_shownCount.ContainsKey(key)) return false;
+            if (!_areas.IsRecordShown(key)) return false;
             ulong own = _groups.GroupsOfSource(key.Slot); // a source with no mesh layer, symbols only, has no group: its labels follow the tile
-            return own == 0 || (_shownGroups.TryGetValue(key, out ulong revealed) && (revealed & own) != 0);
+            return own == 0 || (_areas.GroupsOf(key) & own) != 0;
         }
 
         /// <summary>True iff the record waits in the release queue with no role. A swapped-out record keeps its old stored role until its
@@ -1645,7 +1614,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Only this call's handles: earlier calls already queued theirs. A record follows its tile: its items show for the groups the
             // tile has revealed, and a tile's reveal belongs to the swap step.
-            if (_consumeHandles.Count > 0 && FollowsShownTile(key, in lt, out ulong shownGroups))
+            ulong shownGroups = GroupsToShow(key);
+            if (_consumeHandles.Count > 0 && shownGroups != 0)
                 QueueShowGroups(lt.DrawHandles.AsSpan(handlesBefore), lt.MaterialIndices.AsSpan(handlesBefore), shownGroups);
 
             if (complete)
@@ -1751,7 +1721,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
 
             RenderTeardownRecord(ref lt);
-            _revealed.Remove(key); // the record is gone; the tiles it served stay revealed, and so does their count
         }
 
         /// <summary>Transfers a Built record's meshes into <see cref="_prepared"/>, keyed per layer under
@@ -1982,7 +1951,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             TileId tile = key.Tile;
             if (_coverIndex.Serves(key)) { role = TileRole.Display; return true; }
 
-            bool shown = _shownCount.ContainsKey(key); // the record serves a revealed area, built or not
+            bool shown = _areas.IsRecordShown(key); // the record serves a revealed area, built or not
             if (shown && _coverIndex.HasRelativeInCover(tile)) { role = TileRole.Hold; return true; }
             if (!shown && IsBetweenHoldAndCover(tile)) { role = TileRole.Bridge; return true; }
 
@@ -2079,22 +2048,15 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// tile's first reveal belongs to <see cref="SwapStep"/>, which checks the tiles around it. Showing a shown item changes nothing.</summary>
         private void ShowRecord(LoadedKey key, in LoadedTile lt)
         {
-            if (!FollowsShownTile(key, in lt, out ulong shownGroups)) return;
+            ulong shownGroups = GroupsToShow(key);
+            if (shownGroups == 0) return;
             QueueShowGroups(lt.DrawHandles, lt.MaterialIndices, shownGroups);
         }
 
-        /// <summary>True iff <paramref name="key"/>'s record shows now: it serves a revealed tile and has a role. A record that joins a
-        /// revealed tile is marked shown, and <paramref name="shownGroups"/> is the groups its items show for.</summary>
-        private bool FollowsShownTile(LoadedKey key, in LoadedTile lt, out ulong shownGroups)
-        {
-            shownGroups = 0;
-            if (!_shownCount.ContainsKey(key)) return false;
-            if (_revealed.TryGetValue(key, out shownGroups)) return true;
-            if (IsCondemned(key)) return false;
-            if (!_shownGroups.TryGetValue(key, out shownGroups) || shownGroups == 0) return false;
-            _revealed[key] = shownGroups;
-            return true;
-        }
+        /// <summary>The visibility groups the items of <paramref name="key"/>'s record show now: those revealed on the tiles it serves, and
+        /// none while it waits in the release queue. Non-obvious why it keeps no record of an earlier show: a queued record with a shown tile has no
+        /// relative in the cover, so the same Update's swap step conceals that tile, and the hide wins before the flush.</summary>
+        private ulong GroupsToShow(LoadedKey key) => IsCondemned(key) ? 0UL : _areas.GroupsOf(key);
 
         /// <summary>Queues the handles whose layer group is in <paramref name="groups"/> to show.</summary>
         private void QueueShowGroups(ReadOnlySpan<int> handles, ReadOnlySpan<int> materialIndices, ulong groups)
@@ -2116,118 +2078,36 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Hold and swap: a tile that left the cover stays shown until ready tiles cover its area ──
         // See docs/tile-pipeline-design.md "Hold and swap".
 
-        private bool IsShown(TileId tile) => _revealedTiles.Contains(tile);
-
-        /// <summary>Adds <paramref name="delta"/> (+1 or -1) to the shown-descendant count of every strict ancestor of <paramref name="tile"/>.</summary>
-        private void CountShownBelow(TileId tile, int delta)
-        {
-            foreach (TileId up in TileAncestry.Ancestors(tile))
-            {
-                _shownBelow.TryGetValue(up, out int n);
-                n += delta;
-                if (n > 0) _shownBelow[up] = n; else _shownBelow.Remove(up);
-            }
-        }
-
-        /// <summary>Rebuilds <see cref="_shownCount"/> from <see cref="_revealedTiles"/> against the current source slots.</summary>
-        private void RebuildShownCounts()
-        {
-            _shownCount.Clear();
-            _shownGroups.Clear();
-            foreach (TileId tile in _revealedTiles)
-            {
-                ulong tileGroups = GroupsRevealed(tile);
-                foreach (LoadedKey key in ServingKeys(tile))
-                {
-                    _shownCount.TryGetValue(key, out int n);
-                    _shownCount[key] = n + 1;
-                    _shownGroups.TryGetValue(key, out ulong union);
-                    _shownGroups[key] = union | tileGroups;
-                }
-            }
-
-            var shownRecords = new List<LoadedKey>(_revealed.Keys);
-            foreach (LoadedKey key in shownRecords)
-            {
-                if (_shownGroups.TryGetValue(key, out ulong union) && union != 0) _revealed[key] = union;
-                else _revealed.Remove(key);
-            }
-        }
-
-        /// <summary>The visibility groups revealed on <paramref name="tile"/>: none when it is not shown, all when the swap revealed it.</summary>
-        private ulong GroupsRevealed(TileId tile)
-            => !_revealedTiles.Contains(tile) ? 0UL : _groupMask.TryGetValue(tile, out ulong groups) ? groups : ulong.MaxValue;
-
-        /// <summary>True iff a strict ancestor or descendant of <paramref name="tile"/> is shown.</summary>
-        private bool HasShownRelative(TileId tile)
-        {
-            if (_shownBelow.ContainsKey(tile)) return true;
-            return HasShownAncestor(tile);
-        }
-
-        private bool HasShownAncestor(TileId tile)
-        {
-            foreach (TileId up in TileAncestry.Ancestors(tile))
-                if (IsShown(up)) return true;
-
-            return false;
-        }
-
-        /// <summary>Marks <paramref name="tile"/> shown and counts it on every record that serves it. False when it was already shown.</summary>
-        private bool MarkTileShown(TileId tile)
-        {
-            if (!_revealedTiles.Add(tile)) return false;
-            CountShownBelow(tile, +1);
-            foreach (LoadedKey key in ServingKeys(tile))
-            {
-                _shownCount.TryGetValue(key, out int n);
-                _shownCount[key] = n + 1;
-                if (n == 0) _shownGroups[key] = 0;
-            }
-
-            return true;
-        }
-
-        /// <summary>Adds <paramref name="groups"/> to what <paramref name="key"/> shows, and shows the items of those groups when the record exists.</summary>
-        private void RevealGroups(LoadedKey key, ulong groups)
-        {
-            _shownGroups.TryGetValue(key, out ulong before);
-            ulong after = before | groups;
-            if (after == before) return;
-            _shownGroups[key] = after;
-            if (!_loaded.TryGetValue(key, out LoadedTile lt)) return; // a record that registers later reads _shownGroups
-            _revealed[key] = after;
-            QueueShowGroups(lt.DrawHandles, lt.MaterialIndices, groups & ~before);
-            QueueShowGroups(lt.OldDrawHandles, lt.OldMaterialIndices, groups & ~before);
-        }
-
         /// <summary>Reveals <paramref name="tile"/> whole: the swap knows its area is covered, or that nothing shown is near it. Every group
         /// shows at once, never group by group.</summary>
         private void RevealTile(TileId tile)
         {
-            if (!MarkTileShown(tile)) return;
-            _groupMask.Remove(tile);
+            if (!_areas.Mark(tile)) return;
             foreach (LoadedKey key in ServingKeys(tile))
-                RevealGroups(key, ulong.MaxValue);
+                RevealRecordGroups(key, ulong.MaxValue);
         }
 
-        /// <summary>Conceals <paramref name="tile"/>. A record that serves it hides when its count goes from 1 to 0, so a record that still
-        /// serves another revealed tile stays shown. The records stay loaded until their release drains.</summary>
+        /// <summary>Adds <paramref name="groups"/> to what <paramref name="key"/> shows, and shows the items of those groups when the record exists.</summary>
+        private void RevealRecordGroups(LoadedKey key, ulong groups)
+        {
+            ulong added = _areas.RevealGroups(key, groups);
+            if (added == 0 || !_loaded.TryGetValue(key, out LoadedTile lt)) return; // a record that registers later reads the groups at once
+            QueueShowGroups(lt.DrawHandles, lt.MaterialIndices, added);
+            QueueShowGroups(lt.OldDrawHandles, lt.OldMaterialIndices, added);
+        }
+
+        /// <summary>Conceals <paramref name="tile"/>. A record that serves it hides when it serves no other shown tile. The records stay loaded
+        /// until their release drains.</summary>
         private void ConcealTile(TileId tile)
         {
-            if (!_revealedTiles.Remove(tile)) return;
-            _groupMask.Remove(tile);
-            CountShownBelow(tile, -1);
+            if (!_areas.Remove(tile)) return;
             foreach (LoadedKey key in ServingKeys(tile))
             {
-                if (!_shownCount.TryGetValue(key, out int n)) continue;
-                if (n > 1) { _shownCount[key] = n - 1; continue; }
-                _shownCount.Remove(key);
-                _shownGroups.Remove(key, out ulong concealedGroups);
+                RecordReveal rest = _areas.Release(key);
+                if (rest.Count > 0) continue;
                 if (!_loaded.TryGetValue(key, out LoadedTile lt)) continue;
-                _concealedThisStep[key] = concealedGroups;
+                _areas.NoteConcealed(key, rest.Groups);
                 HideRecord(in lt);
-                _revealed.Remove(key);
             }
         }
 

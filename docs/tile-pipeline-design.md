@@ -273,13 +273,14 @@ area is covered or leaves the view, so it never outlives what is on screen.
   and a cover tile, is kept instead of cancelled, and a `Bridge` fetches nothing of its own. A level that was the cover on some frame is
   requested as usual. Only a jump (two levels or more at once) requests nothing for the levels it skips. `CountActiveLoads` counts a
   `Bridge` and a `Hold` that is still in flight with the cover.
-- **Shown state.** Two structures describe what is shown, and they answer different questions.
-  - The **area set** `_revealedTiles` holds the revealed cover, `Hold` and `Bridge` tiles. `_shownBelow` counts the revealed tiles under each ancestor.
-    Every area question of the swap reads only these two. A record's role reads its own count: a record that serves a revealed area is `Hold` once the area has left the cover.
-  - The **record count** `_shownCount` gives, for each serving key, how many revealed tiles it serves. A record is shown while its count is above zero.
-    A source that serves a tile from its maxzoom ancestor has one record under several cover tiles, and that record hides only when the last of them is concealed.
-  - The count exists whether or not the record does, so a record that registers late reads it at once. It is a function of the area set and the serving map, so a
-    record's teardown leaves it alone, and a source-slot remap rebuilds it. `_revealed` holds, per shown record, the groups it shows (§4.11). A full restyle clears all of these.
+- **Shown state.** `RevealedAreas` holds what the swap has shown, as bookkeeping only: it queues nothing, and `TileManager` shows and hides the items.
+  - The **areas** are the revealed cover, `Hold` and `Bridge` tiles, with a count of the shown tiles under each ancestor and the groups revealed on a tile
+    revealed group by group. Every area question of the swap reads only these.
+  - The **records** map each serving key to how many shown tiles it serves and the groups revealed on them (§4.11). A record is shown while its count is
+    above zero. A source that serves a tile from its maxzoom ancestor has one record under several cover tiles, and that record hides only when the last of them is concealed.
+    A record's role reads its own entry: a record that serves a revealed area is `Hold` once the area has left the cover.
+  - The entry exists whether or not the record does, so a record that registers late reads it at once. It is a function of the areas, the masks and the serving
+    map, so a record's teardown leaves it alone, and a source-slot remap or a group change recounts it. A full restyle clears all of it.
 - **Ready.** A tile is ready when every source that serves it has its record built, or rebuilding with its previous geometry still
   registered, and not waiting to retry, the background included. A source that does not serve the tile counts for nothing. A missing record is not ready. An absent tile and a tile that
   cannot be decoded are built and empty, so they are ready.
@@ -293,17 +294,15 @@ area is covered or leaves the view, so it never outlives what is on screen.
   4. A cover tile that has no shown relative, and has items or is ready, shows its next ready groups (§4.11). This covers a new area, which fills in
      group by group, and a tile that returns before its release drains.
 - **One flush.** Every show and hide of an Update reaches the backend in one `VisibilityBatch.Flush`: one hide call and one show call. A handle
-  queued both ways in one Update ends as its last call says, because the two batches are made disjoint before the calls. The
+  queued both ways in one Update ends as its last call says, because each handle keeps only its last queued call. The
   outgoing items are hidden, not removed. The record loses its role and waits in the release queue, so a swing-back shows it again
   without registering it again. `MaxReleasesPerTick` bounds that teardown and never the swap.
   `TileManager.Update` ends with the backend's `Rebuild`, after the flush, so the flush's shows are in that frame's draw list.
   A swap has no one-frame hole on any backend. `DrainMeshBuilds` ends the same way, from the last frame `Update` saw.
 - **The guard.** A tile's first reveal belongs to the swap step, which looks at the tiles around it. Registering items never starts
-  it. `FollowsShownTile` is the guard. It is false unless the record serves a revealed tile (its shown count is above zero). A record
-  already marked shown passes with no role check. Any other record needs a role, and the guard then marks it shown (it writes `_revealed`).
-  `ShowRecord` and the consume path both ask it, so a record that finishes loading or rebakes passes through it too. A record with no role
-  that is not yet marked shown, one waiting for its release, stays hidden. The swap itself shows such a record when it regains a role
-  before the release drains (a swing-back).
+  it. `GroupsToShow` is the guard: a record shows the groups revealed on the tiles it serves, and nothing while it waits in the release queue.
+  `ShowRecord` and the consume path both ask it, so a record that finishes loading or rebakes passes through it too. The swap itself shows
+  such a record when it regains a role before the release drains (a swing-back).
 
 ### 4.9 Retrying a failed download
 

@@ -9,8 +9,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True iff <paramref name="tile"/> lies strictly between a shown tile and a cover tile, on one ancestry chain, in either direction.</summary>
         private bool IsBetweenHoldAndCover(TileId tile)
         {
-            if (_coverIndex.HasDescendantInCover(tile)) return HasShownAncestor(tile);
-            return _shownBelow.ContainsKey(tile) && _coverIndex.HasAncestorInCover(tile);
+            if (_coverIndex.HasDescendantInCover(tile)) return _areas.HasShownAncestor(tile);
+            return _areas.HasShownDescendant(tile) && _coverIndex.HasAncestorInCover(tile);
         }
 
         /// <summary>True iff some source has a record for <paramref name="tile"/>.</summary>
@@ -53,11 +53,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                     continue;
                 }
 
-                MarkTileShown(tile);
+                _areas.Mark(tile);
                 revealed |= bit;
-                _groupMask[tile] = revealed;
+                _areas.SetGroupMask(tile, revealed);
                 foreach (LoadedKey key in ServingKeys(tile))
-                    RevealGroups(key, bit);
+                    RevealRecordGroups(key, bit);
 
                 any = true;
             }
@@ -73,7 +73,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             foreach (LoadedKey key in ServingKeys(tile))
             {
                 if ((_groups.GroupsOfSource(key.Slot) & bit) == 0) continue;
-                if (!_concealedThisStep.TryGetValue(key, out ulong shown) || (shown & bit) == 0) return false;
+                if ((_areas.ConcealedGroups(key) & bit) == 0) return false;
                 any = true;
             }
 
@@ -105,11 +105,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (Instanced == null) return;
             bool changed = false;
-            _concealedThisStep.Clear();
+            _areas.BeginStep();
 
             // 1. A shown tile with no relative in the cover: its area left the view.
             _swapTiles.Clear();
-            foreach (TileId t in _revealedTiles) _swapTiles.Add(t);
+            foreach (TileId t in _areas) _swapTiles.Add(t);
             for (int i = 0; i < _swapTiles.Count; i++)
             {
                 TileId tile = _swapTiles[i];
@@ -120,24 +120,24 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // 2. Zoom out: a ready ancestor in the cover, or a hidden Bridge below it, shows whole and hides the tiles under it.
             _swapTiles.Clear();
-            foreach (TileId t in _revealedTiles) if (!_coverIndex.Contains(t)) _swapTiles.Add(t);
+            foreach (TileId t in _areas) if (!_coverIndex.Contains(t)) _swapTiles.Add(t);
             for (int i = 0; i < _swapTiles.Count; i++)
             {
                 TileId shown = _swapTiles[i];
-                if (!IsShown(shown) || !TryFindCoveringAncestor(shown, out TileId ancestor)) continue;
+                if (!_areas.IsShown(shown) || !TryFindCoveringAncestor(shown, out TileId ancestor)) continue;
                 RevealTile(ancestor);
                 for (int j = 0; j < _swapTiles.Count; j++)
-                    if (IsShown(_swapTiles[j]) && TileAncestry.IsStrictAncestor(ancestor, _swapTiles[j])) ConcealTile(_swapTiles[j]);
+                    if (_areas.IsShown(_swapTiles[j]) && TileAncestry.IsStrictAncestor(ancestor, _swapTiles[j])) ConcealTile(_swapTiles[j]);
                 changed = true;
             }
 
             // 3. Zoom in: a shown tile whose every cover area is covered by ready tiles gives way to them.
             _swapTiles.Clear();
-            foreach (TileId t in _revealedTiles) if (_coverIndex.HasDescendantInCover(t)) _swapTiles.Add(t);
+            foreach (TileId t in _areas) if (_coverIndex.HasDescendantInCover(t)) _swapTiles.Add(t);
             for (int i = 0; i < _swapTiles.Count; i++)
             {
                 TileId shown = _swapTiles[i];
-                if (!IsShown(shown)) continue;
+                if (!_areas.IsShown(shown)) continue;
                 _swapCovering.Clear();
                 if (!ChildrenCovered(shown)) continue;
                 for (int j = 0; j < _swapCovering.Count; j++) RevealTile(_swapCovering[j]);
@@ -150,20 +150,18 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int i = 0; i < _selection.Cover.Count; i++)
             {
                 TileId tile  = _selection.Cover[i];
-                ulong  have  = GroupsRevealed(tile);
-                if ((have & _groups.AllGroups) == _groups.AllGroups || HasShownRelative(tile)) continue;
+                ulong  have  = _areas.GroupsRevealedOn(tile);
+                if ((have & _groups.AllGroups) == _groups.AllGroups || _areas.HasShownRelative(tile)) continue;
                 if (have == 0 && !(HasDrawHandles(tile) || IsReady(tile))) continue; // a ready tile with no items is shown too, so its labels draw
                 if (RevealReadyGroups(tile, have)) changed = true;
             }
 
             // A held or bridged tile that left the cover part-revealed keeps revealing its groups as its records finish.
-            _partialTiles.Clear();
-            foreach (var kv in _groupMask)
-                if ((kv.Value & _groups.AllGroups) != _groups.AllGroups) _partialTiles.Add(kv.Key);
+            _areas.CollectPartial(_partialTiles, _groups.AllGroups);
             for (int i = 0; i < _partialTiles.Count; i++)
             {
                 TileId tile = _partialTiles[i];
-                if (!HasShownRelative(tile) && RevealReadyGroups(tile, _groupMask[tile])) changed = true;
+                if (!_areas.HasShownRelative(tile) && RevealReadyGroups(tile, _areas.GroupsRevealedOn(tile))) changed = true;
             }
 
             if (changed) RecomputeRoles();
@@ -178,7 +176,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             foreach (TileId up in TileAncestry.Ancestors(shown))
             {
                 bool inCover = _coverIndex.Contains(up);
-                if ((inCover || HasRecord(up)) && !IsShown(up) && IsReady(up))
+                if ((inCover || HasRecord(up)) && !_areas.IsShown(up) && IsReady(up))
                 {
                     ancestor = up;
                     found    = true;
