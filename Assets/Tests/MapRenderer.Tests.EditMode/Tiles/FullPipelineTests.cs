@@ -1679,6 +1679,11 @@ namespace MapRenderer.Tests.Tiles
                 // (SSOT), reached via InternalsVisibleTo — renaming a marker is a one-line edit at its source.
                 SymbolSubsystem.ProfilerMarkerNames.SymbolExtract,
                 SymbolSubsystem.ProfilerMarkerNames.AtlasUpload,
+                SymbolSubsystem.ProfilerMarkerNames.TailCollectRanges,
+                SymbolSubsystem.ProfilerMarkerNames.TailShape,
+                SymbolSubsystem.ProfilerMarkerNames.TailBake,
+                SymbolSubsystem.ProfilerMarkerNames.TailCommit,
+                SymbolSubsystem.ProfilerMarkerNames.TailResumed,
                 SymbolSubsystem.ProfilerMarkerNames.BatchCollect,
                 SymbolSubsystem.ProfilerMarkerNames.BatchSoA,
                 SymbolPlacementSystem.ProfilerMarkerNames.Gather,

@@ -58,14 +58,20 @@ namespace MapRenderer.Unity.Text
         // ── Nested types ──────────────────────────────────────────────
         /// <summary>Profiler marker name constants (SSOT), referenced by the <see cref="ProfilerMarker"/> fields
         /// below and by <c>ProfilerMarkerTests</c>. Hierarchical so the Profiler's flat search reads as a tree.
-        /// Only synchronous main-thread stages are marked (the awaited glyph-range ensure step's wall-clock is
-        /// fetch-suspension, not CPU; shaping itself is synchronous CPU but unmarked here).</summary>
+        /// Only synchronous main-thread stages are marked: the awaited glyph-range ensure step's wall-clock is
+        /// fetch-suspension, not CPU. <c>TailResumed</c> covers the tail's work after that suspension, which runs
+        /// outside <c>Symbol.Collect</c>.</summary>
         internal static class ProfilerMarkerNames
         {
-            internal const string SymbolExtract = "MapRenderer.Symbol.Extract";
-            internal const string AtlasUpload  = "MapRenderer.Symbol.AtlasUpload";
-            internal const string BatchCollect = "MapRenderer.Symbol.BatchBuild.Collect";
-            internal const string BatchSoA     = "MapRenderer.Symbol.BatchBuild.SoA";
+            internal const string SymbolExtract     = "MapRenderer.Symbol.Extract";
+            internal const string AtlasUpload       = "MapRenderer.Symbol.AtlasUpload";
+            internal const string TailCollectRanges = "MapRenderer.Symbol.Tail.CollectRanges";
+            internal const string TailShape         = "MapRenderer.Symbol.Tail.Shape";
+            internal const string TailBake          = "MapRenderer.Symbol.Tail.Bake";
+            internal const string TailCommit        = "MapRenderer.Symbol.Tail.Commit";
+            internal const string TailResumed       = "MapRenderer.Symbol.Tail.Resumed";
+            internal const string BatchCollect      = "MapRenderer.Symbol.BatchBuild.Collect";
+            internal const string BatchSoA          = "MapRenderer.Symbol.BatchBuild.SoA";
         }
 
         /// <summary>A worker-phase-complete symbol build awaiting its budgeted main-thread tail
@@ -108,6 +114,16 @@ namespace MapRenderer.Unity.Text
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolExtract);
         private static readonly ProfilerMarker PmAtlasUpload =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.AtlasUpload);
+        private static readonly ProfilerMarker PmTailCollectRanges =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TailCollectRanges);
+        private static readonly ProfilerMarker PmTailShape =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TailShape);
+        private static readonly ProfilerMarker PmTailBake =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TailBake);
+        private static readonly ProfilerMarker PmTailCommit =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TailCommit);
+        private static readonly ProfilerMarker PmTailResumed =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TailResumed);
 
         private static readonly ProfilerMarker PmBatchCollect =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.BatchCollect);
@@ -752,22 +768,38 @@ namespace MapRenderer.Unity.Text
                 {
                     // ONE dedup scope per BUILD — safe to share _rangeSeen across builds; see its field comment.
                     _rangeSeen.Clear();
-                    for (int p = 0; p < tail.Processors.Length; p++)
-                        tail.Processors[p].CollectRequiredRanges(ranges, _rangeSeen);
-                    await _builder.EnsureGlyphRangesAsync(ranges, tail.Ct); // the ONE suspension point
+                    using (PmTailCollectRanges.Auto())
+                        for (int p = 0; p < tail.Processors.Length; p++)
+                            tail.Processors[p].CollectRequiredRanges(ranges, _rangeSeen);
+                    UniTask ensure = _builder.EnsureGlyphRangesAsync(ranges, tail.Ct);
+                    bool suspends = !ensure.Status.IsCompleted();
+                    await ensure; // the ONE suspension point
                     tail.Ct.ThrowIfCancellationRequested(); // new guard for the new suspension point
 
-                    for (int p = 0; p < tail.Processors.Length; p++)
-                        tail.Processors[p].CompleteOnMain(tail.Ct);
-                    tail.Ct.ThrowIfCancellationRequested(); // the existing partial-commit guard
+                    // A suspended tail resumes outside Symbol.Collect, so its rest gets its own marker.
+                    if (suspends) PmTailResumed.Begin();
+                    try
+                    {
+                        using (PmTailShape.Auto())
+                            for (int p = 0; p < tail.Processors.Length; p++)
+                                tail.Processors[p].CompleteOnMain(tail.Ct);
+                        tail.Ct.ThrowIfCancellationRequested(); // the existing partial-commit guard
 
-                    // Bake this tile's native SoA block HERE, on the main thread — glyph quads / curved glyphs
-                    // are only materialized by the layer shape above, so nothing is left to bake off-main.
-                    var block = SymbolTileBlockBaker.Bake(tail.Buffer, SlotCount, tail.TileOriginRender);
+                        // Bake this tile's native SoA block HERE, on the main thread — glyph quads / curved glyphs
+                        // are only materialized by the layer shape above, so nothing is left to bake off-main.
+                        SymbolTileBlock block;
+                        using (PmTailBake.Auto())
+                            block = SymbolTileBlockBaker.Bake(tail.Buffer, SlotCount, tail.TileOriginRender);
 
-                    // Commit — unless superseded or dropped mid-build (released-to-cache still commits, to the
-                    // cached side). CompleteBuild disposes `block` on a superseded/dropped commit, so no leak.
-                    _store.CompleteBuild(tail.Key, tail.Generation, block);
+                        // Commit — unless superseded or dropped mid-build (released-to-cache still commits, to the
+                        // cached side). CompleteBuild disposes `block` on a superseded/dropped commit, so no leak.
+                        using (PmTailCommit.Auto())
+                            _store.CompleteBuild(tail.Key, tail.Generation, block);
+                    }
+                    finally
+                    {
+                        if (suspends) PmTailResumed.End();
+                    }
                 }
                 finally
                 {

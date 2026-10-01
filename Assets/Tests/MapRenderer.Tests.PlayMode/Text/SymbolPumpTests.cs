@@ -207,9 +207,18 @@ namespace MapRenderer.Tests.PlayMode.Text
         // ── The symbol EXTRACT marker must fire OFF the main thread ──
         // A main-thread-only recorder must read ZERO across a full build while an all-thread one reads >=1.
         [UnityTest]
-        public IEnumerator SymbolExtract_RunsOffTheMainThread()
+        public IEnumerator SymbolExtract_RunsOffTheMainThread_AndTheTailStagesFireOnIt()
         {
-            UseImmediateGlyphs();
+            // A gated glyph source parks the first tail, so it resumes later and fires the Tail.Resumed marker too.
+            var gate = new UniTaskCompletionSource();
+            var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
+            _subsystem.GlyphSourceFactoryOverride = _ => new TestGlyphSource(async (fontStack, rangeStart, ct) =>
+            {
+                await gate.Task;
+                return new GlyphRangeResponse(ranges[(fontStack, rangeStart)]);
+            });
+            StyleDocument style = TestStyle.Document(StyleJson);
+            _subsystem.SetStyle(style, ExtractSymbolLayers(style));
             var tile   = new TileId { Z = 3, X = 0, Y = 0 };
             var loaded = new List<LoadedTileKey> { Key(tile) };
 
@@ -218,11 +227,23 @@ namespace MapRenderer.Tests.PlayMode.Text
             using var anyThread = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.Extract",
                 ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame);
 
+            string[] tailNames =
+            {
+                SymbolSubsystem.ProfilerMarkerNames.TailCollectRanges, SymbolSubsystem.ProfilerMarkerNames.TailShape,
+                SymbolSubsystem.ProfilerMarkerNames.TailBake, SymbolSubsystem.ProfilerMarkerNames.TailCommit,
+                SymbolSubsystem.ProfilerMarkerNames.TailResumed,
+            };
+            var tailRecorders = new ProfilerRecorder[tailNames.Length];
+            for (int i = 0; i < tailNames.Length; i++)
+                tailRecorders[i] = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, tailNames[i],
+                    ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+
             DriveTileBytesReady(tile);
             for (var settle = SettleTimeout.Start(); settle.Running; )
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
+                if (_subsystem.TailsStartedLastPump > 0) gate.TrySetResult(); // the tail is parked: let it resume
                 yield return null;
                 if (SymbolCount() > 0) break; // build committed → the decode marker has fired
             }
@@ -239,6 +260,15 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, mainHits,
                 "MapRenderer.Symbol.Extract must NOT fire on the main thread — Stage B runs the feature " +
                 "extract on the thread pool. A regression that drops SwitchToThreadPool fails this.");
+
+            // The tail's stages fire on the main thread, and the resumed one only because the tail was parked.
+            for (int i = 0; i < tailNames.Length; i++)
+            {
+                long hits = 0;
+                for (int s = 0; s < math.min(tailRecorders[i].Count, ProfilerSampleCapacity); s++) hits += tailRecorders[i].GetSample(s).Count;
+                tailRecorders[i].Dispose();
+                Assert.Greater(hits, 0, $"{tailNames[i]} must fire on the main thread during one tail.");
+            }
         }
 
         // ── Cancellation — a restyle silently cancels a build suspended in glyph-fetch ──
