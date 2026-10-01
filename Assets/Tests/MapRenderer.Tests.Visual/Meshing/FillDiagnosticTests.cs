@@ -703,20 +703,67 @@ namespace MapRenderer.Tests.Visual
             Assert.Less(center[0], 0.3, "the center region specifically must show no fill either");
         }
 
-        [Test]
-        public void Fill_ZeroOpacity_RendersBackgroundOnly()
+        private static bool HasDrawableGeometry(Mesh[] meshes)
         {
-            // Secondary negative control: fills declare _SURFACE_TYPE_TRANSPARENT, and opacity 0 is proven
-            // invisible by FillPaintSnapshotTests.
+            if (meshes == null) return false;
+            foreach (Mesh mesh in meshes)
+                if (mesh != null && mesh.vertexCount > 0) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// A fill with a CONSTANT opacity of 0 is refused at construction and never fetched (design: "Decided once, at
+        /// construction"), so arm 1 asserts the skip. A DATA-DRIVEN opacity of 0 is built and submitted, and the
+        /// transparent shader draws it with alpha 0, so arm 2 proves that path invisible. Its control, the same
+        /// expression at 1, must render. The material-level <c>_Opacity</c> of 0 is covered by
+        /// <c>FillPaintSnapshotTests.Opacity_NoRebuild_MeshUnchanged_And_LuminanceChanges</c>.
+        /// </summary>
+        [Test]
+        public void Fill_ZeroOpacity_IsSkippedWhenConstant_AndInvisibleWhenDataDriven()
+        {
             var (west, south, east, north) = ProofRectangle();
-            using var scene = VisualScene.New()
+
+            // ── Arm 1: a constant 0 builds no layer and fetches no tile.
+            using (var scene = VisualScene.New()
                 .Source("cities", GeoJson.Polygon(west, south, east, north))
                 .Layer(VisualLayer.Fill("land").Source("cities").Color("#ffffff").Opacity(0.0))
-                .Camera(ProofLookAt(), zoom: ProofTile.Z);
+                .Camera(ProofLookAt(), zoom: ProofTile.Z)
+                .ExpectsNoTiles())
+            {
+                VisualFrame frame = scene.Render(SnapPx);
 
-            VisualFrame frame = scene.Render(SnapPx);
+                Assert.IsTrue(frame.Coverage().IsBlank, "fill-opacity 0 must render nothing");
+                Assert.AreEqual(0, frame.MapView.WiredFeatureSourceCount(),
+                    "a constant fully-transparent layer is skipped, so no source is wired for it");
+            }
 
-            Assert.IsTrue(frame.Coverage().IsBlank, "fill-opacity 0 must render nothing");
+            // ── Arm 2: a data-driven 0 is drawn through the transparent shader, and shows nothing.
+            using (var scene = VisualScene.New()
+                .Source("cities", GeoJson.Polygon(west, south, east, north))
+                .Layer(VisualLayer.Fill("land").Source("cities").Color("#ffffff")
+                    .OpacityExpression(@"[""coalesce"",[""get"",""opacity""],0]"))
+                .Camera(ProofLookAt(), zoom: ProofTile.Z))
+            {
+                VisualFrame frame = scene.Render(SnapPx);
+
+                Assert.AreEqual(1, frame.MapView.WiredFeatureSourceCount(),
+                    "a data-driven opacity is built and fetched, so the source is wired");
+                Assert.IsTrue(HasDrawableGeometry(frame.MapView.GetTileMeshes(ProofTile)),
+                    "the data-driven fill is built and submitted: its tile mesh holds vertices that the transparent shader draws with alpha 0");
+                Assert.IsTrue(frame.Coverage().IsBlank, "a data-driven fill-opacity of 0 must render nothing");
+            }
+
+            // ── Control: the same expression at 1 renders, so the blank above comes from alpha 0.
+            using (var scene = VisualScene.New()
+                .Source("cities", GeoJson.Polygon(west, south, east, north))
+                .Layer(VisualLayer.Fill("land").Source("cities").Color("#ffffff")
+                    .OpacityExpression(@"[""coalesce"",[""get"",""opacity""],1]"))
+                .Camera(ProofLookAt(), zoom: ProofTile.Z))
+            {
+                VisualFrame frame = scene.Render(SnapPx);
+
+                Assert.IsFalse(frame.Coverage().IsBlank, "control: the same data-driven opacity at 1 must render");
+            }
         }
 
         // ── G-VR: golden reference-image regression (change detector, layered ALONGSIDE the analytic
@@ -824,7 +871,8 @@ namespace MapRenderer.Tests.Visual
             using (var scene = VisualScene.New()
                 .Source("cities", GeoJson.Polygon(west, south, east, north))
                 .Layer(VisualLayer.Fill("land").Source("does-not-exist").Color("#ffffff"))
-                .Camera(ProofLookAt(), zoom: ProofTile.Z))
+                .Camera(ProofLookAt(), zoom: ProofTile.Z)
+                .ExpectsNoTiles())
             {
                 VisualFrame frame = scene.Render(SnapPx);
 

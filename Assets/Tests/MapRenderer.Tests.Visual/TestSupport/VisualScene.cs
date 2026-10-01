@@ -42,6 +42,7 @@ namespace MapRenderer.Tests
         /// <c>FadeDurationSeconds / Time.deltaTime</c>, so this covers any delta above a fraction of a millisecond.</summary>
         private const int MaxFadeSettleTicks = 2000;
 
+        private bool _expectsNoTiles;
         private readonly List<VisualSource> _sources = new List<VisualSource>();
         private readonly List<VisualLayer>  _layers  = new List<VisualLayer>();
 
@@ -110,6 +111,14 @@ namespace MapRenderer.Tests
         {
             _cameraProperties = new CameraProperties(lookAt, zoom, heading, tilt);
             _cameraSet = true;
+            return this;
+        }
+
+        /// <summary>Declares that no tile loads in this scene, so <see cref="Render"/> pumps a fixed number of frames and does not wait for
+        /// the cover to settle. For a scene whose layer binds to no source.</summary>
+        public VisualScene ExpectsNoTiles()
+        {
+            _expectsNoTiles = true;
             return this;
         }
 
@@ -280,7 +289,8 @@ namespace MapRenderer.Tests
             string json = BuildStyleJson();
             StyleDocument doc = TestStyle.Document(json);
             SpinToCompleted(_mapView.SetStyle(doc, "visual-scene"));
-            PumpUntilSettledByAwaiting(_mapView);
+            if (_expectsNoTiles) PumpFrames(_mapView, NoTileFrames);
+            else PumpUntilSettledByAwaiting(_mapView);
 
             // Warm-up (WarmupFrames): pump extra LateUpdate/Rebuild ticks so the Entities-Graphics BRG batch is
             // cullable before the snapshot — rendering on the settle frame itself is blank (see WarmupFrames).

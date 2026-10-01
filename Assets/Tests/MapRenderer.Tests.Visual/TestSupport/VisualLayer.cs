@@ -40,6 +40,7 @@ namespace MapRenderer.Tests
         // Color()/ColorExpression() still gets a well-formed paint block.
         private string _colorJson = "\"#000000\"";
         private double? _opacity;
+        private string _opacityJson;
         private string _outlineColorJson;
 
         /// <param name="id">The style-JSON layer id (forwarded to the base).</param>
@@ -83,11 +84,21 @@ namespace MapRenderer.Tests
             return this;
         }
 
+        /// <summary><c>fill-opacity</c> as a Style-Spec expression, for an opacity that depends on the feature. Wins over
+        /// <see cref="Opacity"/>. Pass the raw JSON text verbatim.</summary>
+        public FillVisualLayer OpacityExpression(string rawExpressionJson)
+        {
+            _opacityJson = rawExpressionJson;
+            return this;
+        }
+
         /// <inheritdoc/>
         public override string ToLayerJson()
         {
             var paint = new List<string> { $"\"fill-color\":{_colorJson}" };
-            if (_opacity.HasValue)
+            if (_opacityJson != null)
+                paint.Add($"\"fill-opacity\":{_opacityJson}");
+            else if (_opacity.HasValue)
                 paint.Add($"\"fill-opacity\":{_opacity.Value.ToString(CultureInfo.InvariantCulture)}");
             if (_outlineColorJson != null)
                 paint.Add($"\"fill-outline-color\":{_outlineColorJson}");

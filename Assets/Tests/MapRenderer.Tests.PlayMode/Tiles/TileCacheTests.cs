@@ -199,7 +199,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 int prepared = view.CaptureTelemetry().PreparingTileCount;
                 view.CollectLoadedTileIds(drawn);
                 AssertPreparedIsTheLevelFiveCover(view, "inside the lead");
-                yield return PumpUntilAcrossFrames(view, () => spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count == prepared);
+                yield return PumpUntilAcrossFrames(view, () => spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count == prepared,
+                    "every prepared tile to begin its label build");
                 Assert.AreEqual(prepared, spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count, "every prepared tile begins its label build.");
                 Assert.IsFalse(drawn.Exists(t => t.Z == 5), "a prepared tile is not reported as loaded.");
                 var reported = new List<LoadedTileKey>();
@@ -224,7 +225,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 {
                     releasedAfterFinish += view.TilesReleasedLastTick();
                     return view.CaptureTelemetry().PreparingTileCount == 0;
-                });
+                }, "the finished prepared records to be released");
                 Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "a prepared record with no role left is released once it finishes.");
                 Assert.Greater(releasedAfterFinish, 0, "the release happened, not a silent drop.");
 
@@ -249,7 +250,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 // ── Jitter across the preload edge of the parents (lead 0.3 above level 5): nothing releases or rebuilds.
                 // The cover is settled at the first jitter zoom, so only the prepared records can change.
                 SetZoom(view, 5.299);
-                yield return PumpUntilAcrossFrames(view, () => view.AllTilesSettled() && view.ReleaseQueueDepth() == 0);
+                yield return PumpUntilAcrossFrames(view, () => view.AllTilesSettled() && view.ReleaseQueueDepth() == 0,
+                    "the cover to settle and the release queue to drain");
                 Assert.Greater(view.CaptureTelemetry().PreparingTileCount, 0, "precondition: prepared parents exist to jitter.");
                 int hits = view.PreparedCacheHits();
                 foreach (double zoom in new[] { 5.301, 5.299, 5.301, 5.299 })
@@ -278,7 +280,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 // ── Past the keep set the finished records go to the cache.
                 SetZoom(view, 4.5);
-                yield return PumpUntilAcrossFrames(view, () => view.CaptureTelemetry().PreparingTileCount == 0);
+                yield return PumpUntilAcrossFrames(view, () => view.CaptureTelemetry().PreparingTileCount == 0,
+                    "no record to stay prepared outside the keep set");
                 Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "outside the keep set no record stays prepared.");
                 Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0, "a released prepared tile goes to the cache.");
 
@@ -298,7 +301,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.Config.FillTileBufferClip = 64.0; // a new bake revision: drawn and prepared records rebake, parked by the gate
                 view.LateUpdate();
                 SetZoom(view, 5.06);
-                yield return PumpUntilAcrossFrames(view, () => view.ReleaseQueueDepth() == 0); // a tile left with no role stays drawn until released
+                yield return PumpUntilAcrossFrames(view, () => view.ReleaseQueueDepth() == 0, "the release queue to drain"); // a tile left with no role stays drawn until released
                 view.CollectLoadedTileIds(drawn);
                 int expectedVisible = 0;
                 foreach (TileId t in drawn) expectedVisible += childMeshes.TryGetValue(t, out int m) ? m : 0;

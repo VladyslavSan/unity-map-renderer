@@ -530,7 +530,7 @@ namespace MapRenderer.Tests.GeoJsons
         private static void AssertNothingWasWired(
             MapView view, System.Func<int> docFetches, System.Func<int> factoryCalls, string what)
         {
-            PumpUntilSettled(view, maxFrames: 200);
+            PumpFrames(view, NoTileFrames);
 
             Assert.AreEqual(0, docFetches(), $"{what} must not trigger a TileJSON round trip — skipping it " +
                                              "means it was never wired, not that it was wired to something else");

@@ -912,7 +912,7 @@ namespace MapRenderer.Tests.Tiles
                     zoom: 14.0, heading: 0.0, tilt: 60.0);
 
                 view.LoadTestStyle(src, cam, style: style);
-                PumpUntilSettled(view, maxFrames: 5000);
+                PumpUntilSettled(view, maxFrames: 5000, what: "the large mixed-level cover to settle");
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
                 // ── Teeth: prove this is genuinely the deep/mixed/large cover the stage demands ──

@@ -281,7 +281,7 @@ namespace MapRenderer.Tests.Lifetime
                 view.Config.MaxConsumesPerTick = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
 
-                PumpUntilSettled(view, maxFrames: 500);
+                PumpUntilSettled(view, maxFrames: 500, what: "the cover to settle after the evicted tiles left");
 
                 // The evicted tiles left _loaded, so ConsumeMeshBuild never ran for them; only the new
                 // cover tiles can have created Meshes.
@@ -656,7 +656,7 @@ namespace MapRenderer.Tests.Lifetime
 
                 // Pump until the cover settles; each Update's PendingDisposalQueue.DrainCompleted() disposes the
                 // released tiles' resources as their held step completes.
-                PumpUntilSettled(view, maxFrames: 500);
+                PumpUntilSettled(view, maxFrames: 500, what: "the cover to settle while the released tiles' held steps complete");
 
                 // Final drain: ensure all pending disposal tasks have been processed.
                 // (Teardown() spins them to completion; calling it here before asserting the counters.)

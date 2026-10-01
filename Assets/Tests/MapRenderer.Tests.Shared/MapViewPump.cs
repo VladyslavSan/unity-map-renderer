@@ -8,7 +8,7 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// The frame loops a test runs to let a <see cref="MapViewComponent"/> load its cover. Call them bare, through
-    /// <c>using static MapRenderer.Tests.MapViewPump;</c>. The synchronous loops end silently when their frame cap runs out.
+    /// <c>using static MapRenderer.Tests.MapViewPump;</c>. A loop that runs out of frames fails the test.
     /// </summary>
     internal static class MapViewPump
     {
@@ -17,7 +17,11 @@ namespace MapRenderer.Tests
 
         /// <summary>Updates and drains mesh builds until the view has tiles and all of them are settled.
         /// Non-obvious why: the <c>LoadedTileCount() &gt; 0</c> guard is load-bearing, because <c>AllTilesSettled()</c> is true on an empty cover.</summary>
-        public static void PumpUntilSettled(MapViewComponent view, int maxFrames = DefaultMaxFrames)
+        public static void PumpUntilSettled(MapViewComponent view) => PumpUntilSettled(view, DefaultMaxFrames, "the cover to settle");
+
+        /// <summary>As <see cref="PumpUntilSettled(MapViewComponent)"/> with an explicit frame cap, which needs its own
+        /// <paramref name="what"/>: a caller that sets a cap says what the cap guards.</summary>
+        public static void PumpUntilSettled(MapViewComponent view, int maxFrames, string what)
         {
             for (int f = 0; f < maxFrames; f++)
             {
@@ -25,26 +29,44 @@ namespace MapRenderer.Tests
                 view.DrainMeshBuilds();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
             }
+
+            Assert.Fail($"timed out waiting for: {what} (loaded {view.LoadedTileCount()}, desired {view.DesiredCount()}, settled {view.AllTilesSettled()})");
         }
 
-        /// <summary>As <see cref="PumpUntilSettled"/>, but waits for in-flight builds instead of draining them.
+        /// <summary>As <see cref="PumpUntilSettled(MapViewComponent)"/>, but waits for in-flight builds instead of draining them.
         /// Non-obvious why: the symbol pass rides the mesh kick, so draining never lands a label build, and the drain form silently yields no labels.</summary>
-        public static void PumpUntilSettledByAwaiting(MapViewComponent view, int maxFrames = DefaultMaxFrames)
+        public static void PumpUntilSettledByAwaiting(MapViewComponent view)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (int f = 0; f < DefaultMaxFrames; f++)
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
                 view.AwaitInFlightMeshBuilds();
             }
+
+            Assert.Fail($"timed out waiting for: the cover to settle (loaded {view.LoadedTileCount()}, desired {view.DesiredCount()}, settled {view.AllTilesSettled()})");
+        }
+
+        /// <summary>The frames a test pumps when it expects no tile to load, so a wrongly wired tile still has time to appear.</summary>
+        public const int NoTileFrames = 200;
+
+        /// <summary>Updates and drains mesh builds for exactly <paramref name="count"/> frames, and waits for nothing. For a test
+        /// that expects no tile to load, so the cover never settles.</summary>
+        public static void PumpFrames(MapViewComponent view, int count)
+        {
+            for (int f = 0; f < count; f++)
+            {
+                view.LateUpdate();
+                view.DrainMeshBuilds();
+            }
         }
 
         /// <summary>Updates once per real frame until the view has tiles and all of them are settled, or the wall-clock bound ends.</summary>
         public static IEnumerator PumpUntilSettledAcrossFrames(MapViewComponent view)
-            => PumpUntilAcrossFrames(view, () => view.LoadedTileCount() > 0 && view.AllTilesSettled());
+            => PumpUntilAcrossFrames(view, () => view.LoadedTileCount() > 0 && view.AllTilesSettled(), "the cover to settle");
 
         /// <summary>Updates once per real frame until <paramref name="done"/> holds, or the wall-clock bound ends.</summary>
-        public static IEnumerator PumpUntilAcrossFrames(MapViewComponent view, Func<bool> done)
+        public static IEnumerator PumpUntilAcrossFrames(MapViewComponent view, Func<bool> done, string what)
         {
             for (var settle = SettleTimeout.Start(); settle.Running; )
             {
@@ -52,6 +74,8 @@ namespace MapRenderer.Tests
                 if (done()) yield break;
                 yield return null;
             }
+
+            Assert.Fail($"timed out waiting for: {what}");
         }
 
         /// <summary>
