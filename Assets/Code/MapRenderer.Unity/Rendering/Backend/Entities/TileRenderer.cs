@@ -23,18 +23,18 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
     /// Non-local invariant: automatic bootstrap is off project-wide, so this owns the only <see cref="World"/>,
     /// and <see cref="Rebuild"/> must tick its systems once per frame.
     /// </summary>
-    internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
+    internal sealed class TileRenderer : TileRenderBackendBase<TileRenderer.DrawItem>, ITileRenderBackend
     {
         // One draw item = one layer entity under its tile's root entity. Internal so the test assembly's
         // EntitiesTileRendererTestExtensions can read it.
-        internal struct ItemRec
+        internal struct DrawItem : IDrawItem
         {
             public Entity      Entity;
             public TileId      TileId;   // which tile root this layer hangs under
             public BatchMeshID MeshId;   // stall #3: the EG-registered mesh id, for UnregisterMesh on removal
-            public int         MaterialIndex; // the layer slot this entity was created at — lets
-                                               // SetLayerMaterials find every item a retired slot must retire
-            public bool        Hidden;    // item-level flag (SetItemsVisible); drawn only when also slot-visible
+            public int         MaterialIndex { get; set; } // the layer slot this entity was created at — lets
+                                                           // SetLayerMaterials find every item a retired slot must retire
+            public bool        Hidden        { get; set; } // item-level flag (SetItemsVisible); drawn only when also slot-visible
         }
 
         // One per live tile: the named parent of its layer entities. Rebuild moves the whole subtree by writing
@@ -50,14 +50,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // Per-layer style id (e.g. "water"), parallel to _layerMaterials. It names each layer entity in the
         // Entities Hierarchy; empty ⇒ the shared material name.
         private readonly List<string>               _layerNames     = new List<string>();
-        // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
-        // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
-        private readonly List<ShadowCastingMode>    _layerShadowModes = new List<ShadowCastingMode>();
-        // Per-layer draw gate (SetLayerVisible), parallel to _layerMaterials; false ⇒ the slot's entities carry
-        // DisableRendering. Absent or short ⇒ visible, identically in all three backends.
-        private readonly List<bool>                _layerVisible     = new List<bool>();
-        // internal (not private) for the same reason as ItemRec/RootRec — test-assembly observability.
-        internal readonly Dictionary<int, ItemRec>    _items          = new Dictionary<int, ItemRec>();
+        // internal (not private) for the same reason as DrawItem/RootRec — test-assembly observability.
         internal readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
 
         // Persistent list for one RemoveItems() batch: its layer entities plus the tile roots it empties,
@@ -85,7 +78,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         internal int RenderMeshArraysCreated { get; private set; }
 
         /// <summary>Live EG-registered meshes (inc on RegisterMesh in AddTileLayer, dec on
-        /// UnregisterMesh in RemoveItem/RemoveItems). Must return to 0 after a full load→release (incl. the
+        /// UnregisterMesh in RemoveItems). Must return to 0 after a full load→release (incl. the
         /// prepared-cache round-trip) — catches the ID route's missing-unregister leak trap.</summary>
         internal int RegisteredMeshCount { get; private set; }
 
@@ -143,13 +136,12 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             IReadOnlyList<Material> layerMaterials,
             IReadOnlyList<string> layerNames = null,
             IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
+            : base(layerShadowModes)
         {
             if (layerMaterials == null) throw new ArgumentNullException(nameof(layerMaterials));
             for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
             if (layerNames != null)
                 for (int i = 0; i < layerNames.Count; i++) _layerNames.Add(layerNames[i]);
-            if (layerShadowModes != null)
-                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             _world           = DefaultWorldInitialization.Initialize("MapEntitiesWorld", editorWorld: false);
             _prevDefaultWorld = World.DefaultGameObjectInjectionWorld;
@@ -205,12 +197,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             for (int i = 0; i < _layerNames.Count && i < layerMaterials.Count; i++)
                 if (layerMaterials[i] == null) _layerNames[i] = null;
 
-            if (_layerVisible.Count > layerMaterials.Count)
-                _layerVisible.RemoveRange(layerMaterials.Count, _layerVisible.Count - layerMaterials.Count);
-
-            _layerShadowModes.Clear();
-            if (layerShadowModes != null)
-                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
+            ReplaceSlotLists(layerMaterials.Count, layerShadowModes);
 
             var retired = new List<int>();
             foreach (var kv in _items)
@@ -264,29 +251,11 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             return prototype;
         }
 
-        /// <summary>This backend's copy of the shared shadow-mode lookup: the declared mode for
-        /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
-        /// or it is short. The fallback must read identically in all three backends
-        /// (<see cref="ITileRenderBackend"/>).</summary>
-        /// <param name="materialIndex">The layer's global SLOT.</param>
-        private ShadowCastingMode ShadowModeFor(int materialIndex)
-            => (uint)materialIndex < (uint)_layerShadowModes.Count
-                ? _layerShadowModes[materialIndex]
-                : ShadowCastingMode.Off;
-
-        /// <summary>True when <paramref name="materialIndex"/>'s slot is visible.</summary>
-        /// <param name="materialIndex">The layer's global SLOT.</param>
-        private bool Visible(int materialIndex)
-            => (uint)materialIndex >= (uint)_layerVisible.Count || _layerVisible[materialIndex];
-
-        /// <inheritdoc cref="ITileRenderBackend.SetLayerVisible"/>
-        public void SetLayerVisible(int slot, bool visible)
+        /// <summary>ONE structural change for the whole slot, not one per entity, for the same reason
+        /// <see cref="RemoveItems"/> destroys its entities in a single call. A hidden item already carries
+        /// <c>DisableRendering</c>, so it is left alone.</summary>
+        protected override void ApplySlotGate(int slot, bool visible)
         {
-            if (IsDisposed || slot < 0) return;
-            while (_layerVisible.Count <= slot) _layerVisible.Add(true);
-            if (_layerVisible[slot] == visible) return; // unchanged ⇒ no structural change
-            _layerVisible[slot] = visible;
-
             int n = 0;
             foreach (var kv in _items) if (kv.Value.MaterialIndex == slot && !kv.Value.Hidden) n++;
             if (n == 0) return;
@@ -298,33 +267,30 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 foreach (var kv in _items)
                     if (kv.Value.MaterialIndex == slot && !kv.Value.Hidden) affected[w++] = kv.Value.Entity;
 
-                // ONE structural change for the whole slot, not one per entity — the same batching reason
-                // RemoveItems destroys its entities in a single DestroyEntity(NativeArray) call.
                 if (visible) _em.RemoveComponent<DisableRendering>(affected);
                 else         _em.AddComponent<DisableRendering>(affected);
             }
             finally { affected.Dispose(); }
         }
 
-        /// <inheritdoc cref="ITileRenderBackend.SetItemsVisible"/>
-        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
+        /// <summary>Gathers the entities whose <c>DisableRendering</c> tag moves: a slot-gated item already carries it, and an
+        /// entity that no longer exists has nothing to move. <see cref="EndItemVisibilityBatch"/> applies them.</summary>
+        protected override void ApplyItemVisibility(DrawItem item, bool visible, bool slotVisible)
         {
-            if (IsDisposed || _world is not { IsCreated: true }) return;
+            if (_world is not { IsCreated: true }) return;
+            if (slotVisible && _em.Exists(item.Entity)) _toggleList.Add(item.Entity);
+        }
 
-            // Only items whose drawn state changes need the tag moved: a slot-gated item already carries it.
-            _toggleList.Clear();
-            for (int i = 0; i < handles.Length; i++)
+        /// <summary>ONE structural change for the whole batch.</summary>
+        protected override void EndItemVisibilityBatch(bool visible)
+        {
+            try
             {
-                if (!_items.TryGetValue(handles[i], out var item) || item.Hidden == !visible) continue;
-                item.Hidden = !visible;
-                _items[handles[i]] = item;
-                if (Visible(item.MaterialIndex) && _em.Exists(item.Entity)) _toggleList.Add(item.Entity);
+                if (_world is not { IsCreated: true } || _toggleList.Length == 0) return;
+                if (visible) _em.RemoveComponent<DisableRendering>(_toggleList.AsArray());
+                else         _em.AddComponent<DisableRendering>(_toggleList.AsArray());
             }
-            if (_toggleList.Length == 0) return;
-
-            // ONE structural change for the whole batch.
-            if (visible) _em.RemoveComponent<DisableRendering>(_toggleList.AsArray());
-            else         _em.AddComponent<DisableRendering>(_toggleList.AsArray());
+            finally { _toggleList.Clear(); }
         }
 
         // ── Instrumentation counters ────────────────────────────────────────────────────────────
@@ -332,43 +298,13 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         /// <summary>Number of batched DestroyEntity structural changes performed by the LAST
         /// <see cref="RemoveItems"/> call (0 or 1 — the whole batch is one structural change). A shallow
-        /// loop-over-<see cref="RemoveItem"/> implementation leaves this 0. Pinned by
+        /// one-item-at-a-time implementation leaves this 0. Pinned by
         /// <c>EntitiesTileRendererTests.RemoveItems_DestroysWholeRecord_InOneBatchedStructuralChange</c>.</summary>
         internal int DestroyEntityBatchesLastRemove { get; private set; }
 
         /// <summary>Entities destroyed by the last <see cref="RemoveItems"/> batch (the record's
         /// layer entities plus any tile root the batch emptied).</summary>
         internal int EntitiesDestroyedLastRemove { get; private set; }
-
-        /// <summary>
-        /// XZ scene-space bounding box covering all live tile entities (each entity's
-        /// <see cref="LocalToWorld"/> translation, plus <paramref name="tileSizeWorld"/> for the tile's
-        /// mesh extent beyond its origin). Used by tests to frame a camera that sees all entities (there
-        /// are no child GameObjects to bound). Returns <c>default</c> when empty. Mirrors
-        /// <see cref="Backend.BRG.TileRenderer.ComputeSceneBounds"/>.
-        /// </summary>
-        public Bounds ComputeSceneBounds(float tileSizeWorld)
-        {
-            if (_items.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
-
-            float minX = float.MaxValue;
-            float maxX = float.MinValue;
-            float minZ = float.MaxValue;
-            float maxZ = float.MinValue;
-            foreach (var kv in _items)
-            {
-                if (!_em.Exists(kv.Value.Entity)) continue;
-                float3 p = _em.GetComponentData<LocalToWorld>(kv.Value.Entity).Position;
-                if (p.x < minX) minX = p.x;
-                if (p.x + tileSizeWorld > maxX) maxX = p.x + tileSizeWorld;
-                if (p.z < minZ) minZ = p.z;
-                if (p.z + tileSizeWorld > maxZ) maxZ = p.z + tileSizeWorld;
-            }
-            if (minX == float.MaxValue) return new Bounds(Vector3.zero, Vector3.zero);
-            float cx = (minX + maxX) * 0.5f;
-            float cz = (minZ + maxZ) * 0.5f;
-            return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
-        }
 
         // ── Draw item registration ────────────────────────────────────────────────────────────────
 
@@ -477,7 +413,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _tileRoots[tileId] = rec;
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec
+            _items[handle] = new DrawItem
             {
                 Entity = e, TileId = tileId, MeshId = meshId, MaterialIndex = materialIndex, Hidden = true
             };
@@ -485,40 +421,10 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         /// <summary>
-        /// Destroys the draw item's layer entity, and destroys the owning tile root once its last layer
-        /// is gone (so an evicted tile leaves no empty node in the Hierarchy). The Mesh asset is NOT
-        /// destroyed here — the caller (TileManager) owns the Mesh lifetime. Idempotent for unknown handles.
-        /// </summary>
-        public void RemoveItem(int handle)
-        {
-            if (IsDisposed) return;
-            if (!_items.TryGetValue(handle, out var item)) return;
-
-            if (_em.Exists(item.Entity)) _em.DestroyEntity(item.Entity);
-            _items.Remove(handle);
-            _eg.UnregisterMesh(item.MeshId); // stall #3: the ID route requires an explicit unregister
-            RegisteredMeshCount--;
-
-            if (_tileRoots.TryGetValue(item.TileId, out var root))
-            {
-                root.ChildCount--;
-                if (root.ChildCount <= 0)
-                {
-                    if (_em.Exists(root.Root)) _em.DestroyEntity(root.Root);
-                    _tileRoots.Remove(item.TileId);
-                }
-                else
-                {
-                    _tileRoots[item.TileId] = root;
-                }
-            }
-        }
-
-        /// <summary>
         /// Removes a whole record's layer entities (and any tile root the batch empties) in ONE
         /// <c>EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;)</c> structural change instead of L+1 — one
-        /// structural change per layer would make a burst of tile releases spike the frame. Same bookkeeping as
-        /// <see cref="RemoveItem"/> (child-count decrement, root-dies-at-0), just collected then destroyed once.
+        /// structural change per layer would make a burst of tile releases spike the frame. Bookkeeping: child-count
+        /// decrement, root-dies-at-0, collected then destroyed once.
         /// Idempotent for unknown handles. The Mesh assets are NOT destroyed here — TileManager owns them.
         /// </summary>
         public void RemoveItems(ReadOnlySpan<int> handles)

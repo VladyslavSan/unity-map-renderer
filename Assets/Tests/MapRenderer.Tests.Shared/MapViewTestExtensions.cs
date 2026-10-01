@@ -3,6 +3,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.View;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
@@ -236,7 +237,12 @@ namespace MapRenderer.Tests
         /// <summary>Scene-space bounds of the live tiles (for framing a snapshot camera). <paramref name="tileSizeWorld"/>
         /// is the tile's world extent at the current zoom.</summary>
         public static Bounds ComputeSceneBounds(this MapViewComponent view, float tileSizeWorld)
-            => view.TileManager != null ? view.TileManager.ComputeSceneBounds(tileSizeWorld) : default;
+        {
+            TileManager tm = view.TileManager;
+            if (tm == null) return default;
+            ITileRenderBackend backend = tm.BrgRenderer ?? (ITileRenderBackend)tm.EntitiesRenderer ?? tm.GameObjectRenderer;
+            return backend?.ComputeSceneBounds(tileSizeWorld) ?? default;
+        }
 
         /// <summary>True once every loaded tile has finished building (or is definitively absent).</summary>
         public static bool AllTilesSettled(this MapViewComponent view) => view.TileManager == null || view.TileManager.AllTilesSettled();

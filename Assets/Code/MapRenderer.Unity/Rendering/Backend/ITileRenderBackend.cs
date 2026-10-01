@@ -27,7 +27,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <paramref name="tileId"/> groups a tile's layers under one named parent for debugging
         /// (<see cref="BRG.TileRenderer"/> ignores it).
         /// </summary>
-        /// <returns>A handle for <see cref="RemoveItem"/>. The item stays hidden until <see cref="SetItemsVisible"/>.</returns>
+        /// <returns>A handle for <see cref="RemoveItems"/>. The item stays hidden until <see cref="SetItemsVisible"/>.</returns>
         int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId);
 
         /// <summary>
@@ -39,15 +39,12 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <param name="visible">True to show the items, false to hide them.</param>
         void SetItemsVisible(ReadOnlySpan<int> handles, bool visible);
 
-        /// <summary>Removes a previously registered draw item. Idempotent for unknown handles.</summary>
-        void RemoveItem(int handle);
-
         /// <summary>
         /// Removes many draw items in ONE backend operation where the backend supports it.
         /// <see cref="Entities.TileRenderer"/> destroys all affected entities (layers plus any emptied tile
         /// roots) in a single structural change instead of one per layer, so a release storm costs one
-        /// structural change. <see cref="BRG.TileRenderer"/> and <see cref="GameObjects.TileRenderer"/> fall back to a
-        /// <see cref="RemoveItem"/> loop. Idempotent for unknown handles.
+        /// structural change. <see cref="BRG.TileRenderer"/> and <see cref="GameObjects.TileRenderer"/> remove one item
+        /// at a time. Idempotent for unknown handles.
         /// </summary>
         void RemoveItems(ReadOnlySpan<int> handles);
 
@@ -77,12 +74,5 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// `docs/tile-pipeline-design.md`). A surviving slot keeps its draw gate; a slot past the new width
         /// loses it. The caller re-pushes gate values (<c>TileManager.PushLayerDrawGates</c>).</summary>
         void SetLayerMaterials(IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes);
-
-        /// <summary>
-        /// XZ scene-space bounding box covering all live tile draw items (each draw item's translation,
-        /// plus <paramref name="tileSizeWorld"/> for the tile's mesh extent beyond its origin). Used by
-        /// tests to frame a camera that sees all rendered tiles. Returns <c>default</c> when empty.
-        /// </summary>
-        Bounds ComputeSceneBounds(float tileSizeWorld);
     }
 }

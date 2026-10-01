@@ -18,32 +18,25 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
     /// slot-aligned with the instanced backends; a null symbol/background slot needs no guard here.
     /// Non-local invariant: <c>TileManager</c> owns the Mesh assets, so this backend destroys GameObjects only.
     /// </summary>
-    internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
+    internal sealed class TileRenderer : TileRenderBackendBase<TileRenderer.DrawItem>, ITileRenderBackend
     {
         // One draw item = one layer child GameObject. Internal because the internal _items field
         // (read by test-assembly extensions) cannot be more accessible than its type.
-        internal struct ItemRec
+        internal struct DrawItem : IDrawItem
         {
             public MeshNode Node;
             public TileId   TileId;   // which tile container this layer hangs under
-            public int      MaterialIndex; // the layer slot this child was bound at — lets
-                                            // SetLayerMaterials find every item a retired slot must retire
-            public bool     Hidden;   // item-level flag (SetItemsVisible); drawn only when also slot-visible
+            public int      MaterialIndex { get; set; } // the layer slot this child was bound at — lets
+                                                        // SetLayerMaterials find every item a retired slot must retire
+            public bool     Hidden        { get; set; } // item-level flag (SetItemsVisible); drawn only when also slot-visible
         }
 
         private readonly List<Material> _layerMaterials = new List<Material>();
         // Per-layer style id (e.g. "water", "road-primary"), parallel to _layerMaterials. Names each layer
         // GameObject after its style layer in the Hierarchy; empty/short ⇒ fall back to the material name.
         private readonly List<string>   _layerNames     = new List<string>();
-        // Per-layer IRenderLayer.CastShadows, parallel to _layerMaterials, verbatim from TileManager.LayerShadowModes.
-        // Absent or short ⇒ Off, the same fallback as the other two backends.
-        private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
-        // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
-        // slot's children are drawn. Absent or short ⇒ visible, identically in all three backends.
-        private readonly List<bool> _layerVisible = new List<bool>();
-        // internal (not private): the test assembly's GameObjectTileRendererTestExtensions reads these
-        // for observability, kept off the public surface.
-        internal readonly Dictionary<int, ItemRec> _items = new Dictionary<int, ItemRec>();
+        // _items (in the base) and _tree are internal so the test assembly's GameObjectTileRendererTestExtensions can read
+        // them, kept off the public surface.
 
         // The shared per-tile container tree. This backend owns only the per-layer children; the containers,
         // their floating-origin transforms and their refcount teardown belong to the tree.
@@ -66,51 +59,21 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         {
             var node = new MeshNode(PooledLayerName);
             node.GameObject.hideFlags       = HideFlags.DontSave;
-            node.Renderer.enabled           = false; // AddTileLayer enables once mesh + material are bound
+            node.Renderer.enabled           = false; // born hidden: SetItemsVisible enables it
             return node;
         }
 
-        /// <summary>This backend's copy of the shared shadow-mode lookup: the declared mode for
-        /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
-        /// or it is short. The fallback must read identically in all three backends
-        /// (<see cref="ITileRenderBackend"/>).</summary>
-        /// <param name="materialIndex">The layer's global SLOT.</param>
-        private ShadowCastingMode ShadowModeFor(int materialIndex)
-            => (uint)materialIndex < (uint)_layerShadowModes.Count
-                ? _layerShadowModes[materialIndex]
-                : ShadowCastingMode.Off;
-
-        /// <summary>True when <paramref name="materialIndex"/>'s slot is visible.</summary>
-        /// <param name="materialIndex">The layer's global SLOT.</param>
-        private bool Visible(int materialIndex)
-            => (uint)materialIndex >= (uint)_layerVisible.Count || _layerVisible[materialIndex];
-
-        /// <inheritdoc cref="ITileRenderBackend.SetLayerVisible"/>
-        public void SetLayerVisible(int slot, bool visible)
+        /// <summary>Each child is its own <c>Renderer.enabled</c> write.</summary>
+        protected override void ApplySlotGate(int slot, bool visible)
         {
-            if (IsDisposed || slot < 0) return;
-            while (_layerVisible.Count <= slot) _layerVisible.Add(true);
-            if (_layerVisible[slot] == visible) return; // unchanged ⇒ no walk over the items
-            _layerVisible[slot] = visible;
-
             foreach (var kv in _items)
                 if (kv.Value.MaterialIndex == slot)
                     kv.Value.Node.Renderer.enabled = visible && !kv.Value.Hidden;
         }
 
-        /// <summary>Each child is its own <c>Renderer.enabled</c> write, so the batch is just the loop.
-        /// See <see cref="ITileRenderBackend.SetItemsVisible"/>.</summary>
-        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
-        {
-            if (IsDisposed) return;
-            for (int i = 0; i < handles.Length; i++)
-            {
-                if (!_items.TryGetValue(handles[i], out var item)) continue;
-                item.Hidden = !visible;
-                _items[handles[i]] = item;
-                item.Node.Renderer.enabled = visible && Visible(item.MaterialIndex);
-            }
-        }
+        /// <summary>Each child is its own <c>Renderer.enabled</c> write, so the batch is just the loop.</summary>
+        protected override void ApplyItemVisibility(DrawItem item, bool visible, bool slotVisible)
+            => item.Node.Renderer.enabled = visible && slotVisible;
 
         // Placeholder name for a freshly built node; AttachAt renames it per style layer on every rent.
         private const string PooledLayerName = "tile-layer";
@@ -120,13 +83,12 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             IReadOnlyList<Material> layerMaterials,
             IReadOnlyList<string> layerNames = null,
             IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
+            : base(layerShadowModes)
         {
             if (layerMaterials == null) throw new ArgumentNullException(nameof(layerMaterials));
             for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
             if (layerNames != null)
                 for (int i = 0; i < layerNames.Count; i++) _layerNames.Add(layerNames[i]);
-            if (layerShadowModes != null)
-                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             _tree     = new SceneTileTree("MapTiles (GameObject backend)");
             _poolRoot = new GameObject("(layer pool)") { hideFlags = HideFlags.DontSave };
@@ -149,15 +111,6 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
         // Test-only observability (DrawItemCount, ContainerCount, Root, …) lives in the test assembly's
         // GameObjectTileRendererTestExtensions, which read _items/_tree and have no post-dispose guard.
-
-        /// <summary>
-        /// XZ scene-space bounding box covering all live tile containers (each container's position, plus
-        /// <paramref name="tileSizeWorld"/> for the tile's mesh extent beyond its origin). Returns
-        /// <c>default</c> when empty. Mirrors <see cref="Entities.TileRenderer.ComputeSceneBounds"/>.
-        /// It is <see cref="ITileRenderBackend"/> surface, so it stays here. It does not answer after
-        /// disposal: <c>DoDispose</c> nulls the tree, so a call throws, which is the contract.
-        /// </summary>
-        public Bounds ComputeSceneBounds(float tileSizeWorld) => _tree.ComputeSceneBounds(tileSizeWorld);
 
         // ── Draw item registration ────────────────────────────────────────────────────────────────
 
@@ -197,7 +150,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             _tree.AddChild(tileId);
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec { Node = node, TileId = tileId, MaterialIndex = materialIndex, Hidden = true };
+            _items[handle] = new DrawItem { Node = node, TileId = tileId, MaterialIndex = materialIndex, Hidden = true };
             return handle;
         }
 
@@ -228,12 +181,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             for (int i = 0; i < _layerNames.Count && i < layerMaterials.Count; i++)
                 if (layerMaterials[i] == null) _layerNames[i] = null;
 
-            if (_layerVisible.Count > layerMaterials.Count)
-                _layerVisible.RemoveRange(layerMaterials.Count, _layerVisible.Count - layerMaterials.Count);
-
-            _layerShadowModes.Clear();
-            if (layerShadowModes != null)
-                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
+            ReplaceSlotLists(layerMaterials.Count, layerShadowModes);
 
             if (retired.Count > 0)
                 RemoveItems(retired.ToArray());
@@ -244,7 +192,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// the tree destroys once its last layer is gone). The Mesh asset is NOT destroyed here — the caller
         /// (TileManager) owns the Mesh lifetime. Idempotent for unknown handles.
         /// </summary>
-        public void RemoveItem(int handle)
+        private void RemoveItem(int handle)
         {
             if (IsDisposed) return;
             if (!_items.TryGetValue(handle, out var item)) return;

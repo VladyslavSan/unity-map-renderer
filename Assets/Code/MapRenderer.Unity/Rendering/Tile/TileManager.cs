@@ -1103,11 +1103,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             return all?.ToArray();
         }
 
-        /// <summary>Test-only: scene-space bounds of all live tile draw items, via the instanced backend.
-        /// Returns <c>default</c> if there's no backend or no tiles.</summary>
-        internal Bounds ComputeSceneBounds(float tileSizeWorld)
-            => _instanced != null ? _instanced.ComputeSceneBounds(tileSizeWorld) : default;
-
         /// <summary>Test-only: true once every loaded tile, in any role, has finished building and both desired lists
         /// are empty — a <c>_loaded</c>-only check would miss cap-deferred tiles, which have no record until admitted.</summary>
         internal bool AllTilesSettled()

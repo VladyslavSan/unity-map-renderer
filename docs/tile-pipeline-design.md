@@ -174,14 +174,14 @@ casting lives in `RenderFilterSettings` — an `ISharedComponentData`, so writin
 a structural change per layer, which is the cost this path exists to avoid. Both prototypes share one
 `RenderMeshArray` **value**, inert and ID-overridden, so no instance ever creates a per-entity array.
 Registration obliges its mirror:
-`RemoveItem` and `RemoveItems` must call `UnregisterMesh`, or EG's registry grows without bound holding
+`RemoveItems` must call `UnregisterMesh`, or EG's registry grows without bound holding
 destroyed meshes' ids. Materials unregister at disposal, and only while the world is still alive — world
 disposal tears down EG's registries wholesale, so that call is for symmetry rather than correctness.
 
 **On the way out**, `ITileRenderBackend.RemoveItems` removes many draw items in one backend operation. The Entities backend
 implements it as a single `EntityManager.DestroyEntity` over a persistent scratch list holding every layer
 entity plus any tile root the batch emptied — one structural change per released record rather than L+1. BRG
-and GameObjects fall back to a `RemoveItem` loop, and every implementation is idempotent for an unknown
+and GameObjects remove one item at a time, and every implementation is idempotent for an unknown
 handle. `RenderTeardownRecord` unregisters through it. With a release budget of 4 and 30 layers a worst frame
 costs at most 4 structural changes instead of 450.
 
@@ -639,10 +639,10 @@ The three differ in mechanism and must agree on outcome — the same shape `IRen
 | GameObjects | `Renderer.enabled = false` on that slot's layer children | one write per item, on change only |
 | Entities | `DisableRendering` added to that slot's entities | one batched structural change, on change only |
 
-`AddTileLayer` consults the gate too: tiles keep finishing while a layer is gated, so an item registered into
-an already-gated slot must arrive undrawn. BRG gets that from reading the gate at emit time; the other two
-apply it per item as they build it. The gate is two-way — lifting it re-enables the slot — and that return
-trip is the half a "the layer disappears" test cannot see, so each backend's tooth asserts it explicitly.
+An item is born hidden, so one registered into an already-gated slot arrives undrawn: tiles keep finishing while a
+layer is gated. The gate applies when the item is shown (`SetItemsVisible` passes whether its slot is visible), and
+BRG reads it at emit time. The gate is two-way — lifting it re-enables the slot — and that return trip is the half a
+"the layer disappears" test cannot see, so one contract test asserts it for every backend.
 
 **No map fragment pass reads fade, and a structure fence keeps it that way.** A discard on `_Opacity` would be
 dead work, since a gated layer never reaches a fragment. The rule is enforced structurally rather than by a
@@ -765,8 +765,8 @@ snapshot per tile build, on the load path.
 `TryGetFetchSource`), `LayerSkipReason`, `ZoomStyleApplier` (`BindOpacity`, `EffectiveOpacityIsZero`,
 `VisibleOpacityEpsilon`), `LayerDrawOrder.QueueFor`, `IFadeableRenderLayer`,
 `FillExtrusionRenderLayer` (`TryCreate`, `FadesGradually`).
-`MapRenderer.Unity/Rendering/Backend/`: `ITileRenderBackend` (`AddTileLayer`, `RemoveItem`, `RemoveItems`,
-`SetLayerMaterials`, `SetLayerVisible`, `SetItemsVisible`), `Entities/TileRenderer` (the layer prototypes, `RegisterMesh` /
+`MapRenderer.Unity/Rendering/Backend/`: `ITileRenderBackend` (`AddTileLayer`, `RemoveItems`,
+`SetLayerMaterials`, `SetLayerVisible`, `SetItemsVisible`), `TileRenderBackendBase` (the slot gate, the shadow list and the hidden flag), `Entities/TileRenderer` (the layer prototypes, `RegisterMesh` /
 `UnregisterMesh`), `BRG/TileRenderer` (`ComputeEmitOrder`, `DrawItem.LayerRenderQueue`),
 `GameObjects/TileRenderer`.
 `MapRenderer.Unity/Rendering/Materials/`: `MapMaterialSet.Validate`, `MaterialFactory`,

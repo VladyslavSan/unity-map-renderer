@@ -21,7 +21,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
     /// Materials are registered once from the <see cref="RenderLayerSet"/>. Draw commands go out in
     /// ascending renderQueue order, which is the painter's layer order.
     /// </summary>
-    internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
+    internal sealed class TileRenderer : TileRenderBackendBase<TileRenderer.DrawItem>, ITileRenderBackend
     {
         // ── Reflected-once packing plan ───────────────────────────────────────────────────────
         // Per-frame pack indexes MaterialEntries[] by index only: no reflection, boxing or allocation.
@@ -31,14 +31,14 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         // ── Per-draw-item record ─────────────────────────────────────────────────────────────
 
-        internal struct DrawItem
+        internal struct DrawItem : IDrawItem
         {
             public BatchMeshID     MeshId;
             public BatchMaterialID MatId;
             public int             LayerRenderQueue;   // material.renderQueue — sort key
             public double3         TileOriginRender;   // SW-corner projected render origin (Mercator: (mercX,0,mercZ))
-            public int             MaterialIndex;      // index into _layerMaterials for prop readback
-            public bool            Hidden;             // item-level flag (SetItemsVisible); emits only when also slot-visible
+            public int             MaterialIndex { get; set; }      // index into _layerMaterials for prop readback
+            public bool            Hidden        { get; set; }      // item-level flag (SetItemsVisible); emits only when also slot-visible
         }
 
         // ── BRG state ─────────────────────────────────────────────────────────────────────────
@@ -56,8 +56,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // Reset to 0 by the caller if needed. Public so tests can probe without subclassing.
         internal int CullingCallCount;
 
-        // Handle → DrawItem  (stable for handle-based removal API).
-        internal readonly Dictionary<int, DrawItem> _items = new Dictionary<int, DrawItem>(64);
         private int _nextHandle;
 
         // Per-layer materials in SLOT order (index == materialIndex == slot); draw order rides each
@@ -82,14 +80,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // consecutive same-shadow-mode commands). Reused each cull → no per-frame managed alloc.
         private readonly List<BatchDrawRange> _drawRanges = new List<BatchDrawRange>(8);
 
-        // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
-        // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
-        private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
-
-        // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
-        // slot emits a draw command. Absent or short ⇒ visible, identically in all three backends.
-        private readonly List<bool> _layerVisible = new List<bool>();
-
         // CPU-side instance data (SoA layout). Grown on demand, never shrunk — no per-frame alloc.
         internal float[] _cpuBuffer = Array.Empty<float>();
 
@@ -108,11 +98,9 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         public TileRenderer(
             System.Collections.Generic.IReadOnlyList<Material> layerMaterials,
             System.Collections.Generic.IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
+            : base(layerShadowModes)
         {
             _brg = new BatchRendererGroup(OnPerformCulling, IntPtr.Zero);
-
-            if (layerShadowModes != null)
-                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             for (int i = 0; i < layerMaterials.Count; i++)
             {
@@ -152,12 +140,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             _layerMaterials.Clear();
             _layerMaterials.AddRange(next);
 
-            if (_layerVisible.Count > layerMaterials.Count)
-                _layerVisible.RemoveRange(layerMaterials.Count, _layerVisible.Count - layerMaterials.Count);
-
-            _layerShadowModes.Clear();
-            if (layerShadowModes != null)
-                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
+            ReplaceSlotLists(layerMaterials.Count, layerShadowModes);
 
             // A retired slot's stale DrawItems are removed here (dict-entry drop only) — see
             // docs/tile-pipeline-design.md for why and how this differs from the other two backends.
@@ -174,40 +157,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         // Test-only read queries (DrawItemCount, HasBuffer, GetInstancePropValue, …) live in the test
         // assembly's BrgTileRendererTestExtensions. CullingCallCount stays here because this class writes it.
-
-        /// <summary>
-        /// Returns the XZ scene-space bounding box that covers all registered tile instances, read from the
-        /// packed O2W translations; <paramref name="tileSizeWorld"/> adds each tile's extent beyond its origin.
-        /// BRG has no child GameObjects, so child-bounds framing does not apply. Returns an empty
-        /// <see cref="Bounds"/> when no draw items are registered or the buffer is empty.
-        /// </summary>
-        public Bounds ComputeSceneBounds(float tileSizeWorld)
-        {
-            int count = _sortedItems.Count;
-            if (count == 0 || _cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance)
-                return new Bounds(Vector3.zero, Vector3.zero);
-
-            float minX = float.MaxValue;
-            float maxX = float.MinValue;
-            float minZ = float.MaxValue;
-            float maxZ = float.MinValue;
-
-            for (int si = 0; si < count; si++)
-            {
-                // Read tile origin from packed O2W buffer: tx = b+9, tz = b+11.
-                float px = _cpuBuffer[si * 12 + 9];
-                float pz = _cpuBuffer[si * 12 + 11];
-                if (px < minX) minX = px;
-                if (px + tileSizeWorld > maxX) maxX = px + tileSizeWorld;
-                if (pz < minZ) minZ = pz;
-                if (pz + tileSizeWorld > maxZ) maxZ = pz + tileSizeWorld;
-            }
-
-            if (minX == float.MaxValue) return new Bounds(Vector3.zero, Vector3.zero);
-            float cx = (minX + maxX) * 0.5f;
-            float cz = (minZ + maxZ) * 0.5f;
-            return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
-        }
 
         // ── Draw item registration ────────────────────────────────────────────────────────────
 
@@ -243,29 +192,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 Hidden           = true,
             };
             return handle;
-        }
-
-        /// <summary>
-        /// Removes a previously registered draw item. The Mesh is NOT unregistered here — the caller
-        /// (TileManager) destroys the Mesh asset separately. Idempotent for unknown handles.
-        /// </summary>
-        public void RemoveItem(int handle)
-        {
-            if (IsDisposed) return;
-            _items.Remove(handle);
-        }
-
-        /// <summary>BRG visibility is one flag write per item, so the batch is just the loop.
-        /// See <see cref="ITileRenderBackend.SetItemsVisible"/>.</summary>
-        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
-        {
-            if (IsDisposed) return;
-            for (int i = 0; i < handles.Length; i++)
-            {
-                if (!_items.TryGetValue(handles[i], out DrawItem item)) continue;
-                item.Hidden = !visible;
-                _items[handles[i]] = item;
-            }
         }
 
         /// <summary>BRG removal is a plain dict remove, so the batch is just the loop — no structural-change
@@ -574,7 +500,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// <summary>
         /// Writes into <paramref name="dst"/> the index (packed instance-buffer slot) of each
         /// <see cref="_sortedItems"/> entry whose handle is still live and whose slot is visible. Handles
-        /// removed by <see cref="RemoveItem"/> since the last <see cref="Rebuild"/> are skipped, so no stale
+        /// removed by <see cref="RemoveItems"/> since the last <see cref="Rebuild"/> are skipped, so no stale
         /// slot emits an uninitialized command (the BRG "MeshID &lt;null&gt;" error). Internal for tests.
         /// </summary>
         /// <param name="dst">Reused destination list; cleared first.</param>
@@ -595,31 +521,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             return dst.Count;
         }
 
-        /// <summary>This backend's copy of the shared shadow-mode lookup: the declared mode for
-        /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
-        /// or it is short. The fallback must read identically in all three backends
-        /// (<see cref="ITileRenderBackend"/>).</summary>
-        /// <param name="materialIndex">The layer's global SLOT.</param>
-        private ShadowCastingMode ShadowModeFor(int materialIndex)
-            => (uint)materialIndex < (uint)_layerShadowModes.Count
-                ? _layerShadowModes[materialIndex]
-                : ShadowCastingMode.Off;
+        /// <summary>The slot gate costs nothing here: <see cref="ComputeEmitOrder"/> reads it per item at every cull.</summary>
+        protected override void ApplySlotGate(int slot, bool visible) { }
 
-        /// <summary>True when <paramref name="materialIndex"/>'s slot is visible, so it emits a draw
-        /// command in every view it is not otherwise excluded from. One list read per item per cull — see
-        /// <see cref="ComputeEmitOrder"/>.</summary>
-        /// <param name="materialIndex">The layer's global SLOT.</param>
-        private bool Visible(int materialIndex)
-            => (uint)materialIndex >= (uint)_layerVisible.Count || _layerVisible[materialIndex];
-
-        /// <inheritdoc cref="ITileRenderBackend.SetLayerVisible"/>
-        public void SetLayerVisible(int slot, bool visible)
-        {
-            if (IsDisposed || slot < 0) return;
-            while (_layerVisible.Count <= slot) _layerVisible.Add(true);
-            if (_layerVisible[slot] == visible) return; // unchanged ⇒ nothing to update
-            _layerVisible[slot] = visible;
-        }
+        /// <summary>The hidden flag costs nothing here: <see cref="ComputeEmitOrder"/> reads it per item at every cull.</summary>
+        protected override void ApplyItemVisibility(DrawItem item, bool visible, bool slotVisible) { }
 
         /// <summary>
         /// Groups <paramref name="emitOrder"/> into <paramref name="dst"/>, one <see cref="BatchDrawRange"/> per

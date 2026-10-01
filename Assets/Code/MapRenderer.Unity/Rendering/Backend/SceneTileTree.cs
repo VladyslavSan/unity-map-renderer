@@ -150,33 +150,6 @@ namespace MapRenderer.Unity.Rendering.Backend
             }
         }
 
-        /// <summary>XZ scene-space bounding box covering every live tile container's position, expanded by
-        /// <paramref name="tileSizeWorld"/> for the tile's mesh extent beyond its origin. Returns a
-        /// zero-sized box centered at the origin when empty.</summary>
-        public Bounds ComputeSceneBounds(float tileSizeWorld)
-        {
-            if (_nodes.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
-
-            float minX = float.MaxValue;
-            float maxX = float.MinValue;
-            float minZ = float.MaxValue;
-            float maxZ = float.MinValue;
-            foreach (var kv in _nodes)
-            {
-                if (kv.Value.Go == null) continue;
-                Vector3 p                            = kv.Value.Go.transform.position;
-                if (p.x                 < minX) minX = p.x;
-                if (p.x + tileSizeWorld > maxX) maxX = p.x + tileSizeWorld;
-                if (p.z                 < minZ) minZ = p.z;
-                if (p.z + tileSizeWorld > maxZ) maxZ = p.z + tileSizeWorld;
-            }
-
-            if (minX == float.MaxValue) return new Bounds(Vector3.zero, Vector3.zero);
-            float cx = (minX + maxX) * 0.5f;
-            float cz = (minZ + maxZ) * 0.5f;
-            return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
-        }
-
         /// <summary>Destroys the root (and with it every LIVE container and its callers' children), then the
         /// pool's detached containers. Runs at most once — <see cref="VerifiedDisposable"/> owns the
         /// idempotency guard, and adds the Editor-only finalizer that reports a tree dropped without
