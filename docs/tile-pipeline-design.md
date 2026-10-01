@@ -244,9 +244,9 @@ switch shows tiles that are already registered.
   the cover. P is empty without the prepared-tile cache, because a released prepared tile goes there.
 - **Hidden registration.** A `Prepare` record builds like a `Display` record and registers every layer hidden. It stays in `_loaded`,
   so eviction cannot reach it. A switch is a show batch: no fetch, no build, no registration.
-- **Keep set K.** A finished `Prepare` record stays while its tile is in K (`TileSelection.Keep`). K is P plus the tiles
-  of P computed with the lead `p + ZoomLevelHysteresis`, so K always holds P. K changes no role, because a `Prepare`
-  record already holds while its tile is in P. A zoom jitter across the edge of P therefore releases nothing and rebuilds
+- **Keep set K.** A record that has no other role stays as `Prepare` while its tile is in K (`TileSelection.Keep`),
+  whatever role it had before; one still loading finishes. K is P plus the tiles of P computed with the lead
+  `p + ZoomLevelHysteresis`, so K always holds P. A parent that a level switch swaps out stays ready while it is in K. A zoom jitter across the edge of P therefore releases nothing and rebuilds
   nothing for the tiles of a level switch. A far tile near its LOD flip can still be released and rebuilt by a jitter. Lateral pans
   are not covered: they churn the set as cover churn does.
 - **An in-flight `Prepare` record is never cancelled** for leaving P or K. It finishes, and if it still has no role it is released to the

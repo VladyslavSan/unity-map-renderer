@@ -1938,8 +1938,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>True iff the record has a reason to stay loaded, and which. A tile in the cover is shown (Display). A shown tile
         /// that left it keeps a relative in it as a Hold. A hidden tile between a Hold and a cover tile is a Bridge. A tile in P is
-        /// prepared, and a prepared record stays while it is unfinished or inside K. An in-flight prepared record is never
-        /// cancelled for leaving P.</summary>
+        /// prepared. A record that has no other role stays while its tile is in K, and one still loading finishes. An unfinished
+        /// prepared record is never cancelled for leaving P.</summary>
         private bool TryResolveRole(in LoadedKey key, in LoadedTile lt, out TileRole role)
         {
             TileId tile = key.Tile;
@@ -1951,7 +1951,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             role = TileRole.Prepare;
             if (_preloadSet.Contains(key)) return true;
-            return lt.Role == TileRole.Prepare && ((!lt.Built && !lt.WaitingRetry) || _keepSet.Contains(key));
+            return (lt.Role == TileRole.Prepare && !lt.Built && !lt.WaitingRetry) || _keepSet.Contains(key);
         }
 
         /// <summary>Gives every record its role, and one with no role joins the deferred-release queue.

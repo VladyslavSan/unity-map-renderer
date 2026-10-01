@@ -238,10 +238,13 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.CollectLoadedTileIds(drawn);
                 AssertPreparedIsTheLevelFiveCover(view, "somewhere new, in flight");
                 HashSet<TileId> preparedBeforeSwitch = PreparedTiles(view);
-                SetZoom(view, 5.06);
+                SetZoom(view, 5.31); // past the parents' preload lead, inside the keep set: the swapped-out parents stay ready
                 view.LateUpdate();
                 gate.Set();
                 yield return PumpUntilSettledAcrossFrames(view);
+                var kept = new List<LoadedTileKey>();
+                view.TileManager.CollectLoadedTileKeys(kept);
+                Assert.IsTrue(kept.Exists(k => k.Tile.Z == 4 && !k.Shown), "the swapped-out parents stay loaded, hidden, inside the keep set.");
                 Assert.Greater(view.LoadedTileCount(), 0, "the switch draws level 5.");
                 view.CollectLoadedTileIds(drawn);
                 Assert.IsTrue(drawn.TrueForAll(preparedBeforeSwitch.Contains), "every tile the switch draws was prepared before it.");
