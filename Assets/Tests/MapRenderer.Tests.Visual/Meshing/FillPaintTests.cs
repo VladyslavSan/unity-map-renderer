@@ -16,6 +16,7 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Style;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Rendering.Materials;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -903,6 +904,101 @@ namespace MapRenderer.Tests.Visual
             UnityEngine.Debug.Log($"[FillBoundaryBand] measured outline+ramp width: diagonal={diagonal} w={rimWidth:F4} px");
             Assert.That(rimWidth, Is.EqualTo(3.0).Within(0.35),
                 $"a 1 logical px outline plus the 1 px ramp must measure 3.0 px perpendicular; got {rimWidth:F3}.");
+        }
+
+        // ── The outline is whole where a band quad twists ─────────────────────────────────────────────
+        //
+        // Non-obvious why: an edge shorter than the outline can twist its band quad: the outer edge crosses, and one
+        // triangle winds backwards. Cull Off draws every triangle, so it is the reference; Cull Back, the shipped state, must
+        // draw the same outline. Only the ramp may differ: a triangle drawn twice composites its partial pixels twice.
+        [Test]
+        public void ATwistedBandQuad_DrawsTheSameOutlineWithCullBackAsWithoutCulling()
+        {
+            // A jagged tip, 5 device px to the unit at a pixel ratio of 4: the outline is wider than the tip's short edges, so their quads
+            // twist, and the quads beside them leave a wedge of the outline uncovered.
+            const double unit = 5.0 / (4.0 * 512.0);
+            var tip = new[]
+            {
+                new double2(3.4, 0.1), new double2(0.4, 1.8), new double2(-2.0, 1.8), new double2(-2.2, -0.7), new double2(-1.9, -0.6),
+                new double2(-2.5, -1.1), new double2(-1.0, -3.6), new double2(3.6, -0.1),
+            };
+            for (int i = 0; i < tip.Length; i++) tip[i] = new double2(0.5 + tip[i].x * unit, 0.5 + tip[i].y * unit);
+            string tipFeature = PolygonFeature(tip);
+
+            VisualFrame Frame(CullMode cull)
+            {
+                using var scene = VisualScene.New()
+                    .RenderMode(MapRenderer.Unity.Rendering.Materials.RenderMode.Unlit)
+                    .Source("shapes", GeoJson.FeatureCollection(GeoJsonTestFixtures.Collection(tipFeature)))
+                    .Layer(VisualLayer.Fill("shapes-fill").Source("shapes").Color("#ffffff").OutlineColor("#ff0000"))
+                    .Camera(LookAt(), zoom: BandTile.Z)
+                    .Configure(config =>
+                    {
+                        config.DevicePixelRatio = 4.0; // an outline wider than the tip's short edges
+                        MapMaterialSet set = UnityEngine.Object.Instantiate(config.MaterialSet);
+                        set.FillMaterial = UnityEngine.Object.Instantiate(set.FillMaterial);
+                        set.FillMaterial.SetCull(cull);
+                        config.MaterialSet = set;
+                    });
+                return scene.Render(SnapPx);
+            }
+
+            VisualFrame shipped   = Frame(CullMode.Back);
+            VisualFrame reference = Frame(CullMode.Off);
+            if (!Classify(shipped, out Ink[] _)) Assert.Ignore(NoGpuMessage);
+
+            Color32[] a = shipped.Pixels.Pixels;
+            Color32[] b = reference.Pixels.Pixels;
+            int differing = 0;
+            for (int i = 0; i < a.Length; i++)
+            {
+                int channelDelta = math.max(math.abs(a[i].r - b[i].r), math.max(math.abs(a[i].g - b[i].g), math.abs(a[i].b - b[i].b)));
+                if (channelDelta > 128) differing++; // a partial pixel drawn twice moves less than half of the outline's contrast
+            }
+
+            Assert.AreEqual(0, differing,
+                $"{differing} pixels of the Cull Back frame lack outline that the Cull Off frame draws. A quad whose outer edge " +
+                "crosses winds one triangle backwards, and Cull Back drops that wedge of the outline unless the reverse-wound " +
+                "triangle covers it.");
+        }
+
+        // ── The outline is round at a sharp tip ────────────────────────────────────────────────────────
+        //
+        // Non-obvious why: a clipped miter leaves the sides of a sharp tip's outline thin. The outline there must be as thick as it is
+        // along the long edges, so a probe beside the apex reads outline colour.
+        [Test]
+        public void ASharpTipHasAnOutlineAsThickAsItsEdgesBesideTheApex()
+        {
+            const double pixelRatio = 8.0;
+            const double unit = 1.0 / (pixelRatio * SnapPx); // one device pixel, in tile fractions
+            double2 Pixel(double x, double y) => new double2(0.5 + x * unit, 0.5 + y * unit);
+            string tip = PolygonFeature(Pixel(-100, 0), Pixel(100, 17.6), Pixel(100, -17.6));
+
+            using var scene = VisualScene.New()
+                .RenderMode(MapRenderer.Unity.Rendering.Materials.RenderMode.Unlit)
+                .Source("shapes", GeoJson.FeatureCollection(GeoJsonTestFixtures.Collection(tip)))
+                .Layer(VisualLayer.Fill("shapes-fill").Source("shapes").Color("#ffffff").OutlineColor("#ff0000"))
+                .Camera(LookAt(), zoom: BandTile.Z)
+                .Configure(config => config.DevicePixelRatio = pixelRatio);
+            VisualFrame frame = scene.Render(SnapPx);
+            if (!Classify(frame, out Ink[] _)) Assert.Ignore(NoGpuMessage);
+
+            Color32[] px = frame.Pixels.Pixels;
+            bool IsOutline(int x, int y) { Color32 c = px[y * frame.Width + x]; return c.r > 180 && c.g < 100 && c.b < 100; }
+
+            // The outline's thickness along the long edge, read at the centre column: red pixels from the first one above the fill.
+            int centre = SnapPx / 2;
+            int row = centre;
+            while (row < frame.Height && !IsOutline(centre, row)) row++;
+            int thickness = 0;
+            while (row + thickness < frame.Height && IsOutline(centre, row + thickness)) thickness++;
+            Assert.Greater(thickness, 4, "precondition: the outline is several pixels thick along the edge, or the probe below means nothing.");
+
+            // Beside the apex, three quarters of that far from it, on both sides: the round tip draws outline there, a clipped miter does not.
+            int apexX = centre - 100;
+            int probe = thickness * 3 / 4;
+            Assert.IsTrue(IsOutline(apexX, centre + probe) && IsOutline(apexX, centre - probe),
+                $"the outline beside the sharp apex is thinner than the {thickness} px it has along the edges.");
         }
 
         // ── The lemma, on the composited frame ────────────────────────────────────────────────────────

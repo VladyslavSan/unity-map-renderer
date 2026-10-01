@@ -1041,15 +1041,7 @@ namespace MapRenderer.Tests.Meshing
             {
                 Assert.IsTrue(buffers.IsCreated, $"{fixtureName}: jobified pipeline produced no buffers");
 
-                int indexCount = buffers.TriangleIndices.Length;
-                var tris = new List<(double2 a, double2 b, double2 c)>(indexCount / 3);
-                for (int i = 0; i + 2 < indexCount; i += 3)
-                {
-                    double2 a = buffers.TileVertices[buffers.TriangleIndices[i]];
-                    double2 b = buffers.TileVertices[buffers.TriangleIndices[i + 1]];
-                    double2 c = buffers.TileVertices[buffers.TriangleIndices[i + 2]];
-                    tris.Add((a, b, c));
-                }
+                var tris = MeshCoverageValidator.InteriorTriangles(in buffers);
 
                 return MeshCoverageValidator.ValidateTriangulation(
                     groundTruthPolys, tris, buffers.Counts[0].ForceClipCount, (int)extent);
@@ -1079,7 +1071,11 @@ namespace MapRenderer.Tests.Meshing
             var groundTruth = new[] { new Polygon(outer) };
             groundTruth[0].Holes.Add(hole);
 
-            var rep = MeshCoverageValidator.ValidateTriangulation(groundTruth, ToTriangles(res), res.ForceClips, extent: 1000);
+            // A zero-area triangle inside the hole (a round fan's point triangle) covers no cell.
+            var tris = ToTriangles(res);
+            tris.Add((new double2(500, 500), new double2(500, 500), new double2(500, 500)));
+            var rep = MeshCoverageValidator.ValidateTriangulation(groundTruth, tris, res.ForceClips, extent: 1000);
+            Assert.AreEqual(0, rep.ExtraCells, "a zero-area triangle must cover no cell");
             Assert.AreEqual(0, rep.ForceClips, "clean square+hole must not force-clip");
             Assert.AreEqual(0, rep.WindingFlips, "no folded triangles");
             Assert.Less(rep.AreaRelError, 0.001, "area = outer − hole");

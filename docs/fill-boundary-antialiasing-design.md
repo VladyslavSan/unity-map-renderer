@@ -83,6 +83,9 @@ the other edge's own unit normal.
 Suppression for an outward band is cheaper than it would be for an inset one: there is no taper to zero, no
 half-pixel step and no T-junction to reconcile.
 
+**Limitation:** a window-line edge that is not a server cut gets no outline. It can occur in tile-aligned data. In
+decoded OpenFreeMap tiles a border edge always has a mirror in the neighbour tile.
+
 ## A band never draws where its fill is hidden
 
 A band vertex is displaced only where its surface faces the camera, tested in view space. Cull Back hides a
@@ -90,9 +93,56 @@ fill on the far side of the globe, and the band collapses to zero width there, s
 does not. `GlobeFillBandRenderTests` pins it: every gained pixel lies within `MiterLimit + 1` px of a triangle of
 the drawn, camera-facing mesh.
 
-**Limitation:** a band quad twists when the outer vertices of a short edge displace along miter directions that
-cross. One of its two triangles then winds backwards and Cull Back drops it, so a small wedge of band is missing
-on a small fraction of short edges, on the flat arm and on the globe.
+## A band quad that twists still draws whole
+
+The band is the outline: one outward displacement of `1 + outline width` device pixels, painted in the outline
+colour and ramped over its last pixel. A missing triangle is therefore a gap in the outline, not an antialiasing
+defect.
+
+Take an edge of render length `L`. Its quad has the edge as its base and two outer vertices at heights `d` over
+it. Each outer vertex also leans along the edge by a fraction `s` of its height: the miter's component along the
+edge over its outward component. The quad winds backwards, and Cull Back drops a triangle of it, iff
+`L < d_end · (s_start − s_end)`. A convex end leans away from the edge, so only a reflex end can satisfy that. The
+height `d` is the pixel width of the band, which the mesh does not know, so one mesh must be right at every zoom
+and every width.
+
+A smaller height does not fix it. It moves the outer vertices to where the two miter rays cross, which is nearer
+than the band is wide, and so thins the outline there. No other triangulation of the four points fixes it either: a
+quad whose outer edge crosses reverses one triangle in every triangulation.
+
+The band keeps every vertex where it is and adds one triangle. `FillBandJob` emits the triangle of the quad that
+can reverse a second time, wound the other way, for each edge whose ends satisfy `s_start > s_end`. Cull Back draws
+exactly one of the pair. When the quad is whole, the original draws. When it crosses, the reverse draws, and it
+covers the wedge that the culled triangle would have covered, at the full width. An edge with no reflex end gets no
+extra triangle.
+
+The fill band relies on Cull Back. With Cull Off both triangles of the pair draw, and a translucent outline
+composites that area twice. `FillBandAttributeTests.ShippedFillMaterials_CullBack_SoATwistCoverDrawsOnce` pins
+`_Cull` on the committed fill materials.
+
+**Limitation:** near a sharp reflex spike the cover paints outline over a little of the polygon's interior, so a
+translucent outline over a translucent fill composites twice there. No test covers that case.
+
+## A sharp convex tip is round
+
+The miter factor is capped at `MiterLimit`. A corner that turns beyond the cap's angle, about 151 degrees, would
+clip its miter. Clipping leaves the sides of the tip thinner than the outline along the edges, and it leaves a
+long spike beyond the apex. The outline is as thick as the band is wide, so that is a visible defect.
+
+A convex corner that the cap clips, and a 180 degree spike, get a round tip instead. The two edges end their quads
+square, with no lean, and a fan of triangles joins them around the vertex. The fan has up to `MaxFanSegments`
+segments of at most 30 degrees each, so a spike gets a semicircle. Each fan vertex is an ordinary band outer
+vertex at the ring vertex's own coordinate, with a unit direction and `side = 1`, so the shader sizes it per
+direction in device pixels, and the ramp covers its last pixel like any other band vertex.
+
+A spike has no side, so it is read as a needle: the cap is on the far side of the tip. A zero-width inward slit is
+also a 180 degree turn, and its cap then lands in the material beyond the slit's end.
+
+A reflex corner keeps a miter. The two walls' offset lines cross at `1/cos(θ/2)` band widths along the bisector, and
+the band's outer vertex sits there, so the outline is as wide as the band along both walls.
+
+**Limitation:** a sharp reflex corner keeps the clipped miter (`MiterLimit`), and the outline of each of its two walls
+tapers toward the corner.
 
 ## The residual rim, accepted (maintainer call)
 

@@ -294,7 +294,7 @@ namespace MapRenderer.Tests
 
                         stack.Add((apex, mVC0, mVA0, childDepth, w.rootIdx, w.feat)); // corner at apex
                         // Quad a0-mVA0-mVC0-c0: the SHORTER diagonal (deterministic in tile space, so parity-safe)
-                        // avoids anisotropic slivers. Both choices preserve winding.
+                        // avoids anisotropic slivers. Both choices preserve winding. The job breaks a band quad's tie by vertex order; no band here.
                         if (DistSq(a0.Tile, mVC0.Tile) <= DistSq(mVA0.Tile, c0.Tile))
                         {
                             stack.Add((a0, mVA0, mVC0, childDepth, w.rootIdx, w.feat));

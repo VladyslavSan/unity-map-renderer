@@ -395,17 +395,18 @@ namespace MapRenderer.Tests.Globe
             /// <summary>The subdivided vertices, in traversal order.</summary>
             public readonly NativeList<GlobeFillVertex> Vertices;
 
+            /// <summary>The triangle indices into <see cref="Vertices"/>.</summary>
+            public readonly NativeList<int> Indices;
+
             /// <param name="vertices">The subdivided vertices.</param>
-            /// <param name="indices">The sequential index list, held only so it can be disposed.</param>
+            /// <param name="indices">The triangle indices into <paramref name="vertices"/>.</param>
             public Run(NativeList<GlobeFillVertex> vertices, NativeList<int> indices)
             {
                 Vertices = vertices;
-                _indices = indices;
+                Indices = indices;
             }
 
-            private readonly NativeList<int> _indices;
-
-            public void Dispose() { Vertices.Dispose(); _indices.Dispose(); }
+            public void Dispose() { Vertices.Dispose(); Indices.Dispose(); }
         }
 
         /// <summary>Subdivides one hand-built vertex/triangle set through the production dispatcher.</summary>
@@ -462,6 +463,51 @@ namespace MapRenderer.Tests.Globe
             },
             new[] { float3.zero, float3.zero, float3.zero, float3.zero, OuterBand, float3.zero, OuterBand },
             new[] { 0, 1, 2, /* quad */ 3, 4, 6, 3, 6, 5 });
+
+        /// <summary>
+        /// A band triangle and its reversal subdivide into exact reversals. FillBandJob emits a second, reverse-wound copy of a twistable
+        /// triangle, and Cull Back draws one of the pair, so the pair's children must cover the same area. The band triangle here has two
+        /// long edges and a vertex that ties its twin, so the subdivider's diagonal choice must not depend on the order of the corners.
+        /// RED: break the tie by role, with `&lt;=` on the two diagonal lengths alone.
+        /// </summary>
+        [Test]
+        public void AReversedBandTriangleSubdividesIntoTheExactReversals()
+        {
+            double2[] tile = { new double2(0, 0), new double2(0, Extent), new double2(0, Extent) };
+            float3[] band = { float3.zero, OuterBand, float3.zero };
+            using Run forward = Subdivide(tile, band, new[] { 0, 1, 2 });
+            using Run reversed = Subdivide(tile, band, new[] { 0, 2, 1 });
+
+            string Key(GlobeFillVertex v) => $"{v.Tile.x:R},{v.Tile.y:R},{v.Band.x:R},{v.Band.y:R},{v.Band.z:R}";
+
+            string Cycle(string a, string b, string c)
+            {
+                string[] corners = { a, b, c };
+                int first = 0;
+                for (int i = 1; i < 3; i++) if (string.CompareOrdinal(corners[i], corners[first]) < 0) first = i;
+                return $"{corners[first]}|{corners[(first + 1) % 3]}|{corners[(first + 2) % 3]}";
+            }
+
+            HashSet<string> Triangles(Run run, bool reverse)
+            {
+                var set = new HashSet<string>();
+                for (int i = 0; i + 2 < run.Indices.Length; i += 3)
+                {
+                    string a = Key(run.Vertices[run.Indices[i]]);
+                    string b = Key(run.Vertices[run.Indices[i + 1]]);
+                    string c = Key(run.Vertices[run.Indices[i + 2]]);
+                    set.Add(reverse ? Cycle(a, c, b) : Cycle(a, b, c));
+                }
+                return set;
+            }
+
+            Assert.Greater(forward.Indices.Length, 3,
+                "precondition: the triangle's two long edges must be marked and split, or the comparison below is vacuous.");
+            Assert.AreEqual(forward.Indices.Length, reversed.Indices.Length, "a triangle and its reversal emit the same number of triangles.");
+            Assert.That(Triangles(reversed, reverse: false), Is.EquivalentTo(Triangles(forward, reverse: true)),
+                "the reversed triangle's children are not the reversals of the forward triangle's. Where a diagonal tie breaks by the " +
+                "corner order, the pair takes different diagonals, and Cull Back then leaves a hole or draws an area twice.");
+        }
 
         // ── The refusal gate: the interior is untouched, and the band conforms to it ────────────────────
 

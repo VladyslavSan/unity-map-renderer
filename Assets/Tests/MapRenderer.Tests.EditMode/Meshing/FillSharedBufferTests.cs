@@ -2438,15 +2438,7 @@ namespace MapRenderer.Tests.Meshing
             {
                 Assert.IsTrue(buffers.IsCreated, "jobified pipeline produced no buffers for a tile with water polygons");
 
-                int indexCount = buffers.TriangleIndices.Length;
-                var tris = new List<(double2 a, double2 b, double2 c)>(indexCount / 3);
-                for (int i = 0; i + 2 < indexCount; i += 3)
-                {
-                    double2 a = buffers.TileVertices[buffers.TriangleIndices[i]];
-                    double2 b = buffers.TileVertices[buffers.TriangleIndices[i + 1]];
-                    double2 c = buffers.TileVertices[buffers.TriangleIndices[i + 2]];
-                    tris.Add((a, b, c));
-                }
+                var tris = MeshCoverageValidator.InteriorTriangles(in buffers);
 
                 var rep = MeshCoverageValidator.ValidateTriangulation(
                     groundTruthPolys, tris, buffers.Counts[0].ForceClipCount, (int)extent);

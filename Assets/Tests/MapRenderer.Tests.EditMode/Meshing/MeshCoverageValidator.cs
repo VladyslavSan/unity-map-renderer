@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Unity.Mathematics;
 using MapRenderer.Tests.TestSupport;
+using MapRenderer.Unity.Jobs.Fill;
 
 namespace MapRenderer.Tests
 {
@@ -55,6 +56,23 @@ namespace MapRenderer.Tests
                 $"areaRel={AreaRelError:P2} coverageMismatch={MismatchPct:F2}% " +
                 $"(missing={MissingCells} extra={ExtraCells} of {PolyCells}) " +
                 $"blindBelow={RasterCellSize:G3} units (rasterN={RasterN})";
+        }
+
+        /// <summary>The flat arm's interior triangles: those whose vertices all precede the band suffix
+        /// (<c>BandVertexCount</c>), so band triangles never count as fill coverage.</summary>
+        internal static List<(double2 a, double2 b, double2 c)> InteriorTriangles(in FillGraphOutput buffers)
+        {
+            int interiorVertices = buffers.TileVertices.Length - buffers.Counts[0].BandVertexCount;
+            var tris = new List<(double2 a, double2 b, double2 c)>(buffers.TriangleIndices.Length / 3);
+            for (int i = 0; i + 2 < buffers.TriangleIndices.Length; i += 3)
+            {
+                int ia = buffers.TriangleIndices[i];
+                int ib = buffers.TriangleIndices[i + 1];
+                int ic = buffers.TriangleIndices[i + 2];
+                if (ia >= interiorVertices || ib >= interiorVertices || ic >= interiorVertices) continue;
+                tris.Add((buffers.TileVertices[ia], buffers.TileVertices[ib], buffers.TileVertices[ic]));
+            }
+            return tris;
         }
 
         /// <summary>
@@ -205,6 +223,8 @@ namespace MapRenderer.Tests
 
         private static bool PointInTri(double2 a, double2 b, double2 c, double px, double py)
         {
+            // A zero-area triangle (a fan's point triangle) covers no cell; the sign test below would call it inside.
+            if ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y) == 0.0) return false;
             double d1 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x);
             double d2 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x);
             double d3 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x);

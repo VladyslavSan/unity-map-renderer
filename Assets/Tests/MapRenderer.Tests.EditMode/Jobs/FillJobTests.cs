@@ -292,38 +292,172 @@ namespace MapRenderer.Tests.EditMode.Jobs
             }
         }
 
-        // Earcut normalises every outer ring's winding, and MVT and GeoJSON wind rings oppositely, so the band
-        // must match earcut for BOTH signs or be back-face culled. RED: drop FillBandJob.EmitRing's reversal.
-        [Test]
-        public void BandTriangles_CarryEarcutsCanonicalWinding_ForEitherRingSign([Values(false, true)] bool reversedRing)
+        /// <summary>A square with a slot cut into its north edge: the slot floor is a short edge between two reflex corners.</summary>
+        private static double2[] SlottedSquare() => new[]
         {
-            double2[] ring = NorthMidVertexSquare();
+            new double2(0, 0), new double2(1.9, 0), new double2(1.9, 2), new double2(2.1, 2), new double2(2.1, 0),
+            new double2(4, 0), new double2(4, 4), new double2(0, 4),
+        };
+
+        /// <summary>A ring with a sharp, jagged tip: its short edges have reflex ends, so they twist when the band is wide, and the
+        /// quads beside them leave a wedge of the outline uncovered.</summary>
+        private static double2[] JaggedTip() => new[]
+        {
+            new double2(3.4, 0.1), new double2(0.4, 1.8), new double2(-2.0, 1.8), new double2(-2.2, -0.7), new double2(-1.9, -0.6),
+            new double2(-2.5, -1.1), new double2(-1.0, -3.6), new double2(3.6, -0.1),
+        };
+
+        // Non-obvious why: earcut normalises every outer ring's winding, and MVT and GeoJSON wind rings oppositely, so the band
+        // must match earcut for BOTH signs or be back-face culled. RED: drop FillBandJob.EmitRing's reversal.
+        // The band is also whole at any width: where an edge's outer vertices cross, the front-facing triangles still cover both
+        // triangles of its quad, so no wedge of the outline is lost. RED: omit EmitRing's extra, reverse-wound triangle.
+        [Test]
+        public void BandTriangles_CarryEarcutsCanonicalWinding_AndLoseNoBandArea_ForEitherRingSign(
+            [Values(false, true)] bool reversedRing, [Values(0, 1, 2)] int shape, [Values(0.01, 0.5, 1.0)] double displacement)
+        {
+            double2[] ring = shape == 0 ? NorthMidVertexSquare() : shape == 1 ? SlottedSquare() : JaggedTip();
             if (reversedRing) System.Array.Reverse(ring);
             using BandCase c = Build(
                 new List<List<double2[]>> { new List<double2[]> { ring } }, new[] { 0 });
             Run(c);
 
-            const double displacement = 0.01; // stands in for the shader's one device pixel
+            // The displacement stands in for the shader's one device pixel plus the outline width, in tile units.
             double2 Position(int index)
             {
                 float3 band = c.VertexBand[index];
                 return c.TileVertices[index] + TileOutward(band) * (displacement * band.z);
             }
 
-            int bandTriangles = 0;
+            double Area(int firstIndex) => SignedArea2(
+                Position(c.TriangleIndices[firstIndex]), Position(c.TriangleIndices[firstIndex + 1]), Position(c.TriangleIndices[firstIndex + 2]));
+
+            // Group each edge's triangles by the inner vertex that anchors them. The first two are the quad; a third is the twist cover.
+            var perEdge = new List<List<int>>();
+            for (int i = 0; i < ring.Length; i++) perEdge.Add(new List<int>());
+            for (int i = 0; i + 2 < c.TriangleIndices.Length; i += 3)
+            {
+                int anchor = c.TriangleIndices[i];
+                if (anchor < c.InteriorVertexCount) continue;
+                perEdge[((anchor - c.InteriorVertexCount) / 2) % ring.Length].Add(i);
+            }
+
+            int covered = 0;
+            for (int edge = 0; edge < ring.Length; edge++)
+            {
+                List<int> triangles = perEdge[edge];
+                Assert.That(triangles.Count, Is.EqualTo(2).Or.EqualTo(3), $"edge {edge}: a quad and at most one twist cover.");
+                double quadArea = math.abs(Area(triangles[0])) + math.abs(Area(triangles[1]));
+                double drawnArea = 0.0;
+                foreach (int triangle in triangles)
+                    if (Area(triangle) < 0.0) drawnArea += -Area(triangle); // earcut's canonical CCW-on-screen is area2 < 0 in this Y-down space
+                Assert.AreEqual(quadArea, drawnArea, 1e-9 * (1.0 + quadArea),
+                    $"edge {edge}: the front-facing band triangles must cover the whole quad, or Cull Back drops a wedge of the band " +
+                    "(and of the outline). A back-facing quad is culled against the interior it borders and the band disappears.");
+                if (triangles.Count == 3) covered++;
+            }
+
+            Assert.AreEqual(shape != 0, covered > 0,
+                "only a ring with a reflex corner on a short edge needs the cover; a convex ring must emit none.");
+        }
+
+        /// <summary>Distance from <paramref name="point"/> to the segment <paramref name="from"/>-<paramref name="to"/>.</summary>
+        private static double DistanceToSegment(double2 point, double2 from, double2 to)
+        {
+            double2 edge = to - from;
+            double t = math.clamp(math.dot(point - from, edge) / math.max(math.dot(edge, edge), 1e-300), 0.0, 1.0);
+            return math.length(point - (from + t * edge));
+        }
+
+        // Non-obvious why: the outline is round at a sharp convex tip: the band covers every point outside the polygon within the width of
+        // the tip, and nothing inside. A 180 degree needle gets a semicircular cap. RED: drop the fan.
+        [Test]
+        [TestCase(5.0, false)]
+        [TestCase(5.0, true)]
+        [TestCase(10.0, false)]
+        [TestCase(10.0, true)]
+        [TestCase(20.0, false)]
+        [TestCase(20.0, true)]
+        [TestCase(30.0, false)]
+        [TestCase(30.0, true)]
+        [TestCase(180.0, false)] // a needle has zero area, so it has no second orientation
+        public void TheBandCoversTheRoundTipOfASharpCorner_AndNothingInsideThePolygon(double tipAngleDegrees, bool reversedRing)
+        {
+            const double width = 3.0;
+            double2[] ring;
+            if (tipAngleDegrees == 180.0)
+                ring = new[] { new double2(0, 0), new double2(40, 0) }; // a needle: the boundary goes out and back
+            else
+            {
+                double half = math.radians(tipAngleDegrees) * 0.5;
+                ring = new[] { new double2(0, 0), new double2(40 * math.cos(half), 40 * math.sin(half)), new double2(40 * math.cos(half), -40 * math.sin(half)) };
+            }
+            if (reversedRing) System.Array.Reverse(ring);
+
+            using BandCase c = Build(new List<List<double2[]>> { new List<double2[]> { ring } }, new[] { 0 });
+            Run(c);
+
+            double2 Position(int index)
+            {
+                float3 band = c.VertexBand[index];
+                return c.TileVertices[index] + TileOutward(band) * (width * band.z);
+            }
+
+            // The drawn triangles: front-facing ones, as earcut's canonical CCW-on-screen is area2 < 0 in this Y-down space.
+            var drawn = new List<(double2 a, double2 b, double2 c)>();
             for (int i = 0; i + 2 < c.TriangleIndices.Length; i += 3)
             {
                 if (c.TriangleIndices[i] < c.InteriorVertexCount) continue;
-                double area = SignedArea2(
-                    Position(c.TriangleIndices[i]), Position(c.TriangleIndices[i + 1]), Position(c.TriangleIndices[i + 2]));
-                Assert.Less(area, 0.0,
-                    "a band triangle must carry earcut's canonical CCW-on-screen orientation (area2 < 0 in " +
-                    "this Y-down space) whichever way the ring was wound, or it is back-face culled against " +
-                    "the interior it borders and the whole band silently disappears.");
-                bandTriangles++;
+                double2 a = Position(c.TriangleIndices[i]);
+                double2 b = Position(c.TriangleIndices[i + 1]);
+                double2 d = Position(c.TriangleIndices[i + 2]);
+                if (SignedArea2(a, b, d) < 0.0) drawn.Add((a, b, d));
             }
-            Assert.AreEqual(2 * ring.Length, bandTriangles,
-                "two triangles per ring edge — a count that reconciles with the ring, not merely a non-zero one.");
+
+            bool Covered(double2 point)
+            {
+                foreach (var t in drawn)
+                {
+                    double w0 = SignedArea2(point, t.b, t.c);
+                    double w1 = SignedArea2(t.a, point, t.c);
+                    double w2 = SignedArea2(t.a, t.b, point);
+                    if (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0) return true;
+                }
+                return false;
+            }
+
+            bool Inside(double2 point)
+            {
+                bool inside = false;
+                for (int i = 0; i < ring.Length; i++)
+                {
+                    double2 a = ring[i];
+                    double2 b = ring[(i + 1) % ring.Length];
+                    if ((a.y > point.y) != (b.y > point.y) && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+                }
+                return inside;
+            }
+
+            int ideal = 0;
+            int missing = 0;
+            int overInterior = 0;
+            for (double y = -8.05; y < 8.0; y += 0.1)
+                for (double x = -8.05; x < 8.0; x += 0.1)
+                {
+                    var point = new double2(x, y);
+                    double distance = double.MaxValue;
+                    for (int i = 0; i < ring.Length; i++) distance = math.min(distance, DistanceToSegment(point, ring[i], ring[(i + 1) % ring.Length]));
+                    bool covered = Covered(point);
+                    if (Inside(point)) { if (covered) overInterior++; continue; }
+                    if (distance > 0.9 * width) continue; // the outer tenth is the chord's sag and the ramp
+                    ideal++;
+                    if (!covered) missing++;
+                }
+
+            Assert.Greater(ideal, 100, "precondition: the window holds a real share of the outline.");
+            Assert.AreEqual(0, missing,
+                $"{missing} of {ideal} points within the width of the tip are outside the drawn band. A clipped miter leaves them out; " +
+                "a round tip covers them.");
+            Assert.AreEqual(0, overInterior, "the band must not paint inside the polygon.");
         }
 
         [Test]

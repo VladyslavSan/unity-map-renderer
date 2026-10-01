@@ -1339,6 +1339,23 @@ namespace MapRenderer.Tests.Structure
                 $"a split band edge — a quarter-pixel pinch at every midpoint. Statement: {statement}");
         }
 
+        // ── The band relies on Cull Back ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Both committed fill materials cull back faces. <c>FillBandJob</c> emits a second, reverse-wound copy of a band
+        /// triangle that can twist: Cull Back draws exactly one of the pair. With Cull Off both draw, and a translucent
+        /// outline composites that triangle twice.
+        /// </summary>
+        [Test]
+        public void ShippedFillMaterials_CullBack_SoATwistCoverDrawsOnce([Values] MapRenderer.Unity.Rendering.Materials.RenderMode mode)
+        {
+            Material fill = MapMaterialSetTestUtil.Load(mode).FillMaterial;
+
+            Assert.That(fill.GetInt("_Cull"), Is.EqualTo((int)UnityEngine.Rendering.CullMode.Back),
+                $"the committed {mode} fill material no longer culls back faces. The fill band relies on it: FillBandJob emits a " +
+                "reverse-wound copy of a band triangle that can twist, and only Cull Back draws exactly one of the two.");
+        }
+
         // ── The mesh actually carries it ────────────────────────────────────────────────────────
 
         /// <summary>

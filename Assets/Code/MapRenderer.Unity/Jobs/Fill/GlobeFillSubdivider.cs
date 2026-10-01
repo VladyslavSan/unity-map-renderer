@@ -236,7 +236,15 @@ namespace MapRenderer.Unity.Jobs.Fill
                         stack.Add(new Tri { A = apex, B = mVC0, C = mVA0, Depth = childDepth, Feat = w.Feat }); // corner at apex
                         // Quad a0-mVA0-mVC0-c0 → the SHORTER diagonal, a deterministic tile-space test the mirror
                         // repeats; it keeps the sub-triangles less anisotropic. Both choices preserve winding.
-                        if (math.distancesq(a0.Tile, mVC0.Tile) <= math.distancesq(mVA0.Tile, c0.Tile))
+                        double firstDiagonal  = math.distancesq(a0.Tile, mVC0.Tile);
+                        double secondDiagonal = math.distancesq(mVA0.Tile, c0.Tile);
+                        // A band vertex shares its tile coordinate with its inner twin, so the lengths tie exactly. The tie then
+                        // breaks by vertex order, not by role, so a triangle and its reversal take the same diagonal.
+                        bool bandQuad = apex.Band.z != 0f || a0.Band.z != 0f || c0.Band.z != 0f || mVA0.Band.z != 0f || mVC0.Band.z != 0f;
+                        bool takeFirst = bandQuad && firstDiagonal == secondDiagonal
+                            ? Precedes(a0, mVC0, mVA0, c0)
+                            : firstDiagonal <= secondDiagonal;
+                        if (takeFirst)
                         {
                             stack.Add(new Tri { A = a0, B = mVA0, C = mVC0, Depth = childDepth, Feat = w.Feat });
                             stack.Add(new Tri { A = a0, B = mVC0, C = c0,   Depth = childDepth, Feat = w.Feat });
@@ -251,6 +259,22 @@ namespace MapRenderer.Unity.Jobs.Fill
             }
             indexByVertex.Dispose();
             stack.Dispose();
+        }
+
+        /// <summary>True iff the diagonal <paramref name="firstA"/>-<paramref name="firstB"/> comes before the diagonal
+        /// <paramref name="secondA"/>-<paramref name="secondB"/>: the one whose least vertex, by tile coordinate then band, is less.</summary>
+        private static bool Precedes(in V firstA, in V firstB, in V secondA, in V secondB)
+            => Less(Least(firstA, firstB), Least(secondA, secondB));
+
+        private static V Least(in V a, in V b) => Less(b, a) ? b : a;
+
+        private static bool Less(in V a, in V b)
+        {
+            if (a.Tile.x != b.Tile.x) return a.Tile.x < b.Tile.x;
+            if (a.Tile.y != b.Tile.y) return a.Tile.y < b.Tile.y;
+            if (a.Band.x != b.Band.x) return a.Band.x < b.Band.x;
+            if (a.Band.y != b.Band.y) return a.Band.y < b.Band.y;
+            return a.Band.z < b.Band.z;
         }
 
         /// <summary>Emits one triangle-corner vertex: a bit-identical vertex already in <see cref="OutVerts"/>

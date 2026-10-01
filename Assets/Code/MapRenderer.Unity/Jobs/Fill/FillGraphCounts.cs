@@ -41,14 +41,14 @@ namespace MapRenderer.Unity.Jobs.Fill
         /// <summary>Total clean-drop ("force clip") loci across every polygon's earcut.</summary>
         public int ForceClipCount;
 
-        /// <summary>Vertices <see cref="FillBandJob"/> appended: two per ring vertex, zero if it did not run
+        /// <summary>Vertices <see cref="FillBandJob"/> appended: two per ring vertex, plus one per segment of a round tip; zero if it did not run
         /// or found no ring. On the flat arm the interior is the <c>TileVertices.Length - BandVertexCount</c>
         /// prefix. Zero on the curved arm is not "no band": <see cref="GlobeFillScatterJob"/> clears it, since
         /// subdivision interleaves band and interior; <see cref="FillGraphOutput.VertexBand"/> marks it
         /// there.</summary>
         public int BandVertexCount;
 
-        /// <summary>Indices <see cref="FillBandJob"/> appended — six per ring edge. Unlike the vertices these
+        /// <summary>Indices <see cref="FillBandJob"/> appended: up to nine per ring edge, plus three per segment of a round tip. Unlike the vertices these
         /// are NOT a suffix even on the flat arm: band triangles are interleaved after their own feature's
         /// interior triangles (see that job's doc), so a reader separating the two filters by vertex index,
         /// not by position. Zeroed on the curved arm for the reason above.</summary>
