@@ -43,7 +43,7 @@ namespace MapRenderer.Tests
             IProjection                        projection = null, // null ⇒ WebMercator (launch-time config threads this in)
             Fill.LayoutProperties              layout     = null, // null ⇒ no fill-sort-key (declared feature order)
             TileBufferClip                     clip       = default, // default ⇒ disabled ⇒ the whole tile buffer is drawn
-            TileBuildBuffers                   buffers    = null, // null ⇒ allocate (non-pooled caller)
+            TileBuildBuffers                   buffers    = null, // null ⇒ a fresh instance for this build
             // A test-only oracle knob: true builds WITHOUT the outward boundary band, which is what a
             // comparison against a band-free reference has to compare against. Production never sets it.
             bool                               suppressBoundaryBand = false)
@@ -53,7 +53,7 @@ namespace MapRenderer.Tests
 
             FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
                 selectedFeatures, geometry, paint, zoom, tileOriginRender, out NativeArray<Vector4> featureColors,
-                projection, layout, clip, buffers);
+                buffers ?? new TileBuildBuffers(), projection, layout, clip);
 
             if (!input.RingVisitOrder.IsCreated)
                 return; // no polygon geometry — md left untouched; caller disposes the unused MeshData
@@ -146,7 +146,7 @@ namespace MapRenderer.Tests
             FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
                 selectedFeatures, geometry, paint, zoom, tileOriginRender,
                 out NativeArray<Vector4> featureColors, out NativeArray<Vector2> featureBake,
-                projection, clip, buffers);
+                buffers ?? new TileBuildBuffers(), projection, clip);
 
             if (!input.RingVisitOrder.IsCreated)
                 return; // no polygon geometry — md left untouched

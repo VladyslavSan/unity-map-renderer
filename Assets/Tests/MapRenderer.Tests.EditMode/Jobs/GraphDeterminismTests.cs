@@ -2559,6 +2559,7 @@ namespace MapRenderer.Tests.Jobs
                 Zoom             = 4.0,
                 TileOriginRender = double3.zero,
                 Projection       = new WebMercatorProjection(),
+                Buffers          = new TileBuildBuffers(),
             };
 
             TileMeshLayerProcessor processor = TileMeshLayerProcessor.AllocateForKick(renderLayer, materialIndex: 0);

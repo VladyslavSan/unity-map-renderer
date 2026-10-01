@@ -33,11 +33,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// off <c>MapViewConfig</c> each Update. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
         public TileBufferClip BufferClip { get; init; }
 
-        /// <summary>This build's rented <see cref="TileBuildBuffers"/> — populated by
-        /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> for the duration of its worker pass,
-        /// <c>null</c> everywhere else (tests, the symbol cadence, any context built outside that entry). A
-        /// processor that reads a <c>null</c> Buffers must fall back to allocating its own — never assume
-        /// this is non-null.</summary>
+        /// <summary>This build's rented <see cref="TileBuildBuffers"/>, set by
+        /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> for the duration of its worker pass. A mesh layer
+        /// processor requires it. The symbol cadence builds its context without it, because no symbol processor
+        /// reads it.</summary>
         public TileBuildBuffers Buffers { get; init; }
     }
 }

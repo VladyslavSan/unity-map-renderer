@@ -110,7 +110,7 @@ namespace MapRenderer.Unity.Rendering.Layers
             FillMeshPipeline.LayerInput input = Meshing.StyledFillExtrusionTileBuilder.BuildLayerInput(
                 selected, geometry, _paint, context.Zoom, context.TileOriginRender,
                 out var colors, out var bake,
-                context.Projection, context.BufferClip, context.Buffers);
+                context.Buffers, context.Projection, context.BufferClip);
             // The relocated emptiness gate — see FillRenderLayer.BuildGraphRequest's own comment.
             if (!input.RingVisitOrder.IsCreated) return null;
             return Meshing.FillExtrusionLayerBuild.Rent(input, colors, bake, materialIndex, payloadName);

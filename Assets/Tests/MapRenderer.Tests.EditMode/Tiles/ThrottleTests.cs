@@ -2699,7 +2699,7 @@ namespace MapRenderer.Tests.Tiles
 
             FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
                 OneSelectedPolygon(), geometry, paint, zoom: 0.0, tileOriginRender: double3.zero,
-                out NativeArray<Vector4> featureColors, new WebMercatorProjection(),
+                out NativeArray<Vector4> featureColors, new TileBuildBuffers(), new WebMercatorProjection(),
                 layout: null, clip: TileBufferClip.KeepTileUnits(0.0));
 
             FillGraphOutput output = default;

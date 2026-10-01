@@ -99,61 +99,32 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// Returns <paramref name="features"/> reordered by <c>fill-sort-key</c> ascending, or the SAME
         /// instance when the layer declares no sort key — the common case, which must stay allocation-free
         /// and order-identical so every existing snapshot keeps its exact triangle order. Non-obvious why:
-        /// the sort is made STABLE by folding the declared index in as the tiebreak, since <c>Array.Sort</c>
-        /// is an introsort and not stable on its own, and features with equal sort keys must keep source
-        /// order. An unevaluable key falls to 0, matching <c>TryEvaluate</c>'s contract elsewhere in this
-        /// builder. <paramref name="buffers"/>, when non-null, draws the working buffers and sort comparer
-        /// from the caller's pooled <see cref="TileBuildBuffers"/> instead of allocating fresh —
-        /// byte-identical output, zero managed allocation once the buffers reach this tile's peak feature
-        /// count; <c>null</c> (tests, non-pooled callers) allocates fresh buffers per call.
+        /// the sort is made STABLE by folding the declared index in as the tiebreak, since the introsort
+        /// is not stable on its own, and features with equal sort keys must keep source order. An unevaluable
+        /// key falls to 0, matching <c>TryEvaluate</c>'s contract elsewhere in this builder. The working
+        /// lists and the comparer come from the caller's <paramref name="buffers"/>, so a build allocates nothing
+        /// once they reach this tile's peak feature count.
         /// </summary>
-        private static IReadOnlyList<SelectedTileFeature> OrderBySortKey(
+        internal static IReadOnlyList<SelectedTileFeature> OrderBySortKey(
             IReadOnlyList<SelectedTileFeature> features, Fill.LayoutProperties layout, double zoom,
             TileBuildBuffers buffers)
         {
             if (layout?.SortKey == null) return features;
 
             int count = features.Count;
-            float[] sortKeys;
-            int[]   declaredOrder;
-            if (buffers != null)
-            {
-                sortKeys      = buffers.SortKeys(count);
-                declaredOrder = buffers.DeclaredOrder(count);
-            }
-            else
-            {
-                sortKeys      = new float[count];
-                declaredOrder = new int[count];
-            }
-
+            List<float> sortKeys      = buffers.SortKeys();
+            List<int>   declaredOrder = buffers.DeclaredOrder();
             for (int i = 0; i < count; i++)
             {
-                declaredOrder[i] = i;
-                sortKeys[i] = layout.SortKey.TryEvaluate(zoom, features[i].Feature, out float key) ? key : 0f;
+                declaredOrder.Add(i);
+                sortKeys.Add(layout.SortKey.TryEvaluate(zoom, features[i].Feature, out float key) ? key : 0f);
             }
 
-            if (buffers != null)
-            {
-                // The pool's reusable comparer allocates no closure. The range overload is load-bearing: the
-                // grow-only backing arrays may be LONGER than the sorted [0, count) range.
-                System.Array.Sort(declaredOrder, 0, count, buffers.SortKeyComparer(sortKeys));
+            // The pool's stored delegate allocates no closure, and the list holds exactly [0, count).
+            declaredOrder.Sort(buffers.SortKeyComparison);
 
-                SelectedTileFeature[] orderedBuffer = buffers.OrderedFeaturesBuffer(count);
-                for (int i = 0; i < count; i++) orderedBuffer[i] = features[declaredOrder[i]];
-                // A fixed-length [0, count) VIEW over the buffer, never the raw (possibly longer) array —
-                // returning the array itself would let a shorter later build's Count read as a stale larger one.
-                return buffers.OrderedFeaturesView(count);
-            }
-
-            System.Array.Sort(declaredOrder, (left, right) =>
-            {
-                int byKey = sortKeys[left].CompareTo(sortKeys[right]);
-                return byKey != 0 ? byKey : left.CompareTo(right); // stable: declared order breaks ties
-            });
-
-            var ordered = new SelectedTileFeature[count];
-            for (int i = 0; i < count; i++) ordered[i] = features[declaredOrder[i]];
+            List<SelectedTileFeature> ordered = buffers.OrderedFeatures();
+            for (int i = 0; i < count; i++) ordered.Add(features[declaredOrder[i]]);
             return ordered;
         }
 
@@ -198,10 +169,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
             double                             zoom,
             double3                            tileOriginRender,
             out NativeArray<Vector4>           featureColors,
+            TileBuildBuffers                   buffers,
             IProjection                        projection = null,
             Fill.LayoutProperties              layout     = null,
-            TileBufferClip                     clip       = default,
-            TileBuildBuffers                   buffers    = null)
+            TileBufferClip                     clip       = default)
         {
             featureColors = default;
 
@@ -299,16 +270,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <item>within a feature, rings keep <b>ascending ring index</b> = decode order, which is what makes
         /// earcut's hole-bridge sort (tiebroken on ring index) land where the reorder form puts it.</item>
         /// </list>
-        /// <paramref name="buffers"/>, when non-null, draws <c>rankStart</c> and its cursor from the pool
-        /// instead of a fresh array — same arithmetic, byte-identical <c>order</c>. The returned
+        /// <paramref name="buffers"/> supplies <c>rankStart</c> and its cursor. The returned
         /// <see cref="NativeArray{T}"/> is always a fresh <c>Allocator.Persistent</c> array the caller disposes.
         /// </summary>
         internal static NativeArray<int> BuildRingVisitOrder(
             TileGeometryBuffers geometry, NativeArray<int> rankByOrdinal, int rankCount, TileBuildBuffers buffers)
         {
-            int   rankStartLength = rankCount + 1;
-            int[] rankStart       = buffers != null ? buffers.RankStart(rankStartLength) : new int[rankStartLength];
-            int   visited         = 0;
+            int       rankStartLength = rankCount + 1;
+            List<int> rankStart       = buffers.RankStart(rankStartLength);
+            int       visited         = 0;
             for (int r = 0; r < geometry.RingCount; r++)
             {
                 int rank = rankByOrdinal[geometry.RingFeatureIdx[r]];
@@ -321,16 +291,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             // Allocator.Persistent, NOT TempJob: owned + disposed by the caller via `using var`,
             // but off-main a build can span >4 main-thread frames, so TempJob's 4-frame check would trip.
             var order = new NativeArray<int>(visited, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            int[] cursor;
-            if (buffers != null)
-            {
-                cursor = buffers.RankCursor(rankStartLength);
-                System.Array.Copy(rankStart, cursor, rankStartLength); // pooled Clone() replacement
-            }
-            else
-            {
-                cursor = (int[])rankStart.Clone();
-            }
+            List<int> cursor = buffers.RankCursor();
+            for (int i = 0; i < rankStartLength; i++) cursor.Add(rankStart[i]); // an index loop, not AddRange
             for (int r = 0; r < geometry.RingCount; r++)
             {
                 int rank = rankByOrdinal[geometry.RingFeatureIdx[r]];

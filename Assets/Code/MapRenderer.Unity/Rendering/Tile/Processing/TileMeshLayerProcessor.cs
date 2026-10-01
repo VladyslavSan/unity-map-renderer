@@ -60,24 +60,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(_layer.StyleLayer, tile);
             if (tileLayer != null)
             {
-                // Non-obvious why: a pooled pass (RunWorkerPass) hands non-null Buffers, so selection fills a
-                // grow-only array, not a new List per (tile × style-layer); null (tests) takes the allocating
-                // path. Read Features once: the accessor may be a lease, and a re-read is what
+                // Read Features once: the accessor may be a lease, and a re-read is what
                 // RunWorkerPass_ObtainsGeometryWithoutReReadingTheFeatureList forbids.
                 var features = tileLayer.Features; // IReadOnlyList<IFeature> — read the accessor ONCE
-                IReadOnlyList<SelectedTileFeature> selected;
-                if (context.Buffers != null)
-                {
-                    SelectedTileFeature[] buffer = context.Buffers.SelectionBuffer(features.Count);
-                    int selectedCount = FeatureSelector.SelectFeatures(_layer.StyleLayer, tileLayer, features, context.Zoom, buffer);
-                    selected = context.Buffers.SelectionView(selectedCount);
-                }
-                else
-                {
-                    var list = new List<SelectedTileFeature>();
-                    FeatureSelector.SelectFeatures(_layer.StyleLayer, tileLayer, features, context.Zoom, list);
-                    selected = list;
-                }
+                List<SelectedTileFeature> selected = context.Buffers.Selection(features.Count);
+                FeatureSelector.SelectFeatures(_layer.StyleLayer, tileLayer, features, context.Zoom, selected);
 
                 // A filter that matches nothing never calls BuildGraphRequest. The decode has already
                 // materialized the geometry, so this gate saves no materialization.

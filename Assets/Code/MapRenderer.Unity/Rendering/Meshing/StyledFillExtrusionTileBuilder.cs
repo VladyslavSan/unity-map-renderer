@@ -164,7 +164,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// caller from here on.</param>
         /// <param name="featureBake">Per-feature data-driven base/height bake (x=base, y=height),
         /// Persistent-allocated and owned by the caller from here on.</param>
-        /// <param name="buffers">Optional pooled ring-visit-order scratch, shared with fill's own
+        /// <param name="buffers">The pooled ring-visit-order scratch, shared with fill's own
         /// <see cref="StyledFillTileBuilder.BuildLayerInput"/> use of it.</param>
         internal static FillMeshPipeline.LayerInput BuildLayerInput(
             IReadOnlyList<SelectedTileFeature> selectedFeatures,
@@ -174,9 +174,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
             double3                            tileOriginRender,
             out NativeArray<Vector4>           featureColors,
             out NativeArray<Vector2>           featureBake,
+            TileBuildBuffers                   buffers,
             IProjection                        projection = null,
-            TileBufferClip                     clip       = default,
-            TileBuildBuffers                   buffers    = null)
+            TileBufferClip                     clip       = default)
         {
             featureColors = default;
             featureBake   = default;

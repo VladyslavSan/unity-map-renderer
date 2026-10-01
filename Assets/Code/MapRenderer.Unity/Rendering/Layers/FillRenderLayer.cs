@@ -194,7 +194,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         {
             FillMeshPipeline.LayerInput input = Meshing.StyledFillTileBuilder.BuildLayerInput(
                 selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
-                context.Projection, _layout, context.BufferClip, context.Buffers);
+                context.Buffers, context.Projection, _layout, context.BufferClip);
             // The emptiness gate. Every BuildLayerInput empty path returns `default` with every `out`
             // column left `default`, so the null path has nothing to dispose.
             if (!input.RingVisitOrder.IsCreated) return null;

@@ -78,25 +78,6 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// Non-vacuity + correctness precondition for the new pooled-buffers overload, checked OUTSIDE the
-        /// measured region: a null (match-all) filter over N features selects exactly N, in declared order.
-        /// </summary>
-        [Test]
-        public void SelectFeatures_ScratchOverload_SelectsEveryFeature_InDeclaredOrder()
-        {
-            MvtLayer roads = MakeSourceLayer("roads", 30);
-            StyleLayer styleLayer = SelectAllLayer("roads-all", "roads");
-            var buffers = new TileBuildBuffers();
-
-            SelectedTileFeature[] buffer = buffers.SelectionBuffer(roads.Features.Count);
-            int selectedCount = FeatureSelector.SelectFeatures(styleLayer, roads, Zoom, buffer);
-
-            Assert.AreEqual(roads.Features.Count, selectedCount, "a null filter must select every feature.");
-            for (int i = 0; i < selectedCount; i++)
-                Assert.AreEqual(i, buffer[i].Ordinal, $"declared order must be preserved at slot {i}.");
-        }
-
-        /// <summary>
         /// A warmed <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>, run across TWO style layers that
         /// resolve to different-sized source layers with a REAL <see cref="TileBuildBuffers"/>, allocates zero
         /// managed bytes. A per-call <c>new List&lt;SelectedTileFeature&gt;()</c> would red this test alone.

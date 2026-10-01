@@ -522,35 +522,6 @@ namespace MapRenderer.Tests.Filters
                 "guard: at least one (filter, layer) combination must be non-degenerate");
         }
 
-        [Test]
-        public void SelectFeatures_ScratchArrayOverload_MatchesManagedParity_ForEveryCoveredFilter_EveryLayer()
-        {
-            int nonDegenerate = 0;
-            foreach (JsonValue filterJson in _parityFilters)
-            {
-                foreach (MvtLayer layer in _tile.Layers)
-                {
-                    if (layer.Features.Count == 0) continue;
-                    List<IFeature> expected = ManagedSelect(filterJson, layer);
-
-                    StyleLayer styleLayer = MakeLayer(layer.Name, filterJson);
-                    var into = new SelectedTileFeature[layer.Features.Count];
-                    int count = FeatureSelector.SelectFeatures(styleLayer, (ITileLayer)layer, 0.0, into);
-
-                    Assert.That(count, Is.EqualTo(expected.Count),
-                        $"layer '{layer.Name}', filter {filterJson}: selected count differs");
-                    for (int i = 0; i < expected.Count; i++)
-                        Assert.AreSame(expected[i], into[i].Feature,
-                            $"layer '{layer.Name}', filter {filterJson}: feature[{i}] differs");
-
-                    if (expected.Count > 0 && expected.Count < layer.Features.Count) nonDegenerate++;
-                }
-            }
-
-            Assert.That(nonDegenerate, Is.GreaterThan(0),
-                "guard: at least one (filter, layer) combination must be non-degenerate");
-        }
-
         // ── Dispatch coverage (the vacuous-all-fallback guard) ─────────────────────────────
 
         /// <summary>Finds a covered filter that actually native-binds against <paramref name="layer"/> (not

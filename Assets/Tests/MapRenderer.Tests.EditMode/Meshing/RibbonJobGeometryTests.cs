@@ -2272,7 +2272,7 @@ namespace MapRenderer.Tests.Meshing
             try
             {
                 FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
-                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake, projection, clip);
+                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake, new TileBuildBuffers(), projection, clip);
                 ringVisitOrder = input.RingVisitOrder;
 
                 ext = FillExtrusionMeshGraph.Schedule(input, colors, bake);
@@ -2372,7 +2372,7 @@ namespace MapRenderer.Tests.Meshing
             {
                 FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
                     selected, geometry, paint, 0.0, renderOrigin,
-                    out colors, out bake, projection, clip);
+                    out colors, out bake, new TileBuildBuffers(), projection, clip);
                 ringVisitOrder = input.RingVisitOrder;
                 Assert.IsTrue(input.RingVisitOrder.IsCreated, "precondition: the fixture must select real work.");
 

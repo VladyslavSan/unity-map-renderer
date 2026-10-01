@@ -583,29 +583,31 @@ namespace MapRenderer.Tests.Meshing
         {
             var buffers = new TileBuildBuffers();
 
-            int[] rank = buffers.RankStart(8);
-            Assert.AreSame(rank, buffers.RankStart(8), "RankStart reuses its backing array for the same size (grow-only).");
-            Assert.AreSame(rank, buffers.RankStart(3), "a smaller RankStart request reuses the already-grown buffer, never re-allocates.");
-            int[] grown = buffers.RankStart(64);
+            List<int> rank = buffers.RankStart(8);
+            Assert.AreSame(rank, buffers.RankStart(8), "RankStart reuses its list for the same size (grow-only).");
+            Assert.AreSame(rank, buffers.RankStart(3), "a smaller RankStart request reuses the already-grown list, never re-allocates.");
+            Assert.AreEqual(3, buffers.RankStart(3).Count, "RankStart is zero-filled to exactly the requested count.");
+            List<int> grown = buffers.RankStart(64);
             Assert.AreSame(grown, buffers.RankStart(64), "after growing past the prior peak, RankStart is stable again.");
 
-            Assert.AreSame(buffers.RankCursor(8), buffers.RankCursor(8), "RankCursor reuses its backing array.");
-            Assert.AreSame(buffers.SortKeys(8), buffers.SortKeys(8), "SortKeys reuses its backing array.");
-            Assert.AreSame(buffers.DeclaredOrder(8), buffers.DeclaredOrder(8), "DeclaredOrder reuses its backing array.");
-            Assert.AreSame(buffers.OrderedFeaturesBuffer(8), buffers.OrderedFeaturesBuffer(8), "OrderedFeaturesBuffer reuses its backing array.");
+            Assert.AreSame(buffers.RankCursor(), buffers.RankCursor(), "RankCursor reuses its list.");
+            Assert.AreSame(buffers.SortKeys(), buffers.SortKeys(), "SortKeys reuses its list.");
+            Assert.AreSame(buffers.DeclaredOrder(), buffers.DeclaredOrder(), "DeclaredOrder reuses its list.");
+            Assert.AreSame(buffers.OrderedFeatures(), buffers.OrderedFeatures(), "OrderedFeatures reuses its list.");
 
-            float[] keys = buffers.SortKeys(8);
-            Assert.AreSame(buffers.SortKeyComparer(keys), buffers.SortKeyComparer(keys),
-                "SortKeyComparer is a stored instance re-fielded per call — NOT a fresh delegate/closure the way Array.Sort's lambda overload allocates.");
-            Assert.AreSame(buffers.OrderedFeaturesView(4), buffers.OrderedFeaturesView(4),
-                "OrderedFeaturesView is a stored IReadOnlyList instance, not a fresh wrapper per call.");
+            Assert.AreSame(buffers.SortKeyComparison, buffers.SortKeyComparison,
+                "SortKeyComparison is a stored delegate — NOT a fresh closure the way Array.Sort's lambda overload allocates.");
 
-            Assert.AreSame(buffers.SelectionBuffer(8), buffers.SelectionBuffer(8), "SelectionBuffer reuses its backing array.");
-            Assert.AreSame(buffers.SelectionView(4), buffers.SelectionView(4),
-                "SelectionView is a stored IReadOnlyList instance, not a fresh wrapper per call.");
-            Assert.AreNotSame(buffers.OrderedFeaturesBuffer(8), buffers.SelectionBuffer(8),
-                "SelectionBuffer must be a DISTINCT array from OrderedFeaturesBuffer — OrderBySortKey reads a " +
+            Assert.AreSame(buffers.Selection(8), buffers.Selection(8), "Selection reuses its list.");
+            Assert.AreNotSame(buffers.OrderedFeatures(), buffers.Selection(8),
+                "Selection must be a DISTINCT list from OrderedFeatures — OrderBySortKey reads a " +
                 "layer's selection while writing the reordered result, so aliasing the two would corrupt the sort.");
+
+            // Steady state: the pooled sort-key path (working lists, comparer, ordered result) allocates nothing.
+            IReadOnlyList<SelectedTileFeature> selected = TestTileMeshBuilder.Selection(MakeFeatures(6));
+            AllocationDiagnostics.AssertNotAllocating(
+                () => StyledFillTileBuilder.OrderBySortKey(selected, SortKeyLayout, Zoom, buffers),
+                "OrderBySortKey with pooled buffers must allocate no managed memory once the lists have grown.");
         }
 
         /// <summary>
@@ -625,8 +627,8 @@ namespace MapRenderer.Tests.Meshing
                 Assert.Greater(geometry.RingCount, 1, "precondition: multiple rings");
 
                 var buffers = new TileBuildBuffers();
-                Assert.AreEqual(0, buffers.RankStart(0).Length, "precondition: RankStart buffer is empty before any build");
-                Assert.AreEqual(0, buffers.SortKeys(0).Length, "precondition: SortKeys buffer is empty before any build");
+                Assert.AreEqual(0, buffers.RankStart(0).Capacity, "precondition: RankStart list is empty before any build");
+                Assert.AreEqual(0, buffers.SortKeys().Capacity, "precondition: SortKeys list is empty before any build");
 
                 Mesh.MeshDataArray mda = Mesh.AllocateWritableMeshData(1);
                 SyncMeshWrite.Fill(mda[0], selected, geometry, Paint, Zoom, double3.zero,
@@ -634,9 +636,9 @@ namespace MapRenderer.Tests.Meshing
                 mda.Dispose();
                 Assert.Greater(verts, 0, "non-vacuity: the build must produce geometry");
 
-                Assert.Greater(buffers.RankStart(0).Length, 0,
+                Assert.Greater(buffers.RankStart(0).Capacity, 0,
                     "BuildRingVisitOrder must route through buffers.RankStart — its buffer grew past empty during the build.");
-                Assert.Greater(buffers.SortKeys(0).Length, 0,
+                Assert.Greater(buffers.SortKeys().Capacity, 0,
                     "OrderBySortKey (fill-sort-key declared) must route through buffers.SortKeys — its buffer grew past empty during the build.");
             }
             finally
@@ -661,7 +663,7 @@ namespace MapRenderer.Tests.Meshing
                 Assert.Greater(geometry.RingCount, 1, "precondition: multiple rings");
 
                 var buffers = new TileBuildBuffers();
-                Assert.AreEqual(0, buffers.RankStart(0).Length, "precondition: RankStart buffer is empty before any build");
+                Assert.AreEqual(0, buffers.RankStart(0).Capacity, "precondition: RankStart list is empty before any build");
 
                 Mesh.MeshDataArray mda = Mesh.AllocateWritableMeshData(1);
                 SyncMeshWrite.FillExtrusion(mda[0], selected, geometry, TestStyle.FillExtrusionPaint(), Zoom,
@@ -669,7 +671,7 @@ namespace MapRenderer.Tests.Meshing
                 mda.Dispose();
                 Assert.Greater(verts, 0, "non-vacuity: the build must produce geometry");
 
-                Assert.Greater(buffers.RankStart(0).Length, 0,
+                Assert.Greater(buffers.RankStart(0).Capacity, 0,
                     "fill-extrusion's BuildLayerInput must route BuildRingVisitOrder through buffers.RankStart, " +
                     "the same pool fill uses — its buffer grew past empty during the build.");
             }
@@ -754,16 +756,6 @@ namespace MapRenderer.Tests.Meshing
             CollectionAssert.AreEqual(reference.colors, pooled.colors,
                 "per-vertex colour must be byte-identical — desyncs from geometry exactly when the ordered " +
                 "view over-reports its length and the loop reads stale entries from the prior build's tail");
-        }
-
-        /// <summary>The non-pooled (<c>buffers: null</c>) path is unchanged by pooling's existence.</summary>
-        [Test]
-        public void WriteMeshData_NullBuffers_StillProducesGeometry()
-        {
-            List<IFeature> features = MakeFeatures(2);
-            Mesh mesh = Track(TestTileMeshBuilder.BuildFill(features, Paint, Zoom, Extent, Tile, null, SortKeyLayout));
-            Assert.IsNotNull(mesh, "buffers: null must still allocate its own buffers and produce geometry");
-            Assert.Greater(mesh.vertexCount, 0);
         }
     }
 

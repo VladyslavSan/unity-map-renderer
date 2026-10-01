@@ -33,6 +33,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Unity.Jobs.Fill;
 using MapRenderer.Unity.Rendering.Meshing;
 using FillExtrusion = MapRenderer.Unity.Style.FillExtrusion;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 
 
 namespace MapRenderer.Tests.Meshing
@@ -666,7 +667,7 @@ namespace MapRenderer.Tests.Meshing
             {
                 FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
                     selected, geometry, fc.Paint, 0.0, renderOrigin,
-                    out colors, out bake, projection, clip: default);
+                    out colors, out bake, new TileBuildBuffers(), projection, clip: default);
                 ringVisitOrder = input.RingVisitOrder;
                 Assert.IsTrue(input.RingVisitOrder.IsCreated, $"{fixtureName}/{label}: fixture must select real work.");
                 ext = FillExtrusionMeshGraph.Schedule(input, colors, bake);
@@ -820,7 +821,7 @@ namespace MapRenderer.Tests.Meshing
             try
             {
                 FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
-                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake, projection, clip);
+                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake, new TileBuildBuffers(), projection, clip);
                 Assert.IsTrue(input.RingVisitOrder.IsCreated, "precondition: the fixture must select real work.");
                 // Capture it: BuildLayerInput hands ownership to the caller, so the finally below disposes
                 // nothing unless this assignment happens.

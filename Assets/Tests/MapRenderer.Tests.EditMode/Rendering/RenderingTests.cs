@@ -1191,6 +1191,7 @@ namespace MapRenderer.Tests.Rendering
         {
             Tile = Tile, Zoom = 0.0, TileOriginRender = double3.zero,
             Projection = new WebMercatorProjection(), BufferClip = TileBufferClip.KeepTileUnits(0.0),
+            Buffers = new TileBuildBuffers(),
         };
 
         private static MapMaterialSet Settings()

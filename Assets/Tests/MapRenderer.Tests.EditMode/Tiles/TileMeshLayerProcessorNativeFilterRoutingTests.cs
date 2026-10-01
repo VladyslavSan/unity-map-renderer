@@ -26,17 +26,15 @@ namespace MapRenderer.Tests.Tiles
     /// <summary>
     /// Proves the mesh-build path's <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> call sites REACH the
     /// native-filter seam (<see cref="FeatureSelector.SelectFeatures(StyleLayer, ITileLayer, IReadOnlyList{IFeature}, double, List{SelectedTileFeature})"/>
-    /// and its scratch-array twin). The golden manifest and <c>NativeFilterVmTests</c>/
+    /// call). The golden manifest and <c>NativeFilterVmTests</c>/
     /// <c>FeatureSelectorNativeFilterTests</c> stay green either way: they observe the VM's answers, never
     /// which overload the processor called.
     /// </summary>
     [TestFixture]
     public class TileMeshLayerProcessorNativeFilterRoutingTests
     {
-        /// <summary><paramref name="buffers"/> non-null reaches <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>'s
-        /// pooled ARRAY arm, which <c>TileLayerProcessorRunner.RunWorkerPass</c> supplies in production; null
-        /// reaches the non-pooled LIST arm that most other EditMode tests reach. The two arms call different
-        /// <c>FeatureSelector.SelectFeatures</c> overloads, so the tooth covers both.</summary>
+        /// <summary>The context <c>TileLayerProcessorRunner.RunWorkerPass</c> builds in production: it carries a rented
+        /// <paramref name="buffers"/>.</summary>
         private static TileLayerProcessContext MakeContext(TileBuildBuffers buffers) => new TileLayerProcessContext
         {
             Tile             = new TileId { Z = 0, X = 0, Y = 0 },
@@ -145,11 +143,8 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // Pooled (production's only arm) and non-pooled share this one spy/oracle. Reverting either
-        // TileMeshLayerProcessor call site alone reds the matching case.
-        [TestCase(true)]
-        [TestCase(false)]
-        public void ProcessOnWorker_ProbesTheNativeSeam_AndSelectsTheManagedAnswer(bool pooled)
+        [Test]
+        public void ProcessOnWorker_ProbesTheNativeSeam_AndSelectsTheManagedAnswer()
         {
             using MvtTile tile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, SampleTileFixture.Bytes());
             MvtLayer countries = tile.GetLayer("countries");
@@ -167,11 +162,11 @@ namespace MapRenderer.Tests.Tiles
             var renderLayer = new CapturingTileMeshRenderLayer(styleLayer);
             var processor = TileMeshLayerProcessor.AllocateForKick(renderLayer, materialIndex: 0);
 
-            var context = MakeContext(pooled ? new TileBuildBuffers() : null);
+            var context = MakeContext(new TileBuildBuffers());
             processor.ProcessOnWorker(decodedTile, in context);
 
             Assert.That(spy.TryBindNativeFilterCalls, Is.EqualTo(1),
-                $"TryBindNativeFilter must be called exactly once for this one style layer (pooled={pooled}) " +
+                $"TryBindNativeFilter must be called exactly once for this one style layer " +
                 "— a routing regression (reverting this arm's call site to the old two-argument overload) " +
                 "leaves this at 0.");
             // NIT (review): being PROBED isn't being BOUND — this filter is proven to native-bind against

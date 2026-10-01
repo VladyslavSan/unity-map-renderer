@@ -1854,7 +1854,7 @@ namespace MapRenderer.Tests.Tiles
             {
                 FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
                     selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
-                    context.Projection, layout: null, context.BufferClip, context.Buffers);
+                    context.Buffers ?? new TileBuildBuffers(), context.Projection, layout: null, clip: context.BufferClip);
                 if (!input.RingVisitOrder.IsCreated) return null;
                 return FillLayerBuild.Rent(input, colors, materialIndex, payloadName);
             }
