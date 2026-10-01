@@ -119,7 +119,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <see cref="Display"/>. A shown tile that left the cover but still has a relative in it is <see cref="Hold"/>.
         /// A hidden tile between a Hold and a cover tile is <see cref="Bridge"/>. A tile prepared ahead of the level switch
         /// is <see cref="Prepare"/>: registered hidden and reported to no subsystem. A record with none is released.</summary>
-        private enum TileRole
+        internal enum TileRole
         {
             Display = 0,
             Prepare,
@@ -133,7 +133,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <c>docs/job-scheduling-design.md</c>). A default instance carries no source, so every
         /// read needs <see cref="Step"/> == <see cref="BuildStep.Prologue"/>; <see cref="Graph"/> is non-null
         /// only when <see cref="Step"/> is <see cref="BuildStep.Measure"/> or <see cref="BuildStep.Write"/>.</summary>
-        private struct LoadedTile
+        internal struct LoadedTile
         {
             public UniTask<SharedDisposable<IDecodedTile>>          Request;
             public bool                                             FetchCompleted; // fetch done; mesh build may be in-flight
@@ -349,7 +349,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly RenderLayerSet _layers; // owned by MapView; this reads the ordered render layers
 
         // Per-source pipeline registry — the per-tile lifecycle is per-(tile, source); see LoadedKey.
-        private readonly SourceRegistry _sources = new();
+        internal readonly SourceRegistry _sources = new();
 
         /// <summary>The normalized source-id a rendered style layer draws from (null → "").</summary>
         private static string SourceIdOf(StyleLayer layer) => layer?.Source ?? string.Empty;
@@ -374,7 +374,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         // ── Tile render backend (Entities, BRG, or GameObject) — constructed in SetSources ────
-        private Backend.ITileRenderBackend _instanced; // null only before SetSources / after Dispose
+        internal Backend.ITileRenderBackend Instanced { get; private set; } // null only before SetSources / after Dispose
 
         /// <summary>The launch-time projection, cached each Update — null means WebMercator; it's launch-constant, so any Update's value is correct.</summary>
         private IProjection _projection;
@@ -396,23 +396,23 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly TileSelection _selection = new();
 
         // Keyed by (tile, source-slot) — one record per (tile, source).
-        private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new();
+        internal readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new();
         private readonly List<LoadedKey>                   _toRelease = new(32);
 
         /// <summary>Deferred-release queue — <see cref="Update"/> enqueues records leaving cover; <see cref="DrainReleaseQueue"/> frees up to the per-Update budget.</summary>
-        private readonly Queue<LoadedKey> _releaseQueue = new(64);
+        internal readonly Queue<LoadedKey> _releaseQueue = new(64);
 
         /// <summary>Dedups <c>_releaseQueue</c> and lets <see cref="PumpPending"/> skip an already-condemned record. Pre-sized to avoid a lazy allocation.</summary>
         private readonly HashSet<LoadedKey> _releaseQueued = new(64);
 
         /// <summary>Keys wanting to load but not yet admitted, kept in priority order (re-sorted each Update by
         /// <see cref="AdmitFromDesired"/>). <c>_desiredSet</c> mirrors this for O(1) membership; both pre-sized.</summary>
-        private readonly List<LoadedKey>    _desired    = new(64);
+        internal readonly List<LoadedKey>    _desired    = new(64);
         private readonly HashSet<LoadedKey> _desiredSet = new(64);
 
         /// <summary>Prepare keys wanting to load, admitted under their own cap. A key leaves this list when it is admitted,
         /// when its tile leaves the preload set, or when its tile enters the cover and the key moves to <see cref="_desired"/>.</summary>
-        private readonly List<LoadedKey>    _prepareDesired    = new(64);
+        internal readonly List<LoadedKey>    _prepareDesired    = new(64);
         private readonly HashSet<LoadedKey> _prepareDesiredSet = new(64);
 
         /// <summary>The cover's own tiles. The swap asks area questions of these, apart from <see cref="_servedKeys"/>, which asks which records serve them.</summary>
@@ -420,7 +420,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>The record keys that serve a cover tile, one per (serving tile, slot). Several cover tiles can share
         /// one key when a source serves them from its maxzoom ancestor. Rebuilt with each cover recompute.</summary>
-        private readonly HashSet<LoadedKey> _servedKeys = new();
+        internal readonly HashSet<LoadedKey> _servedKeys = new();
 
         /// <summary>The record keys prepared ahead (P), and the larger set that keeps a finished prepared record loaded (K).
         /// Neither holds a key that already serves a cover tile. Rebuilt with each cover recompute.</summary>
@@ -840,24 +840,24 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary><see cref="RestyleSourcesInPlace"/>'s backend step. This method is never reached
-        /// with a null <see cref="_instanced"/> — the partial-survival arm only runs after a first, full
+        /// with a null <see cref="Instanced"/> — the partial-survival arm only runs after a first, full
         /// <see cref="SetStyle"/> has already called <see cref="SetSources"/> → <see cref="BuildBackend"/> at
         /// least once — but falls back to building one rather than assuming that.</summary>
         private void EnsureBackend(Map.RenderBackend backend)
         {
-            if (_instanced == null) { BuildBackend(backend); return; }
-            _instanced.SetLayerMaterials(LayerMaterials(_layers), LayerShadowModes(_layers));
+            if (Instanced == null) { BuildBackend(backend); return; }
+            Instanced.SetLayerMaterials(LayerMaterials(_layers), LayerShadowModes(_layers));
         }
 
         /// <summary>Constructs the tile render backend from the styled layer set (default arm Entities so a
         /// legacy serialized value resolves safely). Disposes any prior backend first (restyle / re-init).</summary>
         private void BuildBackend(Map.RenderBackend backend)
         {
-            _instanced?.Dispose();
+            Instanced?.Dispose();
             _showBatchCount = 0; // handles of the disposed backend mean nothing to the new one
             _hideBatchCount = 0;
             _lastQueuedShow.Clear();
-            _instanced = backend switch
+            Instanced = backend switch
             {
                 Map.RenderBackend.Brg =>
                     new BRGBackend.TileRenderer(LayerMaterials(_layers), LayerShadowModes(_layers)),
@@ -912,28 +912,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             return modes;
         }
 
-        // ── Test observability (surfaced through MapViewTestExtensions, not the production API) ────────
-
-        /// <summary>The in-flight fetch count summed across every source pipeline.</summary>
-        internal int InFlightCount => _sources.TotalInFlight;
-
-        /// <summary>Pipelines that actually own a feature source, excluding the synthetic background pipeline.
-        /// Zero is the only positive signal that a source was skipped — not-throwing/fetching/rendering all look the same otherwise.</summary>
-        internal int WiredFeatureSourceCount => _sources.RealSourceCount;
-
-        /// <summary>Loaded/loading (tile, source) records — what the per-frame loops iterate.</summary>
-        internal int LoadedTileCount => CountByRole(TileRole.Display);
-
-        /// <summary>The active set <see cref="AdmitFromDesired"/> bounds against the concurrency cap — admitted, not-yet-built records in the cover.</summary>
-        internal int ActiveLoadCount => CountActiveLoads();
-
-        /// <summary>(tile,source) keys wanting to load but not yet admitted.</summary>
-        internal int DesiredCount => _desired.Count;
-
-        /// <summary>The head of the not-yet-admitted desired list — the next tile <see cref="AdmitFromDesired"/>
-        /// will admit, or <see cref="TileId"/>'s default if the list is empty.</summary>
-        internal TileId DesiredHeadTile => _desired.Count > 0 ? _desired[0].Tile : default;
-
         /// <summary>Fills <paramref name="into"/> with the (source, tile) membership of every record that has a role, flagged
         /// <see cref="LoadedTileKey.Shown"/> while its geometry is visible. A record with no role is left out, so its symbols depart.
         /// Allocation-free.</summary>
@@ -956,33 +934,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             return own == 0 || (_shownGroups.TryGetValue(key, out ulong revealed) && (revealed & own) != 0);
         }
 
-        /// <summary>The tile of each record that serves a cover tile, as a <see cref="TileId"/> (may repeat across sources). A record that
-        /// a swap took out of the cover keeps its old role until its release drains, so the role is not the test.</summary>
-        internal void CollectLoadedTileIds(List<TileId> into)
-        {
-            into.Clear();
-            foreach (var kv in _loaded)
-                if (_servedKeys.Contains(kv.Key)) into.Add(kv.Key.Tile);
-        }
-
         /// <summary>True iff the record waits in the release queue with no role. A swapped-out record keeps its old stored role until its
         /// release drains. <see cref="RecomputeRoles"/> takes a record that regains a role (a swing-back) off the queue.</summary>
         private bool IsCondemned(LoadedKey key) => _releaseQueued.Contains(key);
 
         /// <summary>Records in <see cref="_loaded"/> with <paramref name="role"/>, recomputed fresh each call.</summary>
-        private int CountByRole(TileRole role)
+        internal int CountByRole(TileRole role)
         {
             int n = 0;
             foreach (var kv in _loaded)
                 if (kv.Value.Role == role && !IsCondemned(kv.Key)) n++;
             return n;
-        }
-
-        /// <summary>Every desired-but-not-admitted tile's <see cref="TileId"/>, in priority order.</summary>
-        internal void CollectDesiredTileIds(List<TileId> into)
-        {
-            into.Clear();
-            for (int i = 0; i < _desired.Count; i++) into.Add(_desired[i].Tile);
         }
 
         /// <summary>Tiles released while their mesh build was still in-flight. Incremented by <see cref="ReleaseTile"/>.</summary>
@@ -1015,9 +977,6 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary><c>SetItemsVisible</c> calls issued by the most recent <see cref="Update"/>: at most one to show and one to hide.</summary>
         internal int VisibilityBatchesLastTick { get; private set; }
-
-        /// <summary>Current deferred-release backlog depth (records awaiting <see cref="DrainReleaseQueue"/>).</summary>
-        internal int ReleaseQueueDepth => _releaseQueue.Count;
 
         /// <summary>Pull-based telemetry, refreshed at the end of every <see cref="Update"/> whether or not anyone
         /// reads it — never read by the request/release decision. Returned by reference, no copy or boxing
@@ -1077,7 +1036,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 PrologueInFlight       = prologue,
                 GraphMeasureInFlight   = graphMeasure,
                 GraphWriteInFlight     = graphWrite,
-                InFlightFetches        = InFlightCount,
+                InFlightFetches        = _sources.TotalInFlight,
                 ReleasedMidFlightCount = ReleasedMidFlightCount,
                 ReleasedMidFetchCount  = ReleasedMidFetchCount,
                 FetchErrorCount        = _fetchErrorCount,
@@ -1094,19 +1053,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             };
         }
 
-        /// <summary>The live BRG renderer, or null when not on the BRG backend / before <see cref="SetSources"/>.</summary>
-        internal BRGBackend.TileRenderer BrgRenderer => _instanced as BRGBackend.TileRenderer;
-
-        /// <summary>The live Entities-Graphics renderer, or null when not on the Entities backend / before <see cref="SetSources"/>.</summary>
-        internal EntBackend.TileRenderer EntitiesRenderer => _instanced as EntBackend.TileRenderer;
-
-        /// <summary>The live GameObject renderer, or null when not on the GameObject backend / before <see cref="SetSources"/>.</summary>
-        internal GOBackend.TileRenderer GameObjectRenderer => _instanced as GOBackend.TileRenderer;
-
-        /// <summary>Invalidates the cached cover-selection key so the next <see cref="Update"/> re-selects the
-        /// cover. Called when the camera is re-wired (<see cref="Map.View.SetCamera"/>).</summary>
-        public void InvalidateCover() => _coverGate.Invalidate();
-
         /// <summary>
         /// Pushes each layer's visibility to the backend as a per-slot draw gate, so a layer that paints
         /// nothing the framebuffer can show submits no draw item at all. Called beside every
@@ -1115,76 +1061,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         public void PushLayerDrawGates()
         {
-            if (_instanced == null) return;
+            if (Instanced == null) return;
             for (int li = 0; li < _layers.Count; li++)
-                _instanced.SetLayerVisible(
+                Instanced.SetLayerVisible(
                     li, !(_layers[li] is IFadeableRenderLayer fadeable) || fadeable.PaintsSomething);
-        }
-
-        /// <summary>Test-only: true ⟺ the record tile <paramref name="id"/> has ≥1 source-record, ALL its records are <c>Built</c>, and
-        /// the union produced geometry. N=1 ⇒ identical to a single-record (built + has-geometry) check.</summary>
-        internal bool TryGetBuiltTile(TileId id)
-        {
-            bool any = false;
-            bool anyGeom = false;
-            foreach (var kv in _loaded)
-            {
-                if (!kv.Key.Tile.Equals(id) || kv.Value.Role != TileRole.Display) continue;
-                any = true;
-                if (!kv.Value.Built) return false;
-                if (kv.Value.DrawHandles != null || kv.Value.Meshes != null) anyGeom = true;
-            }
-
-            return any && anyGeom;
-        }
-
-        /// <summary>Test-only, backend-agnostic: <see cref="Mesh"/> assets for a loaded record tile — the union
-        /// across its source-records (pipeline-slot order), or null if the tile has no geometry.</summary>
-        internal Mesh[] GetTileMeshes(TileId id)
-        {
-            List<Mesh> all = null;
-            for (int s = 0; s < _sources.Count; s++)
-            {
-                if (_loaded.TryGetValue(new LoadedKey(id, s), out var lt) && lt.Meshes != null)
-                {
-                    all ??= new List<Mesh>(8);
-                    all.AddRange(lt.Meshes);
-                }
-            }
-
-            return all?.ToArray();
-        }
-
-        /// <summary>Test-only: global material index of each mesh in <see cref="GetTileMeshes"/>, same order
-        /// (both walk pipelines/meshes in lockstep).</summary>
-        internal int[] GetTileMaterialIndices(TileId id)
-        {
-            List<int> all = null;
-            for (int s = 0; s < _sources.Count; s++)
-            {
-                if (_loaded.TryGetValue(new LoadedKey(id, s), out var lt) && lt.MaterialIndices != null)
-                {
-                    all ??= new List<int>(8);
-                    all.AddRange(lt.MaterialIndices);
-                }
-            }
-
-            return all?.ToArray();
-        }
-
-        /// <summary>Test-only: true once every loaded tile, in any role, has finished building and both desired lists
-        /// are empty — a <c>_loaded</c>-only check would miss cap-deferred tiles, which have no record until admitted.</summary>
-        internal bool AllTilesSettled()
-        {
-            if (_desired.Count > 0 || _prepareDesired.Count > 0) return false;
-
-            foreach (var kv in _loaded)
-            {
-                if (!kv.Value.Built)
-                    return false;
-            }
-
-            return true;
         }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
@@ -1208,7 +1088,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _lastSceneFrame    = sceneFrame;
             _hasLastSceneFrame = true;
             using (PmInstancedRebuild.Auto())
-                _instanced?.Rebuild(in sceneFrame);
+                Instanced?.Rebuild(in sceneFrame);
         }
 
         private void UpdateCore(CameraProperties cam, TileSelectionConfig cfg, double nowSeconds)
@@ -1339,8 +1219,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             VisibilityBatchesLastTick = 0;
         }
 
-        /// <summary>Deterministic drain: blocks until every in-flight fetch/mesh-build task completes and
-        /// consumes it, so <see cref="AllTilesSettled()"/> is true afterward. Test-only, not called from Update.</summary>
+        /// <summary>Deterministic drain: blocks until every in-flight fetch and mesh-build task completes and consumes it, so every
+        /// loaded tile is built afterward. Test-only. Non-obvious why it stays here: it mirrors <see cref="Update"/>'s frame order and
+        /// drives the same private admit, swap and flush steps.</summary>
         internal void DrainMeshBuilds(CameraProperties cam)
         {
             // Only .Projection is read on this uncapped path — cap == int.MaxValue skips the priority sort entirely.
@@ -1461,46 +1342,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             SwapStep();
             FlushVisibility();
             if (_hasLastSceneFrame) RebuildBackend(in _lastSceneFrame);
-        }
-
-        /// <summary>Waits for in-flight fetch and mesh-build tasks on <c>_loaded</c> tiles, parking off the
-        /// PlayerLoop rather than polling. Does not consume or kick anything — a caller that needs the mesh
-        /// built must still tick <c>LateUpdate</c>. <see cref="DrainMeshBuilds"/> is the consuming peer.
-        ///
-        /// <para>Never re-park a still-pending fetch: it double-registers the <c>UniTask</c>'s single
-        /// continuation slot.</para></summary>
-        /// <param name="timeoutMs">Maximum wait per task, in milliseconds.</param>
-        /// <exception cref="System.TimeoutException">A task did not finish within <paramref name="timeoutMs"/>.</exception>
-        internal void AwaitInFlightMeshBuilds(int timeoutMs)
-        {
-            foreach (var kv in _loaded)
-            {
-                LoadedTile lt = kv.Value;
-                if (lt.Built) continue;
-
-                bool completed;
-                if (!lt.FetchCompleted)
-                    completed = lt.Request.WaitOffPlayerLoop(timeoutMs);
-                else if (lt.Step == BuildStep.Prologue)
-                {
-                    UniTask<Processing.TilePrologueOutput> buildTask = lt.MeshBuildTask.ToUniTask();
-                    completed = buildTask.WaitOffPlayerLoop(timeoutMs);
-                }
-                // Complete() advances no step and consumes nothing; it can't throw TimeoutException, since a graph has no PlayerLoop to dead-end on.
-                else if (lt.Step == BuildStep.Measure || lt.Step == BuildStep.Write)
-                {
-                    lt.Graph.Complete();
-                    completed = true;
-                }
-                else
-                    continue; // fetch observed but not yet kicked (cap-deferred) — no in-flight task to park on.
-
-                if (!completed)
-                    throw new System.TimeoutException(
-                        $"AwaitInFlightMeshBuilds: tile {kv.Key.Tile} did not complete within {timeoutMs}ms — " +
-                        "a hung fetch or mesh-build task. Re-parking a still-pending task would double-register " +
-                        "its single continuation, so this fails loud instead of retrying.");
-            }
         }
 
         /// <summary>Kicks each tile's mesh build then consumes it, bounded by the mesh-build/consume/vertex
@@ -1904,7 +1745,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 int handle;
                 using (PmAddTileLayer.Auto())
-                    handle = _instanced.AddTileLayer(mesh, lt.TileOriginRender, materialIndex, id);
+                    handle = Instanced.AddTileLayer(mesh, lt.TileOriginRender, materialIndex, id);
                 _consumeMeshes.Add(mesh); // Track for explicit destruction
                 _consumeHandles.Add(handle);
                 _consumeMatIndices.Add(materialIndex); // Which layerId this mesh belongs to
@@ -2073,7 +1914,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Records in the cover not yet <see cref="LoadedTile.Built"/>, recomputed fresh each call rather than
         /// tracked incrementally — a cached counter would need write-back on every mutation site.</summary>
-        private int CountActiveLoads() => CountInFlight(prepared: false);
+        internal int CountActiveLoads() => CountInFlight(prepared: false);
 
         /// <summary>Prepared-ahead records not yet built: what <see cref="TileSelectionConfig.MaxConcurrentPrepareLoads"/> bounds.</summary>
         private int CountPrepareLoads() => CountInFlight(prepared: true);
@@ -2347,7 +2188,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 int handle;
                 using (PmAddTileLayer.Auto())
-                    handle = _instanced.AddTileLayer(mesh, origin, layerId, id);
+                    handle = Instanced.AddTileLayer(mesh, origin, layerId, id);
                 _consumeMeshes.Add(mesh);
                 _consumeHandles.Add(handle);
                 _consumeMatIndices.Add(layerId);
@@ -2633,7 +2474,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// tile that has no shown relative. Its shows and hides reach the backend in the one <see cref="FlushVisibility"/>.</summary>
         private void SwapStep()
         {
-            if (_instanced == null) return;
+            if (Instanced == null) return;
             bool changed = false;
             _concealedThisStep.Clear();
 
@@ -2847,22 +2688,22 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _lastQueuedShow.Clear();
 
-            if (_instanced != null)
+            if (Instanced != null)
             {
                 if (_hideBatchCount > 0)
                 {
-                    _instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_hideBatch, 0, _hideBatchCount), false);
+                    Instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_hideBatch, 0, _hideBatchCount), false);
                     VisibilityBatchesLastTick++;
                 }
 
                 if (_showBatchCount > 0)
                 {
-                    _instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_showBatch, 0, _showBatchCount), true);
+                    Instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_showBatch, 0, _showBatchCount), true);
                     VisibilityBatchesLastTick++;
                 }
             }
 
-            _hideBatchCount = 0; // the queues are dropped when _instanced is null: no backend holds those handles
+            _hideBatchCount = 0; // the queues are dropped when Instanced is null: no backend holds those handles
             _showBatchCount = 0;
         }
 
@@ -2915,8 +2756,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
 
             // Unregister draw items before destroying meshes — one batched call so Entities drops all layer entities in a single structural change.
-            if (_instanced != null && lt.DrawHandles != null)
-                _instanced.RemoveItems(lt.DrawHandles);
+            if (Instanced != null && lt.DrawHandles != null)
+                Instanced.RemoveItems(lt.DrawHandles);
 
             RetireOldGeometry(ref lt); // a record released mid-rebake still owns its previous geometry
             DestroyTrackedMeshes(ref lt); // Unity does not free a Mesh asset just because nothing references it
@@ -2989,8 +2830,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// the rebake state. A no-op when the record holds none. Each mesh is destroyed exactly once.</summary>
         private void RetireOldGeometry(ref LoadedTile lt)
         {
-            if (_instanced != null && lt.OldDrawHandles != null)
-                _instanced.RemoveItems(lt.OldDrawHandles);
+            if (Instanced != null && lt.OldDrawHandles != null)
+                Instanced.RemoveItems(lt.OldDrawHandles);
             if (lt.OldMeshes != null)
                 for (int i = 0; i < lt.OldMeshes.Length; i++)
                     lt.OldMeshes[i].DestroySafely(allowDestroyingAssets: true);
@@ -3113,8 +2954,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _prepared.Dispose();
 
                 // Dispose the backend AFTER destroying all tile meshes, so it never references a freed Mesh.
-                _instanced?.Dispose();
-                _instanced = null;
+                Instanced?.Dispose();
+                Instanced = null;
 
                 // After the teardown pass above, which releases fetches through this registry.
                 _sources.Dispose();

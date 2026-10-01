@@ -142,18 +142,18 @@ namespace MapRenderer.Tests
         // ── Tile lifecycle observability (forwarded to the TileManager) ──────────────────────────
 
         /// <summary>Number of currently loaded (or loading) tiles.</summary>
-        public static int LoadedTileCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.LoadedTileCount : 0;
+        public static int LoadedTileCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.LoadedTileCount() : 0;
 
         /// <summary>Tile-load smoothness: the ACTIVE (admitted, not-yet-Built) set size — what
         /// <c>MaxConcurrentTileLoads</c> bounds.</summary>
-        public static int ActiveLoadCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ActiveLoadCount : 0;
+        public static int ActiveLoadCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ActiveLoadCount() : 0;
 
         /// <summary>Tile-load smoothness: number of (tile,source) keys wanting to load but not yet admitted.</summary>
-        public static int DesiredCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.DesiredCount : 0;
+        public static int DesiredCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.DesiredCount() : 0;
 
         /// <summary>Tile-load smoothness: the tile at the head of the not-yet-admitted desired list (next to
         /// admit) — default <see cref="TileId"/> if the desired list is empty.</summary>
-        public static TileId DesiredHeadTile(this MapViewComponent view) => view.TileManager != null ? view.TileManager.DesiredHeadTile : default;
+        public static TileId DesiredHeadTile(this MapViewComponent view) => view.TileManager != null ? view.TileManager.DesiredHeadTile() : default;
 
         /// <summary>Tile-load smoothness: every currently-ADMITTED tile's <see cref="TileId"/>.</summary>
         public static void CollectLoadedTileIds(this MapViewComponent view, List<TileId> into)
@@ -172,10 +172,10 @@ namespace MapRenderer.Tests
 
         /// <summary>Number of source pipelines that actually own a feature source (the source-less
         /// background pipeline excluded) — "how many sources did the style wire?".</summary>
-        public static int WiredFeatureSourceCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.WiredFeatureSourceCount : 0;
+        public static int WiredFeatureSourceCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.WiredFeatureSourceCount() : 0;
 
         /// <summary>The scheduler's in-flight fetch count.</summary>
-        public static int InFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.InFlightCount : 0;
+        public static int InFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.InFlightCount() : 0;
 
         /// <summary>Number of tiles released while their mesh build was still in-flight.</summary>
         public static int ReleasedMidFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFlightCount : 0;
@@ -207,13 +207,13 @@ namespace MapRenderer.Tests
         /// <summary>(tile, source) records fully released in the most recent Update's DrainReleaseQueue.</summary>
         public static int TilesReleasedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesReleasedLastTick : 0;
         /// <summary>Current deferred-release backlog depth (records that left cover and await drain).</summary>
-        public static int ReleaseQueueDepth(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleaseQueueDepth : 0;
+        public static int ReleaseQueueDepth(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleaseQueueDepth() : 0;
         /// <summary>Batched DestroyEntity structural changes in the Entities backend's LAST RemoveItems call (0 or 1); 0 if not on the Entities backend.</summary>
-        public static int DestroyEntityBatchesLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.DestroyEntityBatchesLastRemove : 0;
+        public static int DestroyEntityBatchesLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer() != null ? view.TileManager.EntitiesRenderer().DestroyEntityBatchesLastRemove : 0;
         /// <summary>Entities destroyed by the Entities backend's last RemoveItems batch (layers + any emptied root).</summary>
-        public static int EntitiesDestroyedLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.EntitiesDestroyedLastRemove : 0;
+        public static int EntitiesDestroyedLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer() != null ? view.TileManager.EntitiesRenderer().EntitiesDestroyedLastRemove : 0;
         /// <summary>Live EG-registered meshes on the Entities backend (inc per AddTileLayer, dec per remove); -1 if not on the Entities backend.</summary>
-        public static int RegisteredMeshCount(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.RegisteredMeshCount : -1;
+        public static int RegisteredMeshCount(this MapViewComponent view) => view.TileManager?.EntitiesRenderer() != null ? view.TileManager.EntitiesRenderer().RegisteredMeshCount : -1;
 
         /// <summary>Cumulative PreparedTileCache hit count (a revisit/style-toggle that skipped
         /// decode/build/upload).</summary>
@@ -240,7 +240,7 @@ namespace MapRenderer.Tests
         {
             TileManager tm = view.TileManager;
             if (tm == null) return default;
-            ITileRenderBackend backend = tm.BrgRenderer ?? (ITileRenderBackend)tm.EntitiesRenderer ?? tm.GameObjectRenderer;
+            ITileRenderBackend backend = tm.BrgRenderer() ?? (ITileRenderBackend)tm.EntitiesRenderer() ?? tm.GameObjectRenderer();
             return backend?.ComputeSceneBounds(tileSizeWorld) ?? default;
         }
 
@@ -267,13 +267,13 @@ namespace MapRenderer.Tests
         // ── Backend handles (null unless the matching backend is selected and Initialise has run) ─
 
         /// <summary>The live BRG renderer; lets tests read instance buffer state without GPU readback.</summary>
-        public static BrgTileRenderer BrgRenderer(this MapViewComponent view) => view.TileManager?.BrgRenderer;
+        public static BrgTileRenderer BrgRenderer(this MapViewComponent view) => view.TileManager?.BrgRenderer();
 
         /// <summary>The live Entities-Graphics renderer.</summary>
-        public static EntitiesTileRenderer EntitiesRenderer(this MapViewComponent view) => view.TileManager?.EntitiesRenderer;
+        public static EntitiesTileRenderer EntitiesRenderer(this MapViewComponent view) => view.TileManager?.EntitiesRenderer();
 
         /// <summary>The live GameObject renderer; lets tests read the per-tile GameObject Hierarchy.</summary>
-        public static GameObjectTileRenderer GameObjectRenderer(this MapViewComponent view) => view.TileManager?.GameObjectRenderer;
+        public static GameObjectTileRenderer GameObjectRenderer(this MapViewComponent view) => view.TileManager?.GameObjectRenderer();
 
         /// <summary>
         /// Assigns a committed production <see cref="MapMaterialSet"/> so the view can build per-layer

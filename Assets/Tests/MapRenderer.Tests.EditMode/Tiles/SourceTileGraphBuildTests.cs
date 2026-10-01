@@ -1621,13 +1621,13 @@ namespace MapRenderer.Tests.Tiles
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must build on first visit.");
                 Assert.AreEqual(3, view.Layers.Count, "drive precondition: all three fill layers must have taken a slot.");
-                int itemsBefore = view.TileManager.BrgRenderer.DrawItemCount();
+                int itemsBefore = view.TileManager.BrgRenderer().DrawItemCount();
                 Assert.Greater(itemsBefore, 0, "drive precondition: the settled cover must have registered draw items.");
 
                 SpinToCompleted(view.SetStyle(ThreeFillLayersReorderedCab(), "A"));
                 view.LateUpdate(); // drives Rebuild, which re-sorts _sortedItems from the (re-stamped) queues
 
-                var brg = view.TileManager.BrgRenderer;
+                var brg = view.TileManager.BrgRenderer();
                 Assert.IsNotNull(brg, "drive precondition: the BRG backend must be active.");
                 Assert.AreEqual(itemsBefore, brg.DrawItemCount(),
                     "a reorder must tear NOTHING down — every draw item registered before it must still be registered.");
