@@ -1017,6 +1017,32 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
+        /// <summary>A, recoloured and renamed: the same bake. Only the root <c>name</c>, constant colours and a constant line width differ.</summary>
+        private static StyleDocument TwoLayerStyleA_Night() => TestStyle.Document(@"{
+            ""version"": 8, ""name"": ""night"",
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 10, 20, 90, 1] } },
+                { ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                  ""source-layer"": ""geolines"",
+                  ""paint"": { ""line-color"": [""rgba"", 200, 200, 255, 1], ""line-width"": 4 } }
+            ]
+        }");
+
+        /// <summary>A with a filter on the fill layer: a different bake.</summary>
+        private static StyleDocument TwoLayerStyleA_Filtered() => TestStyle.Document(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""filter"": [""=="", ""name"", ""none""], ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                { ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                  ""source-layer"": ""geolines"",
+                  ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 } }
+            ]
+        }");
+
         /// <summary>A single FILL layer at id "shape-layer" — the closed-hole drive's first arm.</summary>
         private static StyleDocument SingleFillLayerStyle() => TestStyle.Document(@"{
             ""version"": 8,
@@ -1102,11 +1128,39 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "a cache hit must not start a build.");
                 Assert.Greater(view.PreparedCacheHits(), hitsBefore, "the revisit must register a cache hit.");
                 Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0, "both layers' meshes must be restored.");
+
+                // The token folds what decides the mesh, not the document: a return through a restyle whose style id, name, colours and line
+                // width differ is the same bake, so it hits; a return with a filter added is a different bake, so it misses.
+                var tokenA = view.TileManager.CurrentStyle;
+                hitsBefore = ReturnThroughB(view, TwoLayerStyleA_Night(), "A-night");
+                Assert.AreEqual(tokenA, view.TileManager.CurrentStyle, "a recolour, rename and new style id must not move the token.");
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "the recoloured style must re-show without a rebuild.");
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore, "the recoloured style must register a cache hit.");
+
+                hitsBefore = ReturnThroughB(view, TwoLayerStyleA_Filtered(), "A-filtered");
+                Assert.AreNotEqual(tokenA, view.TileManager.CurrentStyle, "a filter edit must move the token.");
+                Assert.AreEqual(hitsBefore, view.PreparedCacheHits(), "a filter edit must never register a hit: the cached meshes are the old bake.");
             }
             finally
             {
                 view.Teardown();
             }
+        }
+
+        /// <summary>Pans out of the cover (the tile's meshes go to the cache), restyles to B, restyles to <paramref name="style"/>, and pans back
+        /// with one Update. Returns the cache hit count from before the pan back.</summary>
+        private static int ReturnThroughB(MapView view, StyleDocument style, string styleId)
+        {
+            view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+            view.LateUpdate();
+            PumpUntilSettled(view);
+            SpinToCompleted(view.SetStyle(SingleLayerStyleB(), "B"));
+            PumpUntilSettled(view);
+            SpinToCompleted(view.SetStyle(style, styleId));
+            int hitsBefore = view.PreparedCacheHits();
+            view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+            view.LateUpdate();
+            return hitsBefore;
         }
 
         /// <summary>The hole a review found in the id-based design: with the cache token derived from

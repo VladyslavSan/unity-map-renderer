@@ -1053,14 +1053,14 @@ namespace MapRenderer.Tests.Style
         /// A Constant <c>text-color</c> pair differing ONLY in alpha must be REFUSED — only RGB rides the
         /// <c>_TextColor</c> uniform; alpha travels by the vertex COLOR stream
         /// (<c>SymbolFeatureExtractor.EvaluatePaint</c>'s <c>textRgba.w</c>), which the in-place path never
-        /// re-bakes. RED-verify: drop the <c>AlphaMatches</c> conjunct from
-        /// <c>SurvivingLayerGate.FreelyTransitionableKeys</c>.
+        /// re-bakes. RED-verify: stop <c>MeshSignature.AlphaOf</c> keeping the alpha, in
+        /// <c>MeshSignature.Layer</c>.
         /// </summary>
         /// <summary>
         /// The halo twin of <see cref="SymbolLayer_AlphaOnlyTextColorChange_IsRefused"/>. text-halo-color's
         /// alpha rides the opacity stream AND decides whether a halo run is emitted at all
         /// (<c>WorldSymbolRenderer.Emit</c>), so an alpha-only change must refuse even though both sides are
-        /// Constant. RED-verify: restrict <c>AlphaMatches</c> back to text-color only.
+        /// Constant. RED-verify: restrict <c>MeshSignature.AlphaOf</c> back to text-color only.
         /// </summary>
         [Test]
         public void SymbolLayer_AlphaOnlyHaloColorChange_IsRefused()

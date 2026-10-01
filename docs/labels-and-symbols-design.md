@@ -1287,7 +1287,7 @@ zoom and eases it. Exactly one carrier is ever non-white, so the colour is conve
   refuses a change to either. `text-color` rides the uniform at Constant only, and the gate refuses any other
   `text-color` change. A colour's ALPHA always stays on the stream, evaluated at the tile build zoom — for the
   halo it additionally decides whether the second run is emitted at all — so the gate compares alpha
-  (`SurvivingLayerGate.AlphaMatches`) and an alpha change refuses, including a Zoom alpha schedule that differs
+  (`MeshSignature`, which keeps a colour's alpha in the signature) and an alpha change refuses, including a Zoom alpha schedule that differs
   at any stop.
 - **What this costs.** A zoom-expression `text-color` does not ease across a restyle, and a halo whose alpha
   schedule changes needs a full rebuild. The halo's RGB is read at the live zoom, its alpha at the build zoom.

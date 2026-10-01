@@ -177,7 +177,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // See StyleToken's own doc for what the digest folds in and why; set AFTER Build, since it
             // needs the built layer numbering.
             TileManager.CurrentStyle = new Tile.StyleToken(JsonCanonical.CacheKey(
-                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing
+                string.Empty, Rendering.Layers.MeshSignature.Document(_style, RenderedStyleLayers(Layers)), LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing
                 + "|src=" + MapViewSourceSpecs.ResolvedSourceIdentity(specs)));
             CommitProbe?.Invoke(CommitPhase.StyleTokenWritten);
             LogSkippedLayers(Layers.SkippedLayers); // once per style load, never per tile/frame
@@ -233,6 +233,14 @@ namespace MapRenderer.Unity.Rendering.Map
             if (problems.Count > 0)
                 Debug.LogWarning(
                     $"[MapView.SetStyle] {problems.Count} style layer(s) not rendered: {string.Join(", ", problems)}");
+        }
+
+        /// <summary>The style layer behind each slot of <paramref name="layers"/>, in slot order.</summary>
+        private static List<StyleLayer> RenderedStyleLayers(Rendering.Layers.RenderLayerSet layers)
+        {
+            var styleLayers = new List<StyleLayer>(layers.Count);
+            for (int li = 0; li < layers.Count; li++) styleLayers.Add(layers[li].StyleLayer);
+            return styleLayers;
         }
 
         /// <summary>A plain-text encoding of the dense (index, id) pairs the layer set just built —

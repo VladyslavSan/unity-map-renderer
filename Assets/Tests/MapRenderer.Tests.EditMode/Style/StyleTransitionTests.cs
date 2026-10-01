@@ -410,7 +410,7 @@ namespace MapRenderer.Tests.Style
         /// A <c>text-opacity</c> change refuses and rebuilds: it bakes into the vertex stream
         /// (<c>SymbolPaint.Opacity</c>), so it is NOT a gate key. Constant <c>text-color</c> takes the
         /// in-place path instead (<see cref="SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives"/>).
-        /// Adding <c>text-opacity</c> to <c>SurvivingLayerGate.TransitionablePaintKeys</c> reds this.
+        /// Adding <c>text-opacity</c> to <c>MeshSignature.TransitionablePaintKeys</c> reds this.
         /// </summary>
         [Test]
         public void SymbolPaintChange_TakesTheRebuildPath()

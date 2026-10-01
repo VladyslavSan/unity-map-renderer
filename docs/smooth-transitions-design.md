@@ -153,7 +153,7 @@ duration.** A compatible restyle (§ "Style switching", sub-topic 4) and a camer
   the same call. A restyle mid-ease starts from the value last written. A runtime override stops the ease and wins.
   The first style and an instant transition snap. The haze switch turns on when the ease starts, so the fog
   colour eases visibly instead of popping on at the end. Because every restyle re-applies these two root
-  keys and no tile mesh bakes them, `SurvivingLayerGate.RootMatches` leaves them out of its comparison.
+  keys and no tile mesh bakes them, `MeshSignature.Root` leaves them out, and so does the restyle gate that reads it.
 - **How it composes with continuous zoom interpolation** — the fill/line/bg zoom path is already *continuous*
   (evaluates every frame) but not *eased* across a discrete change (a restyle, or a stepped property). Easing
   layers on top of, not instead of, continuous interpolation: both the origin and the target of an easing

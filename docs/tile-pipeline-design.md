@@ -368,11 +368,16 @@ for other reasons; the bake does not read it.
 
 **This is the bake-parameter SSOT.** The prepared artifact is a pure function of the closed set:
 
-> `{ Tile, Zoom = id.Z, origin = f(tile, projection), projection, bufferClip }` + the typed paint and layout
-> (the style content **and** `MapViewConfig.FillAntialiasing`) + the built layer numbering.
+> `{ Tile, Zoom = id.Z, origin = f(tile, projection), projection, bufferClip }` + the style's mesh signature
+> (`MeshSignature`) + `MapViewConfig.FillAntialiasing` + the built layer numbering.
 
 The rule that licenses `PreparedTileCache` holding no purge of its own: **a new bake input enters the cache
-identity.** The current inputs split across two components. Content,
+identity, and an input that is not a bake input stays out of it.** `MeshSignature` is the one list of what a
+style contributes: the raw layer without its draw-gate keys (`minzoom`, `maxzoom`, `layout.visibility`) and
+without the value of any paint key that rides a uniform; the root without `layers`, `light`, `sky`, `name` and
+`metadata`. The restyle-in-place gate (`SurvivingLayerGate`) compares the same signature, so what a restyle may keep in place and what the cache may reuse
+never disagree, and moving a property between the mesh and a uniform is one edit. The style id is not an input: two documents with equal
+signatures share cached meshes. The current inputs split across two components. The signature,
 `FillAntialiasing`, the built layer numbering, and each source's resolved identity (`SourceId` + `SourceKey`)
 fold into `TileManager.CurrentStyle`'s `StyleToken` (`MapView.SetStyle`, keyed through
 `JsonCanonical.CacheKey`) — the resolved identity because a TileJSON can resolve differently under identical

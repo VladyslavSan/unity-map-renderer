@@ -7,7 +7,7 @@ namespace MapRenderer.Unity.Rendering.Layers
     /// Which symbol colours ride a per-layer uniform and which bake into the vertex COLOR stream.
     /// <c>text-color</c> rides only at <c>Constant</c>; <c>text-halo-color</c> rides at every kind that does
     /// not depend on the feature, and its alpha always stays on the stream.
-    /// <see cref="SurvivingLayerGate"/> reads both predicates, so widening one frees a key the in-place path
+    /// <see cref="MeshSignature"/> reads both predicates, so widening one frees a key the in-place path
     /// cannot re-bake.
     /// </summary>
     internal static class SymbolTextColorCarrier
