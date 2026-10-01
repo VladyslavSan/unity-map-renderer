@@ -83,6 +83,17 @@ the other edge's own unit normal.
 Suppression for an outward band is cheaper than it would be for an inset one: there is no taper to zero, no
 half-pixel step and no T-junction to reconcile.
 
+## A band never draws where its fill is hidden
+
+A band vertex is displaced only where its surface faces the camera, tested in view space. Cull Back hides a
+fill on the far side of the globe, and the band collapses to zero width there, so it never draws where its fill
+does not. `GlobeFillBandRenderTests` pins it: every gained pixel lies within `MiterLimit + 1` px of a triangle of
+the drawn, camera-facing mesh.
+
+**Limitation:** a band quad twists when the outer vertices of a short edge displace along miter directions that
+cross. One of its two triangles then winds backwards and Cull Back drops it, so a small wedge of band is missing
+on a small fraction of short edges, on the flat arm and on the globe.
+
 ## The residual rim, accepted (maintainer call)
 
 Two polygons **of the same layer abutting inside one tile** share no such predicate: each one's band ramps
