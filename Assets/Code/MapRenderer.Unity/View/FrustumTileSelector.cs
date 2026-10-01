@@ -25,10 +25,12 @@ namespace MapRenderer.Unity.View
         private readonly int    _selectionZoomOffset;
         private readonly double _onScreenTilePx;
         private readonly double _zoomLevelHysteresis;
+        private readonly double _zoomLevelPreload;
         private readonly ITileLodStrategy _lod;
         private readonly IFarPlanePolicy  _farPolicy;
 
         private readonly List<TileId> _stack = new List<TileId>(256);
+        private readonly HashSet<TileId> _planned = new HashSet<TileId>(256); // dedupes one preload or keep list
 
         // The previous selection, read as TileLodContext.History. Cleared by a jump, not by a level change.
         private readonly HashSet<TileId> _prevEmitted = new HashSet<TileId>(256);
@@ -41,10 +43,6 @@ namespace MapRenderer.Unity.View
         private int    _level = -1;
         private double _continuous;
 
-        /// <inheritdoc/>
-        public TargetLevel LastTarget
-            => new TargetLevel { Level = _level, Continuous = _continuous, MinLevel = _minZoom, MaxLevel = _maxZoom };
-
         /// <param name="minZoom">Lower clamp for the near-field selection zoom.</param>
         /// <param name="maxZoom">Upper clamp for the near-field selection zoom.</param>
         /// <param name="onScreenTilePx">Target on-screen tile size (512 convention). Sets both the zoom offset
@@ -53,11 +51,14 @@ namespace MapRenderer.Unity.View
         /// <param name="farPolicy">Far-plane policy — MUST match the render camera's. Default
         ///   <see cref="GeometryAwareFarPlane"/> (planar); the globe wants <see cref="MultiplierFarPlane"/>.</param>
         /// <param name="zoomLevelHysteresis">Zoom units the target level holds past each integer, clamped to [0, 0.5].
-        ///   0 follows the camera's integer zoom exactly; it is the legacy and test value, production passes the config.</param>
+        ///   0 follows the camera's integer zoom exactly. It also widens the keep set past the preload lead.</param>
+        /// <param name="zoomLevelPreload">Zoom units before a level switch at which the preload set starts,
+        /// clamped to [-1, 1]. Negative starts after the whole level.</param>
         public FrustumTileSelector(int minZoom = 0, int maxZoom = 22, int onScreenTilePx = 512,
                                    ITileLodStrategy lod = null, IFarPlanePolicy farPolicy = null,
-                                   double zoomLevelHysteresis = 0.0)
+                                   double zoomLevelHysteresis = 0.0, double zoomLevelPreload = 0.0)
         {
+            _zoomLevelPreload = math.clamp(zoomLevelPreload, -1.0, 1.0);
             _zoomLevelHysteresis = math.clamp(zoomLevelHysteresis, 0.0, MaxZoomLevelHysteresis);
             _minZoom = minZoom;
             _maxZoom = maxZoom;
@@ -70,10 +71,10 @@ namespace MapRenderer.Unity.View
         }
 
         /// <inheritdoc/>
-        public void SelectVisibleTiles(in ViewContext view, List<TileId> reuseBuffer)
+        public void SelectVisibleTiles(in ViewContext view, TileSelection selection)
         {
-            if (reuseBuffer == null) throw new ArgumentNullException(nameof(reuseBuffer));
-            reuseBuffer.Clear();
+            if (selection == null) throw new ArgumentNullException(nameof(selection));
+            selection.Clear();
 
             IProjection      proj = view.Projection;
             CameraProperties cam  = view.Camera;
@@ -99,27 +100,85 @@ namespace MapRenderer.Unity.View
             if (near < 0.1) near = 0.1;
             double aspect = vp.x / vp.y;
             double far    = _farPolicy.FarMetres(altitude, cam.Tilt.Value, cam.VerticalFovDeg, aspect);
-            ViewFrustum frustum = ViewFrustum.FromPose(pos, fwd, up, cam.VerticalFovDeg, aspect, near, far);
-
-            double3  origin = proj.Project(lookAt);
-            float3x3 basis  = proj.TangentBasisAt(lookAt);
 
             // Horizon occlusion (globe only): a tile whose bounding sphere is entirely beyond this sphere's
             // limb is hidden. A flat atlas reports none — occ == false, and none of the sphere math runs.
             bool    occ    = proj.TryGetHorizonOccluder(out double3 occCentre, out double occRadius);
             double3 camVec = occ ? new double3(pos.x - occCentre.x, pos.y - occCentre.y, pos.z - occCentre.z) : default;
-            double  dc     = occ ? math.length(camVec) : 0.0;
-            double  r2     = occ ? occRadius * occRadius : 0.0;
 
             // LOD screen-size ratio: a tile of groundSize at distance d spans ≤ onScreenTilePx px ⇔
             // groundSize ≤ lodRatio·d. worldSpan is the equatorial circumference (planar & globe alike).
-            double tanV      = math.tan(Angle.FromDegrees(cam.VerticalFovDeg * 0.5).Radians);
-            double lodRatio  = _onScreenTilePx * 2.0 * tanV / vp.y;
-            double worldSpan = 2.0 * WebMercator.WorldExtent;
+            double tanV = math.tan(Angle.FromDegrees(cam.VerticalFovDeg * 0.5).Radians);
 
-            // Pinhole pixel basis, for measuring a tile's actual projected on-screen size (the area-rule input).
-            var pixelBasis = new PixelBasis(pos, fwd, up, vp.y / (2.0 * tanV), near);
+            var frame = new TraversalFrame(
+                projection: proj,
+                frustum:    ViewFrustum.FromPose(pos, fwd, up, cam.VerticalFovDeg, aspect, near, far),
+                origin:     proj.Project(lookAt),
+                basis:      proj.TangentBasisAt(lookAt),
+                occluded:   occ,
+                occCentre:  occCentre,
+                camVec:     camVec,
+                camDist:    occ ? math.length(camVec) : 0.0,
+                occRadius2: occ ? occRadius * occRadius : 0.0,
+                camPos:     pos,
+                // Pinhole pixel basis, for measuring a tile's actual projected on-screen size (the area-rule input).
+                pixels:     new PixelBasis(pos, fwd, up, vp.y / (2.0 * tanV), near),
+                lodRatio:   _onScreenTilePx * 2.0 * tanV / vp.y,
+                worldSpan:  2.0 * WebMercator.WorldExtent);
 
+            Traverse(in frame, z, 1.0, selection.Cover);
+            // The shifted passes read the history of the PREVIOUS cover, so they run before it is remembered.
+            PlanAhead(in frame, z, continuous, _zoomLevelPreload, selection.Preload);
+            // Keep holds Preload by construction. With no hysteresis its lead equals the preload lead, so it needs no pass.
+            if (_zoomLevelHysteresis > 0.0)
+                PlanAhead(in frame, z, continuous, _zoomLevelPreload + _zoomLevelHysteresis, selection.Keep);
+            // An index loop, not AddRange: a BCL may copy an ICollection source through a temporary array.
+            for (int i = 0; i < selection.Preload.Count; i++)
+                selection.Keep.Add(selection.Preload[i]);
+
+            RememberCover(selection.Cover);
+            DedupeOutsideCover(selection.Preload);
+            DedupeOutsideCover(selection.Keep);
+            _level      = z;
+            _continuous = continuous;
+        }
+
+        /// <summary>Appends to <paramref name="into"/> the tiles the traversal would emit if the camera were
+        /// <paramref name="lead"/> zoom units closer, and as many units farther. The level target moves one
+        /// level once the zoom is within the lead of the switch. The LOD thresholds scale by the lead, and not
+        /// at all for a negative lead (no preload).</summary>
+        private void PlanAhead(in TraversalFrame frame, int level, double continuous, double lead, List<TileId> into)
+        {
+            double scale = math.pow(2.0, math.max(lead, 0.0));
+            int closer = continuous >= level + 1 - lead && level + 1 <= _maxZoom ? level + 1 : level;
+            int farther = continuous < level + lead && level - 1 >= _minZoom ? level - 1 : level;
+            Traverse(in frame, closer, 1.0 / scale, into);
+            Traverse(in frame, farther, scale, into);
+        }
+
+        /// <summary>Removes duplicates, and the tiles of the cover just remembered, from
+        /// <paramref name="tiles"/>, keeping order.</summary>
+        private void DedupeOutsideCover(List<TileId> tiles)
+        {
+            _planned.Clear();
+            int kept = 0;
+            for (int i = 0; i < tiles.Count; i++)
+            {
+                TileId tile = tiles[i];
+                if (_prevEmitted.Contains(tile) || !_planned.Add(tile)) continue;
+                tiles[kept++] = tile;
+            }
+
+            tiles.RemoveRange(kept, tiles.Count - kept);
+        }
+
+        /// <summary>The descent from the world tile: appends to <paramref name="output"/> every visible tile at
+        /// or past the target zoom <paramref name="level"/>, or earlier where the LOD strategy stops.
+        /// <paramref name="ratioScale"/> scales the LOD screen ratio and the target on-screen size, so every
+        /// strategy sees the same shift.</summary>
+        private void Traverse(in TraversalFrame frame, int level, double ratioScale, List<TileId> output)
+        {
+            double lodRatio = frame.LodRatio * ratioScale;
             _stack.Clear();
             _stack.Add(new TileId { Z = 0, X = 0, Y = 0 });
             while (_stack.Count > 0)
@@ -133,30 +192,63 @@ namespace MapRenderer.Unity.View
                 // The whole-world tile is always partially visible, and (on a globe) its bounding sphere
                 // under-bounds it — so testing it can wrongly prune everything. Skip the test at z0.
                 if (t.Z == 0) { nearDist = 0.0; onScreenPx = 0.0; }
-                else if (!TileVisible(in frustum, proj, origin, basis, occ, occCentre, camVec, dc, r2,
-                                      pos, in pixelBasis, t, t.Z >= z, out nearDist, out onScreenPx)) continue;
+                else if (!TileVisible(in frame, t, t.Z >= level, out nearDist, out onScreenPx)) continue;
 
-                if (t.Z >= z) { reuseBuffer.Add(t); continue; } // near-field detail cap
-                if (t.Z == 0) { PushChildren(t); continue; }    // never LOD-stop the world tile
+                if (t.Z >= level) { output.Add(t); continue; } // near-field detail cap
+                if (t.Z == 0) { PushChildren(t); continue; }   // never LOD-stop the world tile
 
                 var ctx = new TileLodContext
                 {
                     TileZoom         = t.Z,
-                    TargetZoom       = z,
-                    GroundSize       = worldSpan / (1L << t.Z),
+                    TargetZoom       = level,
+                    GroundSize       = frame.WorldSpan / (1L << t.Z),
                     Distance         = nearDist,
                     ScreenRatio      = lodRatio,
                     OnScreenPx       = onScreenPx,
-                    TargetOnScreenPx = _onScreenTilePx,
+                    TargetOnScreenPx = _onScreenTilePx * ratioScale,
                     History          = HistoryOf(t),
                 };
-                if (_lod.StopAt(in ctx)) { reuseBuffer.Add(t); continue; } // far → coarse
+                if (_lod.StopAt(in ctx)) { output.Add(t); continue; } // far → coarse
                 PushChildren(t);
             }
+        }
 
-            RememberCover(reuseBuffer);
-            _level      = z;
-            _continuous = continuous;
+        /// <summary>The per-call camera quantities every traversal pass reads.</summary>
+        private readonly struct TraversalFrame
+        {
+            public readonly IProjection Projection;
+            public readonly ViewFrustum Frustum;
+            public readonly double3     Origin;
+            public readonly float3x3    Basis;
+            public readonly bool        Occluded;
+            public readonly double3     OccCentre;
+            public readonly double3     CamVec;
+            public readonly double      CamDist;
+            public readonly double      OccRadius2;
+            public readonly double3     CamPos;
+            public readonly PixelBasis  Pixels;
+            public readonly double      LodRatio;
+            public readonly double      WorldSpan;
+
+            public TraversalFrame(IProjection projection, ViewFrustum frustum, double3 origin, float3x3 basis,
+                                  bool occluded, double3 occCentre, double3 camVec, double camDist,
+                                  double occRadius2, double3 camPos, PixelBasis pixels, double lodRatio,
+                                  double worldSpan)
+            {
+                Projection = projection;
+                Frustum    = frustum;
+                Origin     = origin;
+                Basis      = basis;
+                Occluded   = occluded;
+                OccCentre  = occCentre;
+                CamVec     = camVec;
+                CamDist    = camDist;
+                OccRadius2 = occRadius2;
+                CamPos     = camPos;
+                Pixels     = pixels;
+                LodRatio   = lodRatio;
+                WorldSpan  = worldSpan;
+            }
         }
 
         /// <summary>The target level: the previous one while <c>L - m &lt;= continuous &lt; L + 1 + m</c>, else the
@@ -241,20 +333,18 @@ namespace MapRenderer.Unity.View
         /// loading it coarse. A globe tile uses a bounding sphere while descending (so a curved tile is not
         /// wrongly pruned) and the tight corner AABB at the leaf; a flat tile always uses the AABB.</summary>
         /// <param name="onScreenPx">The tile's true projected on-screen size, in pixels.</param>
-        private static bool TileVisible(in ViewFrustum frustum, IProjection proj, double3 origin, float3x3 basis,
-                                        bool occ, double3 occCentre, double3 camVec, double dc, double r2,
-                                        double3 camPos, in PixelBasis pixelBasis, TileId t, bool leaf,
+        private static bool TileVisible(in TraversalFrame frame, TileId t, bool leaf,
                                         out double nearDist, out double onScreenPx)
         {
-            double3 c  = RenderPoint(proj, origin, basis, t, 0.5, 0.5);
-            double3 p0 = RenderPoint(proj, origin, basis, t, 0.0, 0.0);
-            double3 p1 = RenderPoint(proj, origin, basis, t, 1.0, 0.0);
-            double3 p2 = RenderPoint(proj, origin, basis, t, 0.0, 1.0);
-            double3 p3 = RenderPoint(proj, origin, basis, t, 1.0, 1.0);
+            double3 c  = RenderPoint(frame.Projection, frame.Origin, frame.Basis, t, 0.5, 0.5);
+            double3 p0 = RenderPoint(frame.Projection, frame.Origin, frame.Basis, t, 0.0, 0.0);
+            double3 p1 = RenderPoint(frame.Projection, frame.Origin, frame.Basis, t, 1.0, 0.0);
+            double3 p2 = RenderPoint(frame.Projection, frame.Origin, frame.Basis, t, 0.0, 1.0);
+            double3 p3 = RenderPoint(frame.Projection, frame.Origin, frame.Basis, t, 1.0, 1.0);
 
-            onScreenPx = OnScreenSize(in pixelBasis, c, p0, p1, p2, p3);
+            onScreenPx = OnScreenSize(in frame.Pixels, c, p0, p1, p2, p3);
 
-            if (occ)
+            if (frame.Occluded)
             {
                 double rad = Dist(c, p0);
                 double d1 = Dist(c, p1); if (d1 > rad) rad = d1;
@@ -262,15 +352,16 @@ namespace MapRenderer.Unity.View
                 double d3 = Dist(c, p3); if (d3 > rad) rad = d3;
 
                 // Occlusion: entirely behind the limb iff the near-most point of the bounding sphere still fails.
-                double centreDot = (c.x - occCentre.x) * camVec.x + (c.y - occCentre.y) * camVec.y
-                                 + (c.z - occCentre.z) * camVec.z;
-                if (centreDot + rad * dc < r2) { nearDist = 0.0; return false; }
+                double centreDot = (c.x - frame.OccCentre.x) * frame.CamVec.x
+                                 + (c.y - frame.OccCentre.y) * frame.CamVec.y
+                                 + (c.z - frame.OccCentre.z) * frame.CamVec.z;
+                if (centreDot + rad * frame.CamDist < frame.OccRadius2) { nearDist = 0.0; return false; }
 
                 if (!leaf)
                 {
-                    double dCentre = Dist(camPos, c);
+                    double dCentre = Dist(frame.CamPos, c);
                     nearDist = dCentre > rad ? dCentre - rad : 0.0; // nearest point of the bounding sphere
-                    return frustum.IntersectsSphere(c, rad);        // descent: conservative sphere
+                    return frame.Frustum.IntersectsSphere(c, rad);  // descent: conservative sphere
                 }
                 // leaf: tight AABB below.
             }
@@ -290,12 +381,13 @@ namespace MapRenderer.Unity.View
             double aMaxY = maxY + 2.0;
 
             // Nearest distance from the camera to the AABB (0 on an axis the camera is already within).
+            double3 camPos = frame.CamPos;
             double nx = camPos.x < minX ? minX - camPos.x : (camPos.x > maxX ? camPos.x - maxX : 0.0);
             double ny = camPos.y < aMinY ? aMinY - camPos.y : (camPos.y > aMaxY ? camPos.y - aMaxY : 0.0);
             double nz = camPos.z < minZ ? minZ - camPos.z : (camPos.z > maxZ ? camPos.z - maxZ : 0.0);
             nearDist = math.sqrt(nx * nx + ny * ny + nz * nz);
-            return frustum.IntersectsAabb(new double3(minX, aMinY, minZ),
-                                          new double3(maxX, aMaxY, maxZ));
+            return frame.Frustum.IntersectsAabb(new double3(minX, aMinY, minZ),
+                                                new double3(maxX, aMaxY, maxZ));
         }
 
         private static double3 RenderPoint(IProjection proj, double3 origin, float3x3 basis,

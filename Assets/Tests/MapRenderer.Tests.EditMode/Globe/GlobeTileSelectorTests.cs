@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.Globe
         public void Z0_EmitsExactlyTheSingleWorldTile()
         {
             var buf = new List<TileId>();
-            Sel(pad: 0).SelectVisibleTiles(View(Cam(0, 0, 0.0)), buf);
+            Sel(pad: 0).SelectCover(View(Cam(0, 0, 0.0)), buf);
             Assert.AreEqual(1, buf.Count, "z=0 is one tile covering the whole world");
             Assert.AreEqual(new TileId { Z = 0, X = 0, Y = 0 }, buf[0]);
         }
@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Globe
         public void EmitsTilesAtSelectionZoom_ContainingTheLookAt()
         {
             var buf = new List<TileId>();
-            Sel().SelectVisibleTiles(View(Cam(0, 0, 4.0)), buf);
+            Sel().SelectCover(View(Cam(0, 0, 4.0)), buf);
 
             Assert.IsNotEmpty(buf);
             int z = buf[0].Z;
@@ -55,7 +55,7 @@ namespace MapRenderer.Tests.Globe
         public void ZoomedIn_CoverIsBounded_NotWholeWorld()
         {
             var buf = new List<TileId>();
-            Sel().SelectVisibleTiles(View(Cam(10, 40, 8.0)), buf); // n=256 ⇒ n²=65536
+            Sel().SelectCover(View(Cam(10, 40, 8.0)), buf); // n=256 ⇒ n²=65536
 
             Assert.IsNotEmpty(buf);
             int n = 1 << buf[0].Z;
@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Globe
             var buf = new List<TileId>();
             // Near a pole, converging meridians make the footprint a wide wedge that reaches the pole row, but
             // it covers only the columns in view, not ALL columns.
-            Sel().SelectVisibleTiles(View(Cam(0, 84.0, 5.0)), buf);
+            Sel().SelectCover(View(Cam(0, 84.0, 5.0)), buf);
 
             Assert.IsNotEmpty(buf);
             int n = 1 << buf[0].Z;
@@ -86,7 +86,7 @@ namespace MapRenderer.Tests.Globe
         public void Antimeridian_WrapsColumns_NoDuplicates()
         {
             var buf = new List<TileId>();
-            Sel().SelectVisibleTiles(View(Cam(180.0, 0.0, 5.0)), buf); // look-at on the antimeridian
+            Sel().SelectCover(View(Cam(180.0, 0.0, 5.0)), buf); // look-at on the antimeridian
 
             Assert.IsNotEmpty(buf);
             int n = 1 << buf[0].Z;
@@ -107,7 +107,7 @@ namespace MapRenderer.Tests.Globe
             var cam = new CameraProperties(
                 new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 6, heading: 0, tilt: 60);
             var buf = new List<TileId>();
-            Sel(pad: 0).SelectVisibleTiles(
+            Sel(pad: 0).SelectCover(
                 new ViewContext { Camera = cam, ViewportPx = new double2(RefH, RefH), Projection = new SphericalProjection() },
                 buf);
 
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests.Globe
         public void LowZoom_CoversTheNearHemisphere()
         {
             var buf = new List<TileId>();
-            Sel(pad: 0).SelectVisibleTiles(View(Cam(0, 0, 1.0)), buf); // z=1, n=2 → 4 tiles, all visible
+            Sel(pad: 0).SelectCover(View(Cam(0, 0, 1.0)), buf); // z=1, n=2 → 4 tiles, all visible
             Assert.AreEqual(4, buf.Count, "at z=1 the whole world (4 tiles) is within the saturated cap");
         }
 

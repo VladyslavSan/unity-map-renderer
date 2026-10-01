@@ -86,6 +86,8 @@
     <!-- S73: device-agnostic gesture intent vocabulary -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/ViewContext.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/IVisibleTileSelector.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileSelection.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/VisibleTileSelectorTestExtensions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/FrustumTileSelector.cs" />
     <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Unity, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileTelemetrySnapshot.cs" />

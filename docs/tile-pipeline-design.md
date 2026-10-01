@@ -229,15 +229,21 @@ switch shows tiles that are already registered.
 - **Roles.** A record is `Display` when its tile is in the cover and `Prepare` when its tile is in the preload set P but not in the
   cover. A record with no role (`Display`, `Hold`, `Bridge` or `Prepare`) is released through the deferred-release queue. A `Prepare` record that enters the cover is shown by the swap step, in
   one batch, unless a tile that overlaps it is shown: § 4.8 then decides when it shows.
-- **The preload set P.** `Selector.LastTarget` gives the held level `L`, the continuous level `zc` and the selector's level range. For
-  each cover tile at level `L`, P holds its four children once `zc >= L + 1 - p`, and its parent while `zc < L + p`, where `p` is
-  `ZoomLevelPreload` (default 0.05, clamped to `[-1, 1]`, negative starts after the whole level). P stays inside the selector's level
-  range and inside each source's own range. P is empty without the prepared-tile cache, because a released prepared tile goes there.
+- **The preload set P.** The selector emits P with the cover, as `TileSelection.Preload`. P holds the tiles outside the cover
+  that the selector would emit if the camera were `p` zoom units closer or farther. The selector repeats its own descent with
+  the level target and the LOD thresholds moved by `p`. `p` is `ZoomLevelPreload` (default 0.05, clamped to `[-1, 1]`).
+  A negative `p` moves the level switch later and leaves the LOD thresholds alone, so `-1` preloads nothing. For a cover of
+  one level `L` this gives the children of the cover tiles that the camera would see once `zc >= L + 1 - p`, and the parent
+  while `zc < L + p`. Under a screen-space LOD a far coarse tile near its flip is also in P. The selector keeps P inside its
+  level range. `TileManager` maps P to record keys, which keeps it inside each source's own range and drops keys that serve
+  the cover. P is empty without the prepared-tile cache, because a released prepared tile goes there.
 - **Hidden registration.** A `Prepare` record builds like a `Display` record and registers every layer hidden. It stays in `_loaded`,
   so eviction cannot reach it. A switch is a show batch: no fetch, no build, no registration.
-- **Keep set K.** A finished `Prepare` record stays while its tile is in K, which is P computed with the lead `p + ZoomLevelHysteresis`.
-  Zoom jitter across the edge of P therefore releases nothing and rebuilds nothing. Lateral pans are not covered: they churn the set as
-  cover churn does.
+- **Keep set K.** A finished `Prepare` record stays while its tile is in K (`TileSelection.Keep`). K is P plus the tiles
+  of P computed with the lead `p + ZoomLevelHysteresis`, so K always holds P. K changes no role, because a `Prepare`
+  record already holds while its tile is in P. A zoom jitter across the edge of P therefore releases nothing and rebuilds
+  nothing for the tiles of a level switch. A far tile near its LOD flip can still be released and rebuilt by a jitter. Lateral pans
+  are not covered: they churn the set as cover churn does.
 - **An in-flight `Prepare` record is never cancelled** for leaving P or K. It finishes, and if it still has no role it is released to the
   cache. After a jump the unfinished prepared records still finish: at most `MaxConcurrentPrepareLoads` admitted ahead, plus drawn tiles
   that were still loading when they left the cover for P.

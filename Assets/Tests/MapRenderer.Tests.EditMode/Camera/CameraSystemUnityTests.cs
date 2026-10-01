@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
@@ -83,6 +84,40 @@ namespace MapRenderer.Tests.Cameras
 
                 AllocationDiagnostics.AssertNotAllocating(act,
                     "Apply must not allocate (struct patch over readonly-struct state; no native calls).");
+        }
+
+        // ── Tile selection reuses its result and allocates zero GC ──────────────────────────────────
+
+        /// <summary>
+        /// A repeated selection of the same view refills one <see cref="TileSelection"/>: the
+        /// three sets keep their capacity and the call allocates nothing. At zoom 5.0 with a lead of 0.3
+        /// the parent level is in reach, so <c>Preload</c> is not empty, and the hysteresis makes the keep
+        /// pass run.
+        /// </summary>
+        [Test]
+        public void TileSelection_RepeatedSelection_ReusesTheSetsAndDoesNotAllocateGCMemory()
+        {
+            var selector = new FrustumTileSelector(0, 22, zoomLevelHysteresis: 0.05, zoomLevelPreload: 0.3);
+            var view = new ViewContext
+            {
+                Camera     = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0),
+                ViewportPx = new double2(1920.0, 1080.0),
+                Projection = new WebMercatorProjection(),
+            };
+            var selection = new TileSelection();
+            selector.SelectVisibleTiles(in view, selection);
+            Assert.Greater(selection.Preload.Count, 0, "precondition: the preload set is not empty, so its reuse is measured");
+            Assert.Greater(selection.Keep.Count, 0, "precondition: the keep set is not empty");
+            int coverCapacity   = selection.Cover.Capacity;
+            int preloadCapacity = selection.Preload.Capacity;
+            int keepCapacity    = selection.Keep.Capacity;
+
+            AllocationDiagnostics.AssertNotAllocating(() => selector.SelectVisibleTiles(in view, selection),
+                "Re-selecting the same view into one TileSelection must not allocate.");
+
+            Assert.AreEqual(coverCapacity, selection.Cover.Capacity, "the cover buffer does not grow");
+            Assert.AreEqual(preloadCapacity, selection.Preload.Capacity, "the preload buffer does not grow");
+            Assert.AreEqual(keepCapacity, selection.Keep.Capacity, "the keep buffer does not grow");
         }
 
         // ── Pose ────────────────────────────────────────────────────────────────────────────────────

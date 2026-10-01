@@ -139,7 +139,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     Projection = view.Camera.Projection,
                 };
                 var independentCover = new List<TileId>();
-                independent.SelectVisibleTiles(in independentView, independentCover);
+                independent.SelectCover(in independentView, independentCover);
 
                 Assert.AreEqual(independentCover.Count, snap.VisibleTileCount,
                     "VisibleTileCount must equal an independently recomputed cover over the same view inputs " +

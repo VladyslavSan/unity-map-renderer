@@ -716,14 +716,16 @@ namespace MapRenderer.Unity.Rendering.Map
             public readonly double      AreaAggressiveness;
             public readonly double      ZoomLevelHysteresis;
             public readonly double      TileDetailHysteresis;
+            public readonly double      ZoomLevelPreload;
 
             public SelectorInputs(bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
                                   double mercFarCap, double globeFarCap, double areaAggressiveness,
-                                  double zoomLevelHysteresis, double tileDetailHysteresis)
+                                  double zoomLevelHysteresis, double tileDetailHysteresis, double zoomLevelPreload)
             {
                 Globe = globe; Lod = lod; MinZoom = minZoom; MaxZoom = maxZoom; OnScreenPx = onScreenPx;
                 MercFarCap = mercFarCap; GlobeFarCap = globeFarCap; AreaAggressiveness = areaAggressiveness;
                 ZoomLevelHysteresis = zoomLevelHysteresis; TileDetailHysteresis = tileDetailHysteresis;
+                ZoomLevelPreload = zoomLevelPreload;
             }
 
             /// <summary>Field-by-field only — no <see cref="EqualityComparer{T}"/>, no boxing, no
@@ -732,13 +734,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 => Globe == other.Globe && Lod == other.Lod && MinZoom == other.MinZoom
                 && MaxZoom == other.MaxZoom && OnScreenPx == other.OnScreenPx && MercFarCap == other.MercFarCap
                 && GlobeFarCap == other.GlobeFarCap && AreaAggressiveness == other.AreaAggressiveness
-                && ZoomLevelHysteresis == other.ZoomLevelHysteresis && TileDetailHysteresis == other.TileDetailHysteresis;
+                && ZoomLevelHysteresis == other.ZoomLevelHysteresis && TileDetailHysteresis == other.TileDetailHysteresis
+                && ZoomLevelPreload == other.ZoomLevelPreload;
 
             public override bool Equals(object obj) => obj is SelectorInputs other && Equals(other);
 
             public override int GetHashCode()
                 => HashCode.Combine(HashCode.Combine(Globe, Lod, MinZoom, MaxZoom, OnScreenPx, MercFarCap, GlobeFarCap,
-                                                     AreaAggressiveness), ZoomLevelHysteresis, TileDetailHysteresis);
+                                                     AreaAggressiveness), ZoomLevelHysteresis, TileDetailHysteresis, ZoomLevelPreload);
         }
 
         /// <summary>Hands the configured visibility groups to the tile manager, which compares them with the ones it holds and
@@ -758,7 +761,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 maxZoom: tileSelection.MaxZoom, onScreenPx: tileSelection.OnScreenTilePx,
                 mercFarCap: tileSelection.MercatorFarPlaneCap, globeFarCap: tileSelection.GlobeFarPlaneCap,
                 areaAggressiveness: tileSelection.ProjectedAreaAggressiveness,
-                zoomLevelHysteresis: tileSelection.ZoomLevelHysteresis, tileDetailHysteresis: tileSelection.TileDetailHysteresis);
+                zoomLevelHysteresis: tileSelection.ZoomLevelHysteresis, tileDetailHysteresis: tileSelection.TileDetailHysteresis,
+                zoomLevelPreload: tileSelection.ZoomLevelPreload);
             if (TileManager.Selector != null && _hasSelectorInputs && key.Equals(_selectorInputs)) return;
             _selectorInputs    = key;
             _hasSelectorInputs = true;
@@ -778,7 +782,7 @@ namespace MapRenderer.Unity.Rendering.Map
             Camera.FarPlanePolicy = far;
             TileManager.Selector = new FrustumTileSelector(
                 tileSelection.MinZoom, tileSelection.MaxZoom, tileSelection.OnScreenTilePx, lod, far,
-                tileSelection.ZoomLevelHysteresis);
+                tileSelection.ZoomLevelHysteresis, tileSelection.ZoomLevelPreload);
         }
 
         /// <summary>

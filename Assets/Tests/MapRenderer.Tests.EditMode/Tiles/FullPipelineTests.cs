@@ -2103,14 +2103,14 @@ namespace MapRenderer.Tests.Tiles
             var selector = new FrustumTileSelector(minZoom: minZoom, maxZoom: maxZoom,
                                                           onScreenTilePx: onScreenTilePx);
             var current = new List<TileId>();
-            selector.SelectVisibleTiles(viewContext, current);
+            selector.SelectCover(viewContext, current);
 
             var lodSelector = new FrustumTileSelector(minZoom: minZoom, maxZoom: maxZoom,
                                                       onScreenTilePx: onScreenTilePx,
                                                       lod: new ScreenSpaceLodStrategy(),
                                                       farPolicy: new GeometryAwareFarPlane());
             var lodCover = new List<TileId>();
-            lodSelector.SelectVisibleTiles(viewContext, lodCover);
+            lodSelector.SelectCover(viewContext, lodCover);
 
             // ── Real Unity camera, posed EXACTLY as MapCamera.SyncToCamera (DPR=1) ──────────────────────
             double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, fov);

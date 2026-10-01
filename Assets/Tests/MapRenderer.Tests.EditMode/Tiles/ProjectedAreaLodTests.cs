@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Tiles
                 Projection = new SphericalProjection(),
             };
             var buffer = new List<TileId>();
-            selector.SelectVisibleTiles(view, buffer);
+            selector.SelectCover(view, buffer);
             return buffer;
         }
 
@@ -80,7 +80,7 @@ namespace MapRenderer.Tests.Tiles
                 Projection = new WebMercatorProjection(),
             };
             var buffer = new List<TileId>();
-            selector.SelectVisibleTiles(view, buffer);
+            selector.SelectCover(view, buffer);
             return buffer;
         }
 
@@ -467,7 +467,7 @@ namespace MapRenderer.Tests.Tiles
             var selector = new FrustumTileSelector(minZoom: 0, maxZoom: 22, onScreenTilePx: 512,
                                                     lod: new FlatLodStrategy());
             var cover = new List<TileId>();
-            selector.SelectVisibleTiles(in view, cover);
+            selector.SelectCover(in view, cover);
 
             Assert.IsNotEmpty(cover);
             var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(cover, NewX(), NewY());
@@ -637,7 +637,7 @@ namespace MapRenderer.Tests.Tiles
                 Projection = new SphericalProjection(),
             };
             var buffer = new List<TileId>();
-            selector.SelectVisibleTiles(view, buffer);
+            selector.SelectCover(view, buffer);
             return buffer.Count;
         }
 
@@ -698,7 +698,7 @@ namespace MapRenderer.Tests.Tiles
                 Projection = new WebMercatorProjection(),
             };
             var buffer = new List<TileId>();
-            selector.SelectVisibleTiles(view, buffer);
+            selector.SelectCover(view, buffer);
             return buffer;
         }
 
@@ -763,7 +763,8 @@ namespace MapRenderer.Tests.Tiles
         /// The selector's stickiness, one arm per rule, each with a control that fails without the rule. Sticky
         /// level: the target holds past the integer by the zoom-level hysteresis, in both directions. Tile detail: a jitter across one
         /// LOD threshold flips tiles statelessly and not with the hysteresis. Jump: two levels, a teleport, and an empty
-        /// viewport each equal a fresh selector, and a heading change alone is not a jump.
+        /// viewport each equal a fresh selector, and a heading change alone is not a jump. Preload: a far coarse tile near its flip
+        /// is preloaded, though no level switch is near, and a negative lead preloads nothing.
         /// </summary>
         [Test]
         public void ScreenSpaceLod_ZoomLevelAndTileDetailHysteresis_HoldJitterAndResetOnJump()
@@ -839,7 +840,7 @@ namespace MapRenderer.Tests.Tiles
 
             FrustumTileSelector emptied = PanSelector(WideHysteresis, 0.05);
             PanSelect(emptied, after);
-            emptied.SelectVisibleTiles(new ViewContext { Camera = new CameraProperties(new GeoCoordinate3D
+            emptied.SelectCover(new ViewContext { Camera = new CameraProperties(new GeoCoordinate3D
                 { Longitude = PanLon, Latitude = PanLat, Altitude = 0.0 }, PanZoom, 0.0, PanTilt),
                 ViewportPx = new double2(0.0, 0.0), Projection = new WebMercatorProjection() }, new List<TileId>());
             CollectionAssert.AreEqual(freshBefore, PanSelect(emptied, before), "an empty viewport, then the pose, equals fresh");
@@ -862,6 +863,44 @@ namespace MapRenderer.Tests.Tiles
             List<TileId> seen = PanSelect(turned, after);
             Assert.IsFalse(HasLodTransition(seen, PanSelect(turned, before, PanZoom, 0.5)), "a heading change is not a jump");
             Assert.IsTrue(HasLodTransition(seen, PanSelect(PanSelector(), before, PanZoom, 0.5)), "control: a fresh selector flips there");
+
+            // ── Preload: at 11.5 with a lead of 0.3 no level switch is near, so only a far tile can put anything in the set.
+            // Every tile in it relates to a cover tile, and none is in the cover.
+            var preloading = new FrustumTileSelector(MinZoom, MaxZoom, OnScreenTilePx, new ScreenSpaceLodStrategy(),
+                                                     new GeometryAwareFarPlane(4.0), zoomLevelPreload: 0.3);
+            var preloadView = new ViewContext
+            {
+                Camera = new CameraProperties(new GeoCoordinate3D { Longitude = PanLon, Latitude = PanLat, Altitude = 0.0 },
+                                              11.5, 0.0, PanTilt),
+                ViewportPx = PanViewport,
+                Projection = new WebMercatorProjection(),
+            };
+            var selection = new TileSelection();
+            preloading.SelectVisibleTiles(in preloadView, selection);
+            int nearLevel = NearLevel(selection.Cover);
+            Assert.AreEqual(11, nearLevel, "precondition: the held level is 11, and 11.5 is far from a level switch");
+            Assert.Greater(selection.Preload.Count, 0, "far tiles near a flip are preloaded");
+            Assert.IsTrue(selection.Preload.Exists(t => t.Z < nearLevel), "the preloaded tiles include far, coarser ones");
+            foreach (TileId tile in selection.Preload)
+            {
+                Assert.IsFalse(selection.Cover.Contains(tile), $"{tile} is in the cover, so it is not preloaded");
+                Assert.IsTrue(selection.Cover.Exists(c => TileAncestry.IsStrictAncestor(c, tile) || TileAncestry.IsStrictAncestor(tile, c)),
+                              $"{tile} relates to no cover tile");
+                Assert.IsTrue(selection.Keep.Contains(tile), $"{tile} is preloaded but not kept");
+            }
+
+            // A negative lead is "preload off": nothing is preloaded, whatever the LOD strategy.
+            var off = new FrustumTileSelector(MinZoom, MaxZoom, OnScreenTilePx, new ScreenSpaceLodStrategy(),
+                                              new GeometryAwareFarPlane(4.0), zoomLevelPreload: -1.0);
+            off.SelectVisibleTiles(in preloadView, selection);
+            Assert.AreEqual(0, selection.Preload.Count, "a lead of -1 preloads nothing");
+            Assert.AreEqual(0, selection.Keep.Count, "and keeps nothing");
+
+            // The shift reaches the projected-area rule too, which reads the on-screen size and not the screen ratio.
+            var area = new FrustumTileSelector(MinZoom, MaxZoom, OnScreenTilePx, new ProjectedAreaLodStrategy(),
+                                               new GeometryAwareFarPlane(4.0), zoomLevelPreload: 0.3);
+            area.SelectVisibleTiles(in preloadView, selection);
+            Assert.Greater(selection.Preload.Count, 0, "the projected-area rule preloads tiles near its own threshold");
         }
 
         // ── Tooth C — the instrument ──────────────────────────────────────────────────────────────

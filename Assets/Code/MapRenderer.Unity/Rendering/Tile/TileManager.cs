@@ -393,7 +393,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal IVisibleTileSelector Selector { get; set; }
 
         // Reused buffers — never reallocated in steady state.
-        private readonly List<TileId> _cover = new(64);
+        private readonly TileSelection _selection = new();
 
         // Keyed by (tile, source-slot) — one record per (tile, source).
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new();
@@ -1028,7 +1028,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         internal TileTelemetrySnapshot CaptureTelemetry()
         {
-            var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(_cover, _coverStatsX, _coverStatsY);
+            var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(_selection.Cover, _coverStatsX, _coverStatsY);
 
             // One shared pass for Pending + ConsumeBacklog — only a completed Write step, unconsumed, counts as backlog.
             int pending = 0;
@@ -1059,7 +1059,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             return new TileTelemetrySnapshot
             {
-                VisibleTileCount       = _cover.Count,
+                VisibleTileCount       = _selection.Cover.Count,
                 CoverColumns           = columns,
                 CoverRows              = rows,
                 SelectionZoom          = maxZ,
@@ -1256,23 +1256,23 @@ namespace MapRenderer.Unity.Rendering.Tile
                     ViewportPx = cfg.FramingViewportPx,
                     Projection = cfg.Projection,
                 };
-                Selector.SelectVisibleTiles(in view, _cover);
+                Selector.SelectVisibleTiles(in view, _selection);
 
                 _servedKeys.Clear();
                 _coverSet.Clear();
                 _coverAncestors.Clear();
-                for (int i = 0; i < _cover.Count; i++)
+                for (int i = 0; i < _selection.Cover.Count; i++)
                 {
-                    _coverSet.Add(_cover[i]);
-                    foreach (TileId up in TileAncestry.Ancestors(_cover[i]))
+                    _coverSet.Add(_selection.Cover[i]);
+                    foreach (TileId up in TileAncestry.Ancestors(_selection.Cover[i]))
                         if (!_coverAncestors.Add(up)) break; // its own ancestors are already in
                 }
 
                 // Merge, not rebuild — newly-covered keys join the desired list; admission below is priority-ordered and capped.
                 // Cover tiles a source serves from one maxzoom ancestor share a key, so the merge queues it once.
-                for (int i = 0; i < _cover.Count; i++)
+                for (int i = 0; i < _selection.Cover.Count; i++)
                 {
-                    TileId id = _cover[i];
+                    TileId id = _selection.Cover[i];
                     foreach (LoadedKey key in ServingKeys(id))
                     {
                         _servedKeys.Add(key);
@@ -1281,7 +1281,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     }
                 }
 
-                ComputePreloadSets(in cfg);
+                ComputePreloadSets();
 
                 // Drop desired entries that no longer serve a cover tile — an already-admitted record is never touched here.
                 for (int i = _desired.Count - 1; i >= 0; i--)
@@ -2219,42 +2219,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (admitted > 0) _prepareDesired.RemoveRange(0, admitted);
         }
 
-        /// <summary>Fills <see cref="_preloadSet"/> (P) and <see cref="_keepSet"/> (K) from the selector's held level and the
-        /// cover: the children of each level-<c>L</c> cover tile once the zoom is within the preload lead of <c>L + 1</c>, and its
-        /// parent while it is within the lead above <c>L</c>. K uses the lead plus the zoom-level hysteresis. Both are empty
-        /// without the prepared-tile cache, which is where a prepared tile goes when it is released.</summary>
-        private void ComputePreloadSets(in TileSelectionConfig cfg)
+        /// <summary>Fills <see cref="_preloadSet"/> (P) and <see cref="_keepSet"/> (K) from the selector's
+        /// preload and keep tiles. Both are empty without the prepared-tile cache, which is where a
+        /// prepared tile goes when it is released.</summary>
+        private void ComputePreloadSets()
         {
             _preloadSet.Clear();
             _keepSet.Clear();
             if (!_cacheEnabled) return;
 
-            TargetLevel target = Selector.LastTarget;
-            if (target.Level < 0) return;
-
-            double lead = math.clamp(cfg.ZoomLevelPreload, -1.0, 1.0);
-            double keep = lead + math.clamp(cfg.ZoomLevelHysteresis, 0.0, FrustumTileSelector.MaxZoomLevelHysteresis);
-            for (int i = 0; i < _cover.Count; i++)
-            {
-                TileId tile = _cover[i];
-                if (tile.Z != target.Level) continue;
-                AddPreload(tile, in target, lead, _preloadSet);
-                AddPreload(tile, in target, keep, _keepSet);
-            }
-        }
-
-        /// <summary>Adds to <paramref name="into"/> the serving keys of the children and parent of <paramref name="tile"/> that
-        /// <paramref name="lead"/> puts in reach of the current zoom, leaving out keys that already serve the cover.</summary>
-        private void AddPreload(TileId tile, in TargetLevel target, double lead, HashSet<LoadedKey> into)
-        {
-            if (target.Continuous >= target.Level + 1 - lead && target.Level + 1 <= target.MaxLevel)
-            {
-                for (int child = 0; child < TileAncestry.ChildCount; child++)
-                    AddPreloadKeys(TileAncestry.Child(tile, child), into);
-            }
-
-            if (target.Continuous < target.Level + lead && target.Level - 1 >= target.MinLevel && tile.Z > 0)
-                AddPreloadKeys(TileAncestry.Parent(tile), into);
+            foreach (TileId tile in _selection.Preload) AddPreloadKeys(tile, _preloadSet);
+            foreach (TileId tile in _selection.Keep) AddPreloadKeys(tile, _keepSet);
         }
 
         /// <summary>Adds the record key each admitting slot serves <paramref name="tile"/> with, unless that key already serves a cover tile.</summary>
@@ -2702,9 +2677,9 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // 4. A cover tile with no shown relative shows its next ready groups: a new area, a swing-back, or a record registered under a
             // relative since hidden. It starts once something is registered, and ends when every group shows.
-            for (int i = 0; i < _cover.Count; i++)
+            for (int i = 0; i < _selection.Cover.Count; i++)
             {
-                TileId tile  = _cover[i];
+                TileId tile  = _selection.Cover[i];
                 ulong  have  = GroupsRevealed(tile);
                 if ((have & _allGroups) == _allGroups || HasShownRelative(tile)) continue;
                 if (have == 0 && !(HasDrawHandles(tile) || IsReady(tile))) continue; // a ready tile with no items is shown too, so its labels draw

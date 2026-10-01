@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         // ── IVisibleTileSelector / FrustumTileSelector ───────────────────────────────────
-        // Tests drive the default impl THROUGH the seam: a ViewContext, then SelectVisibleTiles(in view, buf).
+        // Tests drive the default impl THROUGH the seam: a ViewContext, then SelectCover(view, buf).
 
         private static readonly IProjection Proj = new WebMercatorProjection();
         private const double RefH = 1080.0; // the framing reference height (matches CameraSystem default)
@@ -156,7 +156,7 @@ namespace MapRenderer.Tests.Cameras
                 double halfV = RefH * mpp / 2.0;
                 double halfH = halfV * fc.Aspect;
 
-                sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
+                sel.SelectCover(View(cam, fc.Aspect), buf);
                 var S = new HashSet<TileId>(buf);
                 // Coverage is asserted at the z the selector ACTUALLY emits (OnScreenTilePx may offset it
                 // coarser than IntegerZoom) — the no-white-spot guarantee must hold at that resolution.
@@ -198,7 +198,7 @@ namespace MapRenderer.Tests.Cameras
                 var cam = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
                 double2 vp = new double2(RefH * fc.Aspect, RefH);
 
-                sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
+                sel.SelectCover(View(cam, fc.Aspect), buf);
                 var S = new HashSet<TileId>(buf);
                 int z = buf.Count > 0 ? buf[0].Z : cam.IntegerZoom; // selection zoom actually emitted (offset-aware)
 
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.Cameras
                 // guard against a NaN/wrap glitch, not a tight count.
                 long bound = (long)((math.ceil(spanX) + 2 * pad + 3) * (math.ceil(spanY) + 2 * pad + 3));
 
-                sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
+                sel.SelectCover(View(cam, fc.Aspect), buf);
                 Assert.LessOrEqual(buf.Count, bound,
                     $"[{fc.Name}] selected {buf.Count} > ceiling {bound} — runaway/NaN bbox?");
                 Assert.Greater(buf.Count, 0, $"[{fc.Name}] empty cover");
@@ -274,7 +274,7 @@ namespace MapRenderer.Tests.Cameras
 
             int DistinctX(double aspect)
             {
-                sel.SelectVisibleTiles(View(Cam(0, 0, 14.0), aspect), buf);
+                sel.SelectCover(View(Cam(0, 0, 14.0), aspect), buf);
                 return buf.Select(t => t.X).Distinct().Count();
             }
 
@@ -295,7 +295,7 @@ namespace MapRenderer.Tests.Cameras
 
             int CountAt(double zoom)
             {
-                sel.SelectVisibleTiles(View(Cam(0, 0, zoom), 1.0), buf);
+                sel.SelectCover(View(Cam(0, 0, zoom), 1.0), buf);
                 return buf.Count;
             }
 
@@ -317,7 +317,7 @@ namespace MapRenderer.Tests.Cameras
             // depends on refH/pad, so the test asserts structure, not a fixed count.
             var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
-            sel.SelectVisibleTiles(View(Cam(0, 0, 2.0), 1.0), buf);
+            sel.SelectCover(View(Cam(0, 0, 2.0), 1.0), buf);
 
             // Selection zoom actually emitted (OnScreenTilePx may coarsen z2 → z1 under the 512 default).
             int z = buf.Count > 0 ? buf[0].Z : 2;
@@ -536,9 +536,9 @@ namespace MapRenderer.Tests.Cameras
             {
                 var cam  = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
                 var view = View(cam, fc.Aspect);
-                sel256.SelectVisibleTiles(view, b256);
-                sel512.SelectVisibleTiles(view, b512);
-                selDefault.SelectVisibleTiles(view, bDefault);
+                sel256.SelectCover(view, b256);
+                sel512.SelectCover(view, b512);
+                selDefault.SelectCover(view, bDefault);
                 if (b256.Count == 0 || b512.Count == 0) continue;
 
                 int z256 = b256[0].Z;
@@ -578,10 +578,10 @@ namespace MapRenderer.Tests.Cameras
 
             var flat = new List<TileId>();
             new FrustumTileSelector(0, 22, 512, new FlatLodStrategy(), new GeometryAwareFarPlane())
-                .SelectVisibleTiles(vc, flat);
+                .SelectCover(vc, flat);
             var lod = new List<TileId>();
             new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), new GeometryAwareFarPlane())
-                .SelectVisibleTiles(vc, lod);
+                .SelectCover(vc, lod);
 
             Assert.IsNotEmpty(lod);
             int minZ = lod.Min(t => t.Z);
@@ -639,7 +639,7 @@ namespace MapRenderer.Tests.Cameras
                 ? (IFarPlanePolicy)new RaySphereFarPlane(occR) : new GeometryAwareFarPlane();
 
             var lod = new List<TileId>();
-            new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), far).SelectVisibleTiles(vc, lod);
+            new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), far).SelectCover(vc, lod);
 
             Assert.IsNotEmpty(lod);
             int minZ = lod.Min(t => t.Z);
@@ -662,7 +662,7 @@ namespace MapRenderer.Tests.Cameras
             var vc = new ViewContext { Camera = cam, ViewportPx = vp, Projection = Proj };
             var cover = new List<TileId>();
             new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), new GeometryAwareFarPlane())
-                .SelectVisibleTiles(vc, cover);
+                .SelectCover(vc, cover);
             Assert.IsNotEmpty(cover);
 
             // Rebuild the frustum planes (same math as ViewFrustum.FromPose) and the render frame the selector used.
@@ -760,7 +760,7 @@ namespace MapRenderer.Tests.Cameras
                 var cam = Cam(lon, lat, zoom, heading);
                 string where = $"lon={lon} lat={lat} zoom={zoom} aspect={aspect:F2} heading={heading}";
 
-                Assert.DoesNotThrow(() => sel.SelectVisibleTiles(View(cam, aspect), buf),
+                Assert.DoesNotThrow(() => sel.SelectCover(View(cam, aspect), buf),
                     $"selection threw at {where}");
                 // Finite atlas: a look-at longitude off the sheet (|lon| > 180) may legitimately select nothing
                 // — the robustness contract there is only "no crash / no boom", not coverage.
@@ -788,14 +788,14 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void Selector_TSeam_InterfaceCarriesNoAlgorithmKnob()
         {
-            // The seam method takes EXACTLY (in ViewContext, List<TileId>) — nothing else.
+            // The seam method takes EXACTLY (in ViewContext, TileSelection) — nothing else.
             MethodInfo m = typeof(IVisibleTileSelector).GetMethod(nameof(IVisibleTileSelector.SelectVisibleTiles));
             Assert.IsNotNull(m);
             ParameterInfo[] ps = m.GetParameters();
-            Assert.AreEqual(2, ps.Length, "SelectVisibleTiles must take only (ViewContext, List<TileId>).");
+            Assert.AreEqual(2, ps.Length, "SelectVisibleTiles must take only (ViewContext, TileSelection).");
             Assert.IsTrue(ps[0].ParameterType == typeof(ViewContext).MakeByRefType() && ps[0].IsIn,
                 "First param must be `in ViewContext`.");
-            Assert.AreEqual(typeof(List<TileId>), ps[1].ParameterType, "Second param must be List<TileId>.");
+            Assert.AreEqual(typeof(TileSelection), ps[1].ParameterType, "Second param must be TileSelection.");
 
             // ViewContext carries EXACTLY { Camera, ViewportPx, Projection } — legitimate view state, and no
             // algorithm knob (no minZoom / maxZoom / selectionZoom of any kind).
@@ -817,7 +817,7 @@ namespace MapRenderer.Tests.Cameras
             // contract (the set keys on whole TileIds carrying their own Z — no single-zoom assumption).
             IVisibleTileSelector fake = new MixedZoomFakeSelector();
             var buf = new List<TileId>();
-            fake.SelectVisibleTiles(View(Cam(0, 0, 4.0), 1.0), buf);
+            fake.SelectCover(View(Cam(0, 0, 4.0), 1.0), buf);
 
             var zs = buf.Select(t => t.Z).Distinct().OrderBy(v => v).ToList();
             CollectionAssert.AreEquivalent(new[] { 3, 4 }, zs,
@@ -826,13 +826,11 @@ namespace MapRenderer.Tests.Cameras
 
         private sealed class MixedZoomFakeSelector : IVisibleTileSelector
         {
-            public TargetLevel LastTarget => new TargetLevel { Level = -1 };
-
-            public void SelectVisibleTiles(in ViewContext view, List<TileId> reuseBuffer)
+            public void SelectVisibleTiles(in ViewContext view, TileSelection selection)
             {
-                reuseBuffer.Clear();
-                reuseBuffer.Add(new TileId { Z = 3, X = 4, Y = 4 }); // coarse (far)
-                reuseBuffer.Add(new TileId { Z = 4, X = 8, Y = 8 }); // fine (near)
+                selection.Clear();
+                selection.Cover.Add(new TileId { Z = 3, X = 4, Y = 4 }); // coarse (far)
+                selection.Cover.Add(new TileId { Z = 4, X = 8, Y = 8 }); // fine (near)
             }
         }
 
@@ -845,7 +843,7 @@ namespace MapRenderer.Tests.Cameras
             // Near the north pole at z3 (n=8): every emitted y ∈ [0,7], never negative / never ≥ n.
             var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
-            sel.SelectVisibleTiles(View(Cam(0, 85.0, 3.0), 1.0), buf);
+            sel.SelectCover(View(Cam(0, 85.0, 3.0), 1.0), buf);
             foreach (var t in buf)
                 Assert.IsTrue(t.Y >= 0 && t.Y <= 7, $"y must be clamped to [0,7]: {t.Y}");
             Assert.Greater(buf.Count, 0);
@@ -856,26 +854,9 @@ namespace MapRenderer.Tests.Cameras
         {
             var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 14);
             var buf = new List<TileId>();
-            sel.SelectVisibleTiles(View(Cam(0, 0, 20.0), 1.0), buf);
+            sel.SelectCover(View(Cam(0, 0, 20.0), 1.0), buf);
             foreach (var t in buf) Assert.AreEqual(14, t.Z, "Selection zoom must clamp to maxZoom.");
             Assert.Greater(buf.Count, 0);
-        }
-
-        [Test]
-        public void Selector_TAlloc_ReusesBuffer_NoGrowthOnRepeat()
-        {
-            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
-            var view = View(Cam(0, 0, 5.0), 16.0 / 9.0);
-            var buf = new List<TileId>();
-            sel.SelectVisibleTiles(view, buf);
-            int firstCount = buf.Count;
-            int capacityAfterFirst = buf.Capacity;
-
-            for (int i = 0; i < 50; i++) sel.SelectVisibleTiles(view, buf);
-
-            Assert.AreEqual(firstCount, buf.Count, "Same view → same tile count.");
-            Assert.AreEqual(capacityAfterFirst, buf.Capacity,
-                "Re-selecting the same view must not grow the buffer (steady-state no-alloc).");
         }
 
         // ── FloatingOrigin: structural ───────────────────────────────────────────────────────
@@ -940,7 +921,7 @@ namespace MapRenderer.Tests.Cameras
                         ViewportPx = new double2(RefH * LiveAspect, RefH),
                         Projection = Proj,
                     };
-                    liveSelector.SelectVisibleTiles(in liveView, cover);
+                    liveSelector.SelectCover(in liveView, cover);
 
                     for (int t = 0; t < cover.Count; t++)
                     {
@@ -1123,7 +1104,7 @@ namespace MapRenderer.Tests.Cameras
             var merc = (IVisibleTileSelector)new FrustumTileSelector(0, 22); // default onScreenTilePx = 512
             foreach (int z in new[] { 3, 5, 8, 11 })
             {
-                merc.SelectVisibleTiles(View(Cam(0, 0, z, 0), 1.0), buf);
+                merc.SelectCover(View(Cam(0, 0, z, 0), 1.0), buf);
                 Assert.IsNotEmpty(buf, $"Mercator cover non-empty at camera zoom {z}");
                 foreach (var t in buf) Assert.AreEqual(z, t.Z, $"camera zoom {z} must select tile z{z} (offset 0)");
             }
@@ -1132,7 +1113,7 @@ namespace MapRenderer.Tests.Cameras
                 new FlatLodStrategy(), new MultiplierFarPlane(4.0));
             foreach (int z in new[] { 3, 5 })
             {
-                globe.SelectVisibleTiles(
+                globe.SelectCover(
                     new ViewContext { Camera = Cam(0, 0, z, 0), ViewportPx = new double2(RefH, RefH),
                                       Projection = new SphericalProjection() }, buf);
                 Assert.IsNotEmpty(buf, $"globe cover non-empty at camera zoom {z}");

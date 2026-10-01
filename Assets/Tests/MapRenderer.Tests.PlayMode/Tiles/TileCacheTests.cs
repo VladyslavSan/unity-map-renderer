@@ -15,6 +15,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Style;
 using MapRenderer.Unity.Jobs.Geometry;
 using Fill = MapRenderer.Unity.Style.Fill;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Cameras;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
@@ -120,6 +121,35 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         // ── Preparing the next level ahead: loaded hidden, kept through jitter, shown in one step ───────────
 
+        /// <summary>The level-5 tiles the view holds hidden: prepared, and not reported as shown.</summary>
+        private static HashSet<TileId> PreparedTiles(MapView view)
+        {
+            var keys = new List<LoadedTileKey>();
+            view.TileManager.CollectLoadedTileKeys(keys);
+            var prepared = new HashSet<TileId>();
+            foreach (LoadedTileKey key in keys)
+                if (!key.Shown && key.Tile.Z == 5) prepared.Add(key.Tile);
+            return prepared;
+        }
+
+        /// <summary>Asserts the prepared tiles are exactly the tiles a level-5 selection sees now: none
+        /// missing, none outside the frustum.</summary>
+        private static void AssertPreparedIsTheLevelFiveCover(MapView view, string when)
+        {
+            var selector = new FrustumTileSelector(5, 5, view.Config.TileSelection.OnScreenTilePx, new FlatLodStrategy(),
+                                                   view.Camera.FarPlanePolicy);
+            var context = new ViewContext
+            {
+                Camera     = view.Camera.CurrentProperties,
+                ViewportPx = view.Camera.ViewportLogicalPx,
+                Projection = view.Camera.Projection,
+            };
+            var cover = new List<TileId>();
+            selector.SelectCover(in context, cover);
+            CollectionAssert.AreEquivalent(cover, PreparedTiles(view),
+                $"{when}: the prepared tiles are exactly the level-5 cover, with none missing and none outside the frustum.");
+        }
+
         private static void SetZoom(MapView view, double zoom)
             => view.Camera.Apply(new CameraPropertiesUpdate { Zoom = zoom });
 
@@ -189,7 +219,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 view.LateUpdate();
                 int prepared = view.CaptureTelemetry().PreparingTileCount;
                 view.CollectLoadedTileIds(drawn);
-                Assert.AreEqual(4 * drawn.Count, prepared, "every drawn tile prepares its four children.");
+                AssertPreparedIsTheLevelFiveCover(view, "inside the lead");
                 yield return TickUntil(view, () => spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count == prepared);
                 Assert.AreEqual(prepared, spy.BeginBuildCalls.FindAll(c => c.Tile.Z == 5).Count, "every prepared tile begins its label build.");
                 Assert.IsFalse(drawn.Exists(t => t.Z == 5), "a prepared tile is not reported as loaded.");
@@ -226,12 +256,15 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 SetZoom(view, 4.72);
                 view.LateUpdate();
                 view.CollectLoadedTileIds(drawn);
-                Assert.AreEqual(4 * drawn.Count, view.CaptureTelemetry().PreparingTileCount, "the new cover prepares its children in flight.");
+                AssertPreparedIsTheLevelFiveCover(view, "somewhere new, in flight");
+                HashSet<TileId> preparedBeforeSwitch = PreparedTiles(view);
                 SetZoom(view, 5.06);
                 view.LateUpdate();
                 gate.Set();
                 yield return PumpUntilSettled(view);
                 Assert.Greater(view.LoadedTileCount(), 0, "the switch draws level 5.");
+                view.CollectLoadedTileIds(drawn);
+                Assert.IsTrue(drawn.TrueForAll(preparedBeforeSwitch.Contains), "every tile the switch draws was prepared before it.");
                 Assert.AreEqual(CoverMeshes(view), VisibleItems(view), "every mesh of a drawn tile shows, none of a prepared one does.");
 
                 // ── Jitter across the preload edge of the parents (lead 0.3 above level 5): nothing releases or rebuilds.
