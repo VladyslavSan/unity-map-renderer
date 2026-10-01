@@ -76,10 +76,10 @@ namespace MapRenderer.Unity.Rendering.Backend
         }
 
         /// <inheritdoc cref="ITileRenderBackend.SetItemsVisible"/>
-        public void SetItemsVisible(ReadOnlySpan<int> handles, bool visible)
+        public void SetItemsVisible(IReadOnlyList<int> handles, bool visible)
         {
             if (IsDisposed) return;
-            for (int i = 0; i < handles.Length; i++)
+            for (int i = 0; i < handles.Count; i++)
             {
                 if (!_items.TryGetValue(handles[i], out TItem item) || item.Hidden == !visible) continue;
                 item.Hidden = !visible;

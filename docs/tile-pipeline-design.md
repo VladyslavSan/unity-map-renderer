@@ -130,6 +130,11 @@ request loop keys off `_loaded` membership and finds nothing new on an unchanged
 re-validates each record by role and finds nothing that lost one. Those are the frames already under consume load, so the
 descent they would pay for is the one that costs most.
 
+`CoverIndex` holds what the cover is made of. Each recompute rebuilds it in one fixed order: the cover tiles and their strict ancestors
+first, then the keys of the records that serve them. The desired-list merge, the preload sets and the role pass read it after that.
+A source change (`SetSources`, a restyle) clears the served keys only, because it invalidates the keys and leaves the cover unchanged;
+the next recompute rebuilds the rest.
+
 ### 4.2 The budget-zero asymmetry
 
 `PumpPending` reads a cap of `0` two different ways. The build and vertex caps treat it as *uncapped*, so an
@@ -287,7 +292,7 @@ area is covered or leaves the view, so it never outlives what is on screen.
      `Bridge` that is shown becomes a `Hold`, and steps 2 and 3 replace it later in the same way.
   4. A cover tile that has no shown relative, and has items or is ready, shows its next ready groups (§4.11). This covers a new area, which fills in
      group by group, and a tile that returns before its release drains.
-- **One flush.** Every show and hide of an Update reaches the backend in one `FlushVisibility`: one hide call and one show call. A handle
+- **One flush.** Every show and hide of an Update reaches the backend in one `VisibilityBatch.Flush`: one hide call and one show call. A handle
   queued both ways in one Update ends as its last call says, because the two batches are made disjoint before the calls. The
   outgoing items are hidden, not removed. The record loses its role and waits in the release queue, so a swing-back shows it again
   without registering it again. `MaxReleasesPerTick` bounds that teardown and never the swap.
@@ -332,7 +337,7 @@ ordered list of groups of layer kinds. The default is the background, then fills
 group, and a list with no group is one group of every layer. Groups past the 64th join the 64th. A change of the list applies at once, through `SetVisibilityGroups`, which `MapView` calls every frame: it
 does not move the items of a tile that is already shown, and a tile revealed group by group keeps the layers it showed.
 
-- **The maps.** `_groupOfSlot` gives the group of each render slot, and `_groupsOfSource` gives the groups each source fills. Slots never renumber, so a
+- **The maps.** `VisibilityGroupMap` gives the group of each render slot and the groups each source fills. Slots never renumber, so a
   restyle or a change of the list only rebuilds these two maps.
 - **A live change.** `SetVisibilityGroups` rebuilds the two maps and remaps what is revealed. A tile revealed whole stays whole. A tile revealed
   group by group keeps exactly the layers it showed: a new group counts as revealed only when every layer in it was. No geometry that is shown hides and

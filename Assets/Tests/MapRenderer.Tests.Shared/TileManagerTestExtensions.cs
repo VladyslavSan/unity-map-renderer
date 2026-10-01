@@ -45,7 +45,7 @@ namespace MapRenderer.Tests
         {
             into.Clear();
             foreach (var kv in manager._loaded)
-                if (manager._servedKeys.Contains(kv.Key)) into.Add(kv.Key.Tile);
+                if (manager._coverIndex.Serves(kv.Key)) into.Add(kv.Key.Tile);
         }
 
         /// <summary>Every desired-but-not-admitted tile id, in priority order.</summary>
@@ -91,7 +91,7 @@ namespace MapRenderer.Tests
             List<Mesh> all = null;
             for (int s = 0; s < manager._sources.Count; s++)
             {
-                if (manager._loaded.TryGetValue(new TileManager.LoadedKey(id, s), out var lt) && lt.Meshes != null)
+                if (manager._loaded.TryGetValue(new LoadedKey(id, s), out var lt) && lt.Meshes != null)
                 {
                     all ??= new List<Mesh>(8);
                     all.AddRange(lt.Meshes);
@@ -107,7 +107,7 @@ namespace MapRenderer.Tests
             List<int> all = null;
             for (int s = 0; s < manager._sources.Count; s++)
             {
-                if (manager._loaded.TryGetValue(new TileManager.LoadedKey(id, s), out var lt) && lt.MaterialIndices != null)
+                if (manager._loaded.TryGetValue(new LoadedKey(id, s), out var lt) && lt.MaterialIndices != null)
                 {
                     all ??= new List<int>(8);
                     all.AddRange(lt.MaterialIndices);

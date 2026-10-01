@@ -7,13 +7,13 @@ namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>Owns the per-source pipeline registry — one <see cref="ITileFeatureSource"/> slot per
     /// rendered source-id, plus the synthetic source-less slot for backgrounds. Callers address a
-    /// pipeline by slot; <see cref="TileManager.LoadedKey"/> stores that slot, never a pipeline reference.
+    /// pipeline by slot; <see cref="LoadedKey"/> stores that slot, never a pipeline reference.
     /// <para><b>Contract: <see cref="Rebuild"/> assigns each pipeline a slot equal to its index.</b> A
     /// caller iterating <c>[0, Count)</c> may use the loop index as a slot directly.</para></summary>
     internal sealed class SourceRegistry : System.IDisposable
     {
         /// <summary>One data pipeline per rendered source-id — its slot is its index in <c>_pipelines</c>
-        /// (the class-level contract), which keys <see cref="TileManager.LoadedKey"/> so the loop never
+        /// (the class-level contract), which keys <see cref="LoadedKey"/> so the loop never
         /// hashes a string.</summary>
         private sealed class SourcePipeline
         {

@@ -37,7 +37,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// </summary>
         /// <param name="handles">Handles returned by <see cref="AddTileLayer"/>.</param>
         /// <param name="visible">True to show the items, false to hide them.</param>
-        void SetItemsVisible(ReadOnlySpan<int> handles, bool visible);
+        void SetItemsVisible(IReadOnlyList<int> handles, bool visible);
 
         /// <summary>
         /// Removes many draw items in ONE backend operation where the backend supports it.

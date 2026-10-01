@@ -29,7 +29,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>Owns the tile lifecycle for <see cref="Map.MapView"/> — cover→fetch→build→consume→evict
     /// plus disposal &amp; mesh-leak guards, uniform across backends via <see cref="Backend.ITileRenderBackend"/>.</summary>
-    internal sealed class TileManager : VerifiedDisposable
+    internal sealed partial class TileManager : VerifiedDisposable
     {
         // Profiler markers (allocation-free) — MapRenderer.* names, asserted exactly by ProfilerMarkerTests.
 
@@ -203,29 +203,6 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         }
 
-        /// <summary>Composite key for the multi-source loaded table — value-type + <see cref="System.IEquatable{T}"/> avoids boxing on every Dictionary probe.</summary>
-        internal readonly struct LoadedKey : System.IEquatable<LoadedKey>
-        {
-            public readonly TileId Tile;
-            public readonly int    Slot;
-
-            public LoadedKey(TileId tile, int slot)
-            {
-                Tile = tile;
-                Slot = slot;
-            }
-
-            public          bool Equals(LoadedKey other) => Slot == other.Slot && Tile.Equals(other.Tile);
-            public override bool Equals(object    obj)   => obj is LoadedKey o && Equals(o);
-
-            public override int GetHashCode()
-            {
-                unchecked
-                {
-                    return Tile.GetHashCode() * 31 + Slot;
-                }
-            }
-        }
 
         /// <summary>Value-equality identity of a resolved source definition — the restyle diff key. Two
         /// sources are "the same" (keep the pipeline, reuse cached bytes) iff their resolved
@@ -415,12 +392,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal readonly List<LoadedKey>    _prepareDesired    = new(64);
         private readonly HashSet<LoadedKey> _prepareDesiredSet = new(64);
 
-        /// <summary>The cover's own tiles. The swap asks area questions of these, apart from <see cref="_servedKeys"/>, which asks which records serve them.</summary>
-        private readonly HashSet<TileId> _coverSet = new();
-
-        /// <summary>The record keys that serve a cover tile, one per (serving tile, slot). Several cover tiles can share
-        /// one key when a source serves them from its maxzoom ancestor. Rebuilt with each cover recompute.</summary>
-        internal readonly HashSet<LoadedKey> _servedKeys = new();
+        /// <summary>The cover's tiles, their ancestors and the keys of the records that serve them. Rebuilt with each cover recompute.</summary>
+        internal readonly CoverIndex _coverIndex = new();
 
         /// <summary>The record keys prepared ahead (P), and the larger set that keeps a finished prepared record loaded (K).
         /// Neither holds a key that already serves a cover tile. Rebuilt with each cover recompute.</summary>
@@ -433,9 +406,6 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>True while an in-flight prepared record outlives its sets, so the next Update checks again once it finishes.</summary>
         private bool _rolePassPending;
-
-        /// <summary>The strict ancestors of every cover tile, rebuilt with each cover recompute: the test for "has a descendant in the cover".</summary>
-        private readonly HashSet<TileId> _coverAncestors = new();
 
         /// <summary>The areas currently shown: the revealed cover, Hold and Bridge tiles. Every relative question of the swap reads this set.</summary>
         private readonly HashSet<TileId> _revealedTiles = new();
@@ -459,14 +429,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>The records this swap step concealed, each with the groups it showed when it went.</summary>
         private readonly Dictionary<LoadedKey, ulong> _concealedThisStep = new();
 
-        /// <summary>The kinds of each configured visibility group; null means one group holding every layer. A manager nobody configured uses the default order.</summary>
-        private StyleLayerType[][] _visibilityGroups = ToKinds(Map.VisibilityGroup.DefaultOrder());
-
-        /// <summary>The group of each render slot (-1 for a slot with no tile mesh), and of each source slot the groups its layers fill.</summary>
-        private int[]   _groupOfSlot    = System.Array.Empty<int>();
-        private ulong[] _groupsOfSource = System.Array.Empty<ulong>();
-        private int     _groupCount     = 1;
-        private ulong   _allGroups      = 1UL;
+        /// <summary>The order a new tile's layers appear in: render slot to group, and source slot to the groups it fills.</summary>
+        private readonly VisibilityGroupMap _groups = new();
 
         /// <summary>For each tile, how many revealed tiles lie strictly below it: the test for "has a shown descendant".</summary>
         private readonly Dictionary<TileId, int> _shownBelow = new();
@@ -509,11 +473,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly List<int> _consumeHandles = new(8);
 
         /// <summary>Handles waiting to be shown, and handles waiting to be hidden, at the next <see cref="FlushVisibility"/>.</summary>
-        private int[] _showBatch = new int[32];
-        private int   _showBatchCount;
-        private int[] _hideBatch = new int[32];
-        private int   _hideBatchCount;
-        private readonly Dictionary<int, bool> _lastQueuedShow = new(64);
+        private readonly VisibilityBatch _visibility = new();
 
         // Parallel to the two above — each newly-built mesh's global material index, for the cache transfer.
         private readonly List<int> _consumeMatIndices = new(8);
@@ -709,52 +669,24 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// revealed, so nothing shown hides and nothing hidden shows early.</summary>
         internal void SetVisibilityGroups(IReadOnlyList<Map.VisibilityGroup> groups)
         {
-            if (SameGroups(groups)) return;
+            if (_groups.SameAs(groups)) return;
 
-            int[] oldGroupOfSlot = _groupOfSlot;
-            int   oldGroupCount  = _groupCount;
-            _visibilityGroups = ToKinds(groups);
+            int[] previousGroupOfSlot = _groups.GroupOfSlots;
+            _groups.SetKinds(groups);
             RebuildGroupMaps();
-            RemapRevealedGroups(oldGroupOfSlot, oldGroupCount);
-        }
-
-        private static StyleLayerType[][] ToKinds(IReadOnlyList<Map.VisibilityGroup> groups)
-        {
-            if (groups == null || groups.Count == 0) return null;
-            var kinds = new StyleLayerType[groups.Count][];
-            for (int g = 0; g < kinds.Length; g++)
-                kinds[g] = groups[g]?.Kinds != null ? (StyleLayerType[])groups[g].Kinds.Clone() : System.Array.Empty<StyleLayerType>();
-            return kinds;
-        }
-
-        /// <summary>True iff <paramref name="groups"/> lists the same kinds, group by group, as the configured list.</summary>
-        private bool SameGroups(IReadOnlyList<Map.VisibilityGroup> groups)
-        {
-            if (groups == null || groups.Count == 0) return _visibilityGroups == null;
-            if (_visibilityGroups == null || _visibilityGroups.Length != groups.Count) return false;
-            for (int g = 0; g < groups.Count; g++)
-            {
-                StyleLayerType[] have = _visibilityGroups[g];
-                StyleLayerType[] want = groups[g]?.Kinds;
-                int wanted = want?.Length ?? 0;
-                if (have.Length != wanted) return false;
-                for (int k = 0; k < wanted; k++)
-                    if (have[k] != want[k]) return false;
-            }
-
-            return true;
+            RemapRevealedGroups(previousGroupOfSlot);
         }
 
         /// <summary>Moves the reveal state to a new group list. A tile revealed whole stays so. A tile revealed group by group keeps exactly the
         /// layers it showed: a new group counts as revealed only when every layer in it was. Every record derives its pending groups afresh at its next
         /// consume, and holds its whole source until then.</summary>
-        private void RemapRevealedGroups(int[] oldGroupOfSlot, int oldGroupCount)
+        private void RemapRevealedGroups(int[] previousGroupOfSlot)
         {
             if (_loaded.Count == 0 && _groupMask.Count == 0) return;
 
             var tiles = new List<TileId>(_groupMask.Keys);
             foreach (TileId tile in tiles)
-                _groupMask[tile] = RemapGroups(_groupMask[tile], oldGroupOfSlot, oldGroupCount);
+                _groupMask[tile] = _groups.RemapMask(_groupMask[tile], previousGroupOfSlot);
             RebuildShownCounts();
 
             var keys = new List<LoadedKey>(_loaded.Keys);
@@ -766,74 +698,25 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        private ulong RemapGroups(ulong oldGroups, int[] oldGroupOfSlot, int oldGroupCount)
-        {
-            if (oldGroups == ulong.MaxValue) return ulong.MaxValue;
-            ulong shown  = 0;
-            ulong unshown = 0;
-            for (int slot = 0; slot < _groupOfSlot.Length; slot++)
-            {
-                bool oldMesh = (uint)slot < (uint)oldGroupOfSlot.Length && oldGroupOfSlot[slot] >= 0;
-                if (!oldMesh || _groupOfSlot[slot] < 0) continue; // a slot with no tile mesh shows nothing to remap
-                int oldGroup = oldGroupOfSlot[slot];
-                if ((oldGroups & (1UL << oldGroup)) != 0) shown |= GroupBit(slot);
-                else unshown |= GroupBit(slot);
-            }
-
-            return shown & ~unshown;
-        }
-
         /// <summary>Resolves every render slot to its visibility group, and every source slot to the groups its layers fill. Slots never
         /// renumber, so only these two maps change when the style or the group list does.</summary>
         private void RebuildGroupMaps()
         {
-            int configured = _visibilityGroups?.Length ?? 0;
-            _groupCount = configured == 0 ? 1 : math.min(configured, 64); // groups past 64 join the last one
-            _allGroups  = _groupCount == 64 ? ulong.MaxValue : (1UL << _groupCount) - 1UL;
-
-            _groupOfSlot = new int[_layers.Count];
-            for (int li = 0; li < _layers.Count; li++)
-                _groupOfSlot[li] = _layers[li] is ITileMeshRenderLayer || _layers[li] is BackgroundRenderLayer
-                    ? GroupOfKind(_layers[li].StyleLayer?.LayerType ?? StyleLayerType.Unknown)
-                    : -1;
-
-            _groupsOfSource = new ulong[_sources.Count];
+            _groups.Rebuild(_layers, _sources.Count);
             for (int slot = 0; slot < _sources.Count; slot++)
             {
                 if (_sources.IsSourceless(slot)) ComputeSourcelessLayerIds(_denseLayerIds);
                 else ComputeDenseLayerIds(_sources.SourceIdOf(slot), _denseLayerIds);
-                ulong mask = 0;
-                for (int d = 0; d < _denseLayerIds.Count; d++) mask |= GroupBit(_denseLayerIds[d]);
-                _groupsOfSource[slot] = mask;
+                _groups.SetGroupsOfSource(slot, _groups.GroupsOf(_denseLayerIds));
             }
         }
-
-        /// <summary>The group a layer kind appears in: the first group listing it, else the last group.</summary>
-        private int GroupOfKind(StyleLayerType kind)
-        {
-            if (_visibilityGroups == null) return 0;
-            for (int g = 0; g < _visibilityGroups.Length; g++)
-            {
-                StyleLayerType[] kinds = _visibilityGroups[g];
-                for (int k = 0; k < kinds.Length; k++)
-                    if (kinds[k] == kind) return math.min(g, _groupCount - 1);
-            }
-
-            return _groupCount - 1;
-        }
-
-        /// <summary>The group of the layer at render slot <paramref name="materialIndex"/>; a slot with no tile mesh falls into the last group.</summary>
-        private int GroupOfSlot(int materialIndex)
-            => (uint)materialIndex < (uint)_groupOfSlot.Length && _groupOfSlot[materialIndex] >= 0 ? _groupOfSlot[materialIndex] : _groupCount - 1;
-
-        private ulong GroupBit(int materialIndex) => 1UL << GroupOfSlot(materialIndex);
 
         /// <summary>Drops the prepared-ahead bookkeeping: its keys are only valid against the slot indexing it was built for. The next cover recompute rebuilds it.</summary>
         private void ClearPreloadState()
         {
             _prepareDesired.Clear();
             _prepareDesiredSet.Clear();
-            _servedKeys.Clear();
+            _coverIndex.ForgetServedKeys();
             _preloadSet.Clear();
             _keepSet.Clear();
             _rolePassPending = false;
@@ -854,9 +737,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private void BuildBackend(Map.RenderBackend backend)
         {
             Instanced?.Dispose();
-            _showBatchCount = 0; // handles of the disposed backend mean nothing to the new one
-            _hideBatchCount = 0;
-            _lastQueuedShow.Clear();
+            _visibility.Clear(); // handles of the disposed backend mean nothing to the new one
             Instanced = backend switch
             {
                 Map.RenderBackend.Brg =>
@@ -930,7 +811,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private bool IsRecordVisible(LoadedKey key)
         {
             if (!_shownCount.ContainsKey(key)) return false;
-            ulong own = _groupsOfSource[key.Slot]; // a source with no mesh layer, symbols only, has no group: its labels follow the tile
+            ulong own = _groups.GroupsOfSource(key.Slot); // a source with no mesh layer, symbols only, has no group: its labels follow the tile
             return own == 0 || (_shownGroups.TryGetValue(key, out ulong revealed) && (revealed & own) != 0);
         }
 
@@ -1138,15 +1019,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 };
                 Selector.SelectVisibleTiles(in view, _selection);
 
-                _servedKeys.Clear();
-                _coverSet.Clear();
-                _coverAncestors.Clear();
-                for (int i = 0; i < _selection.Cover.Count; i++)
-                {
-                    _coverSet.Add(_selection.Cover[i]);
-                    foreach (TileId up in TileAncestry.Ancestors(_selection.Cover[i]))
-                        if (!_coverAncestors.Add(up)) break; // its own ancestors are already in
-                }
+                _coverIndex.Rebuild(_selection.Cover, _sources);
 
                 // Merge, not rebuild — newly-covered keys join the desired list; admission below is priority-ordered and capped.
                 // Cover tiles a source serves from one maxzoom ancestor share a key, so the merge queues it once.
@@ -1155,7 +1028,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                     TileId id = _selection.Cover[i];
                     foreach (LoadedKey key in ServingKeys(id))
                     {
-                        _servedKeys.Add(key);
                         if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
                         if (_desiredSet.Add(key)) _desired.Add(key);
                     }
@@ -1167,7 +1039,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 for (int i = _desired.Count - 1; i >= 0; i--)
                 {
                     LoadedKey dk = _desired[i];
-                    if (!_servedKeys.Contains(dk))
+                    if (!_coverIndex.Serves(dk))
                     {
                         _desiredSet.Remove(dk);
                         _desired.RemoveAt(i);
@@ -1766,7 +1638,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // Derived from what is still unconsumed, so a call that took one of two fills leaves the group pending.
                 ulong pending = 0;
                 for (int i = cursor; i < denseCount; i++)
-                    if (payloads[i] != null) pending |= GroupBit(payloads[i].MaterialIndex);
+                    if (payloads[i] != null) pending |= _groups.GroupBit(payloads[i].MaterialIndex);
                 lt.PendingGroups = pending;
                 lt.GroupsDerived = true;
             }
@@ -2077,7 +1949,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private void AddPreloadKeys(TileId tile, HashSet<LoadedKey> into)
         {
             foreach (LoadedKey key in ServingKeys(tile))
-                if (!_servedKeys.Contains(key)) into.Add(key);
+                if (!_coverIndex.Serves(key)) into.Add(key);
         }
 
         /// <summary>Drops prepare keys whose tile left P, which includes one that entered the cover (the cover merge already
@@ -2108,10 +1980,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         private bool TryResolveRole(in LoadedKey key, in LoadedTile lt, out TileRole role)
         {
             TileId tile = key.Tile;
-            if (_servedKeys.Contains(key)) { role = TileRole.Display; return true; }
+            if (_coverIndex.Serves(key)) { role = TileRole.Display; return true; }
 
             bool shown = _shownCount.ContainsKey(key); // the record serves a revealed area, built or not
-            if (shown && HasRelativeInCover(tile)) { role = TileRole.Hold; return true; }
+            if (shown && _coverIndex.HasRelativeInCover(tile)) { role = TileRole.Hold; return true; }
             if (!shown && IsBetweenHoldAndCover(tile)) { role = TileRole.Bridge; return true; }
 
             role = TileRole.Prepare;
@@ -2230,15 +2102,15 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int i = 0; i < handles.Length; i++)
             {
                 int materialIndex = i < materialIndices.Length ? materialIndices[i] : -1;
-                if ((GroupBit(materialIndex) & groups) != 0) QueueShow(handles[i]);
+                if ((_groups.GroupBit(materialIndex) & groups) != 0) _visibility.QueueShow(handles[i]);
             }
         }
 
         /// <summary>Queues a record's current and, while it rebakes, previous draw handles to hide at the next flush.</summary>
         private void HideRecord(in LoadedTile lt)
         {
-            QueueHide(lt.DrawHandles);
-            QueueHide(lt.OldDrawHandles);
+            _visibility.QueueHide(lt.DrawHandles);
+            _visibility.QueueHide(lt.OldDrawHandles);
         }
 
         // ── Hold and swap: a tile that left the cover stays shown until ready tiles cover its area ──
@@ -2286,16 +2158,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         private ulong GroupsRevealed(TileId tile)
             => !_revealedTiles.Contains(tile) ? 0UL : _groupMask.TryGetValue(tile, out ulong groups) ? groups : ulong.MaxValue;
 
-        /// <summary>True iff a strict ancestor or descendant of <paramref name="tile"/> is in the cover.</summary>
-        private bool HasRelativeInCover(TileId tile)
-        {
-            if (_coverAncestors.Contains(tile)) return true;
-            foreach (TileId up in TileAncestry.Ancestors(tile))
-                if (_coverSet.Contains(up)) return true;
-
-            return false;
-        }
-
         /// <summary>True iff a strict ancestor or descendant of <paramref name="tile"/> is shown.</summary>
         private bool HasShownRelative(TileId tile)
         {
@@ -2309,44 +2171,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (IsShown(up)) return true;
 
             return false;
-        }
-
-        /// <summary>True iff <paramref name="tile"/> lies strictly between a shown tile and a cover tile, on one ancestry chain, in either direction.</summary>
-        private bool IsBetweenHoldAndCover(TileId tile)
-        {
-            if (_coverAncestors.Contains(tile)) return HasShownAncestor(tile);
-            return _shownBelow.ContainsKey(tile) && HasAncestorInCover(tile);
-        }
-
-        private bool HasAncestorInCover(TileId tile)
-        {
-            foreach (TileId up in TileAncestry.Ancestors(tile))
-                if (_coverSet.Contains(up)) return true;
-
-            return false;
-        }
-
-        /// <summary>True iff some source has a record for <paramref name="tile"/>.</summary>
-        private bool HasRecord(TileId tile)
-        {
-            // Every slot, admitted or not: an overzoomed tile outside a source's bounds is still served by its maxzoom ancestor's record.
-            for (int slot = 0; slot < _sources.Count; slot++)
-                if (_loaded.ContainsKey(new LoadedKey(_sources.ServingTile(slot, tile), slot))) return true;
-            return false;
-        }
-
-        /// <summary>True iff every source that serves <paramref name="tile"/> has its record built, or rebuilding with its previous geometry
-        /// still registered, and not waiting to retry, the background included. A missing record is not ready; a source that does not
-        /// serve the tile counts for nothing. An absent or undecodable tile is built, so it is ready and empty.</summary>
-        private bool IsReady(TileId tile)
-        {
-            foreach (LoadedKey key in ServingKeys(tile))
-            {
-                if (!_loaded.TryGetValue(key, out LoadedTile lt)) return false;
-                if (!(lt.Built || (lt.Rebaking && lt.OldDrawHandles != null)) || lt.WaitingRetry) return false;
-            }
-
-            return true;
         }
 
         /// <summary>Marks <paramref name="tile"/> shown and counts it on every record that serves it. False when it was already shown.</summary>
@@ -2407,230 +2231,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>Reveals the next ready groups of a cover tile, in order: a group shows once every earlier group has. A group is ready when no
-        /// record that serves the tile still holds one of its payloads. The first group revealed marks the tile shown. A group whose records
-        /// this step just concealed for another tile shows at once, so a record shared by overzoom does not blink across a pan.</summary>
-        private bool RevealReadyGroups(TileId tile, ulong revealed)
-        {
-            bool any     = false;
-            bool blocked = false;
-            for (int group = 0; group < _groupCount; group++)
-            {
-                ulong bit = 1UL << group;
-                if ((revealed & bit) != 0) continue;
-                if (!GroupCarried(tile, bit) && (blocked || !GroupReady(tile, bit)))
-                {
-                    blocked = true;
-                    continue;
-                }
-
-                MarkTileShown(tile);
-                revealed |= bit;
-                _groupMask[tile] = revealed;
-                foreach (LoadedKey key in ServingKeys(tile))
-                    RevealGroups(key, bit);
-
-                any = true;
-            }
-
-            return any;
-        }
-
-        /// <summary>True iff the group <paramref name="bit"/> has records for <paramref name="tile"/> and this swap step concealed every one of them
-        /// while it showed that group, so a group a record never showed is not carried ahead of the groups before it.</summary>
-        private bool GroupCarried(TileId tile, ulong bit)
-        {
-            bool any = false;
-            foreach (LoadedKey key in ServingKeys(tile))
-            {
-                if ((_groupsOfSource[key.Slot] & bit) == 0) continue;
-                if (!_concealedThisStep.TryGetValue(key, out ulong shown) || (shown & bit) == 0) return false;
-                any = true;
-            }
-
-            return any;
-        }
-
-        /// <summary>True iff no record that serves <paramref name="tile"/> still holds a payload of the group <paramref name="bit"/>. A record
-        /// that is missing, or has not reached its write step, holds every group of its source. One waiting to retry after a network fault holds
-        /// none, so a dead source never keeps another source's groups hidden.</summary>
-        private bool GroupReady(TileId tile, ulong bit)
-        {
-            foreach (LoadedKey key in ServingKeys(tile))
-                if ((PendingGroups(key) & bit) != 0) return false;
-
-            return true;
-        }
-
-        private ulong PendingGroups(LoadedKey key)
-        {
-            if (!_loaded.TryGetValue(key, out LoadedTile lt)) return _groupsOfSource[key.Slot];
-            if (lt.WaitingRetry || lt.Built) return 0;
-            return lt.GroupsDerived ? lt.PendingGroups : _groupsOfSource[key.Slot];
-        }
-
-        /// <summary>Runs every Update after the pump, and at the end of the drain. It hides a shown tile whose area left the view,
-        /// replaces a shown tile by the ready tiles that cover it, shows a ready ancestor over shown descendants, and shows a cover
-        /// tile that has no shown relative. Its shows and hides reach the backend in the one <see cref="FlushVisibility"/>.</summary>
-        private void SwapStep()
-        {
-            if (Instanced == null) return;
-            bool changed = false;
-            _concealedThisStep.Clear();
-
-            // 1. A shown tile with no relative in the cover: its area left the view.
-            _swapTiles.Clear();
-            foreach (TileId t in _revealedTiles) _swapTiles.Add(t);
-            for (int i = 0; i < _swapTiles.Count; i++)
-            {
-                TileId tile = _swapTiles[i];
-                if (_coverSet.Contains(tile) || HasRelativeInCover(tile)) continue;
-                ConcealTile(tile);
-                changed = true;
-            }
-
-            // 2. Zoom out: a ready ancestor in the cover, or a hidden Bridge below it, shows whole and hides the tiles under it.
-            _swapTiles.Clear();
-            foreach (TileId t in _revealedTiles) if (!_coverSet.Contains(t)) _swapTiles.Add(t);
-            for (int i = 0; i < _swapTiles.Count; i++)
-            {
-                TileId shown = _swapTiles[i];
-                if (!IsShown(shown) || !TryFindCoveringAncestor(shown, out TileId ancestor)) continue;
-                RevealTile(ancestor);
-                for (int j = 0; j < _swapTiles.Count; j++)
-                    if (IsShown(_swapTiles[j]) && TileAncestry.IsStrictAncestor(ancestor, _swapTiles[j])) ConcealTile(_swapTiles[j]);
-                changed = true;
-            }
-
-            // 3. Zoom in: a shown tile whose every cover area is covered by ready tiles gives way to them.
-            _swapTiles.Clear();
-            foreach (TileId t in _revealedTiles) if (_coverAncestors.Contains(t)) _swapTiles.Add(t);
-            for (int i = 0; i < _swapTiles.Count; i++)
-            {
-                TileId shown = _swapTiles[i];
-                if (!IsShown(shown)) continue;
-                _swapCovering.Clear();
-                if (!ChildrenCovered(shown)) continue;
-                for (int j = 0; j < _swapCovering.Count; j++) RevealTile(_swapCovering[j]);
-                ConcealTile(shown);
-                changed = true;
-            }
-
-            // 4. A cover tile with no shown relative shows its next ready groups: a new area, a swing-back, or a record registered under a
-            // relative since hidden. It starts once something is registered, and ends when every group shows.
-            for (int i = 0; i < _selection.Cover.Count; i++)
-            {
-                TileId tile  = _selection.Cover[i];
-                ulong  have  = GroupsRevealed(tile);
-                if ((have & _allGroups) == _allGroups || HasShownRelative(tile)) continue;
-                if (have == 0 && !(HasDrawHandles(tile) || IsReady(tile))) continue; // a ready tile with no items is shown too, so its labels draw
-                if (RevealReadyGroups(tile, have)) changed = true;
-            }
-
-            // A held or bridged tile that left the cover part-revealed keeps revealing its groups as its records finish.
-            _partialTiles.Clear();
-            foreach (var kv in _groupMask)
-                if ((kv.Value & _allGroups) != _allGroups) _partialTiles.Add(kv.Key);
-            for (int i = 0; i < _partialTiles.Count; i++)
-            {
-                TileId tile = _partialTiles[i];
-                if (!HasShownRelative(tile) && RevealReadyGroups(tile, _groupMask[tile])) changed = true;
-            }
-
-            if (changed) RecomputeRoles();
-        }
-
-        /// <summary>The shallowest ancestor of <paramref name="shown"/> that has a record, is not fully shown, and is ready, looking up to the
-        /// cover tile above it. Between them it takes any loaded tile, a Bridge or a prepared one. Fails when no ancestor is in the cover.</summary>
-        private bool TryFindCoveringAncestor(TileId shown, out TileId ancestor)
-        {
-            ancestor = default;
-            bool found = false;
-            foreach (TileId up in TileAncestry.Ancestors(shown))
-            {
-                bool inCover = _coverSet.Contains(up);
-                if ((inCover || HasRecord(up)) && !IsShown(up) && IsReady(up))
-                {
-                    ancestor = up;
-                    found    = true;
-                }
-
-                if (inCover) return found;
-            }
-
-            return false; // no ancestor in the cover: the tile is held for descendants, which step 3 handles
-        }
-
-        /// <summary>True iff each child area of <paramref name="tile"/> is covered, filling <see cref="_swapCovering"/> with the ready tiles that cover it.</summary>
-        private bool ChildrenCovered(TileId tile)
-        {
-            for (int child = 0; child < TileAncestry.ChildCount; child++)
-                if (!AreaCovered(TileAncestry.Child(tile, child))) return false;
-
-            return true;
-        }
-
-        /// <summary>An area is covered when it has no relative in the cover, or when its shallowest ready cover or Bridge tile exists, or when all four of its children are covered.</summary>
-        private bool AreaCovered(TileId tile)
-        {
-            bool inCover = _coverSet.Contains(tile);
-            bool above   = _coverAncestors.Contains(tile);
-            if (!inCover && !above) return true;
-            if ((inCover || HasRecord(tile)) && IsReady(tile))
-            {
-                _swapCovering.Add(tile);
-                return true;
-            }
-
-            return above && ChildrenCovered(tile);
-        }
-
-        /// <summary>The record key of every slot that admits <paramref name="tile"/>, in slot order.
-        /// An allocation-free <c>foreach</c> source. It lives here because <c>LoadedKey</c> is this
-        /// class's nested type, and the registry's public surface is pinned.</summary>
+        /// <summary>The record key of every slot that admits <paramref name="tile"/>, in slot order. An allocation-free <c>foreach</c> source.</summary>
         private ServingKeyWalk ServingKeys(TileId tile) => new ServingKeyWalk(_sources, tile);
-
-        /// <summary>The struct enumerator behind <see cref="ServingKeys"/>. It is mutable and <c>GetEnumerator</c>
-        /// returns a copy, so never call <c>MoveNext</c> on a stored value.</summary>
-        private struct ServingKeyWalk
-        {
-            private readonly SourceRegistry _sources;
-            private readonly TileId _tile;
-            private int _slot;
-            private LoadedKey _current;
-
-            public ServingKeyWalk(SourceRegistry sources, TileId tile)
-            {
-                _sources = sources;
-                _tile    = tile;
-                _slot    = -1;
-                _current = default;
-            }
-
-            public LoadedKey Current => _current;
-
-            public ServingKeyWalk GetEnumerator() => this;
-
-            public bool MoveNext()
-            {
-                while (++_slot < _sources.Count)
-                {
-                    if (!_sources.AdmitsTile(_slot, _tile)) continue;
-                    _current = new LoadedKey(_sources.ServingTile(_slot, _tile), _slot);
-                    return true;
-                }
-
-                return false;
-            }
-        }
-
-        private bool HasDrawHandles(TileId tile)
-        {
-            // Every slot, admitted or not: an overzoomed tile outside a source's bounds is still served by its maxzoom ancestor's record.
-            for (int slot = 0; slot < _sources.Count; slot++)
-                if (_loaded.TryGetValue(new LoadedKey(_sources.ServingTile(slot, tile), slot), out LoadedTile lt) && (lt.DrawHandles != null || lt.OldDrawHandles != null)) return true;
-            return false;
-        }
 
         /// <summary>Starts the fetch again for every record whose network-fault cooldown has passed and that is not queued for release.
         /// The general failure arm also catches a throw after the scheduler cached the bytes, so the retry releases the tile in its source
@@ -2655,66 +2257,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>Queues <paramref name="handles"/> to hide at the next <see cref="FlushVisibility"/>.</summary>
-        private void QueueHide(int[] handles)
-        {
-            if (handles == null) return;
-            for (int i = 0; i < handles.Length; i++)
-            {
-                if (_hideBatchCount == _hideBatch.Length) System.Array.Resize(ref _hideBatch, _hideBatch.Length * 2);
-                _hideBatch[_hideBatchCount++] = handles[i];
-                _lastQueuedShow[handles[i]] = false;
-            }
-        }
-
-        /// <summary>Queues one handle to show at the next flush.</summary>
-        private void QueueShow(int handle)
-        {
-            if (_showBatchCount == _showBatch.Length) System.Array.Resize(ref _showBatch, _showBatch.Length * 2);
-            _showBatch[_showBatchCount++] = handle;
-            _lastQueuedShow[handle] = true;
-        }
-
-        /// <summary>Hides every queued item in ONE backend call, then shows every queued item in ONE more, so a tile with many
-        /// layers costs one batch each way. A handle queued both ways in one Update ends as its LAST queued call says: the batches are
-        /// made disjoint first. Runs at the end of <see cref="UpdateCore"/> and of <see cref="DrainMeshBuilds"/>.</summary>
-        private void FlushVisibility()
-        {
-            if (_hideBatchCount > 0 && _showBatchCount > 0)
-            {
-                _hideBatchCount = KeepLastQueued(_hideBatch, _hideBatchCount, shown: false);
-                _showBatchCount = KeepLastQueued(_showBatch, _showBatchCount, shown: true);
-            }
-
-            _lastQueuedShow.Clear();
-
-            if (Instanced != null)
-            {
-                if (_hideBatchCount > 0)
-                {
-                    Instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_hideBatch, 0, _hideBatchCount), false);
-                    VisibilityBatchesLastTick++;
-                }
-
-                if (_showBatchCount > 0)
-                {
-                    Instanced.SetItemsVisible(new System.ReadOnlySpan<int>(_showBatch, 0, _showBatchCount), true);
-                    VisibilityBatchesLastTick++;
-                }
-            }
-
-            _hideBatchCount = 0; // the queues are dropped when Instanced is null: no backend holds those handles
-            _showBatchCount = 0;
-        }
-
-        /// <summary>Compacts <paramref name="batch"/> to the handles whose last queued call was <paramref name="shown"/>. Returns the new count.</summary>
-        private int KeepLastQueued(int[] batch, int count, bool shown)
-        {
-            int kept = 0;
-            for (int i = 0; i < count; i++)
-                if (_lastQueuedShow[batch[i]] == shown) batch[kept++] = batch[i];
-            return kept;
-        }
+        /// <summary>Sends the queued shows and hides to the backend in at most one call each. Runs at the end of <see cref="UpdateCore"/> and of
+        /// <see cref="DrainMeshBuilds"/>.</summary>
+        private void FlushVisibility() => VisibilityBatchesLastTick += _visibility.Flush(Instanced);
 
         /// <summary>Tears down a record's RENDER state: destroys its meshes, unregisters its draw items, and stashes
         /// any in-flight fetch/mesh build in the holding pens. It does not touch the scheduler/cache:

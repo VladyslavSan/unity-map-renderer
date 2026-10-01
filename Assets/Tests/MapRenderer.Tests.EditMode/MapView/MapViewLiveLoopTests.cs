@@ -15,6 +15,7 @@ using MapRenderer.Unity.Style;
 using Fill = MapRenderer.Unity.Style.Fill;
 using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Cameras;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile;
@@ -161,6 +162,26 @@ namespace MapRenderer.Tests.MapViews
             AssertARuntimeChangeOfTheGroupsFollowsOnNewTiles();
             AssertAChangeShowsALayerThatRegisteredHiddenBeforeIt();
             AssertAnInPlaceEditOfAGroupFollowsOnNewTiles();
+        }
+
+        /// <summary>A backend that only counts what a flush sends it.</summary>
+        private sealed class CountingBackend : ITileRenderBackend
+        {
+            public int HandlesShownLastFlush;
+            public int HandlesHiddenLastFlush;
+
+            public void SetItemsVisible(IReadOnlyList<int> handles, bool visible)
+            {
+                if (visible) HandlesShownLastFlush = handles.Count;
+                else HandlesHiddenLastFlush = handles.Count;
+            }
+
+            public int  AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId) => 0;
+            public void RemoveItems(ReadOnlySpan<int> handles) { }
+            public void Rebuild(in SceneFrame frame) { }
+            public void SetLayerVisible(int slot, bool visible) { }
+            public void SetLayerMaterials(IReadOnlyList<Material> layerMaterials, IReadOnlyList<UnityEngine.Rendering.ShadowCastingMode> layerShadowModes) { }
+            public void Dispose() { }
         }
 
         private const string BackgroundAndTwoFillsStyleJson = @"{
@@ -814,7 +835,7 @@ namespace MapRenderer.Tests.MapViews
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
-                // Prime the reused buffers (_cover, _servedKeys, _toRelease) to steady capacity.
+                // Prime the reused buffers (_cover, _coverIndex, _toRelease) to steady capacity.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
                 view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
@@ -919,6 +940,22 @@ namespace MapRenderer.Tests.MapViews
                     view.Config.TileSelection.MinZoom = 2;
                     view.Config.TileSelection.MaxZoom = 2;
                 }
+
+                // ── (g) A FLUSH THAT HAS WORK: shows and hides queued in one round, then one hide call and one show call. ──
+                // The arms above flush an empty queue. This one fills the map, partitions it and calls the backend twice.
+                var batch   = new VisibilityBatch();
+                var backend = new CountingBackend();
+                int[] hide  = { 1, 2, 3, 4, 5, 6 };
+                AllocationDiagnostics.AssertNotAllocating(() =>
+                {
+                    for (int i = 0; i < hide.Length; i++) batch.QueueShow(hide[i]);
+                    batch.QueueHide(hide);       // the last call wins: all six end hidden
+                    batch.QueueShow(100);
+                    batch.Flush(backend);
+                },
+                    "A flush that hides and shows must not allocate (the handle map, the two lists and the two backend calls).");
+                Assert.AreEqual(1, backend.HandlesShownLastFlush, "only handle 100 is shown");
+                Assert.AreEqual(hide.Length, backend.HandlesHiddenLastFlush, "the six handles hidden last are hidden");
             }
             finally
             {

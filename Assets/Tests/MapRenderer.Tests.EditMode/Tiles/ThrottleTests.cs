@@ -926,7 +926,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.Greater(telemetry.VisibleTileCount, 30,
                     $"Cover must be large (many quadtree nodes visited) — got VisibleTileCount={telemetry.VisibleTileCount}.");
 
-                // Prime the reused buffers (_cover, _servedKeys, _toRelease, the selector's _stack) to steady
+                // Prime the reused buffers (_cover, _coverIndex, _toRelease, the selector's _stack) to steady
                 // capacity before measuring — mirrors MapViewLiveLoopTests' priming ticks.
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + 1e-6, Longitude = 13.405 + 1e-6 });
                 view.LateUpdate();
@@ -2593,8 +2593,8 @@ namespace MapRenderer.Tests.Tiles
             => new TilePriorityContext(new ZeroProjection(), double3.zero, float3x3.identity, double3.zero,
                 TilePriorityStrategy.GroundDistanceToLookAt);
 
-        private static TileManager.LoadedKey Key(int z, int x, int y, int slot)
-            => new TileManager.LoadedKey(new TileId { Z = z, X = x, Y = y }, slot);
+        private static LoadedKey Key(int z, int x, int y, int slot)
+            => new LoadedKey(new TileId { Z = z, X = x, Y = y }, slot);
 
         private static readonly TilePriorityContext Zero = ZeroContext();
 
@@ -2605,7 +2605,7 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void SortsStably_OnEqualKeys()
         {
-            var list = new List<TileManager.LoadedKey>
+            var list = new List<LoadedKey>
             {
                 Key(5, 3, 2, 1),
                 Key(5, 1, 5, 0),
@@ -2616,7 +2616,7 @@ namespace MapRenderer.Tests.Tiles
 
             new TilePrioritySorter().Sort(list, in Zero);
 
-            var expected = new List<TileManager.LoadedKey>
+            var expected = new List<LoadedKey>
             {
                 Key(3, 9, 9, 9),
                 Key(5, 1, 2, 0),
@@ -2636,7 +2636,7 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void Sort_DoesNotAllocate()
         {
-            var list = new List<TileManager.LoadedKey>(100);
+            var list = new List<LoadedKey>(100);
             for (int i = 0; i < 100; i++)
                 list.Add(Key(5, i, 100 - i, i & 3));
 
