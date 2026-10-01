@@ -459,8 +459,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>The records this swap step concealed, each with the groups it showed when it went.</summary>
         private readonly Dictionary<LoadedKey, ulong> _concealedThisStep = new();
 
-        /// <summary>The configured visibility groups; null means one group holding every layer. A manager nobody configured uses the default order.</summary>
-        private Map.VisibilityGroup[] _visibilityGroups = Map.VisibilityGroup.DefaultOrder();
+        /// <summary>The kinds of each configured visibility group; null means one group holding every layer. A manager nobody configured uses the default order.</summary>
+        private StyleLayerType[][] _visibilityGroups = ToKinds(Map.VisibilityGroup.DefaultOrder());
 
         /// <summary>The group of each render slot (-1 for a slot with no tile mesh), and of each source slot the groups its layers fill.</summary>
         private int[]   _groupOfSlot    = System.Array.Empty<int>();
@@ -704,13 +704,83 @@ namespace MapRenderer.Unity.Rendering.Tile
             ClearPreloadState();
         }
 
-        /// <summary>Sets the order a new tile's layers appear in. It takes effect at the next <see cref="SetSources"/> or
-        /// <see cref="RestyleSourcesInPlace"/>, which resolve the layers against it. A null or empty list is one group of everything.</summary>
+        /// <summary>Sets the order a new tile's layers appear in, and applies it at once. A null or empty list is one group of everything.
+        /// An unchanged list costs a comparison and nothing else, so a caller may pass it every frame. A change remaps what is already
+        /// revealed, so nothing shown hides and nothing hidden shows early.</summary>
         internal void SetVisibilityGroups(IReadOnlyList<Map.VisibilityGroup> groups)
         {
-            if (groups == null || groups.Count == 0) { _visibilityGroups = null; return; }
-            _visibilityGroups = new Map.VisibilityGroup[groups.Count];
-            for (int i = 0; i < groups.Count; i++) _visibilityGroups[i] = groups[i];
+            if (SameGroups(groups)) return;
+
+            int[] oldGroupOfSlot = _groupOfSlot;
+            int   oldGroupCount  = _groupCount;
+            _visibilityGroups = ToKinds(groups);
+            RebuildGroupMaps();
+            RemapRevealedGroups(oldGroupOfSlot, oldGroupCount);
+        }
+
+        private static StyleLayerType[][] ToKinds(IReadOnlyList<Map.VisibilityGroup> groups)
+        {
+            if (groups == null || groups.Count == 0) return null;
+            var kinds = new StyleLayerType[groups.Count][];
+            for (int g = 0; g < kinds.Length; g++)
+                kinds[g] = groups[g]?.Kinds != null ? (StyleLayerType[])groups[g].Kinds.Clone() : System.Array.Empty<StyleLayerType>();
+            return kinds;
+        }
+
+        /// <summary>True iff <paramref name="groups"/> lists the same kinds, group by group, as the configured list.</summary>
+        private bool SameGroups(IReadOnlyList<Map.VisibilityGroup> groups)
+        {
+            if (groups == null || groups.Count == 0) return _visibilityGroups == null;
+            if (_visibilityGroups == null || _visibilityGroups.Length != groups.Count) return false;
+            for (int g = 0; g < groups.Count; g++)
+            {
+                StyleLayerType[] have = _visibilityGroups[g];
+                StyleLayerType[] want = groups[g]?.Kinds;
+                int wanted = want?.Length ?? 0;
+                if (have.Length != wanted) return false;
+                for (int k = 0; k < wanted; k++)
+                    if (have[k] != want[k]) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Moves the reveal state to a new group list. A tile revealed whole stays so. A tile revealed group by group keeps exactly the
+        /// layers it showed: a new group counts as revealed only when every layer in it was. Every record derives its pending groups afresh at its next
+        /// consume, and holds its whole source until then.</summary>
+        private void RemapRevealedGroups(int[] oldGroupOfSlot, int oldGroupCount)
+        {
+            if (_loaded.Count == 0 && _groupMask.Count == 0) return;
+
+            var tiles = new List<TileId>(_groupMask.Keys);
+            foreach (TileId tile in tiles)
+                _groupMask[tile] = RemapGroups(_groupMask[tile], oldGroupOfSlot, oldGroupCount);
+            RebuildShownCounts();
+
+            var keys = new List<LoadedKey>(_loaded.Keys);
+            foreach (LoadedKey key in keys)
+            {
+                LoadedTile lt = _loaded[key];
+                lt.GroupsDerived = false;
+                _loaded[key]     = lt;
+            }
+        }
+
+        private ulong RemapGroups(ulong oldGroups, int[] oldGroupOfSlot, int oldGroupCount)
+        {
+            if (oldGroups == ulong.MaxValue) return ulong.MaxValue;
+            ulong shown  = 0;
+            ulong unshown = 0;
+            for (int slot = 0; slot < _groupOfSlot.Length; slot++)
+            {
+                bool oldMesh = (uint)slot < (uint)oldGroupOfSlot.Length && oldGroupOfSlot[slot] >= 0;
+                if (!oldMesh || _groupOfSlot[slot] < 0) continue; // a slot with no tile mesh shows nothing to remap
+                int oldGroup = oldGroupOfSlot[slot];
+                if ((oldGroups & (1UL << oldGroup)) != 0) shown |= GroupBit(slot);
+                else unshown |= GroupBit(slot);
+            }
+
+            return shown & ~unshown;
         }
 
         /// <summary>Resolves every render slot to its visibility group, and every source slot to the groups its layers fill. Slots never
@@ -744,8 +814,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (_visibilityGroups == null) return 0;
             for (int g = 0; g < _visibilityGroups.Length; g++)
             {
-                StyleLayerType[] kinds = _visibilityGroups[g]?.Kinds;
-                if (kinds == null) continue;
+                StyleLayerType[] kinds = _visibilityGroups[g];
                 for (int k = 0; k < kinds.Length; k++)
                     if (kinds[k] == kind) return math.min(g, _groupCount - 1);
             }

@@ -332,7 +332,7 @@ namespace MapRenderer.Unity.Rendering.Map
             {
                 // Unconditional here, including a pure reorder — docs/tile-pipeline-design.md,
                 // "Partial-survival restyle".
-                TileManager.SetVisibilityGroups(_config.VisibilityGroups);
+                ApplyVisibilityGroups();
                 TileManager.RestyleSourcesInPlace(specs, _config.Backend);
 
                 // The in-place arm skips Layers.Build, the style token, SymbolSubsystem.SetStyle and the symbol
@@ -377,7 +377,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 _symbolStyleLayers); // group symbol layers + (re)build the shared glyph pipeline
             CommitProbe?.Invoke(CommitPhase.SymbolStyleApplied);
 
-            TileManager.SetVisibilityGroups(_config.VisibilityGroups);
+            ApplyVisibilityGroups();
             TileManager.SetSources(specs, _config.Backend, RecordProbeOrNull());
             _committedStyle = style; // the rebuild completed — the gate may trust it again
         }
@@ -636,6 +636,7 @@ namespace MapRenderer.Unity.Rendering.Map
             }
 
             EnsureSelector();
+            ApplyVisibilityGroups();
             using (PmManagerUpdate.Auto())
                 TileManager.Update(cameraProperties, BuildTileSelectionConfig(), NowSeconds, in sceneFrame);
 
@@ -739,6 +740,10 @@ namespace MapRenderer.Unity.Rendering.Map
                 => HashCode.Combine(HashCode.Combine(Globe, Lod, MinZoom, MaxZoom, OnScreenPx, MercFarCap, GlobeFarCap,
                                                      AreaAggressiveness), ZoomLevelHysteresis, TileDetailHysteresis);
         }
+
+        /// <summary>Hands the configured visibility groups to the tile manager, which compares them with the ones it holds and
+        /// applies a change at once. Called every frame and at every style load, so an Inspector edit takes effect live.</summary>
+        internal void ApplyVisibilityGroups() => TileManager.SetVisibilityGroups(_config.VisibilityGroups);
 
         // ── Visible-tile selector, rebuilt only when a selection input (or the projection) changes ──────
         private bool           _hasSelectorInputs;

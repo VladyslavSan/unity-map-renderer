@@ -113,11 +113,11 @@ namespace MapRenderer.Tests.MapViews
         }
 
         /// <summary>
-        /// A new tile's layers appear group by group, in the configured order. Arms: (1) with the source's fetch closed the source-less background
-        /// is drawn and the fill is not, and a list of one group draws nothing until the fill is ready; (2) a group appears when its last payload
-        /// is consumed, while a later group of the tile still consumes, and a group's layers appear in one flush; (3) with a second source that
-        /// lags, A's fill and labels wait for it, and one that is absent, undecodable or faulting never blocks them; (4) a rebaking shared record stays
-        /// drawn across a pan.
+        /// A new tile's layers appear group by group, in the configured order. Arms: (1) with the fetch closed the background draws and the fill does
+        /// not, and one group draws nothing until the fill is ready; (2) a group appears when its last payload is consumed, in one flush; (3) a lagging
+        /// second source holds A's fill and labels, and an absent, undecodable or faulting one never does; (4) a rebaking shared record stays drawn
+        /// across a pan; (5) a group list changed at runtime keeps what is shown, shows a layer registered hidden before the change, and orders new
+        /// tiles by the new list, also after an in-place edit of a group's kinds.
         /// </summary>
         [Test]
         public void VisibilityGroups_ApplyToNewTilesAcrossSourcesAndRestyle()
@@ -177,6 +177,153 @@ namespace MapRenderer.Tests.MapViews
             foreach (SecondSourceBehaviour behaviour in Enum.GetValues(typeof(SecondSourceBehaviour)))
                 AssertASecondSourceNeverBlocksTheFirstSourcesGroups(behaviour);
             AssertARebakingSharedRecordStaysDrawnAcrossAPan();
+            AssertARuntimeChangeOfTheGroupsFollowsOnNewTiles();
+            AssertAChangeShowsALayerThatRegisteredHiddenBeforeIt();
+            AssertAnInPlaceEditOfAGroupFollowsOnNewTiles();
+        }
+
+        private const string BackgroundAndTwoFillsStyleJson = @"{
+            ""version"": 8,
+            ""name"": ""Test"",
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#102030"" } },
+                { ""id"": ""fill-1"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                { ""id"": ""fill-2"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 50, 50, 200, 1] } }
+            ]
+        }";
+
+        /// <summary>
+        /// One fill layer of a tile is registered hidden, because its group still waits for the second fill. The groups then change so the fill group
+        /// comes first. The group numbering moves, and the layer registered hidden still shows once its group is ready: the reveal state was remapped.
+        /// </summary>
+        private void AssertAChangeShowsALayerThatRegisteredHiddenBeforeIt()
+        {
+            var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0;
+            view.WithTestCamera(256);
+            view.Config.MaxConsumesPerTick   = 1;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            try
+            {
+                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(0, 0, 0.0), style: TestStyle.Document(BackgroundAndTwoFillsStyleJson));
+                for (int i = 0; i < 2500 && view.BrgRenderer().DrawItemCount() < 2; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(2, view.BrgRenderer().DrawItemCount(), "precondition: two layers of the tile are registered");
+                Assert.AreEqual(1, view.BrgRenderer().HiddenDrawItemCount(), "precondition: the background shows and the fill waits for the second fill");
+
+                view.Config.VisibilityGroups = new[]
+                {
+                    new VisibilityGroup { Kinds = new[] { StyleLayerType.Fill, StyleLayerType.Line } },
+                    new VisibilityGroup { Kinds = new[] { StyleLayerType.Background } },
+                    new VisibilityGroup { Kinds = new[] { StyleLayerType.FillExtrusion } },
+                };
+                view.Config.MaxConsumesPerTick = 64;
+                PumpUntilSettled(view);
+                view.LateUpdate();
+                Assert.AreEqual(3, view.BrgRenderer().DrawItemCount(), "all three layers are registered");
+                Assert.AreEqual(0, view.BrgRenderer().HiddenDrawItemCount(), "every layer of the tile is shown, the one registered before the change too");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>
+        /// An Inspector edit changes the kinds of a group in place, with no new list. The fill leaves the first group, so a new tile's background
+        /// no longer waits for it.
+        /// </summary>
+        private void AssertAnInPlaceEditOfAGroupFollowsOnNewTiles()
+        {
+            var gate = new UniTaskCompletionSource<bool>();
+            var src  = TestDataSource.FromFetch(async tile =>
+            {
+                await gate.Task;
+                return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
+            });
+            var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0;
+            view.WithTestCamera(256);
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.VisibilityGroups = new[]
+            {
+                new VisibilityGroup { Kinds = new[] { StyleLayerType.Background, StyleLayerType.Fill } },
+                new VisibilityGroup { Kinds = new[] { StyleLayerType.FillExtrusion } },
+            };
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: BackgroundAndFillStyle());
+                for (int i = 0; i < 40; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(0, EmittedFor(view, 0), "precondition: the first group holds the fill, so the background waits");
+
+                view.Config.VisibilityGroups[0].Kinds[1] = StyleLayerType.Background; // in place: the fill is in no group now
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 90.0 });
+                for (int i = 0; i < 40; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(4, EmittedFor(view, 0), "a new tile's background shows first, with the fill still loading");
+            }
+            finally
+            {
+                gate.TrySetResult(true);
+                view.Teardown();
+            }
+        }
+
+        /// <summary>
+        /// The group list changes at runtime, with no restyle, while a tile's background shows and its fill still loads. The shown background
+        /// stays drawn. A tile that appears afterwards follows the new order: one group holds its background and fill, so the background
+        /// waits for the fill.
+        /// </summary>
+        private void AssertARuntimeChangeOfTheGroupsFollowsOnNewTiles()
+        {
+            var gate = new UniTaskCompletionSource<bool>();
+            var src  = TestDataSource.FromFetch(async tile =>
+            {
+                await gate.Task;
+                return new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt);
+            });
+            var view = Track(new GameObject("MapView")).AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.TileSelection.ZoomLevelPreload = -1.0;
+            view.WithTestCamera(256);
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: BackgroundAndFillStyle());
+                for (int i = 0; i < 40; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(4, EmittedFor(view, 0), "precondition: the background shows while the fill loads");
+
+                view.Config.VisibilityGroups = new[]
+                {
+                    new VisibilityGroup { Kinds = new[] { StyleLayerType.Background, StyleLayerType.Fill } },
+                };
+                for (int i = 0; i < 5; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(4, EmittedFor(view, 0), "the background that already shows stays drawn");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 90.0 });
+                for (int i = 0; i < 40; i++) { view.LateUpdate(); Thread.Sleep(1); }
+                Assert.AreEqual(0, EmittedFor(view, 0), "a new tile's background waits for its fill: one group holds both");
+
+                gate.TrySetResult(true);
+                PumpUntilSettled(view);
+                view.LateUpdate();
+                Assert.AreEqual(4, EmittedFor(view, 0), "the new tiles' background is drawn once the tiles are ready");
+                Assert.AreEqual(4, EmittedFor(view, 1), "the new tiles' fill is drawn once the tiles are ready");
+            }
+            finally
+            {
+                gate.TrySetResult(true);
+                view.Teardown();
+            }
         }
 
         /// <summary>
@@ -280,7 +427,7 @@ namespace MapRenderer.Tests.MapViews
                 mv.Camera.SetProperties(Cam(0, 0, 5.0));
                 mv.Camera.SyncToCamera();
                 mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
-                mv.TileManager.SetVisibilityGroups(view.Config.VisibilityGroups);
+                mv.ApplyVisibilityGroups();
                 mv.TileManager.SetSources(new List<TileManager.SourceSpec>
                 {
                     new TileManager.SourceSpec("a", default, 0, int.MaxValue, () => new MvtTileFeatureSource(sourceA, new InlineWorkScheduler())),

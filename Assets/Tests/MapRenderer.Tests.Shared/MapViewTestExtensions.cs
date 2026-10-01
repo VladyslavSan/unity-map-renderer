@@ -105,7 +105,7 @@ namespace MapRenderer.Tests
             // StyleLayer.Source fetches, and background is source-less.
             for (int i = 0; i < layers.Count; i++)
                 if (!string.IsNullOrEmpty(layers[i].StyleLayer?.Source)) AddSpec(layers[i].StyleLayer.Source);
-            mv.TileManager.SetVisibilityGroups(view.Config.VisibilityGroups); // the call MapView.SetStyle makes before SetSources
+            mv.ApplyVisibilityGroups();
             mv.TileManager.SetSources(specs, view.Config.Backend);
 
             void AddSpec(string sid)

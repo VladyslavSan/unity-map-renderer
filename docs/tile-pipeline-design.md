@@ -323,11 +323,15 @@ it would replace stays drawn meanwhile.
 
 A new tile appears in groups, so its background shows before its fills and its fills before its buildings. `MapViewConfig.VisibilityGroups` is an
 ordered list of groups of layer kinds. The default is the background, then fills and lines, then extrusions. A kind in no group falls in the last
-group, and a list with no group is one group of every layer. Groups past the 64th join the 64th. A change of the list takes full effect on the next
-`SetSources`: it does not move the items of a tile that is already shown.
+group, and a list with no group is one group of every layer. Groups past the 64th join the 64th. A change of the list applies at once, through `SetVisibilityGroups`, which `MapView` calls every frame: it
+does not move the items of a tile that is already shown, and a tile revealed group by group keeps the layers it showed.
 
 - **The maps.** `_groupOfSlot` gives the group of each render slot, and `_groupsOfSource` gives the groups each source fills. Slots never renumber, so a
   restyle or a change of the list only rebuilds these two maps.
+- **A live change.** `SetVisibilityGroups` rebuilds the two maps and remaps what is revealed. A tile revealed whole stays whole. A tile revealed
+  group by group keeps exactly the layers it showed: a new group counts as revealed only when every layer in it was. No geometry that is shown hides and
+  none that is hidden shows early. Label visibility follows the remapped groups, so a merge can leave a record's labels fading until its merged
+  group is ready. Every record derives its pending groups again at its next consume.
 - **Pending.** A record's `PendingGroups` is derived at each consume, from the payloads it has not consumed yet. A record that is not built and has not
   consumed yet, or is missing, holds every group of its source. A record that waits to retry holds none, so a dead source never keeps another source's
   groups hidden.

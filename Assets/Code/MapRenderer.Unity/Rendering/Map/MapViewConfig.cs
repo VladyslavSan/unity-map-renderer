@@ -155,8 +155,8 @@ namespace MapRenderer.Unity.Rendering.Map
 
         [Tooltip("The order a new tile's layers appear in, as lists of layer kinds. A group shows when every layer of it " +
                  "has finished loading, and only after the groups before it. A tile mesh kind in no group joins the " +
-                 "last one. At most 64 groups count; later ones join the 64th. Applied when the style is set, so a change takes " +
-                 "full effect on the next style load.")]
+                 "last one. At most 64 groups count; later ones join the 64th. A change applies at once: a tile already shown " +
+                 "keeps what it shows, and new tiles follow the new order.")]
         public VisibilityGroup[] VisibilityGroups = VisibilityGroup.DefaultOrder();
     }
 
