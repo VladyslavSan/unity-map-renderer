@@ -46,6 +46,13 @@ elimination itself scale:
 
 This is the published ear-clipping-with-holes technique; `THIRD-PARTY-NOTICES.txt` records its provenance.
 
+The shared-vertex splice is this repository's own addition. It is not part of that technique:
+
+- **A hole that touches the merged ring joins it with no seam.** A hole vertex exactly on a merged-ring vertex, with both hole
+  edges locally inside the ring there, joins the ring at that vertex. The hole vertex is the second visit of that position
+  (`IsBridgeCopy`). Other holes are bridged.
+  *Limitation:* a touch along a shared edge, or a refused interior test, still takes the bridge and can fill the hole.
+
 ## 3. The failure cascade
 
 When ear detection stalls, `EarcutJob` runs a cascade that degrades correctly and never folds:

@@ -151,7 +151,7 @@ namespace MapRenderer.Tests.Tiles
         // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It
         // includes the degenerate-candidate ear-predicate fix in EarcutJob.PointInTriangle.
         private const string FrozenGoldens =
-            "TriangleStream=rGzWbOAGcl9bEQyzuS336mSlkYFucl2qqTZO2cO5zdk=";
+            "TriangleStream=IohDXa2Z8Yqmrc2qw4VUPr1QYlINTgmApb+F3DLvB9g=";
 
         [Test]
         public void Schedule_MatchesFrozenSubdivideGoldens_AcrossCorpus()
@@ -357,17 +357,17 @@ namespace MapRenderer.Tests.Tiles
         private static string ProjectionName(IProjection p) => p.GetType().Name;
 
         // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the degenerate-candidate
-        // ear-predicate fix in EarcutJob.PointInTriangle.
+        // ear-predicate fix in EarcutJob.PointInTriangle and the splice of a hole that touches the ring.
         internal const string FrozenGoldensMercator =
-            "Vertex=abw1RVTEKTX0q2SAH1frMmR5klneemBfwyLltWhcC9Q= World=ix/06MAQIOpWn5DSnMXHtCoVJJOMR5ZlDZ1RPmZ4jos= " +
-            "Up=ewzYSZfuaKsiX83I/hDgjTGtdNN/hOAoc/9I01wENsQ= FeatIdx=9LQBKkxJtx4HO+DNPANmTtZ4ZXhWRF4muz+8lUw4UQw= " +
-            "Indices=ibY64qOJPV0HG+vpmH423n2jBLqjxYDgNT6EoQxbnMs= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
+            "Vertex=2m5CMFEs5/+9i2+JwkN7+FecfZDqPzVVcHBD6XsRE0c= World=8ToY+drIcSm/b556q6bSkkrAMRMK6vHCB6OshkU/yuU= " +
+            "Up=qNGZ6CD0QR8/sGpknFPnJU4yBdsVwW3Z/AeahmKbVYc= FeatIdx=RJukTjSMCg0HX3iWsUG+LP8zzRIgIjF99RGAvZqa+e8= " +
+            "Indices=qeVmpp9jairqEm5EQg38LG8aez73NFUaIO1Q30wltQk= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
             "RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= " +
-            "ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
+            "ForceClip=B8Iyzq78pIfNXwp5SFjP2+MRGvIB+5m3PWBIgIdH/HA=";
         // Re-captured for the same cause as FrozenGoldensMercator above.
         internal const string FrozenGoldensSpherical =
             "PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= " +
-            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
+            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=B8Iyzq78pIfNXwp5SFjP2+MRGvIB+5m3PWBIgIdH/HA=";
 
         /// <summary>Walks (corpus fixture × 2 clip arms) + 1 synthetic hole layer in the fixed order the goldens of
         /// <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/> pin.

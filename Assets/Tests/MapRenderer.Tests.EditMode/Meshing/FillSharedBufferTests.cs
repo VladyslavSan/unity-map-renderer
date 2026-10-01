@@ -455,6 +455,78 @@ namespace MapRenderer.Tests.Meshing
                 $"Area conservation: got {triArea}, expected {expectedArea}");
         }
 
+        private static IEnumerable<TestCaseData> TouchingHoleCases()
+        {
+            var square = new List<double2>
+            {
+                new double2(0, 0), new double2(100, 0), new double2(100, 100), new double2(0, 100), new double2(0, 50),
+            };
+            var bottom = new List<double2>
+            {
+                new double2(0, 0), new double2(50, 0), new double2(100, 0), new double2(100, 100), new double2(0, 100),
+            };
+            yield return new TestCaseData(square, new List<List<double2>>
+            {
+                new List<double2> { new double2(0, 50), new double2(40, 30), new double2(40, 70) },
+            }).SetName("OneHoleOnAnEdgeVertex");
+            var notched = new List<double2>
+            {
+                new double2(0, 0), new double2(100, 0), new double2(100, 100), new double2(0, 100), new double2(40, 50),
+            };
+            yield return new TestCaseData(notched, new List<List<double2>>
+            {
+                new List<double2> { new double2(40, 50), new double2(70, 35), new double2(70, 65) },
+            }).SetName("OneHoleOnAReflexCorner");
+            yield return new TestCaseData(square, new List<List<double2>>
+            {
+                new List<double2> { new double2(0, 50), new double2(40, 30), new double2(40, 48) },
+                new List<double2> { new double2(0, 50), new double2(40, 52), new double2(40, 70) },
+            }).SetName("TwoHolesOnOneOuterVertex");
+            yield return new TestCaseData(bottom, new List<List<double2>>
+            {
+                new List<double2> { new double2(50, 0), new double2(30, 40), new double2(45, 40) },
+                new List<double2> { new double2(50, 0), new double2(55, 40), new double2(70, 40) },
+            }).SetName("TwoHolesOnAVertexThatIsNotTheFirstHolesLeftmost");
+        }
+
+        /// <summary>A hole that shares a vertex with the outer ring (valid in a tile feed) fills no triangle: the areas
+        /// sum to outer minus the holes, and no triangle centroid lies in a hole. Arms: the shared vertex lies on an
+        /// edge, at a reflex corner, or is shared by two holes. A new method, because no other test puts a hole vertex
+        /// on an outer vertex.</summary>
+        [TestCaseSource(nameof(TouchingHoleCases))]
+        public void HoleSharingAnOuterVertex_ConservesAreaAndFillsNothingInTheHole(
+            List<double2> outer, List<List<double2>> holes)
+        {
+            var result = EarcutJobPolygonRunner.Run(outer, holes.ConvertAll(h => (IReadOnlyList<double2>)h));
+
+            double expected = RingArea(outer);
+            foreach (var hole in holes) expected -= RingArea(hole);
+            Assert.That(TotalTriArea(result.Vertices, result.Indices), Is.EqualTo(expected).Within(expected * 1e-6),
+                "area conservation");
+            for (int i = 0; i < result.Indices.Length; i += 3)
+            {
+                double2 centroid = (result.Vertices[result.Indices[i]] + result.Vertices[result.Indices[i + 1]]
+                                    + result.Vertices[result.Indices[i + 2]]) / 3.0;
+                foreach (var hole in holes)
+                    Assert.IsFalse(PointInRing(hole, centroid),
+                        $"triangle {i / 3} has its centroid {centroid} inside a hole");
+            }
+        }
+
+        private static bool PointInRing(List<double2> ring, double2 p)
+        {
+            bool inside = false;
+            for (int a = 0, b = ring.Count - 1; a < ring.Count; b = a++)
+            {
+                double2 from = ring[a];
+                double2 to   = ring[b];
+                if ((from.y > p.y) != (to.y > p.y) && p.x < (to.x - from.x) * (p.y - from.y) / (to.y - from.y) + from.x)
+                    inside = !inside;
+            }
+
+            return inside;
+        }
+
         // -----------------------------------------------------------------------------------------
         // Simple polygon (no hole) area conservation.
         // -----------------------------------------------------------------------------------------

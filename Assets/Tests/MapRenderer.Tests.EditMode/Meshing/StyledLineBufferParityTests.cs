@@ -1127,20 +1127,14 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void Corpus_Water_6_32_20_TriangulatesFaithfully()
         {
-            // Non-obvious why: water-6-32-20's poly 0 drops ONE sub-pixel locus the cure -> split cascade
-            // cannot resolve, below the validator's raster resolution, so ForceClips is its only observer and
-            // the count is pinned EXACTLY.
             var rep = RunOnBurstArm("water-6-32-20.pbf.bytes", new TileId { Z = 6, X = 32, Y = 20 }, "water");
             TestContext.WriteLine($"water-6-32-20 (Burst arm): {rep.Summary}");
             Assert.AreEqual(0, rep.WindingFlips, "water z6/32/20: NO folds/inversions allowed - " + rep.Summary);
             Assert.LessOrEqual(rep.AreaRelError, 0.01, "water z6/32/20: area conserved within 1% - " + rep.Summary);
             Assert.LessOrEqual(rep.MismatchPct, 1.0, "water z6/32/20: coverage matches the source - " + rep.Summary);
-            Assert.AreEqual(1, rep.ForceClips,
-                "water z6/32/20's clean-drop count (Burst arm) moved off its pinned value. " +
-                "Reading 0 means the locus was RESOLVED - that is an IMPROVEMENT, not a regression: re-pin this " +
-                "to 0 and delete the justification comment above. A higher count means a NEW drop appeared and " +
-                "must be investigated before this pin is touched. Either way, do not widen this to an inequality - " +
-                "ForceClips is the only instrument in this suite that can see a sub-cell drop. " + rep.Summary);
+            Assert.AreEqual(0, rep.ForceClips,
+                "water z6/32/20 drops no locus (clean-drop count, Burst arm). A higher count means a NEW drop appeared and must be " +
+                "investigated. Do not widen this to an inequality: ForceClips is the only instrument that sees a sub-cell drop. " + rep.Summary);
         }
 
         // ---- real coastline-dense tiles (fjords / archipelagos) with pathological hole counts ----------

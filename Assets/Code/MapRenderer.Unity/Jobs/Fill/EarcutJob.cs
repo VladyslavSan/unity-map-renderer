@@ -181,7 +181,7 @@ namespace MapRenderer.Unity.Jobs.Fill
             // ── Sort holes by (leftmost-x, min-y, original-index) for deterministic bridging.
             // The coordinator sorts them before scheduling this job, so they are used in order.
 
-            // On clean input the merged ring is outer + Σ(hole + 2 bridge verts); `total` grows past that only
+            // On clean input the merged ring is at most outer + Σ(hole + 2 bridge verts); `total` grows past that only
             // through SplitPolygon, bounded by the Verts.Length check in TrySplit.
             int total = 0;
 
@@ -213,10 +213,14 @@ namespace MapRenderer.Unity.Jobs.Fill
 
                 double holeArea2 = ComputeArea2(PolyVertices, holeVertexStart, holeCount);
                 bool reverseHole = holeArea2 < 0.0; // negative = CCW on screen → reverse to CW
+                double2 holeMin = new double2(double.MaxValue, double.MaxValue);
+                double2 holeMax = new double2(double.MinValue, double.MinValue);
                 for (int i = 0; i < holeCount; i++)
                 {
                     int src = reverseHole ? (holeCount - 1 - i) : i;
                     Verts[total] = PolyVertices[holeVertexStart + src];
+                    holeMin = math.min(holeMin, Verts[total]);
+                    holeMax = math.max(holeMax, Verts[total]);
                     Prev[total] = total - 1;
                     Next[total] = total + 1;
                     IsBridgeCopy[total] = false;
@@ -227,6 +231,16 @@ namespace MapRenderer.Unity.Jobs.Fill
                 Next[total - 1] = holeStart;
 
                 holeVertexStart += holeCount;
+
+                // A hole that touches the merged ring at a shared vertex needs no bridge: splice the hole in at that vertex.
+                int touchedHoleVertex = FindTouchedVertex(
+                    holeStart, holeCount, holeMin, holeMax, mergedRingStart, mergedRingCount, out int touched);
+                if (touchedHoleVertex >= 0)
+                {
+                    SpliceHoleAtSharedVertex(touched, touchedHoleVertex);
+                    mergedRingCount = total;
+                    continue;
+                }
 
                 int holeLM      = HoleLeftmostIndex(holeStart, holeCount);
                 int outerBridge = FindBridgeVertex(holeLM, mergedRingStart, mergedRingCount);
@@ -714,6 +728,57 @@ namespace MapRenderer.Unity.Jobs.Fill
                 { minX = Verts[j].x; idx = j; }
             }
             return idx;
+        }
+
+        /// <summary>The first hole vertex (in hole order) that sits exactly on a merged-ring vertex, where both hole
+        /// edges at it leave into the ring's interior. A ring vertex outside the hole's box is skipped. Returns that
+        /// hole vertex and sets <paramref name="touched"/> to its first matching ring vertex; -1 when the hole
+        /// touches nothing.</summary>
+        private int FindTouchedVertex(
+            int holeStart, int holeCount, double2 holeMin, double2 holeMax,
+            int mergedRingStart, int mergedRingCount, out int touched)
+        {
+            int bestHoleVertex = -1;
+            touched = -1;
+            int cur = mergedRingStart;
+            for (int i = 0; i < mergedRingCount; i++)
+            {
+                double2 position = Verts[cur];
+                if (position.x >= holeMin.x && position.x <= holeMax.x && position.y >= holeMin.y && position.y <= holeMax.y)
+                {
+                    int limit = bestHoleVertex < 0 ? holeCount : bestHoleVertex - holeStart;
+                    for (int k = 0; k < limit; k++)
+                    {
+                        int hv = holeStart + k;
+                        if (Verts[hv].x == position.x && Verts[hv].y == position.y
+                            && LocallyInside(cur, Next[hv]) && LocallyInside(cur, Prev[hv]))
+                        {
+                            bestHoleVertex = hv;
+                            touched = cur;
+                            break;
+                        }
+                    }
+
+                    if (bestHoleVertex == holeStart) break;
+                }
+
+                cur = Next[cur];
+                if (cur == mergedRingStart) break;
+            }
+
+            return bestHoleVertex;
+        }
+
+        /// <summary>Joins a hole to the ring at the shared vertex <paramref name="touched"/>: the ring runs through the hole and
+        /// returns to that position through <paramref name="holeVertex"/>, which becomes the seam duplicate.</summary>
+        private void SpliceHoleAtSharedVertex(int touched, int holeVertex)
+        {
+            int ringNext = Next[touched];
+            int holeNext = Next[holeVertex];
+
+            Next[touched]    = holeNext;  Prev[holeNext] = touched;
+            Next[holeVertex] = ringNext;  Prev[ringNext] = holeVertex;
+            IsBridgeCopy[holeVertex] = true;
         }
 
         private int FindBridgeVertex(int holeLM, int mergedRingStart, int mergedRingCount)
