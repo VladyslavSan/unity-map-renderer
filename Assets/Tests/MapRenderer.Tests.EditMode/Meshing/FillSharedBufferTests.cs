@@ -71,6 +71,7 @@ namespace MapRenderer.Tests.Meshing
     public class BoundaryGlitchMeshTests
     {
         // fixture, tile z, x, y  (paint/width evaluate at integer tile z, matching the kick path)
+        [Category("Online")]
         [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
         [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
         [TestCase("boundary-6-38-19.pbf.bytes",   6,  38,  19)]
@@ -86,7 +87,7 @@ namespace MapRenderer.Tests.Meshing
                 if (l.Id == "boundary_3") { layer = l as LineStyleLayer; break; }
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
-            byte[] bytes = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture));
+            byte[] bytes = OnlineTestData.Tile(fixture);
             // Decoded at the SAME id the build bakes from — the buffer is the only copy now.
             using MvtTile tile = MvtDecoder.Decode(id, bytes);
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
@@ -221,12 +222,13 @@ namespace MapRenderer.Tests.Meshing
 
         // ---- A counted bound, not a clock ---------------------------------------------------
 
+        [Category("Online")]
         [Test]
         public void Stockholm_EarTestScan_VisitsFewCandidates()
         {
             var id = new TileId { Z = 9, X = 282, Y = 150 };
             var runs = EarcutJobGatherHarness.RunLayer(
-                LoadFixture("water-real-stockholm-archipelago-9-282-150.pbf.bytes"), "water", id,
+                OnlineTestData.Tile("water-real-stockholm-archipelago-9-282-150.pbf.bytes"), "water", id,
                 forceLinearEarScan: false);
 
             long totalVisits = 0;
@@ -258,28 +260,27 @@ namespace MapRenderer.Tests.Meshing
             ("water-real-stockholm-archipelago-9-282-150.pbf.bytes", new TileId { Z = 9, X = 282, Y = 150 }),
         };
 
+        [Category("Online")]
         [Test]
         public void IndexArmMatchesForcedLinearFallback_OnEveryWaterFixture()
         {
             foreach (var (file, id) in WaterCorpus)
-                AssertArmsAgree(file, "water", id);
+                AssertArmsAgree(file, OnlineTestData.Tile(file), "water", id);
         }
 
         [Test]
         public void IndexArmMatchesForcedLinearFallback_OnSampleTile()
         {
             // All layers (RunLayer's layerName: null mode) — sample-tile's full-layer coverage.
-            AssertArmsAgree("sample-tile.bytes", null, new TileId { Z = 0, X = 0, Y = 0 });
+            AssertArmsAgree("sample-tile.bytes", LoadFixture("sample-tile.bytes"), null, new TileId { Z = 0, X = 0, Y = 0 });
         }
 
         /// <summary>Triangulates <paramref name="fixtureName"/> through <see cref="EarcutJobGatherHarness.RunLayer"/>
         /// with the grid index and with <c>forceLinearEarScan</c>, and asserts each polygon's used-prefix
         /// vertices, indices and ForceClips agree. Only the scan strategy differs, so polygons pair by
         /// index.</summary>
-        private static void AssertArmsAgree(string fixtureName, string layerName, TileId id)
+        private static void AssertArmsAgree(string fixtureName, byte[] mvt, string layerName, TileId id)
         {
-            byte[] mvt = LoadFixture(fixtureName);
-
             var indexed = EarcutJobGatherHarness.RunLayer(mvt, layerName, id, forceLinearEarScan: false);
             var linear  = EarcutJobGatherHarness.RunLayer(mvt, layerName, id, forceLinearEarScan: true);
 
@@ -2063,6 +2064,7 @@ namespace MapRenderer.Tests.Meshing
         // mirror's lineage by output order) must match the mirror's own report.
         // -----------------------------------------------------------------------------------------------
 
+        [Category("Online")]
         [Test]
         public void Corpus_Water_6_32_20_Globe_OrderedParityAndGapCorollary()
         {
@@ -2070,7 +2072,7 @@ namespace MapRenderer.Tests.Meshing
             var proj = new SphericalProjection();
             // Decoded by the production MvtDecoder; parity needs only identical input to both arms.
             var (tileVerts, triangleIndices, vertexFeatureIdx, extent) =
-                EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(LoadFixture("water-6-32-20.pbf.bytes"), "water", id);
+                EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(OnlineTestData.Tile("water-6-32-20.pbf.bytes"), "water", id);
 
             ParityRun run = AssertOrderedParity(
                 proj, id, extent, new double3(0, 0, 0), tileVerts, triangleIndices, vertexFeatureIdx,
@@ -2299,10 +2301,11 @@ namespace MapRenderer.Tests.Meshing
 
         // ---- always-on guard — Mercator is a pass-through no-op ("Mercator moves zero pixels") ----
 
+        [Category("Online")]
         [Test]
         public void Mercator_IsPassThrough_NoOp()
         {
-            var mvt = LoadFixture("water-6-32-20.pbf.bytes");
+            var mvt = OnlineTestData.Tile("water-6-32-20.pbf.bytes");
             var rep = RunOnBurstArm(mvt, "water", Water63220, new WebMercatorProjection());
 
             Assert.AreEqual(0, rep.MaxDepthReached, "a constant-up projection must never subdivide: " + rep.Summary);
@@ -2337,10 +2340,11 @@ namespace MapRenderer.Tests.Meshing
 
         // ---- The artefact tile must subdivide with no T-junction gap ----------------------------------------
         // A non-conforming per-triangle 1→4 split fails here on the gap clause alone, far over the 0.05% gate.
+        [Category("Online")]
         [Test]
         public void Corpus_Water_6_32_20_Globe_SubdivisionIsConforming()
         {
-            var mvt = LoadFixture("water-6-32-20.pbf.bytes");
+            var mvt = OnlineTestData.Tile("water-6-32-20.pbf.bytes");
             var rep = RunOnBurstArm(mvt, "water", Water63220, new SphericalProjection());
 
             Assert.IsTrue(rep.Passes(), "globe fill subdivision has a visible T-junction crack: " + rep.Summary);
@@ -2390,17 +2394,11 @@ namespace MapRenderer.Tests.Meshing
     /// </summary>
     public class JobifiedWaterTriangulationTests
     {
-        private static byte[] LoadFixture(string name)
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", name);
-            FileAssert.Exists(path);
-            return File.ReadAllBytes(path);
-        }
-
+        [Category("Online")]
         [Test]
         public void JobifiedPipeline_Water_8_135_80_TriangulatesFaithfully()
         {
-            byte[] mvtBytes = LoadFixture("water-8-135-80.pbf.bytes");
+            byte[] mvtBytes = OnlineTestData.Tile("water-8-135-80.pbf.bytes");
             var tileId  = new TileId { Z = 8, X = 135, Y = 80 };
             using var mvtTile = MvtDecoder.Decode(tileId, mvtBytes);
             var layer   = mvtTile.GetLayer("water");
@@ -2610,9 +2608,14 @@ namespace MapRenderer.Tests.Meshing
     // LineGraphParityTests — the per-ring subdivided point count, exact, element for element
     // ───────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// The z9 goldens come from the retired managed line oracle, over the previous bytes of that tile; the graph still matches them. The z6 goldens
+    /// are regression pins, regenerated from the graph over the pinned OpenFreeMap build after the corpus moved.
+    /// </summary>
     [TestFixture]
     public class LineGraphParityTests
     {
+        [Category("Online")]
         [TestCase("boundary-6-34-21.pbf.bytes", "z6", 6, 34, 21, "WebMercator")]
         [TestCase("boundary-6-34-21.pbf.bytes", "z6", 6, 34, 21, "Spherical")]
         [TestCase("boundary-9-274-168.pbf.bytes", "z9", 9, 274, 168, "WebMercator")]
@@ -2630,8 +2633,7 @@ namespace MapRenderer.Tests.Meshing
                 if (l.Id == "boundary_3") { layer = l as LineStyleLayer; break; }
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
-            using MvtTile tile = MvtDecoder.Decode(
-                id, File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
+            using MvtTile tile = MvtDecoder.Decode(id, OnlineTestData.Tile(fixture));
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             Assert.IsNotNull(mvtLayer, "boundary_3's source-layer must resolve in this fixture");
             var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
@@ -2859,9 +2861,7 @@ namespace MapRenderer.Tests.Meshing
 
         private static JsonValue LoadGolden(string tag, string label)
         {
-            string path = Path.Combine(Application.dataPath, "Fixtures", $"line-graphwrite-golden-{tag}-{label}.json");
-            FileAssert.Exists(path);
-            return JsonParser.Parse(File.ReadAllText(path));
+            return JsonParser.Parse(OnlineTestData.Golden($"line-graphwrite-golden-{tag}-{label}.json"));
         }
 
         private static uint[] ParseHexArray(string csv)

@@ -734,6 +734,9 @@ namespace MapRenderer.Tests.Filters
         /// membership SCAN; this tile has the most <c>transportation</c> features, 3 with <c>brunnel</c>.</summary>
         private static MvtTile _croatiaTile;
 
+        private static MvtTile CroatiaTile() => _croatiaTile ??= MvtDecoder.Decode(
+            new TileId { Z = 9, X = 279, Y = 187 }, OnlineTestData.Tile("water-real-croatia-dalmatia-9-279-187.pbf.bytes"));
+
         private static List<JsonValue> _coveredLibertyFilters;
         private static List<string> _refusedLibertyLayerIds;
         private static int _totalFilteredLibertyLayers;
@@ -742,8 +745,6 @@ namespace MapRenderer.Tests.Filters
         public void SetUp()
         {
             _tile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, SampleTileFixture.Bytes());
-            _croatiaTile = MvtDecoder.Decode(new TileId { Z = 9, X = 279, Y = 187 }, File.ReadAllBytes(
-                Path.Combine(Application.dataPath, "Fixtures", "water-real-croatia-dalmatia-9-279-187.pbf.bytes")));
             _coveredLibertyFilters = CollectCoveredLibertyFilters();
         }
 
@@ -751,7 +752,7 @@ namespace MapRenderer.Tests.Filters
         public void TearDown()
         {
             _tile.Dispose();
-            _croatiaTile.Dispose();
+            _croatiaTile?.Dispose();
         }
 
         /// <summary>True iff <paramref name="node"/> is exactly <c>["get", <paramref name="key"/>]</c>.</summary>
@@ -839,13 +840,14 @@ namespace MapRenderer.Tests.Filters
         /// <c>brunnel</c> filters (<c>waterway</c>/<c>water</c>) stay uncovered. Its 3 <c>brunnel</c> features
         /// are all <c>tunnel</c>, so the match-true "bridge" arm is never taken.
         /// </remarks>
+        [Category("Online")]
         [Test]
         public void Vm_AgreesWithManagedCompiledFilter_ForEveryCoveredFilter_EveryFeature_EveryLayer()
         {
             int comparisons = 0;
             int classNonNull = 0;
             int brunnelNonNull = 0;
-            MvtTile[] tiles = { _tile, _croatiaTile }; // hoisted out of the per-filter loop (NIT, review)
+            MvtTile[] tiles = { _tile, CroatiaTile() }; // hoisted out of the per-filter loop (NIT, review)
 
             foreach (JsonValue filterJson in _coveredLibertyFilters)
             {

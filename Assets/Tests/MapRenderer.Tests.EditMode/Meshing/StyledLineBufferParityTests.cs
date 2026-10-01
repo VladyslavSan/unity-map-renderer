@@ -974,21 +974,8 @@ namespace MapRenderer.Tests.Meshing
     /// </summary>
     public class WaterTriangulationTests
     {
-        private static byte[] LoadFixture(string name)
-        {
-            string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
-            foreach (string start in starts)
-            {
-                string dir = start;
-                for (int i = 0; i < 16 && dir != null; i++)
-                {
-                    string p = Path.Combine(dir, "Assets", "Fixtures", name);
-                    if (File.Exists(p)) return File.ReadAllBytes(p);
-                    dir = Directory.GetParent(dir)?.FullName;
-                }
-            }
-            throw new FileNotFoundException($"{name} not found walking up from {AppContext.BaseDirectory}");
-        }
+        // Every use pins numbers of the pinned-build tiles (ForceClips counts, areas).
+        private static byte[] LoadFixture(string name) => OnlineTestData.Tile(name);
 
         private static readonly string[] Corpus = { "water-8-135-80.pbf.bytes", "water-6-32-20.pbf.bytes" };
 
@@ -1082,6 +1069,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.Less(rep.MismatchPct, 0.5, "coverage matches source; the hole is subtracted");
         }
 
+        [Category("Online")]
         [Test]
         public void Corpus_DecodesAssemblesAndOuterRingsTriangulateClean()
         {
@@ -1120,6 +1108,7 @@ namespace MapRenderer.Tests.Meshing
         // ---- acceptance teeth for the hole-handling fix — Burst arm ----------------------------------
         // water-8-135-80 is proven by JobifiedWaterTriangulationTests (not duplicated here).
 
+        [Category("Online")]
         [Test]
         public void Corpus_Water_6_32_20_TriangulatesFaithfully()
         {
@@ -1145,6 +1134,7 @@ namespace MapRenderer.Tests.Meshing
             ("water-real-stockholm-archipelago-9-282-150.pbf.bytes", new TileId { Z = 9, X = 282, Y = 150 }),
         };
 
+        [Category("Online")]
         [Test]
         public void Corpus_RealCleanTiles_TriangulateFaithfully()
         {
@@ -1165,6 +1155,7 @@ namespace MapRenderer.Tests.Meshing
             ("water-real-indonesia-rajaampat-8-220-128.pbf.bytes", new TileId { Z = 8, X = 220, Y = 128 }),
         };
 
+        [Category("Online")]
         [Test]
         public void Corpus_RealHardTiles_DegradeGracefullyNeverFold()
         {

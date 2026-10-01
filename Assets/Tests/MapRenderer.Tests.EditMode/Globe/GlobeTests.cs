@@ -1071,6 +1071,7 @@ namespace MapRenderer.Tests.Globe
     public class GlobeLineWindingTests : BaseTestFixture
     {
         // z6 and z9 boundary_3 fixtures — winding is independent of curvature subdivision, so either zoom works.
+        [Category("Online")]
         [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
         [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
         public void GlobeLine_WindsSameAsMercator_RelativeToSurfaceNormal(string fixture, int z, int x, int y)
@@ -1085,7 +1086,7 @@ namespace MapRenderer.Tests.Globe
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
             using MvtTile tile = MvtDecoder.Decode(
-                id, File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
+                id, OnlineTestData.Tile(fixture));
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             Assert.IsNotNull(mvtLayer, "boundary_3's source-layer must resolve in this fixture");
             var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
@@ -1420,6 +1421,7 @@ namespace MapRenderer.Tests.Globe
 
     public class RightHandedSphereProjectionWindingTests : BaseTestFixture
     {
+        [Category("Online")]
         [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
         [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
         public void RightHandedCurvedLine_WindsSameAsMercator_RelativeToSurfaceNormal(string fixture, int z, int x, int y)
@@ -1434,7 +1436,7 @@ namespace MapRenderer.Tests.Globe
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
             using MvtTile tile = MvtDecoder.Decode(
-                id, File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
+                id, OnlineTestData.Tile(fixture));
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             Assert.IsNotNull(mvtLayer, "boundary_3's source-layer must resolve in this fixture");
             var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);

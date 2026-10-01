@@ -229,6 +229,7 @@ namespace MapRenderer.Tests.Style
 
         // ══ Liberty's city dot does not outlive its own name ════════════════
         // The dot allows overlap and the text does not; paired, AllowOverlap is the AND, so both drop together.
+        [Category("Online")]
         [Test]
         public void LibertyLabelCity_TextBlocked_DropsTheDotToo_NoOrphanIcon()
         {
@@ -386,6 +387,7 @@ namespace MapRenderer.Tests.Style
 
         // ══ The line branch re-gates on BOTH suppressions, not just the icon's ═══════════════
         // The TEXT leaves for the curved shape; without `&& textAtAnchors` a lone icon is stamped Owner.
+        [Category("Online")]
         [Test]
         public void MapAlignedTextWithViewportIcon_StampsNoPairRole()
         {
@@ -433,13 +435,13 @@ namespace MapRenderer.Tests.Style
         /// <summary>A real z6 tile whose `place` layer carries class=city features (liberty's `label_city`).</summary>
         private static MvtTile PlaceFixtureTile()
             => _placeTile ??= MvtDecoder.Decode(PlaceTileId,
-                SymbolTestFixtures.LoadUpBytes("Assets", "Fixtures", "water-6-32-20.pbf.bytes"));
+                OnlineTestData.Tile("water-6-32-20.pbf.bytes"));
 
         private static MvtTile _berlinTile;
 
         private static MvtTile BerlinFixtureTile()
             => _berlinTile ??= MvtDecoder.Decode(BerlinTileId,
-                SymbolTestFixtures.LoadUpBytes("Assets", "Fixtures", "boundary-9-274-168.pbf.bytes"));
+                OnlineTestData.Tile("boundary-9-274-168.pbf.bytes"));
 
         /// <summary>The cached fixture tiles own native buffers for the whole fixture's life.</summary>
         [OneTimeTearDown]
@@ -534,7 +536,7 @@ namespace MapRenderer.Tests.Style
         // ── Walk-up fixture loaders + the parsed Liberty style live in SymbolTestFixtures (shared with
         //    SymbolPairPredicateTests); these are the local names this file's call sites already use. ──
         private static byte[] LoadBerlinFixtureBytes()
-            => SymbolTestFixtures.LoadUpBytes("Assets", "Fixtures", "boundary-9-274-168.pbf.bytes");
+            => OnlineTestData.Tile("boundary-9-274-168.pbf.bytes");
 
         private static SymbolStyle.StyleLayer FindShieldLayer(string id) => SymbolTestFixtures.FindSymbolLayer(id);
 
@@ -637,6 +639,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
+        [Category("Online")]
         [Test]
         public void PointPlacement_OnLineString_EmitsSymbols()
         {
@@ -666,6 +669,7 @@ namespace MapRenderer.Tests.Style
             => MapRenderer.Unity.Jobs.Tiles.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 10.0).Count;
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
+        [Category("Online")]
         [Test]
         public void ShieldIconImages_ResolveFromAtlas_AllThreeLayers()
         {
@@ -709,6 +713,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
+        [Category("Online")]
         [Test]
         public void LinePlacement_ViewportAligned_EmitsUprightAnchorSymbols()
         {
@@ -734,6 +739,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
+        [Category("Online")]
         [Test]
         public void CentredPair_EmitsAdjacentIconThenText()
         {
@@ -771,6 +777,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
+        [Category("Online")]
         [Test]
         public void MapAlignedLineLayer_StillCurves_FieldForField()
         {
@@ -886,6 +893,7 @@ namespace MapRenderer.Tests.Style
             return eligible;
         }
 
+        [Category("Online")]
         [Test]
         public void MapAlignedLineIconLayer_EmitsAlongLineIcons()
         {
@@ -934,6 +942,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── The three-way alignment classification the icon emit shape branches on. ────────────────
+        [Category("Online")]
         [Test]
         public void IconRotationAlignment_ResolvesToThreeDistinctEmitShapes()
         {
@@ -987,6 +996,7 @@ namespace MapRenderer.Tests.Style
 
         // ── The centred-pair predicate uses the UN-suppressed `hasIcon`, so on the line branch it re-gates on
         //    `iconAtAnchors`: an icon that leaves for the along-line shape must not leave a Rider orphaned. ──
+        [Category("Online")]
         [Test]
         public void ViewportTextWithAlongLineIcon_StampsNoPairRole()
         {
@@ -1062,6 +1072,7 @@ namespace MapRenderer.Tests.Style
                 "absent icon-rotate -> 0 radians");
         }
 
+        [Category("Online")]
         [Test]
         public void IconRotate_180_IsStampedOnAnAlongLineIcon()
         {
@@ -1467,6 +1478,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ───────────────────────────────────────────────────────────────────────────────────────────────
+        [Category("Online")]
         [Test]
         public void UsShieldLayers_SelectNothingFromBerlinFixture()
         {

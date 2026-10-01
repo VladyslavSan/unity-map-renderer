@@ -334,3 +334,47 @@ Ordered. First match wins. Read down until one fires.
   sequential asserts, not positional literals.
 - **NOT yet enforced across the codebase** — read this as the rule new and touched tests are held to; no
   sweep of the existing suite has been run against it.
+
+## 8. Online tests — real map data
+
+This repository stores no OpenStreetMap-derived tile data. A test that needs real tiles is an **online test**:
+
+- It carries `[Category("Online")]` and runs on **every** test run, because the sources are rarely down.
+  - **Opt out:** `./Tools/run-tests.sh --offline [Both|EditMode|PlayMode] [filter]` forwards `-testCategory
+    "!Online"`, so no Online test runs. They are not skipped or inconclusive; they are not in the results at all.
+    `--offline` is accepted in any position. A filter that names only Online tests matches nothing under `--offline`:
+    the run exits `0` and the verdict says the filter matched no test.
+  - **No source answers:** the test ends **Inconclusive** with its URLs and causes. Nothing is red. `unity test` then
+    exits `8`, and the script prints `VERDICT [<platform>]: INCONCLUSIVE — nothing failed, but N test(s) ended
+    inconclusive …` and exits `8` (the exit table in `AGENTS.md`). This holds for any `Assert.Inconclusive`.
+  - **Select them:** `unity test … -- -testCategory Online` runs all Online tests together.
+- It reads its bytes from `OnlineTestData` (`Tests.Shared`), never from a path under `Assets/`.
+  `OnlineTestData.Tile(name)` takes a tile or the old fixture name; `OnlineTestData.Golden(name)` takes a golden file
+  derived from the same tiles.
+- **The chain.** The cache folder `Assets/Fixtures/online~/` (git-ignored, ignored by Unity), then the pinned
+  OpenFreeMap planet build (`20260927_080001_pt`), then a local server of the test-tile repository, then
+  `Assert.Inconclusive`, which names what it tried. A fetch writes the cache, so the next run is offline. Goldens are
+  not on OpenFreeMap: the cache or the local server serves them.
+- **A source that fails to connect is skipped for the rest of the run**, so an unreachable host costs one timeout, not
+  one per tile. An HTTP status such as 404 does not mark a source down.
+- **The test-tile repository** `unity-map-renderer-test-tiles` holds the same bytes as the pinned build
+  (`tiles/{z}/{x}/{y}.pbf`), the goldens, a `manifest.json` and the ODbL licence with attribution. It is the durable
+  source when OpenFreeMap retires the build. Serve it with `python3 -m http.server 8000` in its directory, or fill the
+  cache once with `Tools/fetch-test-tiles.sh`.
+- **Environment.** `UMR_TEST_TILES_URL` sets the local server (default `http://localhost:8000`).
+  `UMR_TEST_TILES_REMOTE_URL` replaces the OpenFreeMap `{z}/{x}/{y}` template, for example to prove the Inconclusive
+  path with an unresolvable host.
+- **A re-baseline is legitimate only when the pinned build changes.** The corpus digests (`FrozenGoldens*` in
+  `FullPipelineTests`) and the z6 line goldens pin the output over those exact bytes. Moving the build moves the data,
+  not the behaviour. First run the current code against the old bytes (green), then against the new ones, list each
+  failing expectation, and regenerate exactly those. A robustness test that degrades on the new tiles is a finding,
+  never a re-bake.
+- **A Burst-vs-managed parity probe keeps an offline twin** on `sample-tile.bytes` (Natural Earth) as a plain
+  `[TestCase]`; only its real-tile cases carry `Category = "Online"`. The default gate then still compares the Burst
+  job with the managed code when no tile source answers (`ProjectionManagedVersusBurstTests`,
+  `FillGraphBurstProbeTests`).
+- **Why not `HttpTransport` or `TemplatedTileSource`.** They resume on the player loop, which a blocking EditMode test
+  stalls, so the fetch hangs Pending. `OnlineTestData` runs `HttpClient` on a worker thread with a bounded timeout
+  (500 ms local, 15 s remote).
+- A new online test names its tile and adds it to the test-tile repository when it is not there. It never adds tile
+  data here.

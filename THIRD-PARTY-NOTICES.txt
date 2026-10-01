@@ -126,6 +126,10 @@ UniTask 2.5.10 — Cysharp/UniTask
 
 DATA / TEST FIXTURES
 --------------------
+No OpenStreetMap-derived tile data is stored in this repository. The Online tests fetch real tiles at run time from OpenFreeMap
+(see LIVE NETWORK ENDPOINT below) or from the separate test-tile repository, which carries the ODbL 1.0 licence and attribution, and
+keep them in a git-ignored cache. A few test arms carry insubstantial coordinate extracts reduced from real water and park polygons.
+
 Assets/Fixtures/sample-tile.bytes
   A single Mapbox Vector Tile (z0/x0/y0) from the MapLibre "demotiles" dataset.
   Underlying geometry: Natural Earth — public domain (no attribution required).
@@ -153,7 +157,7 @@ Assets/StreamingAssets/Fixtures/liberty.json
   The Liberty style design (a fork of OSM Liberty, tracing back to OSM Bright / Mapbox Open Styles) and
   the OpenMapTiles schema it targets are BSD-3-Clause (code) + CC BY 4.0 (design). The style references
   live OpenFreeMap endpoints for vector tiles, raster hillshade, sprites, and glyphs (see LIVE NETWORK
-  ENDPOINT below) — none of that tile / sprite / glyph data is bundled in this repo.
+  ENDPOINT below).
 
   REQUIRED ATTRIBUTION — non-MapLibre clients (and any printed media / video) MUST display:
       OpenFreeMap © OpenMapTiles Data from OpenStreetMap
@@ -226,8 +230,7 @@ LIVE NETWORK ENDPOINT (runtime only)
 -------------------------------------
 https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf
   The MapLibre demotiles vector tile endpoint used by MapViewBootstrap at runtime.
-  Tiles are NOT bundled in this repo. Fetched over HTTP only when the MapDemo.unity
-  scene is run in Play mode. This is a free public endpoint.
+  Fetched over HTTP only when the MapDemo.unity scene is run in Play mode. This is a free public endpoint.
   Underlying geometry: Natural Earth — public domain (no attribution required).
   Endpoint maintained by: MapLibre contributors.
   Subject to the endpoint's terms of service and fair-use policy.
@@ -235,7 +238,7 @@ https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf
 https://tiles.openfreemap.org/  (vector planet, natural_earth raster, sprites, fonts)
   The OpenFreeMap tile / sprite / glyph endpoints referenced by
   Assets/StreamingAssets/Fixtures/liberty.json, fetched at runtime when the demo renders the Liberty
-  basemap. NOT bundled in this repo.
+  basemap, and by the Online tests (the pinned planet build).
     - Vector tiles:  https://tiles.openfreemap.org/planet                          (OpenMapTiles schema; data © OpenStreetMap)
     - Raster shade:  https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png   (Natural Earth — public domain)
     - Sprites:       https://tiles.openfreemap.org/sprites/ofm_f384/ofm

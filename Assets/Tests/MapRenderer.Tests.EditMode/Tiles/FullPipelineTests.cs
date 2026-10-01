@@ -148,30 +148,24 @@ namespace MapRenderer.Tests.Tiles
 
         // ── (a) Golden parity of the subdivided output, over the whole fixture corpus. ─────
 
-        // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It includes
-        // the hole splice and the ear tests of docs/mesh-triangulation-robustness-design.md §2 and §4.
+        // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It includes the hole splice and
+        // the ear tests of docs/mesh-triangulation-robustness-design.md §2 and §4. Re-baselined once to the pinned OpenFreeMap corpus.
         private const string FrozenGoldens =
-            "TriangleStream=Mve3YLsThXMxOU1chBH8UxcpjRPKKFmvgx0PymY8x38=";
+            "TriangleStream=lVr3mivIMsPMeQ+b41BZURCDRSov55hL5m9tTrBUD34=";
 
+        [Category("Online")]
         [Test]
         public void Schedule_MatchesFrozenSubdivideGoldens_AcrossCorpus()
         {
-            string fixturesDir = Path.Combine(Application.dataPath, "Fixtures");
-            var pbfPaths = new List<string>(Directory.GetFiles(fixturesDir, "*.pbf.bytes"));
-            pbfPaths.Sort(StringComparer.Ordinal);
-            var allPaths = new List<string> { Path.Combine(fixturesDir, "sample-tile.bytes") };
-            allPaths.AddRange(pbfPaths);
+            var corpus = OnlineTestData.CorpusWithSample();
 
             var fixturesCovered = new HashSet<string>();
             int layersChecked = 0;
             bool anySplitFired = false;
             var vertBytes = new List<byte>();
 
-            foreach (string path in allPaths)
+            foreach ((string fileName, byte[] bytes) in corpus)
             {
-                string fileName = Path.GetFileName(path);
-                FileAssert.Exists(path);
-                byte[] bytes = File.ReadAllBytes(path);
 
                 TileId tileId;
                 Match m = TileIdFromName.Match(fileName);
@@ -226,7 +220,7 @@ namespace MapRenderer.Tests.Tiles
             string result = $"TriangleStream={Sha256(vertBytes)}";
             Assert.AreEqual(FrozenGoldens, result,
                 "the graph's curved-arm subdivided output across the corpus no longer matches the frozen " +
-                "GlobeFillSubdivideDispatch.Run/FillMeshPipeline.Schedule goldens — a real regression, not a re-bake candidate.");
+                "GlobeFillSubdivideDispatch.Run/FillMeshPipeline.Schedule goldens — a regression unless the pinned corpus itself changed.");
         }
 
         /// <summary>Schedules the curved-arm graph over <paramref name="input"/>, appends its de-indexed vertex
@@ -356,18 +350,18 @@ namespace MapRenderer.Tests.Tiles
 
         private static string ProjectionName(IProjection p) => p.GetType().Name;
 
-        // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the hole splice and the ear
-        // tests of docs/mesh-triangulation-robustness-design.md §2 and §4.
+        // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the hole splice and the ear tests of
+        // docs/mesh-triangulation-robustness-design.md §2 and §4. Re-baselined once to the pinned OpenFreeMap corpus; re-bake only if it changes.
         internal const string FrozenGoldensMercator =
-            "Vertex=Oxk4bkNdZ5lwsTUuPd5VH9hZ86NlTzp1CaTpQUFv9Lw= World=zxNg/WZSDDYPoY2xtz4D9H0P0Y8tLK4p5GaoshEnufk= " +
-            "Up=rGX7epJHzQ6P76Y81uuSo0Lq48QrG5gNiayirJX/dAM= FeatIdx=Ge6QNnm4YJG0pY7JHMiQHjYdHvDGfuBTOv3ymymLQ4E= " +
-            "Indices=WaNCoHNTGTx6yjjikla9tdzQqwdmwa5MuHu1qrDj9Bc= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
-            "RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= " +
+            "Vertex=di8zWOcdjnHDG87p5/b1TQXIKcEccE9n37Rj9WVPxg4= World=Pf7E9lqs5Uif9sG7UU7Lhk55dxbfOtmX7PsMMsZUf40= " +
+            "Up=KorNS8uYBcRb7285++z28reqqBDUumhz+kdUVl7O34A= FeatIdx=uTHDGy+orBQoz64wRJJ9T66XTcHv0HfGFb2SUXEP5/c= " +
+            "Indices=w271njjVYHDzImfIeYOhhP7NVRBsrezb1RzOJJewQ1Q= PolyCount=J742QO0RR/xmrg4qdGrf43SPRIy/aL9DURXvX0VC/8Y= " +
+            "RingCount=YEmOv6pKFX6FVqJ4WKDf/3qq2J852pK8xtPPjJSQazk= HoleCount=67oq5y1K5HhBZoMmTRrHbQimRvJfqq3z0sn4aVM269s= " +
             "ForceClip=SAxS8DDZ5VzsU6FuRU/+jxK1a52ToNrdKPImr4k5MZU=";
         // Re-captured for the same cause as FrozenGoldensMercator above.
         internal const string FrozenGoldensSpherical =
-            "PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= " +
-            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=SAxS8DDZ5VzsU6FuRU/+jxK1a52ToNrdKPImr4k5MZU=";
+            "PolyCount=J742QO0RR/xmrg4qdGrf43SPRIy/aL9DURXvX0VC/8Y= RingCount=YEmOv6pKFX6FVqJ4WKDf/3qq2J852pK8xtPPjJSQazk= " +
+            "HoleCount=67oq5y1K5HhBZoMmTRrHbQimRvJfqq3z0sn4aVM269s= ForceClip=SAxS8DDZ5VzsU6FuRU/+jxK1a52ToNrdKPImr4k5MZU=";
 
         /// <summary>Walks (corpus fixture × 2 clip arms) + 1 synthetic hole layer in the fixed order the goldens of
         /// <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/> pin.
@@ -376,20 +370,13 @@ namespace MapRenderer.Tests.Tiles
         /// <param name="visit">Receives each case's <see cref="FillMeshPipeline.LayerInput"/>, in order.</param>
         internal static void WalkCorpusAndSynthetic(IProjection projection, Action<FillMeshPipeline.LayerInput> visit)
         {
-            string fixturesDir = Path.Combine(Application.dataPath, "Fixtures");
-            var pbfPaths = new List<string>(Directory.GetFiles(fixturesDir, "*.pbf.bytes"));
-            pbfPaths.Sort(StringComparer.Ordinal);
-            var allPaths = new List<string> { Path.Combine(fixturesDir, "sample-tile.bytes") };
-            allPaths.AddRange(pbfPaths);
+            var corpus = OnlineTestData.CorpusWithSample();
 
             var fixturesCovered = new HashSet<string>();
             int layersChecked = 0;
 
-            foreach (string path in allPaths)
+            foreach ((string fileName, byte[] bytes) in corpus)
             {
-                string fileName = Path.GetFileName(path);
-                FileAssert.Exists(path);
-                byte[] bytes = File.ReadAllBytes(path);
 
                 TileId tileId;
                 Match m = TileIdFromName.Match(fileName);
@@ -456,6 +443,7 @@ namespace MapRenderer.Tests.Tiles
             finally { synthetic.Dispose(); }
         }
 
+        [Category("Online")]
         [Test]
         public void Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer(
             [ValueSource(nameof(ProjectionCases))] IProjection projection)
@@ -521,7 +509,7 @@ namespace MapRenderer.Tests.Tiles
             {
                 Assert.AreEqual(FrozenGoldensSpherical, countsResult,
                     $"[proj={ProjectionName(projection)}] the graph's counts across the corpus + synthetic layer " +
-                    "no longer match the frozen FillMeshPipeline.Schedule goldens — a real regression, not a re-bake candidate.");
+                    "no longer match the frozen FillMeshPipeline.Schedule goldens — a regression unless the pinned corpus itself changed.");
                 return;
             }
 
@@ -530,7 +518,7 @@ namespace MapRenderer.Tests.Tiles
                 $"Indices={Sha256(idxBytes)} {countsResult}";
             Assert.AreEqual(FrozenGoldensMercator, geometryResult,
                 $"[proj={ProjectionName(projection)}] the graph's output across the corpus + synthetic layer no " +
-                "longer matches the frozen FillMeshPipeline.Schedule goldens — a real regression, not a re-bake candidate.");
+                "longer matches the frozen FillMeshPipeline.Schedule goldens — a regression unless the pinned corpus itself changed.");
         }
 
         // ── (e) Projection dispatch coverage — job-scheduling-design.md. ────────────────────────────────────

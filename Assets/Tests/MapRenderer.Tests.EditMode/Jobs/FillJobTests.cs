@@ -995,6 +995,7 @@ namespace MapRenderer.Tests.Jobs
 
         // ── clipping does not make triangulation worse ────────────────────────────────────────────
 
+        [Category("Online")]
         [Test]
         public void Clip_OverTheBufferedCorpus_KeepsGeometryInExtent_AndDoesNotWorsenTriangulation()
         {
@@ -1005,8 +1006,7 @@ namespace MapRenderer.Tests.Jobs
 
         private static void RunCorpusCase(string fixture, TileId tileId)
         {
-            byte[] bytes = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture));
-            Assert.IsNotNull(bytes);
+            byte[] bytes = OnlineTestData.Tile(fixture);
             using MvtTile mvtTile = MvtDecoder.Decode(tileId, bytes);
 
             bool sawAnyLayer      = false;

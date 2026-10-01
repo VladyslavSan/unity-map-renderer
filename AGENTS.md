@@ -56,7 +56,8 @@ produced the first one.
 - `Assets/Tests/MapRenderer.Tests.PlayMode/` — PlayMode tests (multi-frame/async behaviour EditMode can't
   exercise).
 - `Assets/Tests/MapRenderer.Tests.Shared/` — shared test infra/fixtures used by both test runners.
-- `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile).
+- `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile). No OpenStreetMap-derived tile data is committed: tests that
+  need real tiles are `Category("Online")` tests that fetch it (`docs/test-conventions.md` § "Online tests").
 - Assemblies are split via `.asmdef`; Core does not depend on `MapRenderer.Unity`.
 
 ## Way of working

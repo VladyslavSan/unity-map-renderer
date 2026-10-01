@@ -503,6 +503,7 @@ namespace MapRenderer.Tests.Jobs
         /// catches a stamp of <c>default(TileId)</c>, a constant, the previous decode's id, or only one of
         /// z/x/y.
         /// </summary>
+        [Category("Online")]
         [Test]
         public void EveryLayersBuffer_CarriesTheAddressItsOwnDecodeWasGiven()
         {
@@ -557,6 +558,7 @@ namespace MapRenderer.Tests.Jobs
         /// decoded <see cref="MvtLayer"/>. The sibling runs over the <c>InMemoryTileLayer</c> double, so it
         /// stays green when <c>MvtLayer</c>'s getter re-materializes.
         /// </summary>
+        [Category("Online")]
         [Test]
         public void ARealDecodedLayer_HandsBackTheSameAllocationOnEveryRead()
         {
@@ -586,12 +588,8 @@ namespace MapRenderer.Tests.Jobs
                 "precondition: at least two real layers must carry a buffer, or this compared nothing");
         }
 
-        private static byte[] Fixture(string name)
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", name);
-            FileAssert.Exists(path);
-            return File.ReadAllBytes(path);
-        }
+        // Every use checks a relation (a stamp, an identity, a count against its own layer).
+        private static byte[] Fixture(string name) => OnlineTestData.Tile(name);
 
         private static IEnumerable<MethodBase> Methods(Type t)
         {
@@ -1332,6 +1330,7 @@ namespace MapRenderer.Tests.Jobs
             };
         }
 
+        [Category("Online")]
         [Test]
         public void Schedule_IsDeterministic_DefaultVsZeroWorkerCount_FullColumnSet(
             [ValueSource(typeof(MapRenderer.Tests.Tiles.FillMeshGraphParityTests), nameof(MapRenderer.Tests.Tiles.FillMeshGraphParityTests.ProjectionCases))]
@@ -1400,23 +1399,18 @@ namespace MapRenderer.Tests.Jobs
         }
 
         // ── Line graph determinism: the same worker-0-vs-default self-comparison over LineGraphOutput ─────
-        // No golden here: the committed line-graphwrite goldens already pin the exact bytes.
+        // No golden here: the line-graphwrite goldens (test-tile repository) already pin the exact bytes.
 
         private static (string Digest, int MaxRingCount, bool AnyNonEmpty) RunOneLinePass(IProjection projection)
         {
-            string fixturesDir = System.IO.Path.Combine(UnityEngine.Application.dataPath, "Fixtures");
-            var pbfPaths = new List<string>(System.IO.Directory.GetFiles(fixturesDir, "*.pbf.bytes"));
-            pbfPaths.Sort(StringComparer.Ordinal);
-            var allPaths = new List<string> { System.IO.Path.Combine(fixturesDir, "sample-tile.bytes") };
-            allPaths.AddRange(pbfPaths);
+            var corpus = OnlineTestData.CorpusWithSample();
 
             var vertBytes = new List<byte>(); var featBytes = new List<byte>(); var idxBytes = new List<byte>();
             int maxRingCount = 0;
             bool anyNonEmpty = false;
 
-            foreach (string path in allPaths)
+            foreach ((string _, byte[] bytes) in corpus)
             {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
                 var tileId = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
                 using var mvtTile = MapRenderer.Unity.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
                 foreach (var layer in mvtTile.Layers)
@@ -1483,6 +1477,7 @@ namespace MapRenderer.Tests.Jobs
             return (digest, maxRingCount, anyNonEmpty);
         }
 
+        [Category("Online")]
         [Test]
         public void LineSchedule_IsDeterministic_DefaultVsZeroWorkerCount(
             [ValueSource(typeof(MapRenderer.Tests.Tiles.FillMeshGraphParityTests), nameof(MapRenderer.Tests.Tiles.FillMeshGraphParityTests.ProjectionCases))]
@@ -1522,6 +1517,7 @@ namespace MapRenderer.Tests.Jobs
             "red here means the corpus changed or a constant was restored — do not lower the constant; see " +
             "the design doc's recorded corpus sizes.";
 
+        [Category("Online")]
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_FillTileToGeo()
         {
@@ -1529,6 +1525,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.GreaterOrEqual(maxVertices / FillMeshGraph.VertexBatch, 2, RefusalMessage);
         }
 
+        [Category("Online")]
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_Project()
         {
@@ -1538,6 +1535,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.GreaterOrEqual(maxVertices / ProjectionDispatch.VertexBatch, 2, RefusalMessage);
         }
 
+        [Category("Online")]
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_LineTileToGeo()
         {
@@ -1545,6 +1543,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.GreaterOrEqual(maxPoints / LineMeshGraph.VertexBatch, 2, RefusalMessage);
         }
 
+        [Category("Online")]
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_ExtrusionTileToGeo()
         {
@@ -1555,6 +1554,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.GreaterOrEqual(maxVertices / FillMeshGraph.VertexBatch, 2, RefusalMessage);
         }
 
+        [Category("Online")]
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_Earcut()
         {
@@ -1564,6 +1564,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.GreaterOrEqual(maxPolygonCount / FillMeshGraph.EarcutPolygonBatch, 2, RefusalMessage);
         }
 
+        [Category("Online")]
         [Test]
         public void ParallelNodes_OfferMoreThanOneBatch_OverTheRealCorpus_Ribbon()
         {
@@ -1588,16 +1589,11 @@ namespace MapRenderer.Tests.Jobs
 
         private static int LargestLineRingCount()
         {
-            string fixturesDir = System.IO.Path.Combine(UnityEngine.Application.dataPath, "Fixtures");
-            var pbfPaths = new List<string>(System.IO.Directory.GetFiles(fixturesDir, "*.pbf.bytes"));
-            pbfPaths.Sort(StringComparer.Ordinal);
-            var allPaths = new List<string> { System.IO.Path.Combine(fixturesDir, "sample-tile.bytes") };
-            allPaths.AddRange(pbfPaths);
+            var corpus = OnlineTestData.CorpusWithSample();
 
             int max = 0;
-            foreach (string path in allPaths)
+            foreach ((string _, byte[] bytes) in corpus)
             {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
                 var tileId = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
                 using var mvtTile = MapRenderer.Unity.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
                 foreach (var layer in mvtTile.Layers)
@@ -1654,18 +1650,13 @@ namespace MapRenderer.Tests.Jobs
         /// keeps only Polygon layers, which hold almost no LineStrings here.</summary>
         private static int LargestLineSubdividedPointCount()
         {
-            string fixturesDir = System.IO.Path.Combine(UnityEngine.Application.dataPath, "Fixtures");
-            var pbfPaths = new List<string>(System.IO.Directory.GetFiles(fixturesDir, "*.pbf.bytes"));
-            pbfPaths.Sort(StringComparer.Ordinal);
-            var allPaths = new List<string> { System.IO.Path.Combine(fixturesDir, "sample-tile.bytes") };
-            allPaths.AddRange(pbfPaths);
+            var corpus = OnlineTestData.CorpusWithSample();
 
             var projections = new IProjection[] { new WebMercatorProjection(), new SphericalProjection() };
             int max = 0;
 
-            foreach (string path in allPaths)
+            foreach ((string _, byte[] bytes) in corpus)
             {
-                byte[] bytes = System.IO.File.ReadAllBytes(path);
                 var tileId = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
                 using var mvtTile = MapRenderer.Unity.Jobs.Mvt.MvtDecoder.Decode(tileId, bytes);
                 foreach (var layer in mvtTile.Layers)
@@ -2485,6 +2476,7 @@ namespace MapRenderer.Tests.Jobs
         /// with no escape for an uncreated buffer: <see cref="MvtGeometryMaterializer"/>'s only early-out is
         /// <c>featureCount == 0 ⇒ default</c>, whose <c>FeatureCount</c> is 0 too.
         /// </summary>
+        [Category("Online")]
         [Test]
         public void EveryRealDecodedLayer_HasOneOrdinalSlotPerFeature()
         {
@@ -2635,12 +2627,8 @@ namespace MapRenderer.Tests.Jobs
         private static StyleLayer MatchAllLayer(string sourceLayer) =>
             new StyleLayer { Id = $"select-all-{sourceLayer}", Source = "s", SourceLayer = sourceLayer };
 
-        private static byte[] Fixture(string name)
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", name);
-            FileAssert.Exists(path);
-            return File.ReadAllBytes(path);
-        }
+        // Every use checks a relation (a stamp, an identity, a count against its own layer).
+        private static byte[] Fixture(string name) => OnlineTestData.Tile(name);
 
         // ── Test doubles ──────────────────────────────────────────────────────────────────────────────
 
@@ -2704,21 +2692,29 @@ namespace MapRenderer.Tests.Jobs
 
         // ── (i) TileToGeoJob.GeoAt vs the Burst job. Projection-independent — both projections exercise the ─
         // ── same code path here, which is expected (see the file header). ────────────────────────────────
-        [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
-        [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
+        [TestCase("sample-tile.bytes", 0, 0, 0)]
+        [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21, Category = "Online")]
+        [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168, Category = "Online")]
         public void TileToGeo_ManagedGeoAt_MatchesBurstJob(string fixture, int z, int x, int y)
         {
             foreach (IProjection proj in Projections)
                 RunTileToGeoProbe(fixture, z, x, y, proj);
         }
 
+        // The Natural Earth sample tile is the offline case of both probes: it keeps a managed-vs-Burst projection guard in the default gate.
+        private const string ProbeSampleFixture = "sample-tile.bytes";
+
+        private static byte[] ProbeTileBytes(string fixture)
+            => fixture == ProbeSampleFixture ? SampleTileFixture.Bytes() : OnlineTestData.Tile(fixture);
+
+        private static string ProbeLayerName(string fixture) => fixture == ProbeSampleFixture ? "countries" : "boundary";
+
         private static void RunTileToGeoProbe(string fixture, int z, int x, int y, IProjection proj)
         {
             var id = new TileId { Z = z, X = x, Y = y };
-            using MvtTile tile = MvtDecoder.Decode(
-                id, File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
-            MvtLayer layer = tile.GetLayer("boundary");
-            Assert.IsNotNull(layer, "the \"boundary\" MVT source-layer (backing the boundary_3 style layer) must be present in this fixture");
+            using MvtTile tile = MvtDecoder.Decode(id, ProbeTileBytes(fixture));
+            MvtLayer layer = tile.GetLayer(ProbeLayerName(fixture));
+            Assert.IsNotNull(layer, $"the \"{ProbeLayerName(fixture)}\" MVT source-layer must be present in {fixture}");
 
             TileGeometryBuffers geometry = layer.Geometry; // BORROWED — owned by `tile`, not disposed here
             int n = geometry.VertexCount;
@@ -2757,8 +2753,9 @@ namespace MapRenderer.Tests.Jobs
 
         // ── (ii) IProjection.ProjectPoint vs ProjectPointsJob<TProj>, compared as double3 ──────────────────
         // A float3 cast would hide a managed↔Burst difference below a float ulp. It schedules on the main thread.
-        [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
-        [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
+        [TestCase("sample-tile.bytes", 0, 0, 0)]
+        [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21, Category = "Online")]
+        [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168, Category = "Online")]
         public void ProjectPoint_Managed_MatchesProjectPointsJob(string fixture, int z, int x, int y)
         {
             foreach (IProjection proj in Projections)
@@ -2768,10 +2765,9 @@ namespace MapRenderer.Tests.Jobs
         private static void RunProjectPointProbe(string fixture, int z, int x, int y, IProjection proj)
         {
             var id = new TileId { Z = z, X = x, Y = y };
-            using MvtTile tile = MvtDecoder.Decode(
-                id, File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
-            MvtLayer layer = tile.GetLayer("boundary");
-            Assert.IsNotNull(layer, "the \"boundary\" MVT source-layer (backing the boundary_3 style layer) must be present in this fixture");
+            using MvtTile tile = MvtDecoder.Decode(id, ProbeTileBytes(fixture));
+            MvtLayer layer = tile.GetLayer(ProbeLayerName(fixture));
+            Assert.IsNotNull(layer, $"the \"{ProbeLayerName(fixture)}\" MVT source-layer must be present in {fixture}");
 
             TileGeometryBuffers geometry = layer.Geometry; // BORROWED
             int n = geometry.VertexCount;
@@ -2865,9 +2861,20 @@ namespace MapRenderer.Tests.Jobs
             return oa > ob ? oa - ob : ob - oa;
         }
 
+        // The boundary tiles measured the ULP bounds above. The sample tile reaches 1 ULP past them (Latitude 4, Up.x 3, Spherical World.x 5),
+        // so its case adds a slack of 2 ULP to every non-zero bound.
+        private const ulong SampleUlpSlack = 2;
+
+        // World = pp.World - origin cancels at planetary magnitude, so its error is a few ULP of ~2e7 m, not of the result: sample World.z was
+        // 391 ULP at 9784 m. The sample case accepts 4 ULP of that scale (1.5e-8 m); measured worst 7.5e-9 m. No other component gets a floor.
+        private const double SampleWorldAbsTolerance = 1.5e-8;
+
         private static void AssertUlpBound(
             double managed, double burst, ulong maxUlp, string fixture, IProjection proj, int index, string label)
         {
+            bool sample = fixture == ProbeSampleFixture;
+            if (sample && maxUlp > 0 && label.StartsWith("World") && math.abs(managed - burst) <= SampleWorldAbsTolerance) return;
+            if (sample && maxUlp > 0) maxUlp += SampleUlpSlack;
             ulong delta = UlpDistance(managed, burst);
             Assert.LessOrEqual(delta, maxUlp,
                 $"{label}[{index}] exceeds its measured {maxUlp}-ULP bound (job-scheduling-design.md's measured " +
@@ -2964,22 +2971,21 @@ namespace MapRenderer.Tests.Jobs
     [TestFixture]
     public class RingAssemblyHoleAttributionTests
     {
+        [Category("Online")]
         [Test]
         public void HolesShareTheirOutersFeature_AcrossTheCommittedMvtCorpus()
         {
-            string[] fixtures = Directory.GetFiles(
-                Path.Combine(Application.dataPath, "Fixtures"), "*.pbf.bytes");
-            Assert.Greater(fixtures.Length, 0, "precondition: the committed .pbf corpus must not be empty");
+            string[] fixtures = OnlineTestData.RealTileCorpus;
 
             int totalPolygons          = 0;
             int totalPolygonsWithHoles = 0;
             int totalHoles             = 0;
             int layersExamined         = 0;
 
-            foreach (string path in fixtures)
+            foreach (string name in fixtures)
             {
-                TileId tileId = TileIdFromFixtureName(Path.GetFileName(path));
-                using MvtTile tile = MvtDecoder.Decode(tileId, File.ReadAllBytes(path));
+                TileId tileId = TileIdFromFixtureName(name);
+                using MvtTile tile = MvtDecoder.Decode(tileId, OnlineTestData.Tile(name));
 
                 foreach (string layerName in LayerNames(tile))
                 {
@@ -3000,7 +3006,7 @@ namespace MapRenderer.Tests.Jobs
                     try
                     {
                         AssembleAndAssert(
-                            geometry, $"{Path.GetFileName(path)}/{layerName}",
+                            geometry, $"{name}/{layerName}",
                             ref totalPolygons, ref totalPolygonsWithHoles, ref totalHoles);
                     }
                     finally

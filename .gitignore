@@ -124,3 +124,6 @@ InitTestScene*.unity*
 .DS_Store?
 ._*
 Thumbs.db
+
+# Cache of the real tiles the Online tests fetch (see docs/test-conventions.md, Online tests)
+/Assets/Fixtures/online~/

@@ -26,12 +26,11 @@ namespace MapRenderer.Tests.Jobs
     {
         private const string WaterFixture = "water-real-stockholm-archipelago-9-282-150.pbf.bytes";
 
-        private static byte[] LoadFixture(string name)
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", name);
-            FileAssert.Exists(path);
-            return File.ReadAllBytes(path);
-        }
+        private const string SampleFixture = "sample-tile.bytes";
+
+        // Both uses compare two arms over one input. The Natural Earth sample tile is the offline case: it keeps a
+        // Burst-vs-managed guard in the default gate.
+        private static byte[] LoadFixture(string name) => name == SampleFixture ? SampleTileFixture.Bytes() : OnlineTestData.Tile(name);
 
         // ── Shared setup moved to EarcutJobGatherHarness.BuildGatherState — the real per-polygon ─────────
         // ── gather chain, now also driving the re-homed corpus and full-pipeline teeth. ───────────────────
@@ -43,14 +42,15 @@ namespace MapRenderer.Tests.Jobs
         /// cannot see it (RED-verified: a transposed vertex here stayed green). Kernel correctness is
         /// pinned by <c>WaterTriangulationTests</c>' 8-tile corpus sweep instead (property coverage against
         /// geometric ground truth, not arm agreement with a managed twin).</summary>
-        [Test]
-        public void EarcutBatchJob_MatchesPerPolygonEarcutJobRun()
+        [TestCase(SampleFixture, 0, 0, 0, "countries")]
+        [TestCase(WaterFixture, 9, 282, 150, "water", Category = "Online")]
+        public void EarcutBatchJob_MatchesPerPolygonEarcutJobRun(string fixture, int z, int x, int y, string layerName)
         {
-            byte[] mvtBytes = LoadFixture(WaterFixture);
-            var tileId = new TileId { Z = 9, X = 282, Y = 150 };
+            byte[] mvtBytes = LoadFixture(fixture);
+            var tileId = new TileId { Z = z, X = x, Y = y };
             using var mvtTile = MvtDecoder.Decode(tileId, mvtBytes);
-            var layer = mvtTile.GetLayer("water");
-            Assert.IsNotNull(layer, "water layer present");
+            var layer = mvtTile.GetLayer(layerName);
+            Assert.IsNotNull(layer, $"{layerName} layer present");
 
             TileGeometryBuffers geometry = layer.Geometry; // BORROWED
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
@@ -176,14 +176,15 @@ namespace MapRenderer.Tests.Jobs
 
         // ── (2) FillGatherJob — unknown (ii): NativeSortExtension.Sort<int, TComparer> inside a job ────────
 
-        [Test]
-        public void FillGatherJob_MatchesManagedPopulatePass()
+        [TestCase(SampleFixture, 0, 0, 0, "countries")]
+        [TestCase(WaterFixture, 9, 282, 150, "water", Category = "Online")]
+        public void FillGatherJob_MatchesManagedPopulatePass(string fixture, int z, int x, int y, string layerName)
         {
-            byte[] mvtBytes = LoadFixture(WaterFixture);
-            var tileId = new TileId { Z = 9, X = 282, Y = 150 };
+            byte[] mvtBytes = LoadFixture(fixture);
+            var tileId = new TileId { Z = z, X = x, Y = y };
             using var mvtTile = MvtDecoder.Decode(tileId, mvtBytes);
-            var layer = mvtTile.GetLayer("water");
-            Assert.IsNotNull(layer, "water layer present");
+            var layer = mvtTile.GetLayer(layerName);
+            Assert.IsNotNull(layer, $"{layerName} layer present");
 
             TileGeometryBuffers geometry = layer.Geometry; // BORROWED
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
