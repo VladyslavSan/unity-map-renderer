@@ -151,7 +151,7 @@ namespace MapRenderer.Tests.Tiles
         // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It includes
         // the hole splice and the ear tests of docs/mesh-triangulation-robustness-design.md §2 and §4.
         private const string FrozenGoldens =
-            "TriangleStream=r380Bn8yMfZb33KGDTmcscc0Yf54mBio5ocnb4PBkv8=";
+            "TriangleStream=Mve3YLsThXMxOU1chBH8UxcpjRPKKFmvgx0PymY8x38=";
 
         [Test]
         public void Schedule_MatchesFrozenSubdivideGoldens_AcrossCorpus()
@@ -359,15 +359,15 @@ namespace MapRenderer.Tests.Tiles
         // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the hole splice and the ear
         // tests of docs/mesh-triangulation-robustness-design.md §2 and §4.
         internal const string FrozenGoldensMercator =
-            "Vertex=yX7wuFRUpGzhMDh4V3sluer0+ujXmCnTuAsvebCEA6A= World=mTO8OG2cWOs78ONkfQR23tb7jwQnPdETMhwuY8oKGS0= " +
-            "Up=s2Bcr40p/LL2qP0rTxaumv2jjVNYrJXr8txRQho9wFg= FeatIdx=Zmw7WMhay5n0CDcO7USCTXFUmMfvMuvkp1ZzBdmyqic= " +
-            "Indices=DPVtdAY3M16VfyNH8bvooBmVtMo2F5II7NICuVlmJeU= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
+            "Vertex=Oxk4bkNdZ5lwsTUuPd5VH9hZ86NlTzp1CaTpQUFv9Lw= World=zxNg/WZSDDYPoY2xtz4D9H0P0Y8tLK4p5GaoshEnufk= " +
+            "Up=rGX7epJHzQ6P76Y81uuSo0Lq48QrG5gNiayirJX/dAM= FeatIdx=Ge6QNnm4YJG0pY7JHMiQHjYdHvDGfuBTOv3ymymLQ4E= " +
+            "Indices=WaNCoHNTGTx6yjjikla9tdzQqwdmwa5MuHu1qrDj9Bc= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
             "RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= " +
-            "ForceClip=B8Iyzq78pIfNXwp5SFjP2+MRGvIB+5m3PWBIgIdH/HA=";
+            "ForceClip=SAxS8DDZ5VzsU6FuRU/+jxK1a52ToNrdKPImr4k5MZU=";
         // Re-captured for the same cause as FrozenGoldensMercator above.
         internal const string FrozenGoldensSpherical =
             "PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= " +
-            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=B8Iyzq78pIfNXwp5SFjP2+MRGvIB+5m3PWBIgIdH/HA=";
+            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=SAxS8DDZ5VzsU6FuRU/+jxK1a52ToNrdKPImr4k5MZU=";
 
         /// <summary>Walks (corpus fixture × 2 clip arms) + 1 synthetic hole layer in the fixed order the goldens of
         /// <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/> pin.

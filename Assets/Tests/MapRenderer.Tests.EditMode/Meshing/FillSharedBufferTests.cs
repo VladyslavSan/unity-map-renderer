@@ -516,6 +516,22 @@ namespace MapRenderer.Tests.Meshing
                     new List<double2> { new double2(1384, 800), new double2(1375, 805), new double2(1384, 803) },
                 })
                 .SetName("AHoleTouchingAHoleThatTouchesTheOuterRing");
+            // Reduced from a real park polygon: the bridge of the second hole would run along that hole's own edge.
+            yield return new TestCaseData(
+                new List<double2> { new double2(176, 3084), new double2(255, 3084), new double2(143, 3127) },
+                new List<List<double2>>
+                {
+                    new List<double2>
+                    {
+                        new double2(180, 3089), new double2(178, 3095), new double2(183, 3101), new double2(191, 3103),
+                        new double2(193, 3099), new double2(193, 3098), new double2(176, 3084),
+                    },
+                    new List<double2>
+                    {
+                        new double2(193, 3088), new double2(193, 3095), new double2(196, 3093), new double2(197, 3087),
+                    },
+                })
+                .SetName("ABridgeAlongAHoleEdge");
         }
 
         private static bool EdgesCross(double2 a, double2 b, double2 c, double2 d)

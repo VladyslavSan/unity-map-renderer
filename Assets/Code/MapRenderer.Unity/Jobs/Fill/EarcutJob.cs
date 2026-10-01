@@ -907,7 +907,30 @@ namespace MapRenderer.Unity.Jobs.Fill
             int holeLM, int cand, int mergedRingStart, int mergedRingCount, int holeStart, int holeCount)
             => LocallyInside(cand, holeLM)
                && !BridgeCrossesRing(holeLM, cand, mergedRingStart, mergedRingCount)
-               && !BridgeCrossesRing(holeLM, cand, holeStart, holeCount);
+               && !BridgeCrossesRing(holeLM, cand, holeStart, holeCount)
+               && !BridgeTouchesRing(holeLM, cand, mergedRingStart, mergedRingCount)
+               && !BridgeTouchesRing(holeLM, cand, holeStart, holeCount);
+
+        /// <summary>True when a vertex of the ring at <paramref name="ringStart"/> lies on the open bridge segment
+        /// holeLM → cand, away from both end positions.</summary>
+        private bool BridgeTouchesRing(int holeLM, int cand, int ringStart, int ringCount)
+        {
+            double2 from = Verts[holeLM];
+            double2 to   = Verts[cand];
+            int c = ringStart;
+            for (int i = 0; i < ringCount; i++)
+            {
+                double2 p = Verts[c];
+                bool atEnd = (p.x == from.x && p.y == from.y) || (p.x == to.x && p.y == to.y);
+                if (!atEnd && Area2(from, to, p) == 0.0
+                    && p.x >= math.min(from.x, to.x) && p.x <= math.max(from.x, to.x)
+                    && p.y >= math.min(from.y, to.y) && p.y <= math.max(from.y, to.y))
+                    return true;
+                c = Next[c];
+            }
+
+            return false;
+        }
 
         /// <summary>True if live vertex i blocks the ear (p, v, n). A vertex at a corner position blocks only when one of its two ring
         /// edges leaves that corner inside the ear's wedge, and never when it or the corner is a seam copy. Any other vertex blocks when

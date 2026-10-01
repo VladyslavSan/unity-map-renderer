@@ -46,12 +46,18 @@ elimination itself scale:
 
 This is the published ear-clipping-with-holes technique; `THIRD-PARTY-NOTICES.txt` records its provenance.
 
-The shared-vertex splice is this repository's own addition. It is not part of that technique:
+The shared-vertex splice and the bridge check below are this repository's own additions. They are not part of that
+technique:
 
-- **A hole that touches the merged ring joins it with no seam.** A hole vertex exactly on a merged-ring vertex, with both hole
-  edges locally inside the ring there, joins the ring at that vertex. The hole vertex is the second visit of that position
-  (`IsBridgeCopy`). Other holes are bridged.
-  *Limitation:* a touch along a shared edge, or a refused interior test, still takes the bridge and can fill the hole.
+- **A hole that touches the merged ring joins it with no seam.** A hole vertex exactly on a merged-ring vertex,
+  with both hole edges locally inside the ring there, joins the ring at that vertex. The hole vertex is the second
+  visit of that position (`IsBridgeCopy`). Other holes are bridged.
+  *Limitation:* a touch along a shared edge, or a refused interior test, still takes the bridge and can fill
+  the hole.
+- **A bridge is refused when a vertex lies on it.** A bridge is refused when a vertex of the merged ring or of the hole
+  lies on its open segment, because that bridge doubles an edge or passes through a vertex, and the ear loop stalls on
+  the remainder. The check runs for every candidate, the fallback scan included, so a bridge costs about twice as much
+  and stays O(ring²) in the fallback.
 
 ## 3. The failure cascade
 
