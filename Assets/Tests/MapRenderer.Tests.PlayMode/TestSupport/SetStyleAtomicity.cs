@@ -21,7 +21,7 @@ namespace MapRenderer.Tests
                              ""paint"": {{ ""background-color"": ""{colorHex}"" }} }} ]
         }}";
 
-        /// <summary>Background + ONE url-source fill, so <c>MapView.BuildSourceSpecs</c>' await(loader)
+        /// <summary>Background + ONE url-source fill, so <c>MapViewSourceSpecs.Build</c>' await(loader)
         /// genuinely suspends until the test releases the gate.</summary>
         public const string BackgroundPlusUrlSourceStyle = @"{
             ""version"": 8,

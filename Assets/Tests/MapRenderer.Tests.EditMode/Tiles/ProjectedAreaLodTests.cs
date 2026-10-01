@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.Tiles
     /// </summary>
     public class ProjectedAreaLodTests
     {
-        // The production wiring, mirrored from MapView.EnsureSelector + the MapViewConfig defaults.
+        // The production wiring, mirrored from TileSelectorBinding.Ensure + the MapViewConfig defaults.
         private const int    MinZoom        = 0;
         private const int    MaxZoom        = 14;
         private const int    OnScreenTilePx = 512;
@@ -606,7 +606,7 @@ namespace MapRenderer.Tests.Tiles
     /// </summary>
     public class TiltCoverGrowthTests
     {
-        // The production globe wiring, mirrored from MapView.EnsureSelector + the MapViewConfig defaults.
+        // The production globe wiring, mirrored from TileSelectorBinding.Ensure + the MapViewConfig defaults.
         private const int    MinZoom        = 0;
         private const int    MaxZoom        = 14;
         private const int    OnScreenTilePx = 512;

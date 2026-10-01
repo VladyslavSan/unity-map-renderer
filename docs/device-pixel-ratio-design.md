@@ -115,7 +115,7 @@ An unusable ratio must not reach the paint basis, the camera altitude, the tile-
 interaction seams by four different routes, because the failure is not uniform and is not loud.
 
 At a ratio of `0` or `+∞`, `MapCamera.ViewportLogicalPx` goes non-finite. That feeds the label collision
-viewport, which then rejects nothing. It also feeds `MapView.BuildTileSelectionConfig`'s
+viewport, which then rejects nothing. It also feeds `TileSelectorBinding.BuildConfig`'s
 `FramingViewportPx`, which survives the selector's `vp <= 0` early-out, drives `CameraPoseMath.AltitudeForZoom`
 to `+∞` and the camera pose to NaN — so **every** frustum-plane comparison is false, `IntersectsAabb` accepts
 every tile, while `lodRatio = finite/∞ = 0` means the LOD stop never fires. The consequence is
@@ -400,7 +400,7 @@ offset the `TilePixelSize` fold would move).
 `MapRenderer.Unity/Rendering/Map/`: `MapCamera.ViewportLogicalPx` (the logical-viewport definition),
 `MapCamera.MetresPerDevicePixel` / `SyncToCamera` (the frame-constant ruler and its push),
 `MapCamera.CurrentAltitudeMetres` (where the ratio enters the framing, once),
-`MapView.BuildTileSelectionConfig` (the cover framing), `MapView.SetStyle` (the post-build re-apply),
+`TileSelectorBinding.BuildConfig` (the cover framing), `MapView.SetStyle` (the post-build re-apply),
 `MapViewConfig.DevicePixelRatio` (the serialized ratio, unclamped at the field), `MapViewConfig.DevicePixelRatioMode`.
 `MapRenderer.Unity/Rendering/Layers/`: `ZoomStyleApplier.BindDevicePixelFloat` / `BindDevicePixelVector` (the
 material-bound seam), `SymbolRenderLayer` (colour tints only — the halo is not bound here).

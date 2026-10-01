@@ -665,7 +665,7 @@ namespace MapRenderer.Tests.GeoJsons
         };
 
         /// <summary>
-        /// <c>type</c> is part of the source key: <c>MapView.BuildSourceSpecs</c> branches on it to fetch bytes
+        /// <c>type</c> is part of the source key: <c>MapViewSourceSpecs.Build</c> branches on it to fetch bytes
         /// or slice a local dataset. Non-obvious why: the field stays in the key although a style
         /// rarely reaches this collision, because two definitions differing only in it are different sources.
         /// </summary>
@@ -1162,7 +1162,7 @@ namespace MapRenderer.Tests.GeoJsons
                 "Point", GeoJsonTestFixtures.Position(lonLat.x, lonLat.y)));
         }
 
-        /// <summary>Builds the geojson source through the REAL <c>MapView.BuildSourceSpecs</c> — the ONE
+        /// <summary>Builds the geojson source through the REAL <c>MapViewSourceSpecs.Build</c> — the ONE
         /// place `buffer` is converted — rather than duplicating the conversion in the test. Blocks
         /// synchronously ON THE CALLING (main) THREAD: an `async Task` test resumes wherever its awaited
         /// UniTask's continuation lands, which <see cref="GetTileSync"/>'s off-main slice would break, and
@@ -1172,7 +1172,8 @@ namespace MapRenderer.Tests.GeoJsons
         {
             var style = TestStyle.Document(StyleWithInlineData(dataJson, bufferJson));
             UniTask<List<TileManager.SourceSpec>> task =
-                view.View.BuildSourceSpecs(style, CancellationToken.None).Preserve();
+                MapRenderer.Unity.Rendering.Map.MapViewSourceSpecs.Build(
+                    style, view.View.DocumentLoaderOverride, view.View.TileSourceFactoryOverride, CancellationToken.None).Preserve();
             Assert.IsTrue(task.WaitOffPlayerLoop(10000), "BuildSourceSpecs must complete within the timeout");
             List<TileManager.SourceSpec> specs = task.GetAwaiter().GetResult();
             Assert.AreEqual(1, specs.Count, "precondition: exactly one geojson source spec was built");

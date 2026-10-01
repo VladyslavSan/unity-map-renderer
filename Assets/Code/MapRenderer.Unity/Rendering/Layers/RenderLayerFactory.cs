@@ -94,7 +94,7 @@ namespace MapRenderer.Unity.Rendering.Layers
         }
 
         /// <summary>
-        /// The ONE registry of "which style layers fetch MVT tiles"; <see cref="Map.MapView.BuildSourceSpecs"/>
+        /// The ONE registry of "which style layers fetch MVT tiles"; <see cref="Map.MapViewSourceSpecs.Build"/>
         /// derives its source-ids from it. True iff <paramref name="layer"/> <see cref="DrawsFromSource"/>, is
         /// visible, is not authored fully-transparent, AND its filter compiles. So nothing fetches a source no
         /// drawing layer reads, and non-MVT bytes stay out of the MVT decode. A pure predicate with no material

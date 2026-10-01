@@ -626,7 +626,7 @@ has-a-background check), so a second source-less kind would need its own such br
   shadow regardless of `fill-extrusion-opacity` — the `ShadowCaster` pass is opaque. Not a bug; the fix would
   be dithered/transparent shadows, which is not in scope.
 - **Layer-kind dispatch has one registry.** `RenderLayerFactory` is the only type-switch;
-  `MapView.BuildSourceSpecs` ("which sources to fetch") and the label subsystem ("which layers are mine") derive
+  `MapViewSourceSpecs.Build` ("which sources to fetch") and the label subsystem ("which layers are mine") derive
   from the built `RenderLayerSet`, not from re-walking `style.Layers` with their own `is` checks.
 
 **The numbering.** Queue = `3000 + declaredOrder × 2 + subSlot`. For a declared interleave `background,

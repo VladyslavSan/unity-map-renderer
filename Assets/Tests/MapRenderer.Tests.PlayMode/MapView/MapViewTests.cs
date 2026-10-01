@@ -7,7 +7,7 @@
 //   MapViewBackgroundRestyleTests  — a restyle keeps the previous background + identity valid until the synchronous commit.
 //   MapViewLiveLoopTests           — the live loop's cover-drives-selection + eviction-releases tooth, settled over real frames.
 //   MapViewSetStyleTests           — the live MapView.SetStyle path over real frames.
-//   MapViewSourceSpecTests         — MapView.BuildSourceSpecs resolves specs to only the MVT-fetching layers.
+//   MapViewSourceSpecTests         — MapViewSourceSpecs.Build resolves specs to only the MVT-fetching layers.
 
 using System.Collections;
 using System.Collections.Generic;
@@ -1313,7 +1313,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapViewSourceSpecTests — MapView.BuildSourceSpecs resolves specs to only the MVT-fetching layers
+    // MapViewSourceSpecTests — MapViewSourceSpecs.Build resolves specs to only the MVT-fetching layers
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]

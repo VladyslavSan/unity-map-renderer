@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Cameras
 
                 view.LateUpdate();
 
-                double2 framing = view.View.BuildTileSelectionConfig().FramingViewportPx;
+                double2 framing = view.View.SelectorBinding.BuildConfig().FramingViewportPx;
 
                 Assert.AreEqual(view.Camera.ViewportLogicalPx.x, framing.x, 0.0,
                     "the selector must frame from the SAME logical viewport the altitude frames from — two " +
@@ -80,7 +80,7 @@ namespace MapRenderer.Tests.Cameras
                     view.Config.DevicePixelRatio  = ratio;
                     view.Camera.DevicePixelRatio  = ratio;
 
-                    double2 framing = view.View.BuildTileSelectionConfig().FramingViewportPx;
+                    double2 framing = view.View.SelectorBinding.BuildConfig().FramingViewportPx;
 
                     Assert.IsFalse(double.IsInfinity(framing.x) || double.IsNaN(framing.x)
                                 || double.IsInfinity(framing.y) || double.IsNaN(framing.y),

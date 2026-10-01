@@ -24,7 +24,7 @@ namespace MapRenderer.Tests
 
     /// <summary>An inline-GeoJSON <see cref="VisualSource"/> — the only source kind the kit implements.
     /// Emits <c>{"type":"geojson","data":&lt;dataJson&gt;}</c>, exactly
-    /// the shape <c>MapView.BuildSourceSpecs</c>' geojson branch requires (an inline JSON OBJECT, never a URL
+    /// the shape <c>MapViewSourceSpecs.Build</c>' geojson branch requires (an inline JSON OBJECT, never a URL
     /// string).</summary>
     internal sealed class GeoJsonInlineSource : VisualSource
     {

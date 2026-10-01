@@ -2725,15 +2725,18 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>The literal <c>TileEncoding.Mvt</c> may appear at exactly one production site — the
-        /// vector-tile branch of <c>MapView.BuildSourceSpecs</c> — never inside the reusable
+        /// vector-tile branch of <c>MapViewSourceSpecs.Build</c> — never inside the reusable
         /// <c>Rendering/Source</c> addressing/transport layer, which stays encoding-agnostic.</summary>
         [Test]
         public void TileEncodingMvt_IsNamedOnlyInBuildSourceSpecs()
         {
             string sourceDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Source");
-            string mapView   = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Map", "MapView.cs");
+            string mapDir    = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Map");
+            string specs     = ReadSource("Code", "MapRenderer.Unity", "Rendering", "Map", "MapViewSourceSpecs.cs");
 
-            int total = CountOccurrences(mapView, "TileEncoding.Mvt");
+            int total = 0;
+            foreach (string file in Directory.GetFiles(mapDir, "*.cs"))
+                total += CountOccurrences(File.ReadAllText(file), "TileEncoding.Mvt");
             foreach (string file in Directory.GetFiles(sourceDir, "*.cs", SearchOption.AllDirectories))
             {
                 int hits = CountOccurrences(File.ReadAllText(file), "TileEncoding.Mvt");
@@ -2745,14 +2748,13 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.AreEqual(1, total,
-                "'TileEncoding.Mvt' must appear exactly once across Rendering/Source/** plus MapView.cs — the " +
-                "BuildSourceSpecs factory line is the one production site that decides vector tiles are MVT.");
+                "'TileEncoding.Mvt' must appear exactly once across Rendering/Source/** plus Rendering/Map/ — the " +
+                "MapViewSourceSpecs factory line is the one production site that decides vector tiles are MVT.");
 
-            // The total-of-1 check alone would still pass if the literal moved out of MapView.cs into a
-            // Rendering/Source/** helper — pin it to the actual file, not just the count.
-            Assert.AreEqual(1, CountOccurrences(mapView, "TileEncoding.Mvt"),
-                "the single 'TileEncoding.Mvt' occurrence must be in MapView.cs itself (the BuildSourceSpecs " +
-                "factory line), not moved into a Rendering/Source/** helper.");
+            // The total-of-1 check alone would still pass if the literal moved to another file — pin it to the actual file.
+            Assert.AreEqual(1, CountOccurrences(specs, "TileEncoding.Mvt"),
+                "the single 'TileEncoding.Mvt' occurrence must be in MapViewSourceSpecs.cs itself (the factory " +
+                "line), not moved into another file.");
         }
 
         /// <summary><c>HttpTransport</c> resumes on the SAME thread <c>SendWebRequest().ToUniTask()</c>

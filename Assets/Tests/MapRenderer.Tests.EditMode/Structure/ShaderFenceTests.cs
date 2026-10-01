@@ -1728,8 +1728,12 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void MapView_NeverTypeSwitchesOnAStyleLayerSubtype()
         {
-            AssertNoOffendingPattern(Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Map", "MapView.cs"));
+            string mapDir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Map");
+            string[] files = Directory.GetFiles(mapDir, "MapView*.cs");
+            var names = new List<string>(Array.ConvertAll(files, Path.GetFileName));
+            Assert.Contains("MapView.Style.cs", names, "the style partial must be in the scanned set, or its code is unchecked.");
+            Assert.Contains("MapViewSourceSpecs.cs", names, "the source-spec file must be in the scanned set, or its code is unchecked.");
+            foreach (string file in files) AssertNoOffendingPattern(file);
         }
 
         [Test]

@@ -1,62 +1,22 @@
-using System;
 using System.Collections.Generic;
-using System.Text;
-using System.Threading;
-using Cysharp.Threading.Tasks;
-using UnityEngine;
+using System;
 using Unity.Mathematics;
 using Unity.Profiling;
+using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
-using MapRenderer.Core.Tiles;
-using MapRenderer.Core.Data;
-using MapRenderer.Unity.Style;
-using MapRenderer.Unity.View;
-using MapRenderer.Unity.View.Cameras;
-using MapRenderer.Core.Text.Placement;
-using MapRenderer.Unity.Concurrency;
-using MapRenderer.Unity.Rendering.Materials;
-using MapRenderer.Unity.Rendering.Source;
-using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
-using Symbol = MapRenderer.Unity.Style.Symbol;
-// Aliased rather than imported wholesale: this file names the GeoJSON parse entry at exactly one site (the
-// geojson branch of BuildSourceSpecs) and nothing else here should reach for the rest of that namespace.
-using GeoJson = MapRenderer.Core.GeoJson;
+using MapRenderer.Unity.Text;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// Selects the tile render backend. All three register one draw item per tile-layer mesh behind
-    /// <see cref="ITileRenderBackend"/> and are driven by a per-frame floating-origin <c>Rebuild</c>; only
-    /// the submission differs (Entities Graphics, raw BRG, or stock GameObjects).
-    /// </summary>
-    public enum RenderBackend
-    {
-        /// <summary>Default: each tile-layer draw item is an <see cref="Backend.Entities.TileRenderer"/>
-        /// entity rendered via Entities Graphics (BatchRendererGroup under the hood), grouped per tile and
-        /// inspectable/disable-able in the Entities Hierarchy. Value 0 so a scene that serialized the
-        /// field as 0 deserializes to Entities.</summary>
-        Entities = 0,
-
-        /// <summary>BRG path: draw tile meshes via a hand-packed <see cref="Backend.BRG.TileRenderer"/>
-        /// BatchRendererGroup. The zero-allocation production path.</summary>
-        Brg = 1,
-
-        /// <summary>The original per-tile-layer GameObject path (<see cref="Backend.GameObjects.TileRenderer"/>):
-        /// one MeshFilter+MeshRenderer child per layer under a <c>"Tile z/x/y"</c> container, drawn by the
-        /// SRP Batcher. The simplest, most Inspector-debuggable backend, an explicit opt-in.</summary>
-        GameObject = 2,
-    }
-
-    /// <summary>
     /// The live multi-tile render loop, a plain C# class hosted by <see cref="MapViewComponent"/>. It is built
     /// with its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/> and owns its
     /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so it has no "wired yet"
-    /// guards. Before <see cref="SetStyle(string,CancellationToken)"/> it is an empty map with no sources, so
+    /// guards. Before <see cref="SetStyle(string,System.Threading.CancellationToken)"/> it is an empty map with no sources, so
     /// <see cref="LateUpdate"/> renders nothing. Steady-state frames do not allocate on the BRG backend (docs/gc-and-allocation-design.md § 2).
     /// </summary>
-    public sealed class MapView
+    public sealed partial class MapView
     {
         /// <summary>Profiler marker name constants (SSOT) for the per-frame view path — referenced by the
         /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
@@ -110,28 +70,6 @@ namespace MapRenderer.Unity.Rendering.Map
         /// once at construction: there is no re-injection (a new camera means a new MapView), so no setter.</summary>
         public MapCamera Camera { get; }
 
-        private StyleDocument _style;
-
-        /// <summary>The document the live layers were last SUCCESSFULLY built or restyled from —
-        /// the in-place gate's <c>previous</c>. Distinct from <see cref="_style"/>, which commits early and
-        /// stays advanced after an aborted rebuild; this field is null from the gate until either arm's end,
-        /// so an abort in between forces the next call down the full-rebuild arm.</summary>
-        private StyleDocument _committedStyle;
-
-        // The FillAntialiasing the TileManager.CurrentStyle token was folded from. It changes vertices, so a live
-        // toggle between two SetStyle calls must fail the in-place gate rather than leave the token stale.
-        private bool _committedFillAntialiasing;
-
-        // The base material references the last full Layers.Build ran against. Non-obvious why: an in-place
-        // restyle only re-binds existing appliers, so it cannot find a layer that a mutated MapMaterialSet
-        // field now builds or skips; the gate refuses on any reference change (Unity's Equals), and
-        // PreparedCacheTests' FillExtrusionMaterial*InPlace_ tests pin it.
-        private (Material fill, Material line, Material fillExtrusion, Material symbolText, Material symbolIcon)
-            _committedMaterials;
-
-        private static (Material, Material, Material, Material, Material) MaterialSnapshot(Materials.MapMaterialSet set)
-            => (set.FillMaterial, set.LineMaterial, set.FillExtrusionMaterial, set.SymbolTextWorld, set.SymbolIconWorld);
-
         /// <summary>Test seam for the style-transition clock. Production → <c>Time.unscaledTimeAsDouble</c>
         /// (UNSCALED: a theme change is a UI-class animation that must ease under <c>timeScale == 0</c>).
         /// <see cref="Text.SymbolPlacementSystem.EaseFade"/> runs on SCALED time, so the two clocks disagree
@@ -158,6 +96,9 @@ namespace MapRenderer.Unity.Rendering.Map
         // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only Layers).
         internal readonly Tile.TileManager TileManager;
 
+        // Keeps the tile manager's selector and per-frame selection inputs in step with the config and camera.
+        internal readonly TileSelectorBinding SelectorBinding;
+
         // ── The per-frame symbol placement path — a SEPARATE path from the tile lifecycle above, never a
         // static per-(tile,layer) mesh. Needs no ctor dependency (unlike TileManager).
         /// <summary>The dedicated per-frame symbol renderer. <c>internal</c>: test surface (job-parity /
@@ -168,7 +109,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// Builds the view over its <paramref name="config"/> (the Inspector knobs, shared by reference with
         /// <see cref="MapViewComponent"/>) and a non-null <paramref name="camera"/>. The
         /// <see cref="TileManager"/> is created here; a data source is wired later via
-        /// <see cref="SetStyle(string,CancellationToken)"/>.
+        /// <see cref="SetStyle(string,System.Threading.CancellationToken)"/>.
         /// </summary>
         public MapView(MapViewConfig config, MapCamera camera)
         {
@@ -177,6 +118,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // The PreparedTileCache's Enabled toggle + byte/count budget — maintainer-tunable Inspector
             // fields (placeholder budget defaults pending in-editor VRAM profiling).
             TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
+            SelectorBinding = new TileSelectorBinding(_config, Camera, TileManager);
             // Built here, after Camera is set: a field initializer would see a null Camera. Both base materials
             // are optional; a null one leaves that draw path inert (see MapMaterialSet.SymbolIconWorld).
             SymbolPlacementSystem = new SymbolPlacementSystem(Camera,
@@ -194,7 +136,7 @@ namespace MapRenderer.Unity.Rendering.Map
         internal readonly SymbolSubsystem SymbolSubsystem;
 
         /// <summary>The sun/sky/haze writers, wired via <see cref="SetEnvironment"/>. Null until wired; a
-        /// style applies over it on every <see cref="SetStyle(string,CancellationToken)"/>.</summary>
+        /// style applies over it on every <see cref="SetStyle(string,System.Threading.CancellationToken)"/>.</summary>
         internal SceneEnvironment Environment { get; private set; }
 
         /// <summary>Points the view at <paramref name="environment"/> (built by <c>MapHost</c> over the scene's
@@ -205,400 +147,12 @@ namespace MapRenderer.Unity.Rendering.Map
             Environment = environment;
         }
 
-        // Reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
-        // fresh list; the single registry (RenderLayerFactory) is walked once via Layers.Layers.
-        private readonly List<Symbol.StyleLayer> _symbolStyleLayers = new List<Symbol.StyleLayer>();
-
         // The SymbolRenderLayer objects themselves (same walk as _symbolStyleLayers, same order) —
         // handed to SymbolPlacementSystem.Update each frame so each layer's survivors draw with its own material/presenter.
         private readonly List<Rendering.Layers.SymbolRenderLayer> _symbolRenderLayers = new List<Rendering.Layers.SymbolRenderLayer>();
 
         // Reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
         private readonly List<Tile.LoadedTileKey> _loadedTileKeys = new List<Tile.LoadedTileKey>();
-
-        // ── SetStyle — the style is the single source of truth ─────────────────────────────────
-        // No separate "Initialise": the map is valid at construction, and SetStyle loads or changes the data.
-
-
-        /// <summary>The id of the active style.
-        /// For <see cref="SetStyle(string,CancellationToken)"/> it is the style URI; for the
-        /// <see cref="StyleDocument"/> overload it is the caller-supplied id.</summary>
-        internal string StyleId { get; private set; }
-
-        // Loader seams — production defaults; tests inject counting/offline fakes via InternalsVisibleTo.
-        internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
-        internal System.Func<TileUrlTemplate, IDataSource>                TileSourceFactoryOverride;
-
-        /// <summary>The six mutation sites of <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s
-        /// full-rebuild arm after which an exception would leave persistent state a later call or frame
-        /// reads (the predicate `docs/tile-pipeline-design.md` enumerates). Named for the site,
-        /// in commit order.</summary>
-        internal enum CommitPhase
-        {
-            /// <summary>After <see cref="_style"/>/<see cref="StyleId"/> commit — old style must stay fully live.</summary>
-            IdentityCommitted,
-            /// <summary>After the <see cref="_committedFillAntialiasing"/>/<see cref="_committedMaterials"/> memo
-            /// write — the in-place gate's own memo must not outrun the build.</summary>
-            MaterialMemoWritten,
-            /// <summary>After <see cref="Rendering.Layers.RenderLayerSet.Build"/> — leak baseline from here on.</summary>
-            LayersBuilt,
-            /// <summary>After the <see cref="Tile.TileManager.CurrentStyle"/> token write.</summary>
-            StyleTokenWritten,
-            /// <summary>After <see cref="Text.SymbolSubsystem.SetStyle"/>.</summary>
-            SymbolStyleApplied,
-            /// <summary>Inside <see cref="Tile.TileManager.SetSources"/>'s teardown loop, once per record —
-            /// the one phase whose OWN interior can throw mid-teardown.</summary>
-            SourcesTeardownRecord,
-        }
-
-        /// <summary>Test seam: null in production (a per-call delegate check, not a per-frame one —
-        /// this method is not a hot path). Set by a test to throw at a chosen <see cref="CommitPhase"/> and
-        /// observe what the full-rebuild arm leaves behind. Reached via the existing
-        /// <c>InternalsVisibleTo("MapRenderer.Tests.EditMode")</c> (<c>MapRenderer.Unity/AssemblyInfo.cs</c>).</summary>
-        internal Action<CommitPhase> CommitProbe;
-
-        /// <summary>
-        /// Load a style from <paramref name="styleUri"/> (file:// or http(s)://), resolve each of its
-        /// sources (inline <c>tiles[]</c>, else TileJSON), wire one data pipeline per source-id, and
-        /// build the render layers — each fetching from ITS OWN source. <c>styleId == styleUri</c>.
-        /// </summary>
-        public async UniTask SetStyle(string styleUri, CancellationToken ct = default)
-        {
-            var           loader = DocumentLoaderOverride ?? StyleDocumentLoader.LoadTextAsync;
-            string        json   = await loader(styleUri, ct);
-            StyleDocument style;
-            try
-            {
-                // Malformed JSON throws here, before the other overload commits anything. A malformed
-                // expression does not: its property takes the default and lands in StyleDocument.Errors.
-                style = StyleParser.Parse(json, _config.FillAntialiasing);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[MapView.SetStyle] failed to parse style '{styleUri}' — keeping the previous style live. {ex}");
-                return;
-            }
-            await SetStyle(style, styleUri, ct);
-        }
-
-        /// <summary>
-        /// Applies an already-parsed <paramref name="style"/> with a caller-supplied
-        /// <paramref name="styleId"/>. A second call RESTYLES: <see cref="RenderLayerSet"/> rebuilds and the
-        /// source registry diffs (unchanged sources keep their warm pipeline; removed are torn down).
-        /// </summary>
-        public async UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
-        {
-            // Transactional restyle: the one await runs before any mutation, so a delayed or cancelled restyle
-            // leaves the old style's layers, materials, backend and identity live and rendering.
-            var specs = await BuildSourceSpecs(style, ct);
-            ct.ThrowIfCancellationRequested(); // last safe abort — nothing mutated yet (old style stays intact)
-            foreach (string warning in style.Warnings) Debug.LogWarning($"[MapView.SetStyle] {warning}");
-            foreach (string error in style.Errors) Debug.LogError($"[MapView.SetStyle] {error}");
-
-            // TOCTOU: _config.MaterialSet is live-mutable, so capture it once and validate that same reference;
-            // no await separates validation from Layers.Build. Across style loads the token's numbering fold guards.
-            var materialSet = _config.MaterialSet;
-            materialSet.Validate();
-
-            // Fail loud HERE (before any commit) — a null Root at Digest's site (after Build) would
-            // leave the new style/id/layers installed under the OLD token. Digest's own check must never fire.
-            if (style.Root == null)
-                throw new InvalidOperationException("StyleDocument.Root is null — the prepared cache's " +
-                    "cache-key digest needs it (a hand-built StyleDocument must set Root).");
-
-            // Nulled for this call: an abort below leaves it null, so the next call takes the full rebuild arm.
-            // See docs/tile-pipeline-design.md § "Partial-survival restyle".
-            StyleDocument   previous   = _committedStyle; // null on the first load — inPlace is false, as it must be
-            _committedStyle            = null;
-            Rendering.Layers.StyleTransition transition = StyleTransition;
-            double          now        = NowSeconds;
-            bool inPlace = previous != null
-                        && _config.FillAntialiasing == _committedFillAntialiasing
-                        && MaterialSnapshot(materialSet).Equals(_committedMaterials)
-                        && TileManager.SourcesUnchanged(specs)
-                        && Layers.TryRestyleInPlace(previous, style, transition, now);
-
-            // Identity commits HERE (not before the await, HIGH b) — a delayed restyle must not run the OLD
-            // layers/pipelines under the NEW cache token, and a cancel above must not report the new identity.
-            _style  = style;
-            StyleId = styleId;
-            CommitProbe?.Invoke(CommitPhase.IdentityCommitted);
-
-            // Re-applied on EVERY style change (in-place or full rebuild), clearing any runtime override. They ease
-            // on the layer paint's transition and clock; LateUpdate moves them.
-            Environment?.ApplyStyle(style.Light, style.Sky, Camera.CurrentProperties.Zoom, transition, now);
-
-            if (inPlace)
-            {
-                // Unconditional here, including a pure reorder — docs/tile-pipeline-design.md,
-                // "Partial-survival restyle".
-                ApplyVisibilityGroups();
-                TileManager.RestyleSourcesInPlace(specs, _config.Backend);
-
-                // The in-place arm skips Layers.Build, the style token, SymbolSubsystem.SetStyle and the symbol
-                // lists; see the same section.
-                Layers.ApplyZoom(new Rendering.Layers.StyleFrameInputs(
-                    Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
-                TileManager.PushLayerDrawGates(); // the restyle may have moved a layer's zoom range
-                _committedStyle = style; // the in-place patch completed — the gate may trust it again
-                return;
-            }
-
-            _committedFillAntialiasing = _config.FillAntialiasing;
-            _committedMaterials        = MaterialSnapshot(materialSet);
-            CommitProbe?.Invoke(CommitPhase.MaterialMemoWritten);
-
-            Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
-            CommitProbe?.Invoke(CommitPhase.LayersBuilt);
-            // See StyleToken's own doc for what the digest folds in and why; set AFTER Build, since it
-            // needs the built layer numbering.
-            TileManager.CurrentStyle = new Tile.StyleToken(JsonCanonical.CacheKey(
-                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing
-                + "|src=" + ResolvedSourceIdentity(specs)));
-            CommitProbe?.Invoke(CommitPhase.StyleTokenWritten);
-            LogSkippedLayers(Layers.SkippedLayers); // once per style load, never per tile/frame
-            // Non-obvious why: Build seeds px uniforms at ratio 1, and this async continuation can resume after this
-            // frame's LateUpdate, so restyled layers would draw loaded tiles once at the wrong device-pixel ratio.
-            Layers.ApplyZoom(new Rendering.Layers.StyleFrameInputs(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
-            TileManager.PushLayerDrawGates(); // fade advanced above; the gate must not lag it by a frame
-            // Derive the symbol layers from the just-built set in one walk, filling two lists in the same order
-            // so the subsystem's layer ordinal maps 1:1 to the SymbolRenderLayer that draws it.
-            _symbolStyleLayers.Clear();
-            _symbolRenderLayers.Clear();
-            foreach (var layer in Layers.Layers)
-                if (layer is Rendering.Layers.SymbolRenderLayer s)
-                {
-                    _symbolStyleLayers.Add(s.SymbolLayer);
-                    _symbolRenderLayers.Add(s);
-                }
-
-            SymbolSubsystem.DevicePixelRatio = _config.DevicePixelRatio;
-            SymbolSubsystem.SetStyle(_style,
-                _symbolStyleLayers); // group symbol layers + (re)build the shared glyph pipeline
-            CommitProbe?.Invoke(CommitPhase.SymbolStyleApplied);
-
-            ApplyVisibilityGroups();
-            TileManager.SetSources(specs, _config.Backend, RecordProbeOrNull());
-            _committedStyle = style; // the rebuild completed — the gate may trust it again
-        }
-
-        /// <summary>The <see cref="CommitPhase.SourcesTeardownRecord"/> half of <see cref="CommitProbe"/>
-        /// — its ONE phase whose site lives inside <see cref="Tile.TileManager.SetSources"/>, not here, so it
-        /// has to cross the call as a delegate rather than an inline invoke. Null when no probe is installed
-        /// (production; also a per-call, not per-frame, allocation when one is).</summary>
-        private Action RecordProbeOrNull()
-            => CommitProbe != null ? () => CommitProbe(CommitPhase.SourcesTeardownRecord) : null;
-
-        /// <summary>Warns once, naming every layer <see cref="Rendering.Layers.RenderLayerSet.Build"/> skipped
-        /// for a compatibility reason (unsupported kind / unconfigured material / unsupported filter). By-design
-        /// skips stay silent:
-        /// <see cref="Rendering.Layers.LayerSkipReason.GenuinelyUnpainted"/>, <see cref="Rendering.Layers.LayerSkipReason.Hidden"/>
-        /// and <see cref="Rendering.Layers.LayerSkipReason.FullyTransparent"/>. Internal so a test can exercise the
-        /// suppression directly.</summary>
-        internal static void LogSkippedLayers(IReadOnlyList<Rendering.Layers.SkippedLayer> skipped)
-        {
-            var problems = new List<string>();
-            for (int i = 0; i < skipped.Count; i++)
-            {
-                Rendering.Layers.SkippedLayer s = skipped[i];
-                if (s.Reason is Rendering.Layers.LayerSkipReason.GenuinelyUnpainted
-                             or Rendering.Layers.LayerSkipReason.Hidden
-                             or Rendering.Layers.LayerSkipReason.FullyTransparent) continue;
-                string detail = s.Detail != null ? $" — {s.Detail}" : "";
-                problems.Add($"'{s.Id}' ({s.RawType}): {s.Reason}{detail}");
-            }
-            if (problems.Count > 0)
-                Debug.LogWarning(
-                    $"[MapView.SetStyle] {problems.Count} style layer(s) not rendered: {string.Join(", ", problems)}");
-        }
-
-        /// <summary>A plain-text encoding of the dense (index, id) pairs the layer set just built —
-        /// folded into the cache token so a numbering shift (a skipped/added layer, from EITHER the style or a
-        /// slot-dropping <c>MapMaterialSet</c> field) changes the token even under unchanged style content.
-        /// <c>RenderLayerCompatibilitySummaryTests</c> pins that it folds the (index, id) PAIRS, not just
-        /// <see cref="Rendering.Layers.RenderLayerSet.Count"/> — why per-index not count is in <c>docs/tile-pipeline-design.md</c>.</summary>
-        internal static string LayerNumbering(Rendering.Layers.RenderLayerSet layers)
-        {
-            var sb = new StringBuilder();
-            for (int li = 0; li < layers.Count; li++)
-                sb.Append(li).Append(':').Append(layers[li].StyleLayer?.Id).Append('|');
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Resolves each rendered source-id of <paramref name="style"/> into a
-        /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
-        /// fetch); a <c>url</c>-only source fetches its TileJSON once; a geojson source whose <c>data</c> is
-        /// a URL string fetches it the same way. A failed fetch skips that source only.
-        /// It runs before <see cref="Rendering.Layers.RenderLayerSet.Build"/>, so it walks the raw style layers through
-        /// <see cref="Rendering.Layers.RenderLayerFactory.TryGetFetchSource"/>, the one registry of fetching layers.
-        /// </summary>
-        internal async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
-            StyleDocument style, CancellationToken ct)
-        {
-            var loader    = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
-            // Vector tiles decode as MVT; the encoding is the source's, never the transport's.
-            var factory   = TileSourceFactoryOverride ?? (address => new TemplatedTileSource(address, TileEncoding.Mvt));
-            IWorkScheduler scheduler = WorkSchedulerFactory.ForCurrentPlatform();
-
-            // Distinct rendered source-ids in declared order.
-            var seen    = new HashSet<string>();
-            var ordered = new List<string>();
-            foreach (var sl in style.Layers)
-            {
-                if (!Rendering.Layers.RenderLayerFactory.TryGetFetchSource(sl, out string sid)) continue;
-                if (seen.Add(sid)) ordered.Add(sid);
-            }
-
-            var specs = new List<Tile.TileManager.SourceSpec>(ordered.Count);
-            foreach (string sid in ordered)
-            {
-                SourceDefinition def = style.GetSource(sid);
-                if (def == null)
-                {
-                    Debug.LogWarning($"[MapView.SetStyle] layer references undefined source '{sid}' — skipped.");
-                    continue;
-                }
-
-                // A geojson source is sliced locally, with no tiles[] or byte fetcher, so it branches before
-                // the TileJSON fetch and the no-tiles skip; a URL `data` is the one thing it still fetches,
-                // through the same loader. A bad source is skipped, never a thrown SetStyle.
-                if (def.Type == SourceType.GeoJson)
-                {
-                    // An inline object was already parsed at style load (SourcePayload.Parse); only a URL
-                    // `data` still has work to do here, since a fetch cannot happen synchronously at parse time.
-                    GeoJson.GeoJsonDataset parsed = def.Data?.Dataset;
-                    string error = def.Data?.Error;
-                    try
-                    {
-                        if (def.Data?.Url != null)
-                        {
-                            // A URL `data`: one document fetch through the same loader TileJSON uses, before
-                            // anything is mutated — BuildSourceSpecs is already SetStyle's one pre-mutation await.
-                            string text = await loader(def.Data.Url, ct);
-                            parsed = GeoJson.GeoJsonParser.Parse(text);
-                        }
-                    }
-                    catch (System.OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (System.Exception ex)
-                    {
-                        // System.Exception, not only GeoJsonFormatException: any other parser or loader throw
-                        // would fault SetStyle for the whole style over one bad source. Cancellation is
-                        // rethrown above.
-                        error = ex.Message;
-                    }
-
-                    if (error != null)
-                    {
-                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to load or parse: " +
-                                         $"{error}. Source skipped.");
-                        continue;
-                    }
-                    if (parsed == null)
-                    {
-                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an inline object " +
-                                         "or URL string `data` — skipped.");
-                        continue;
-                    }
-
-                    // Slice options are per-source, supplied HERE at the wiring site. An authored `buffer`
-                    // (Style Spec [0, 512], 512 = one tile width = 4096 reference units, hence x8) overrides
-                    // the margin; absent (def.Buffer null) keeps GeoJsonSliceOptions.Default's margin.
-                    var geoJsonOptions = def.Buffer is double buffer
-                        ? new GeoJson.GeoJsonSliceOptions
-                        {
-                            Extent                  = GeoJson.GeoJsonSliceOptions.DefaultExtent,
-                            BufferAtReferenceExtent = buffer * (TileBufferClip.ReferenceExtent / 512.0),
-                            SimplifyTolerance       = 0.0,
-                        }
-                        : GeoJson.GeoJsonSliceOptions.Default;
-                    specs.Add(new Tile.TileManager.SourceSpec(
-                        sid, Tile.TileManager.SourceKey.From(def), def.MinZoom, def.MaxZoom,
-                        () => new Tile.Processing.GeoJsonTileFeatureSource(parsed, geoJsonOptions, scheduler)));
-                    continue;
-                }
-
-                // Fetch + resolve the TileJSON ONCE when the source is url-only (inline tiles[] short-circuits).
-                TileJson resolvedTileJson = null;
-                if (SourceResolver.NeedsTileJson(def))
-                {
-                    try
-                    {
-                        string tjText = await loader(def.Url, ct);
-                        resolvedTileJson = TileJsonParser.Parse(tjText);
-                        SourceResolver.Resolve(def, resolvedTileJson);
-                    }
-                    catch (System.OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (System.Exception ex)
-                    {
-                        Debug.LogWarning($"[MapView.SetStyle] TileJSON load failed for source '{sid}' " +
-                                         $"({def.Url}): {ex.Message}. Source skipped (no tiles).");
-                        continue; // failure isolation — other sources still wire
-                    }
-                }
-
-                if (def.Tiles == null || def.Tiles.Length == 0)
-                {
-                    Debug.LogWarning($"[MapView.SetStyle] source '{sid}' resolved to no tiles — skipped.");
-                    continue;
-                }
-
-                var address = new TileUrlTemplate { Template = def.Tiles[0], Tms = def.Scheme == "tms" };
-                // def.Bounds/BoundsMalformed reflect whichever JSON supplied `bounds` (TileJSON or the
-                // source's own — SourceResolver.Resolve carries both), validated below before the key.
-                Tile.GeoBounds bounds = ValidateBounds(def.Bounds, def.BoundsMalformed, sid);
-                var            key    = Tile.TileManager.SourceKey.From(def, bounds);
-
-                // The ONE production site that wraps the byte fetcher into the raised ITileFeatureSource seam.
-                // A `"tms"` scheme flips only the fetch address (inside TileUrlTemplate); everything
-                // downstream keeps XYZ addressing.
-                specs.Add(new Tile.TileManager.SourceSpec(
-                    sid, key, def.MinZoom, def.MaxZoom,
-                    () => new Tile.Processing.MvtTileFeatureSource(factory(address), scheduler),
-                    bounds));
-            }
-
-            return specs;
-        }
-
-        /// <summary>Converts a resolved, already-validated <c>bounds</c> array to <see cref="Tile.GeoBounds"/>.
-        /// <paramref name="malformed"/> (<see cref="Style.SourceDefinition.BoundsMalformed"/>) is the
-        /// parser's verdict, read here rather than re-inspecting raw JSON. Malformed warns once and returns
-        /// <c>default</c> (no gate); otherwise <paramref name="parsedBounds"/> converts unchanged.</summary>
-        private static Tile.GeoBounds ValidateBounds(double[] parsedBounds, bool malformed, string sourceId)
-        {
-            if (malformed)
-            {
-                Debug.LogWarning($"[MapView.SetStyle] source '{sourceId}' has a malformed bounds (need " +
-                                  "[west, south, east, north] as 4 numbers, south <= north, longitudes in " +
-                                  "[-180, 180]) — ignored, no bounds gate.");
-                return default;
-            }
-
-            return new Tile.GeoBounds
-            {
-                West = parsedBounds[0], South = parsedBounds[1],
-                East = parsedBounds[2], North = parsedBounds[3],
-                HasBounds = true,
-            };
-        }
-
-        /// <summary>Joins every spec's <c>(SourceId, resolved SourceKey)</c> in order — the style-token
-        /// input <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s full-rebuild arm folds in,
-        /// so two loads that resolve a source differently never share a prepared-cache key.</summary>
-        private static string ResolvedSourceIdentity(List<Tile.TileManager.SourceSpec> specs)
-        {
-            var sb = new StringBuilder();
-            for (int i = 0; i < specs.Count; i++)
-                sb.Append(specs[i].SourceId).Append('=').Append(specs[i].Key).Append(';');
-            return sb.ToString();
-        }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
@@ -635,10 +189,10 @@ namespace MapRenderer.Unity.Rendering.Map
                 TileManager.PushLayerDrawGates();
             }
 
-            EnsureSelector();
+            SelectorBinding.Ensure();
             ApplyVisibilityGroups();
             using (PmManagerUpdate.Auto())
-                TileManager.Update(cameraProperties, BuildTileSelectionConfig(), NowSeconds, in sceneFrame);
+                TileManager.Update(cameraProperties, SelectorBinding.BuildConfig(), NowSeconds, in sceneFrame);
 
             // Pull the sprite sheet, which the symbol subsystem owns and fetches, into the fill-pattern layers each
             // frame. SetSprites early-outs on an unchanged pair.
@@ -699,114 +253,9 @@ namespace MapRenderer.Unity.Rendering.Map
             };
         }
 
-        /// <summary>The selector's rebuild-detection inputs, hand-rolled rather than a tuple — DO NOT
-        /// "tidy" this back into one. A <c>System.ValueTuple</c> past 7 elements was measured allocating
-        /// on Unity's Mono every tick: the 8th+ field wraps in a nested <c>ValueTuple</c> (the compiler's
-        /// <c>TRest</c>), and STORING or comparing that shape allocated. Internal (not private) only so
-        /// <c>ProjectedAreaLodWiringTests.SelectorInputsEquals_DistinguishesEveryField</c> can reach it.</summary>
-        internal readonly struct SelectorInputs : IEquatable<SelectorInputs>
-        {
-            public readonly bool        Globe;
-            public readonly TileLodMode Lod;
-            public readonly int         MinZoom;
-            public readonly int         MaxZoom;
-            public readonly int         OnScreenPx;
-            public readonly double      MercFarCap;
-            public readonly double      GlobeFarCap;
-            public readonly double      AreaAggressiveness;
-            public readonly double      ZoomLevelHysteresis;
-            public readonly double      TileDetailHysteresis;
-            public readonly double      ZoomLevelPreload;
-
-            public SelectorInputs(bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
-                                  double mercFarCap, double globeFarCap, double areaAggressiveness,
-                                  double zoomLevelHysteresis, double tileDetailHysteresis, double zoomLevelPreload)
-            {
-                Globe = globe; Lod = lod; MinZoom = minZoom; MaxZoom = maxZoom; OnScreenPx = onScreenPx;
-                MercFarCap = mercFarCap; GlobeFarCap = globeFarCap; AreaAggressiveness = areaAggressiveness;
-                ZoomLevelHysteresis = zoomLevelHysteresis; TileDetailHysteresis = tileDetailHysteresis;
-                ZoomLevelPreload = zoomLevelPreload;
-            }
-
-            /// <summary>Field-by-field only — no <see cref="EqualityComparer{T}"/>, no boxing, no
-            /// <c>System.ValueTuple</c> machinery, so this stays allocation-free on the per-tick path.</summary>
-            public bool Equals(SelectorInputs other)
-                => Globe == other.Globe && Lod == other.Lod && MinZoom == other.MinZoom
-                && MaxZoom == other.MaxZoom && OnScreenPx == other.OnScreenPx && MercFarCap == other.MercFarCap
-                && GlobeFarCap == other.GlobeFarCap && AreaAggressiveness == other.AreaAggressiveness
-                && ZoomLevelHysteresis == other.ZoomLevelHysteresis && TileDetailHysteresis == other.TileDetailHysteresis
-                && ZoomLevelPreload == other.ZoomLevelPreload;
-
-            public override bool Equals(object obj) => obj is SelectorInputs other && Equals(other);
-
-            public override int GetHashCode()
-                => HashCode.Combine(HashCode.Combine(Globe, Lod, MinZoom, MaxZoom, OnScreenPx, MercFarCap, GlobeFarCap,
-                                                     AreaAggressiveness), ZoomLevelHysteresis, TileDetailHysteresis, ZoomLevelPreload);
-        }
-
         /// <summary>Hands the configured visibility groups to the tile manager, which compares them with the ones it holds and
         /// applies a change at once. Called every frame and at every style load, so an Inspector edit takes effect live.</summary>
         internal void ApplyVisibilityGroups() => TileManager.SetVisibilityGroups(_config.VisibilityGroups);
-
-        // ── Visible-tile selector, rebuilt only when a selection input (or the projection) changes ──────
-        private bool           _hasSelectorInputs;
-        private SelectorInputs _selectorInputs;
-
-        private void EnsureSelector()
-        {
-            var  tileSelection = _config.TileSelection;
-            bool globe         = Camera.Projection is SphericalProjection;
-            var key = new SelectorInputs(
-                globe: globe, lod: tileSelection.LodMode, minZoom: tileSelection.MinZoom,
-                maxZoom: tileSelection.MaxZoom, onScreenPx: tileSelection.OnScreenTilePx,
-                mercFarCap: tileSelection.MercatorFarPlaneCap, globeFarCap: tileSelection.GlobeFarPlaneCap,
-                areaAggressiveness: tileSelection.ProjectedAreaAggressiveness,
-                zoomLevelHysteresis: tileSelection.ZoomLevelHysteresis, tileDetailHysteresis: tileSelection.TileDetailHysteresis,
-                zoomLevelPreload: tileSelection.ZoomLevelPreload);
-            if (TileManager.Selector != null && _hasSelectorInputs && key.Equals(_selectorInputs)) return;
-            _selectorInputs    = key;
-            _hasSelectorInputs = true;
-
-            // One FrustumTileSelector for every projection; the far-plane policy is ray-sphere for the globe and
-            // geometry-aware for the flat map. The camera gets the same far, so it renders the selected frustum.
-            ITileLodStrategy lod = tileSelection.LodMode switch
-            {
-                TileLodMode.ScreenSpaceLod => new ScreenSpaceLodStrategy(tileSelection.TileDetailHysteresis),
-                TileLodMode.ProjectedArea  => new ProjectedAreaLodStrategy(tileSelection.ProjectedAreaAggressiveness),
-                _                          => new FlatLodStrategy(),
-            };
-            IFarPlanePolicy far = Camera.Projection.TryGetHorizonOccluder(out _, out double occRadius)
-                ? new RaySphereFarPlane(occRadius, tileSelection.GlobeFarPlaneCap)
-                : new GeometryAwareFarPlane(tileSelection.MercatorFarPlaneCap);
-
-            Camera.FarPlanePolicy = far;
-            TileManager.Selector = new FrustumTileSelector(
-                tileSelection.MinZoom, tileSelection.MaxZoom, tileSelection.OnScreenTilePx, lod, far,
-                tileSelection.ZoomLevelHysteresis, tileSelection.ZoomLevelPreload);
-        }
-
-        /// <summary>
-        /// The per-frame view inputs the selector consumes. The framing viewport is
-        /// <see cref="MapCamera.ViewportLogicalPx"/>, the same quantity the camera altitude frames from, so an
-        /// on-screen tile keeps its physical size across panel densities.
-        /// </summary>
-        internal Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
-            => new Tile.TileManager.TileSelectionConfig
-            {
-                FramingViewportPx    = Camera.ViewportLogicalPx,
-                Projection           = Camera.Projection,
-                MaxConsumesPerTick   = _config.MaxConsumesPerTick,
-                MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
-                MaxVerticesPerTick   = _config.MaxVerticesPerTick,
-                MaxReleasesPerTick   = _config.MaxReleasesPerTick,
-                MaxConcurrentTileLoads = _config.MaxConcurrentTileLoads,
-                PriorityStrategy       = _config.PriorityStrategy,
-                // Negative skips the clip stage; zero cuts at the tile boundary. The decode lives in the value
-                // type so the parity oracles build their reference arm under the same window.
-                BufferClip           = TileBufferClip.FromInspectorUnits(_config.FillTileBufferClip),
-                MaxConcurrentPrepareLoads = _config.TileSelection.MaxConcurrentPrepareLoads,
-                FetchRetrySeconds         = _config.TileSelection.FetchRetrySeconds,
-            };
 
         /// <summary>
         /// Disposes the tiles, then the layer materials, then the symbol placement system, then the symbol

@@ -858,7 +858,7 @@ namespace MapRenderer.Tests.Visual
         /// A fill layer binds to its source by EXACT id match: a dangling id renders nothing and wires no
         /// source at all (the load-bearing arm — "nothing rendered" alone passes for unrelated reasons, no
         /// light/mis-framed camera/no GPU; only a wired-source count of zero proves the skip actually
-        /// happened, <c>MapView.cs:311-314</c>), and flipping the id back to the declared source renders
+        /// happened, <c>MapViewSourceSpecs.cs</c>), and flipping the id back to the declared source renders
         /// again and wires exactly the one source — proving the discriminator is the ID match, not some
         /// default wiring.
         /// </summary>
@@ -877,7 +877,7 @@ namespace MapRenderer.Tests.Visual
                 VisualFrame frame = scene.Render(SnapPx);
 
                 Assert.IsTrue(frame.Coverage().IsBlank,
-                    "a fill layer bound to an UNDECLARED source id must render nothing (MapView.cs:311-314 skips it)");
+                    "a fill layer bound to an UNDECLARED source id must render nothing (MapViewSourceSpecs.cs skips it)");
                 Assert.AreEqual(0, frame.MapView.WiredFeatureSourceCount(),
                     "…and must leave NO source wired. This is the load-bearing arm: 'nothing rendered' alone " +
                     "passes for unrelated reasons (no light, mis-framed camera, no GPU) — only a wired-source " +

@@ -38,7 +38,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Rendering.Materials;
 using Unity.Mathematics;
 using MapRenderer.Unity.View;
-using SelectorInputs = MapRenderer.Unity.Rendering.Map.MapView.SelectorInputs;
+using SelectorInputs = MapRenderer.Unity.Rendering.Map.TileSelectorBinding.SelectorInputs;
 using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Unity.Jobs.Fill;
@@ -1234,7 +1234,7 @@ namespace MapRenderer.Tests.Tiles
         /// <see cref="FillExtrusionMaterialAssignedInPlace_BetweenStyleLoads_NeverServesAStaleHit"/>: starts
         /// with BOTH layers built (dense ids extrusion=0, fill=1), then NULLS
         /// <c>FillExtrusionMaterial</c> so the extrusion layer drops out and the fill layer's dense id shifts
-        /// DOWN to 0. RED: drop <c>LayerNumbering(Layers)</c> from the digest fold (<c>MapView.cs</c>).</summary>
+        /// DOWN to 0. RED: drop <c>LayerNumbering(Layers)</c> from the digest fold (<c>MapView.Style.cs</c>).</summary>
         [Test]
         public void FillExtrusionMaterialNulledInPlace_BetweenStyleLoads_NeverServesAStaleHit()
         {
@@ -1723,7 +1723,7 @@ namespace MapRenderer.Tests.Tiles
                 view.Config.TileSelection.GlobeFarPlaneCap            = 8.0;
                 view.Config.TileSelection.ProjectedAreaAggressiveness = 2.0;
 
-                view.LateUpdate(); // EnsureSelector() must build ProjectedAreaLodStrategy(2.0)
+                view.LateUpdate(); // the selector binding must build ProjectedAreaLodStrategy(2.0)
 
                 var probe = new ViewContext
                 {
@@ -3423,7 +3423,7 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The vector-source `scheme`/`bounds` wiring in <c>MapView.BuildSourceSpecs</c>: a `"tms"` scheme flips
+    /// The vector-source `scheme`/`bounds` wiring in <c>MapViewSourceSpecs.Build</c>: a `"tms"` scheme flips
     /// the fetch address (never the loaded/cache key), `bounds` gates which cover tiles are ever admitted,
     /// and a malformed `bounds` warns instead of gating. Every test drives the real async
     /// <c>MapView.SetStyle</c> -&gt; <c>BuildSourceSpecs</c> path — never <c>LoadTestStyle</c>, which bypasses
@@ -3796,7 +3796,7 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreEqual(absentDef.Bounds, malformedDef.Bounds,
                 "the test only proves something if both raw arrays are the SAME spec-default shape.");
 
-            // Mirrors BuildSourceSpecs' own resolution (MapView.ValidateBounds): malformed resolves to no
+            // Mirrors BuildSourceSpecs' own resolution (MapViewSourceSpecs.ValidateBounds): malformed resolves to no
             // gate; absent resolves to the default array, still a real (if world-spanning) gate.
             GeoBounds malformedBounds = default;
             double[]  ab              = absentDef.Bounds;

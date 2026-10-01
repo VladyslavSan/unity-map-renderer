@@ -171,7 +171,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   changes — the tail becomes a nested `ValueTuple<T8>` (`TRest`) — and constructing or comparing that
   shape allocates under Unity's Mono; comparing field-by-field instead of `==` does not fix it. Past 7
   fields, replace the tuple with a `readonly struct` implementing `IEquatable<T>`, compared via
-  `key.Equals(prev)` (prior art: `MapView.SelectorInputs`).
+  `key.Equals(prev)` (prior art: `TileSelectorBinding.SelectorInputs`).
 
 - **`Allocator.Temp` containers cannot be scheduled with `.Run()`.** The Collections safety system
   rejects a `Temp`-allocated container passed to a `.Run()` job — `.Run()` counts as scheduling even

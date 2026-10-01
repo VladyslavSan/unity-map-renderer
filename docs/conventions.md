@@ -489,7 +489,7 @@ the comparison operator.
 
 Past 7 fields, remove `ValueTuple` from the path entirely: a `readonly struct` implementing
 `IEquatable<T>`, compared with `key.Equals(prev)`, with a plain `bool` held beside it rather than a
-`Nullable<T>`. `MapView.SelectorInputs` is the shipped example.
+`Nullable<T>`. `TileSelectorBinding.SelectorInputs` is the shipped example.
 
 ### `Allocator.Temp` containers cannot be scheduled with `.Run()`
 

@@ -1156,7 +1156,7 @@ namespace MapRenderer.Tests.Rendering
         /// A source read only by layers that can never draw — because their filter cannot compile, or
         /// because they can never draw at all (<c>visibility: none</c>/constant fully-transparent) — is never
         /// fetched, so its tiles are never decoded either. <c>TryGetFetchSource</c> is the one registry
-        /// <c>MapView.BuildSourceSpecs</c> derives from, so excluding a layer here is what stops the whole
+        /// <c>MapViewSourceSpecs.Build</c> derives from, so excluding a layer here is what stops the whole
         /// per-tile pipeline for it.
         /// </summary>
         private static IEnumerable<TestCaseData> RefusesFetchSourceCases()

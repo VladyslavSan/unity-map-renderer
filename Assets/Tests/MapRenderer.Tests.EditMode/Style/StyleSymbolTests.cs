@@ -271,7 +271,7 @@ namespace MapRenderer.Tests.Style
 
         // ── the extraction half of the in-place restyle's "no symbol BAKE output" claim ───────
 
-        /// <summary>The in-place restyle in <c>MapView.cs</c> skips <c>SymbolSubsystem.SetStyle</c>, so a
+        /// <summary>The in-place restyle in <c>MapView.Style.cs</c> skips <c>SymbolSubsystem.SetStyle</c>, so a
         /// Constant <c>text-color</c> change between two otherwise-identical symbol layers must extract
         /// IDENTICAL <see cref="SymbolPaint"/>s (white vertex RGB both sides); that is what lets
         /// <c>SymbolSubsystem</c> keep the previous document's symbol layers. Without the <c>RidesUniform</c>

@@ -101,7 +101,7 @@ namespace MapRenderer.Tests
                             "LoadTestStyle does not wire SymbolSubsystem, so symbol layers never place. Use the " +
                             "async MapView.SetStyle path (see VisualScene / GeoJsonPointSymbolFixtureTests), or " +
                             "pass symbolsIntentionallyUnwired: true if this test only needs the source wired.");
-            // Mirrors the production skip in MapView.BuildSourceSpecs: only a layer with a non-empty
+            // Mirrors the production skip in MapViewSourceSpecs.Build: only a layer with a non-empty
             // StyleLayer.Source fetches, and background is source-less.
             for (int i = 0; i < layers.Count; i++)
                 if (!string.IsNullOrEmpty(layers[i].StyleLayer?.Source)) AddSpec(layers[i].StyleLayer.Source);
@@ -112,7 +112,7 @@ namespace MapRenderer.Tests
             {
                 sid ??= string.Empty;
                 // Wrap the injected byte source into the MVT feature source, mirroring
-                // MapView.BuildSourceSpecs' production wrap.
+                // MapViewSourceSpecs.Build' production wrap.
                 if (seen.Add(sid))
                     specs.Add(new TileManager.SourceSpec(
                         sid, default, 0, sourceMaxZoom, () => new MvtTileFeatureSource(source, decodeSched), bounds));
