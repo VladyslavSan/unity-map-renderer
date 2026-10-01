@@ -10,7 +10,15 @@ namespace MapRenderer.Unity.View
         /// <summary>The tile one zoom level up. The world tile has no parent and returns itself,
         /// so a walk must stop at <c>Z == 0</c>.</summary>
         public static TileId Parent(TileId tile)
-            => tile.Z == 0 ? tile : new TileId { Z = tile.Z - 1, X = tile.X >> 1, Y = tile.Y >> 1 };
+            => tile.Z == 0 ? tile : AncestorAt(tile, tile.Z - 1);
+
+        /// <summary>The tile at zoom <paramref name="z"/> that contains <paramref name="tile"/>. Callers pass
+        /// <paramref name="z"/> of 0 or more. A <paramref name="z"/> at or above the tile's own zoom returns the tile itself.</summary>
+        public static TileId AncestorAt(TileId tile, int z)
+        {
+            int up = tile.Z - z;
+            return up <= 0 ? tile : new TileId { Z = z, X = tile.X >> up, Y = tile.Y >> up };
+        }
 
         /// <summary>The number of children a tile has.</summary>
         public const int ChildCount = 4;
@@ -47,8 +55,7 @@ namespace MapRenderer.Unity.View
         /// a tile is never its own ancestor, and siblings are unrelated.</summary>
         public static bool IsStrictAncestor(TileId ancestor, TileId descendant)
         {
-            int up = descendant.Z - ancestor.Z;
-            return up > 0 && descendant.X >> up == ancestor.X && descendant.Y >> up == ancestor.Y;
+            return descendant.Z > ancestor.Z && AncestorAt(descendant, ancestor.Z).Equals(ancestor);
         }
     }
 }

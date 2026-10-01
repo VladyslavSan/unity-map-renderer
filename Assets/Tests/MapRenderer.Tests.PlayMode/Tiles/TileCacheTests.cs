@@ -279,7 +279,16 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 Assert.AreEqual(CoverMeshes(view), VisibleItems(view), "the shown items are the drawn tiles' meshes.");
 
                 // ── Past the keep set the finished records go to the cache.
+                // The batch path: they are condemned together, and one release a tick keeps most queued, outside the count.
+                int finished = view.CaptureTelemetry().PreparingTileCount;
+                int releaseBudget = view.Config.MaxReleasesPerTick;
+                view.Config.MaxReleasesPerTick = 1;
                 SetZoom(view, 4.5);
+                view.LateUpdate();
+                Assert.Greater(view.ReleaseQueueDepth(), 0, "precondition: the release budget leaves a condemned record queued.");
+                Assert.AreEqual(finished - view.TilesReleasedLastTick() - view.ReleaseQueueDepth(), view.CaptureTelemetry().PreparingTileCount,
+                    "a condemned prepared record waiting in the release queue is not counted as prepared.");
+                view.Config.MaxReleasesPerTick = releaseBudget;
                 yield return PumpUntilAcrossFrames(view, () => view.CaptureTelemetry().PreparingTileCount == 0,
                     "no record to stay prepared outside the keep set");
                 Assert.AreEqual(0, view.CaptureTelemetry().PreparingTileCount, "outside the keep set no record stays prepared.");

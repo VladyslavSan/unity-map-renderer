@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Rendering.Tile.Processing;
+using MapRenderer.Unity.View;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {
@@ -98,11 +99,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>The tile whose record serves <paramref name="tile"/> for <paramref name="slot"/>: the tile
         /// itself, or its ancestor at the source's <c>maxzoom</c> when the tile is finer than the source.</summary>
-        public TileId ServingTile(int slot, TileId tile)
-        {
-            int levels = tile.Z - _pipelines[slot].MaxZoom;
-            return levels <= 0 ? tile : new TileId { Z = tile.Z - levels, X = tile.X >> levels, Y = tile.Y >> levels };
-        }
+        public TileId ServingTile(int slot, TileId tile) => TileAncestry.AncestorAt(tile, _pipelines[slot].MaxZoom);
 
         /// <summary>Converts a declared <see cref="GeoBounds"/> to unit-square min/max, or reports no gate
         /// when <see cref="GeoBounds.HasBounds"/> is false.</summary>

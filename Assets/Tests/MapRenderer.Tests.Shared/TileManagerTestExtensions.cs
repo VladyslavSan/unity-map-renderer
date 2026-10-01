@@ -27,7 +27,7 @@ namespace MapRenderer.Tests
         internal static int WiredFeatureSourceCount(this TileManager manager) => manager._sources.RealSourceCount;
 
         /// <summary>Loaded or loading (tile, source) records in the cover, not counting those waiting for their release.</summary>
-        internal static int LoadedTileCount(this TileManager manager) => manager.CountByRole(TileManager.TileRole.Display);
+        internal static int LoadedTileCount(this TileManager manager) => manager.CaptureTelemetry().LoadedTileCount;
 
         /// <summary>The active set the concurrency cap bounds: admitted, not-yet-built records in the cover.</summary>
         internal static int ActiveLoadCount(this TileManager manager) => manager.CountActiveLoads();

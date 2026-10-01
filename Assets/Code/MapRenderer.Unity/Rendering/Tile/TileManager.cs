@@ -115,9 +115,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal enum TileRole
         {
             Display = 0,
-            Prepare,
             Hold,
             Bridge,
+            Prepare,
         }
 
         // ── Mesh build payload ──────────────────────────────────────────────────────────────
@@ -791,15 +791,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>True iff the record waits in the release queue with no role. A swapped-out record keeps its old stored role until its
         /// release drains. <see cref="RecomputeRoles"/> takes a record that regains a role (a swing-back) off the queue.</summary>
         private bool IsCondemned(LoadedKey key) => _releaseQueued.Contains(key);
-
-        /// <summary>Records in <see cref="_loaded"/> with <paramref name="role"/>, recomputed fresh each call.</summary>
-        internal int CountByRole(TileRole role)
-        {
-            int n = 0;
-            foreach (var kv in _loaded)
-                if (kv.Value.Role == role && !IsCondemned(kv.Key)) n++;
-            return n;
-        }
 
         /// <summary>Tiles released while their mesh build was still in-flight. Incremented by <see cref="ReleaseTile"/>.</summary>
         internal int ReleasedMidFlightCount { get; private set; }
