@@ -150,7 +150,8 @@ Assets/StreamingAssets/Fixtures/liberty.json
   The OpenFreeMap "Liberty" MapLibre GL style document (spec version 8), committed as the demo basemap
   style and as a parser/pipeline test fixture (TileJsonTests, GlobeLineWindingTests,
   RightHandedSphereProjectionWindingTests, BoundaryGlitchMeshTests). Pretty-printed from the upstream
-  single-line original; the content is otherwise unmodified.
+  single-line original; the only content change is one added filter on the "building-3d" layer
+  (!= [get hide_3d] true), which hides the building outlines whose parts are extruded separately.
   Source:  OpenFreeMap — https://openfreemap.org/  •  https://github.com/hyperknot/openfreemap
   Project license: MIT — Copyright (c) 2023 Zsolt Ero. (LICENSE.md:
     https://github.com/hyperknot/openfreemap/blob/main/LICENSE.md)
@@ -164,6 +165,11 @@ Assets/StreamingAssets/Fixtures/liberty.json
   (MapLibre GL adds it automatically; other renderers must add it themselves.) Underlying map data
   © OpenStreetMap contributors — https://www.openstreetmap.org/copyright. The raster hillshade source
   is Natural Earth (public domain).
+
+Assets/StreamingAssets/Fixtures/liberty-night.json
+  A night variant of the OpenFreeMap "Liberty" style above, made in this repository: Liberty with darkened
+  colours, plus added top-level "light" and "sky" blocks, plus the same added "building-3d" filter.
+  Same source, licences and attribution as liberty.json.
 
 Assets/Fixtures/glyphs/NotoSansRegular/*.pbf.bytes
   (0-255.pbf.bytes, 1536-1791.pbf.bytes, 64256-64511.pbf.bytes, 65024-65279.pbf.bytes)

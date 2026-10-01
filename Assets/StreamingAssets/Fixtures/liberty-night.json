@@ -3931,6 +3931,14 @@
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 14,
+      "filter": [
+        "!=",
+        [
+          "get",
+          "hide_3d"
+        ],
+        true
+      ],
       "paint": {
         "fill-extrusion-base": [
           "get",

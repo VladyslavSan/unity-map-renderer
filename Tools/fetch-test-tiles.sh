@@ -15,7 +15,7 @@ SIBLING="$ROOT/../unity-map-renderer-test-tiles"
 LOCAL="${UMR_TEST_TILES_URL:-http://localhost:8000}"
 PINNED="https://tiles.openfreemap.org/planet/20260927_080001_pt"
 
-TILES="6/34/21 6/38/19 9/274/168 6/32/20 8/135/80 8/145/99 9/279/187 8/220/128 8/132/72 8/212/120 9/282/150"
+TILES="6/34/21 6/38/19 9/274/168 6/32/20 8/135/80 8/145/99 9/279/187 8/220/128 8/132/72 8/212/120 9/282/150 14/4825/6156"
 GOLDENS="line-graphwrite-golden-z6-WebMercator.json line-graphwrite-golden-z6-Spherical.json line-graphwrite-golden-z9-WebMercator.json line-graphwrite-golden-z9-Spherical.json"
 
 remote_down=0

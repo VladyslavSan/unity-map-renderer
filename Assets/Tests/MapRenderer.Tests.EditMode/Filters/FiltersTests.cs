@@ -239,6 +239,47 @@ namespace MapRenderer.Tests.Filters
                 "Legacy and expression type filters should select same count");
         }
 
+        // ── The shipped styles' 3D building filter ────────────────────────────────────────────────
+
+        /// <summary>The outline of a building with separate parts carries <c>hide_3d</c>; extruding it as well
+        /// as its parts z-fights. Both shipped styles must drop it and keep a feature without the attribute.</summary>
+        [Test]
+        [TestCase(false, TestName = "Building3dFilter_DropsHide3dOutline(Liberty)")]
+        [TestCase(true, TestName = "Building3dFilter_DropsHide3dOutline(LibertyNight)")]
+        public void Building3dFilter_DropsHide3dOutline(bool night)
+        {
+            StyleDocument doc = night ? SymbolTestFixtures.LibertyNightDoc() : SymbolTestFixtures.LibertyDoc();
+            StyleLayer layer = doc.Layers.First(l => l.Id == "building-3d");
+            Assert.IsNotNull(layer.Filter, "building-3d must carry a filter");
+            Assert.IsNull(layer.Filter.Error, "the filter must parse");
+            CompiledFilter filter = FeatureSelector.FilterFor(layer);
+
+            var outline = new DictionaryFeature(new Dictionary<string, Value> { ["hide_3d"] = Value.Bool(true) });
+            var part = new DictionaryFeature(new Dictionary<string, Value> { ["render_height"] = Value.Number(10) });
+
+            Assert.IsFalse(filter.Matches(outline, 0.0), "a hide_3d outline must not be extruded");
+            Assert.IsTrue(filter.Matches(part, 0.0), "a feature without hide_3d must be extruded");
+        }
+
+        /// <summary>Real Manhattan tile 14/4825/6156 holds 3 <c>hide_3d</c> outlines among 561 buildings. The
+        /// production selector must drop exactly those.</summary>
+        [Category("Online")]
+        [Test]
+        public void Building3dFilter_OnRealTile_SelectsEveryBuildingButTheHide3dOutlines()
+        {
+            var id = new TileId { Z = 14, X = 4825, Y = 6156 };
+            using MvtTile tile = MvtDecoder.Decode(id, OnlineTestData.Tile(id));
+            StyleLayer layer = SymbolTestFixtures.LibertyDoc().Layers.First(l => l.Id == "building-3d");
+            IReadOnlyList<IFeature> buildings = tile.GetLayer("building").Features;
+            int hidden = buildings.Count(f => f.TryGetProperty("hide_3d", out Value v) && v.Equals(Value.Bool(true)));
+            Assume.That(hidden, Is.GreaterThan(0), "precondition: the tile has hide_3d outlines");
+
+            var selected = FeatureSelector.SelectFeatures(layer, tile);
+
+            Assert.That(selected.Count, Is.EqualTo(buildings.Count - hidden));
+            Assert.IsFalse(selected.Any(f => f.TryGetProperty("hide_3d", out _)), "no outline may be selected");
+        }
+
         // ── The ordinal-returning overload ────────────────────────────────────────────────────────
 
         /// <summary>
@@ -1034,6 +1075,47 @@ namespace MapRenderer.Tests.Filters
                 {
                     JsonValue.OfString("has"), JsonValue.OfString("class"),
                 }), layer);
+            }
+            finally
+            {
+                values.Dispose();
+                tagWords.Dispose();
+                tagOffsets.Dispose();
+                tagLengths.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// <c>["!=",["get","hide_3d"],true]</c> over a layer where <c>hide_3d</c> is PRESENT as boolean true
+        /// on feature 0, absent on feature 1 and present as false on feature 2. The shipped 3D building
+        /// filter takes this shape; the VM must agree with the managed filter on all three.
+        /// </summary>
+        [Test]
+        public void Vm_AgreesWithManagedCompiledFilter_ForHandBuiltBooleanNotEquals()
+        {
+            var keys = new List<string> { "hide_3d", "other" };
+            var keyIndex = new Dictionary<string, int> { ["hide_3d"] = 0, ["other"] = 1 };
+            var values = new NativeArray<MvtValueNative>(
+                new[] { MvtValueNative.Bool(true), MvtValueNative.Bool(false) }, Allocator.Persistent);
+            // f0: (hide_3d,true); f1: (other,true); f2: (hide_3d,false)
+            var tagWords = new NativeArray<uint>(new uint[] { 0, 0, 1, 0, 0, 1 }, Allocator.Persistent);
+            var tagOffsets = new NativeArray<int>(new[] { 0, 2, 4 }, Allocator.Persistent);
+            var tagLengths = new NativeArray<int>(new[] { 2, 2, 2 }, Allocator.Persistent);
+            try
+            {
+                var resolver = new MvtLayerPropertyResolver(
+                    keys, values, System.Array.Empty<string>(), keyIndex, tagWords, tagOffsets, tagLengths);
+                var layer = new MvtLayer { Name = "synthetic_bool" };
+                for (int feature = 0; feature < 3; feature++)
+                    layer.Features.Add(new MvtFeature
+                        { GeometryType = TileGeometryType.Unknown, Store = new DensePropertyStore(resolver, feature) });
+                layer.DenseKeyResolver = resolver;
+
+                JsonValue filter = JsonParser.Parse("[\"!=\",[\"get\",\"hide_3d\"],true]");
+                AssertMatchParity(filter, layer);
+                CompiledFilter managed = CompiledFilter.Compile(filter);
+                Assert.IsFalse(managed.Matches(layer.Features[0], 0.0), "precondition: outline rejected");
+                Assert.IsTrue(managed.Matches(layer.Features[1], 0.0), "precondition: absent accepted");
             }
             finally
             {

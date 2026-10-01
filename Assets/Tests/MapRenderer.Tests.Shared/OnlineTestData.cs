@@ -49,6 +49,7 @@ namespace MapRenderer.Tests
             ["tiles/8/132/72.pbf"] = "678cfb36b352b493185e9149a1230d5c18c5cd36863a8b6e8d8c4d72f7bdde80",
             ["tiles/8/212/120.pbf"] = "7e32eb9f854978fff397cfc4bc66ddd401aae03bf967748b1dc053158560e63c",
             ["tiles/9/282/150.pbf"] = "ea480b110ea1e802266ddb979a3bd5ed69edbf4ecb7ab7829ca0d7447b507859",
+            ["tiles/14/4825/6156.pbf"] = "a16b1139a9b5e1a09d250a1a7c782e425b9bb7ef599a8f0972cab503ed6968e8",
             ["goldens/line-graphwrite-golden-z6-Spherical.json"] = "8a3598a4a327541654ffe7c3842769763eb8689e4e0fa44fc932d3032fb07f05",
             ["goldens/line-graphwrite-golden-z6-WebMercator.json"] = "d71edbf01f7b605e95ea0cee552c4908c6b0885af01e9a094a8a936a85882b4a",
             ["goldens/line-graphwrite-golden-z9-Spherical.json"] = "deca64ddc1e5ad11ba437d93707147a9b9cec6e77c22f0a2a728d1799540385b",
