@@ -133,8 +133,8 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     `TriangulationBuffers.FlatWorkVerts`. Contrast `Next` in the *same* file, which correctly stays its
     own column: `scan = Next[scan]` streams it alone on every ring walk, touching no position field at all.
   - **Co-access is necessary but not sufficient.** If a field's only same-index partner is itself streamed
-    alone somewhere, merging into it taxes that stream for the newcomer's benefit. `EarcutJob`'s `IsEar` and
-    `IsBridgeCopy` read at the same index as `Removed` on every touch, yet stay their own columns because
+    alone somewhere, merging into it taxes that stream for the newcomer's benefit. `EarcutJob`'s `IsEar`
+    is read at the same index as `Removed` on every touch, yet stays its own column because
     `Removed` is walked alone by three `Next`-only ring scans (`:297`, `:629` in `CountRing`, `:391-403`).
   - **Not yet enforced across the codebase** — new/touched code only; no prior split-column elsewhere has
     been swept against this test.

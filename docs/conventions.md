@@ -383,8 +383,8 @@ vertex array through cache on every hop of a loop that never reads it.
 
 **Co-access is necessary but not sufficient.** If a column's only same-index partner is itself streamed
 alone somewhere, merging into it taxes that stream for the newcomer's benefit — so the newcomer stays split
-despite reading together everywhere. In `EarcutJob.cs`, `IsEar` and `IsBridgeCopy` are read at the same
-index as `Removed` on every touch, yet stay their own columns because `Removed` is walked alone by three
+despite reading together everywhere. In `EarcutJob.cs`, `IsEar` is read at the same
+index as `Removed` on every touch, yet stays its own column because `Removed` is walked alone by three
 `Next`-only ring scans (`EarcutJob.cs:297`, `:629` in `CountRing`, `:391-403`).
 
 **Not yet enforced across the codebase — this is a rule new and touched code is held to.** No prior

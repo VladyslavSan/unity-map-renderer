@@ -487,15 +487,53 @@ namespace MapRenderer.Tests.Meshing
                 new List<double2> { new double2(50, 0), new double2(30, 40), new double2(45, 40) },
                 new List<double2> { new double2(50, 0), new double2(55, 40), new double2(70, 40) },
             }).SetName("TwoHolesOnAVertexThatIsNotTheFirstHolesLeftmost");
+            // Reduced from a real water polygon: the bridge vertex is clipped as an ear before its seam copy.
+            yield return new TestCaseData(
+                new List<double2>
+                {
+                    new double2(3714, 2661), new double2(3799, 2502), new double2(3792, 2535),
+                    new double2(3773, 2625), new double2(4060, 2556), new double2(3771, 2701),
+                },
+                new List<List<double2>>
+                {
+                    new List<double2> { new double2(3859, 2636), new double2(3859, 2639), new double2(3864, 2639) },
+                })
+                .SetName("ABridgeVertexClippedBeforeItsSeamCopy");
+            // Reduced from a real coastline polygon: a hole touches the outer ring, a second hole touches the first.
+            yield return new TestCaseData(
+                new List<double2>
+                {
+                    new double2(1350, 737), new double2(1384, 735), new double2(1831, 561),
+                    new double2(1541, 863), new double2(1529, 843), new double2(1368, 863),
+                },
+                new List<List<double2>>
+                {
+                    new List<double2>
+                    {
+                        new double2(1384, 735), new double2(1379, 798), new double2(1384, 800),
+                        new double2(1384, 796), new double2(1389, 793), new double2(1384, 792),
+                    },
+                    new List<double2> { new double2(1384, 800), new double2(1375, 805), new double2(1384, 803) },
+                })
+                .SetName("AHoleTouchingAHoleThatTouchesTheOuterRing");
         }
 
-        /// <summary>A hole that shares a vertex with the outer ring (valid in a tile feed) fills no triangle: the areas
-        /// sum to outer minus the holes, and no triangle centroid lies in a hole. Arms: the shared vertex lies on an
-        /// edge, at a reflex corner, or is shared by two holes. A new method, because no other test puts a hole vertex
-        /// on an outer vertex.</summary>
+        private static bool EdgesCross(double2 a, double2 b, double2 c, double2 d)
+        {
+            double d1 = SignedTriArea(a, b, c);
+            double d2 = SignedTriArea(a, b, d);
+            double d3 = SignedTriArea(c, d, a);
+            double d4 = SignedTriArea(c, d, b);
+            return d1 * d2 < 0.0 && d3 * d4 < 0.0;
+        }
+
+        /// <summary>A holed polygon fills exactly its interior: the areas sum to outer minus
+        /// the holes, no triangle centroid lies in a hole, and no triangle edge crosses a ring edge. Arms: the shared
+        /// vertex lies on an edge, at a reflex corner, or is shared by two holes; a bridge vertex is clipped before its
+        /// seam copy; a hole touches a hole. A new method, because no other test checks a holed polygon's triangles
+        /// against its rings.</summary>
         [TestCaseSource(nameof(TouchingHoleCases))]
-        public void HoleSharingAnOuterVertex_ConservesAreaAndFillsNothingInTheHole(
-            List<double2> outer, List<List<double2>> holes)
+        public void PolygonWithHoles_FillsExactlyItsInterior(List<double2> outer, List<List<double2>> holes)
         {
             var result = EarcutJobPolygonRunner.Run(outer, holes.ConvertAll(h => (IReadOnlyList<double2>)h));
 
@@ -511,6 +549,19 @@ namespace MapRenderer.Tests.Meshing
                     Assert.IsFalse(PointInRing(hole, centroid),
                         $"triangle {i / 3} has its centroid {centroid} inside a hole");
             }
+
+            var rings = new List<List<double2>> { outer };
+            rings.AddRange(holes);
+            for (int i = 0; i < result.Indices.Length; i += 3)
+                for (int e = 0; e < 3; e++)
+                {
+                    double2 from = result.Vertices[result.Indices[i + e]];
+                    double2 to   = result.Vertices[result.Indices[i + (e + 1) % 3]];
+                    foreach (var ring in rings)
+                        for (int r = 0; r < ring.Count; r++)
+                            Assert.IsFalse(EdgesCross(from, to, ring[r], ring[(r + 1) % ring.Count]),
+                                $"an edge of triangle {i / 3} crosses a ring edge near {ring[r]}");
+                }
         }
 
         private static bool PointInRing(List<double2> ring, double2 p)

@@ -597,8 +597,8 @@ namespace MapRenderer.Unity.Jobs.Fill
         /// <summary>
         /// Split the polygon: duplicate a and b into two fresh vertices (a2, b2) and rewire so the ring
         /// splits into two independent cycles — [a → b → … → a] and [a2 → … → b2 → a2]. Split-added
-        /// vertices are real ring vertices (IsBridgeCopy = false), unlike the zero-width bridge-seam
-        /// copies, so they participate fully in point-in-triangle tests. Caller MUST have already verified
+        /// vertices are real ring vertices (IsBridgeCopy = false), so the corner rule of the ear test applies to
+        /// them, unlike a bridge-seam copy. Caller MUST have already verified
         /// <c>total + 2 &lt;= Verts.Length</c> (see <see cref="TrySplit"/>) — this never bounds-checks itself.
         /// </summary>
         private int SplitPolygon(int a, int b, ref int total, in EarGrid grid)
@@ -909,19 +909,46 @@ namespace MapRenderer.Unity.Jobs.Fill
                && !BridgeCrossesRing(holeLM, cand, mergedRingStart, mergedRingCount)
                && !BridgeCrossesRing(holeLM, cand, holeStart, holeCount);
 
-        /// <summary>True if live vertex i blocks the ear (p, v, n) — not a triangle corner, not a
-        /// bridge-seam duplicate (spatial coverage already tested through the vertex it duplicates),
-        /// not a position duplicate of a corner, and inside or on the triangle. Shared by
+        /// <summary>True if live vertex i blocks the ear (p, v, n). A vertex at a corner position blocks only when one of its two ring
+        /// edges leaves that corner inside the ear's wedge, and never when it or the corner is a seam copy. Any other vertex blocks when
+        /// it is inside or on the triangle, a seam copy included: its original may be clipped already. Shared by
         /// <see cref="ComputeIsEar"/>'s cell-walk, wide-AABB-fallback and overflow scans.</summary>
         private bool BlocksEar(int i, int p, int v, int n, double2 a, double2 b, double2 c)
         {
             if (Removed[i] || i == p || i == v || i == n) return false;
-            if (IsBridgeCopy[i]) return false;
             double vxi = Verts[i].x;
             double vyi = Verts[i].y;
-            if ((vxi == a.x && vyi == a.y) || (vxi == b.x && vyi == b.y) || (vxi == c.x && vyi == c.y))
-                return false;
-            return PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi);
+            bool atA = vxi == a.x && vyi == a.y;
+            bool atB = vxi == b.x && vyi == b.y;
+            bool atC = vxi == c.x && vyi == c.y;
+            if (!(atA || atB || atC))
+                return PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi);
+
+            int corner = atA ? p : atB ? v : n;
+            if (IsBridgeCopy[i] || IsBridgeCopy[corner]) return false;
+            return EdgeEntersEarWedge(i, atA ? a : atB ? b : c, atA ? b : atB ? c : a, atA ? c : atB ? a : b);
+        }
+
+        /// <summary>True when a ring edge of vertex i, which lies at <paramref name="apex"/>, leaves the apex strictly inside the
+        /// ear wedge between the directions to <paramref name="first"/> and <paramref name="second"/>. A neighbour at the
+        /// apex has no direction and is skipped.</summary>
+        private bool EdgeEntersEarWedge(int i, double2 apex, double2 first, double2 second)
+        {
+            double orientation = (first.x - apex.x) * (second.y - apex.y) - (first.y - apex.y) * (second.x - apex.x);
+            if (orientation == 0.0) return false;
+
+            for (int k = 0; k < 2; k++)
+            {
+                int neighbour = k == 0 ? Next[i] : Prev[i];
+                double dx = Verts[neighbour].x - apex.x;
+                double dy = Verts[neighbour].y - apex.y;
+                if (dx == 0.0 && dy == 0.0) continue;
+                double toFirst  = (first.x - apex.x) * dy - (first.y - apex.y) * dx;
+                double toSecond = dx * (second.y - apex.y) - dy * (second.x - apex.x);
+                if (toFirst * orientation > 0.0 && toSecond * orientation > 0.0) return true;
+            }
+
+            return false;
         }
 
         /// <summary>True iff vertex v is an ear: convex, and no other live vertex lies inside or on

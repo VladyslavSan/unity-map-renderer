@@ -78,9 +78,8 @@ passes `LocallyInside`/`IsValidDiagonal`; the only alternative is a counted clea
   `ForceClips`.
 - **Adversarial synthetic polygons keep a small overlap tail.** Adversarial star polygons show no winding
   flips, but a small fraction overlap by more than 1 % of their area (overlap, not fold; invisible for an
-  opaque fill). It is not observed on real tiles. The suspected cause: `IsEar` skips bridge-copy vertices in
-  its containment test, which can admit an ear that straddles a zero-width bridge seam. Tightening that is the
-  principled way to drive the tail toward zero.
+  opaque fill). It is not observed on real tiles. The ear test checks a bridge-copy vertex away from the ear's
+  corner positions and skips it only at them; whether the tail remains is not measured.
 - **A reversed-concave residual** could in principle overlap with `ForceClips == 0` and no winding flip. The
   non-crossing bridge keeps a clean input's merged ring simple, so it is not reachable on real data; a unit
   test pins the case (`Unit_ReversedConcaveQuad_NoFold_AreaConserved`).
@@ -99,6 +98,11 @@ as contained. The branch is safe at any coordinate precision, not just on intege
 stage introduces fractional ones — `RingClipJob.Intersect`): a triangle's point set is always a subset of its
 own bounding box, so the branch can only turn a spurious `true` into a correct `false`; it never discards a
 genuine containment. This branch is the precondition for the index being answer-preserving.
+
+**The corner rule.** A vertex at the position of an ear corner blocks the ear only when one of its ring edges
+strictly enters the ear's wedge at that corner. A seam copy at a corner position, or a corner that is a seam
+copy, never blocks. A seam copy anywhere else is tested like any vertex, because its original may already be
+clipped. This rule is this repository's own.
 
 **The index.** `EarcutJob.EarGrid` is a uniform bucket grid (CSR layout, counting sort) built once per polygon
 over the merged ring (`BuildEarGrid`). `ComputeIsEar` walks only the cells that overlap the candidate

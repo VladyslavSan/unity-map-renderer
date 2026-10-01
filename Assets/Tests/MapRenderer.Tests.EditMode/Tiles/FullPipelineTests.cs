@@ -148,10 +148,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── (a) Golden parity of the subdivided output, over the whole fixture corpus. ─────
 
-        // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It
-        // includes the degenerate-candidate ear-predicate fix in EarcutJob.PointInTriangle.
+        // Frozen golden of the retired synchronous subdivide over FillMeshPipeline.Schedule output. It includes
+        // the hole splice and the ear tests of docs/mesh-triangulation-robustness-design.md §2 and §4.
         private const string FrozenGoldens =
-            "TriangleStream=IohDXa2Z8Yqmrc2qw4VUPr1QYlINTgmApb+F3DLvB9g=";
+            "TriangleStream=r380Bn8yMfZb33KGDTmcscc0Yf54mBio5ocnb4PBkv8=";
 
         [Test]
         public void Schedule_MatchesFrozenSubdivideGoldens_AcrossCorpus()
@@ -356,12 +356,12 @@ namespace MapRenderer.Tests.Tiles
 
         private static string ProjectionName(IProjection p) => p.GetType().Name;
 
-        // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the degenerate-candidate
-        // ear-predicate fix in EarcutJob.PointInTriangle and the splice of a hole that touches the ring.
+        // ── Frozen goldens of the retired FillMeshPipeline.Schedule. They include the hole splice and the ear
+        // tests of docs/mesh-triangulation-robustness-design.md §2 and §4.
         internal const string FrozenGoldensMercator =
-            "Vertex=2m5CMFEs5/+9i2+JwkN7+FecfZDqPzVVcHBD6XsRE0c= World=8ToY+drIcSm/b556q6bSkkrAMRMK6vHCB6OshkU/yuU= " +
-            "Up=qNGZ6CD0QR8/sGpknFPnJU4yBdsVwW3Z/AeahmKbVYc= FeatIdx=RJukTjSMCg0HX3iWsUG+LP8zzRIgIjF99RGAvZqa+e8= " +
-            "Indices=qeVmpp9jairqEm5EQg38LG8aez73NFUaIO1Q30wltQk= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
+            "Vertex=yX7wuFRUpGzhMDh4V3sluer0+ujXmCnTuAsvebCEA6A= World=mTO8OG2cWOs78ONkfQR23tb7jwQnPdETMhwuY8oKGS0= " +
+            "Up=s2Bcr40p/LL2qP0rTxaumv2jjVNYrJXr8txRQho9wFg= FeatIdx=Zmw7WMhay5n0CDcO7USCTXFUmMfvMuvkp1ZzBdmyqic= " +
+            "Indices=DPVtdAY3M16VfyNH8bvooBmVtMo2F5II7NICuVlmJeU= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
             "RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= " +
             "ForceClip=B8Iyzq78pIfNXwp5SFjP2+MRGvIB+5m3PWBIgIdH/HA=";
         // Re-captured for the same cause as FrozenGoldensMercator above.
